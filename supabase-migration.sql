@@ -287,4 +287,13 @@ CREATE POLICY "production_update" ON daily_production FOR UPDATE TO authenticate
   USING (faction_id = get_my_faction_id() AND company_name = get_my_company_name())
   WITH CHECK (faction_id = get_my_faction_id() AND company_name = get_my_company_name());
 
+CREATE POLICY "production_delete" ON daily_production FOR DELETE TO authenticated
+  USING (
+    faction_id = get_my_faction_id()
+    AND (
+      company_name = get_my_company_name()
+      OR get_my_role() = 'executive'
+    )
+  );
+
 -- Invite codes: no direct access, handled by SECURITY DEFINER functions
