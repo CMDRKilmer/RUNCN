@@ -7,7 +7,12 @@ const inputModel = computed({
   get: () => model.value,
   set: (value: string) => {
     if (value !== '') {
-      model.value = parseFloat(value);
+      const num = parseFloat(value);
+      if (!isNaN(num) && isFinite(num)) {
+        model.value = num;
+      } else {
+        model.value = 0;
+      }
       return;
     }
     if (optional) {

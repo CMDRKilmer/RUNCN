@@ -21,3 +21,4 @@ vite.config.mts.timestamp-*.mjs
 *.log
 git_log_*.txt
 .tmp
+dist.zip
