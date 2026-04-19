@@ -7,7 +7,7 @@ const inputModel = computed({
   get: () => model.value,
   set: (value: string) => {
     if (value !== '') {
-      model.value = parseInt(value, 10);
+      model.value = parseFloat(value);
       return;
     }
     if (optional) {
