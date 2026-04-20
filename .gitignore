@@ -3,6 +3,7 @@
 
 # testing
 **/coverage
+.playwright-mcp/*.log
 
 # build
 **/dist
@@ -17,5 +18,7 @@
 .idea
 **/.turbo
 vite.config.mts.timestamp-*.mjs
+*.log
+git_log_*.txt
 .tmp
 dist.zip

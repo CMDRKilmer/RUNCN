@@ -520,72 +520,139 @@ export async function aggregateMyProduction(): Promise<{ ticker: string; quantit
 export async function reportProduction(items: ProductionItem[]): Promise<ApiSuccess> {
   const myFaction = await supabase.rpc('get_my_faction_id' as never);
   const myName = await supabase.rpc('get_my_company_name' as never);
+  const factionId = (myFaction.data as string | null) ?? '';
+  const companyName = (myName.data as string | null) ?? '';
+
+  if (!factionId || !companyName) {
+    throwApi('UNAUTHORIZED', '未找到组织成员信息，请重新登录组织面板');
+  }
+
   const today = new Date().toISOString().slice(0, 10);
 
   const rows = items
     .filter(item => !!item.ticker && item.quantity > 0)
     .map(item => ({
-      faction_id: (myFaction.data as string) ?? '',
-      company_name: (myName.data as string) ?? '',
+      faction_id: factionId,
+      company_name: companyName,
       material_ticker: item.ticker.toUpperCase(),
       quantity: item.quantity,
       report_date: today,
     }));
 
+  await clearMyProductionSnapshot(factionId, companyName);
+
   if (rows.length === 0) {
-    if (myFaction.data && myName.data) {
-      await supabase
-        .from('daily_production')
-        .delete()
-        .eq('faction_id', myFaction.data)
-        .eq('company_name', myName.data);
-    }
     return { ok: true };
   }
 
-  // 先插入新数据，成功后再删除不在新数据中的旧记录
-  const { error } = await supabase.from('daily_production').upsert(rows, {
-    onConflict: 'faction_id,company_name,material_ticker,report_date',
-  });
+  const { error } = await supabase.from('daily_production').insert(rows);
   if (error) throwApi('REPORT_FAILED', error.message);
 
-  const newTickers = rows.map(r => r.material_ticker);
-
-  // 删除该用户历史日期的全部记录（只保留今天）
-  await supabase
-    .from('daily_production')
-    .delete()
-    .eq('faction_id', rows[0].faction_id)
-    .eq('company_name', rows[0].company_name)
-    .neq('report_date', today);
-
-  // 删除当天该用户不在本次上报中的旧材料记录
-  await supabase
-    .from('daily_production')
-    .delete()
-    .eq('faction_id', rows[0].faction_id)
-    .eq('company_name', rows[0].company_name)
-    .eq('report_date', today)
-    .not('material_ticker', 'in', `(${newTickers.join(',')})`);
-
   return { ok: true };
+}
+
+async function clearMyProductionSnapshot(factionId: string, companyName: string) {
+  const { error } = await supabase
+    .from('daily_production')
+    .delete()
+    .eq('faction_id', factionId)
+    .eq('company_name', companyName);
+
+  if (error) {
+    throwApi('CLEAR_FAILED', error.message);
+  }
+
+  const { data, error: verifyError } = await supabase
+    .from('daily_production')
+    .select('id')
+    .eq('faction_id', factionId)
+    .eq('company_name', companyName)
+    .limit(1);
+
+  if (verifyError) {
+    throwApi('CLEAR_FAILED', verifyError.message);
+  }
+
+  if ((data?.length ?? 0) > 0) {
+    throwApi(
+      'CLEAR_FAILED',
+      '旧产出数据未能清除，请先在 Supabase 执行 daily_production 删除策略迁移',
+    );
+  }
+}
+
+interface ProductionSummaryRow {
+  id: string;
+  company_name: string;
+  material_ticker: string;
+  quantity: number;
+  report_date: string;
+}
+
+interface ProductionMemberRow {
+  company_name: string;
+  username: string | null;
+}
+
+const SUPABASE_SELECT_PAGE_SIZE = 1000;
+
+async function fetchAllDailyProductionRows(): Promise<ProductionSummaryRow[]> {
+  const rows: ProductionSummaryRow[] = [];
+
+  for (let from = 0; ; from += SUPABASE_SELECT_PAGE_SIZE) {
+    const to = from + SUPABASE_SELECT_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from('daily_production')
+      .select('id, company_name, material_ticker, quantity, report_date')
+      .order('company_name')
+      .order('material_ticker')
+      .range(from, to);
+
+    if (error) {
+      throwApi('FETCH_FAILED', error.message);
+    }
+
+    rows.push(...((data ?? []) as ProductionSummaryRow[]));
+
+    if ((data?.length ?? 0) < SUPABASE_SELECT_PAGE_SIZE) {
+      return rows;
+    }
+  }
+}
+
+async function fetchAllProductionMembers(): Promise<ProductionMemberRow[]> {
+  const rows: ProductionMemberRow[] = [];
+
+  for (let from = 0; ; from += SUPABASE_SELECT_PAGE_SIZE) {
+    const to = from + SUPABASE_SELECT_PAGE_SIZE - 1;
+    const { data, error } = await supabase
+      .from('members')
+      .select('company_name, username')
+      .order('company_name')
+      .range(from, to);
+
+    if (error) {
+      throwApi('FETCH_FAILED', error.message);
+    }
+
+    rows.push(...((data ?? []) as ProductionMemberRow[]));
+
+    if ((data?.length ?? 0) < SUPABASE_SELECT_PAGE_SIZE) {
+      return rows;
+    }
+  }
 }
 
 export async function fetchProductionSummary(): Promise<ProductionSummaryResponse> {
   const today = new Date().toISOString().slice(0, 10);
 
-  const [prodResult, membersResult] = await Promise.all([
-    supabase
-      .from('daily_production')
-      .select('id, company_name, material_ticker, quantity, report_date')
-      .order('company_name')
-      .order('material_ticker'),
-    supabase.from('members').select('company_name, username'),
+  const [productionRows, memberRows] = await Promise.all([
+    fetchAllDailyProductionRows(),
+    fetchAllProductionMembers(),
   ]);
-  if (prodResult.error) throwApi('FETCH_FAILED', prodResult.error.message);
 
   const usernameMap: Record<string, string> = {};
-  for (const m of membersResult.data ?? []) {
+  for (const m of memberRows) {
     if (m.username) usernameMap[m.company_name] = m.username;
   }
 
@@ -594,7 +661,7 @@ export async function fetchProductionSummary(): Promise<ProductionSummaryRespons
     Record<string, { id: string; ticker: string; quantity: number; report_date: string }>
   > = {};
 
-  for (const row of prodResult.data ?? []) {
+  for (const row of productionRows) {
     if (!byMember[row.company_name]) {
       byMember[row.company_name] = {};
     }

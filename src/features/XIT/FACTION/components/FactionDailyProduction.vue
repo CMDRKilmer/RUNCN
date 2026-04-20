@@ -55,6 +55,22 @@ const filteredMembers = computed(() => {
     .filter((m): m is ProductionMemberSummary => m !== null);
 });
 
+const currentPage = ref(1);
+const pageSize = 10;
+const totalPages = computed(() => {
+  const t = Math.ceil(filteredMembers.value.length / pageSize);
+  return t === 0 ? 1 : t;
+});
+
+const paginatedMembers = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredMembers.value.slice(start, start + pageSize);
+});
+
+watch([searchQuery, members], () => {
+  currentPage.value = 1;
+});
+
 // 检测哪些卡片内容实际溢出了折叠高度
 const overflowingCards = ref(new Set<string>());
 const itemsWrapRefs = ref<Record<string, HTMLElement | null>>({});
@@ -92,7 +108,7 @@ function setupOverflowObservers() {
 }
 
 watch(
-  () => filteredMembers.value.map(m => m.companyName).join(','),
+  () => paginatedMembers.value.map(m => m.companyName).join(','),
   async () => {
     await nextTick();
     setupOverflowObservers();
@@ -224,7 +240,7 @@ onMounted(loadData);
       </div>
 
       <div :class="$style.grid">
-        <div v-for="member in filteredMembers" :key="member.companyName" :class="$style.card">
+        <div v-for="member in paginatedMembers" :key="member.companyName" :class="$style.card">
           <div :class="$style.cardHeader">
             <span :class="$style.cardName">
               {{ member.companyName }}
@@ -266,6 +282,14 @@ onMounted(loadData);
             {{ expandedCards.has(member.companyName) ? '收起 ▲' : '展开 ▼' }}
           </div>
         </div>
+      </div>
+
+      <div v-if="totalPages > 1" :class="$style.pagination">
+        <PrunButton dark :disabled="currentPage === 1" @click="currentPage--">上一页</PrunButton>
+        <span :class="$style.pageInfo">{{ currentPage }} / {{ totalPages }}</span>
+        <PrunButton dark :disabled="currentPage === totalPages" @click="currentPage++"
+          >下一页</PrunButton
+        >
       </div>
     </template>
   </div>

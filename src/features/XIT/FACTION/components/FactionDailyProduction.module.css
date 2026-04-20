@@ -134,3 +134,18 @@
   font-size: 11px;
   outline: none;
 }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.pageInfo {
+  font-size: 11px;
+  color: #ccc;
+}
