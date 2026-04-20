@@ -1,6 +1,4 @@
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
-import { productionStore } from '@src/infrastructure/prun-api/data/production';
-import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';

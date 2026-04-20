@@ -101,7 +101,7 @@ export function normalizeCartItems(items: Iterable<Partial<UserData.CartItem>>) 
   for (const item of items) {
     const ticker = normalizeTicker(item.ticker);
     const amount = normalizeAmount(item.amount);
-    if (!ticker || !amount) {
+    if (!ticker || amount === undefined || amount === null || amount <= 0) {
       continue;
     }
     merged.set(ticker, (merged.get(ticker) ?? 0) + amount);
@@ -112,7 +112,7 @@ export function normalizeCartItems(items: Iterable<Partial<UserData.CartItem>>) 
       materialsStore.getByTicker(a.ticker),
       materialsStore.getByTicker(b.ticker),
     );
-    return byMaterial || a.ticker.localeCompare(b.ticker);
+    return byMaterial !== 0 ? byMaterial : a.ticker.localeCompare(b.ticker);
   });
 }
 
@@ -185,7 +185,7 @@ function visitSource(source: unknown, state: ImportState) {
 
   const ticker = normalizeTicker(asString(record.ticker));
   const amount = normalizeAmount(record.amount);
-  if (ticker && amount) {
+  if (ticker && amount !== undefined && amount !== null && amount > 0) {
     state.materials.set(ticker, (state.materials.get(ticker) ?? 0) + amount);
   }
 }
@@ -198,7 +198,12 @@ function mergeMaterialRecord(source: unknown, target: Map<string, number>) {
   for (const [ticker, amount] of Object.entries(source as JsonRecord)) {
     const normalizedTicker = normalizeTicker(ticker);
     const normalizedAmount = normalizeAmount(amount);
-    if (!normalizedTicker || !normalizedAmount) {
+    if (
+      !normalizedTicker ||
+      normalizedAmount === undefined ||
+      normalizedAmount === null ||
+      normalizedAmount <= 0
+    ) {
       continue;
     }
     target.set(normalizedTicker, (target.get(normalizedTicker) ?? 0) + normalizedAmount);
@@ -255,7 +260,7 @@ function toMaterialRecord(items: Iterable<UserData.CartItem>) {
   for (const item of items) {
     const ticker = normalizeTicker(item.ticker);
     const amount = normalizeAmount(item.amount);
-    if (!ticker || !amount) {
+    if (!ticker || amount === undefined || amount === null || amount <= 0) {
       continue;
     }
     materials[ticker] = (materials[ticker] ?? 0) + amount;

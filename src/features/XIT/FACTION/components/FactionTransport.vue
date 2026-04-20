@@ -167,8 +167,10 @@ function cancelForm() {
 }
 
 async function handleSubmit() {
-  const feePerTon = parseFloat(formFeePerTon.value) || 0;
-  const feePerM3 = parseFloat(formFeePerM3.value) || 0;
+  const feePerTonVal = parseFloat(formFeePerTon.value);
+  const feePerM3Val = parseFloat(formFeePerM3.value);
+  const feePerTon = Number.isNaN(feePerTonVal) ? 0 : feePerTonVal;
+  const feePerM3 = Number.isNaN(feePerM3Val) ? 0 : feePerM3Val;
   if (!formDeparture.value || !formDestination.value) return;
 
   const data = {
@@ -358,8 +360,8 @@ function startTripCreate(routeId: string, ship?: ShipStatusReport) {
   tripCountdownHours.value = '';
   tripCountdownMinutes.value = '';
   tripDepartureTime.value = '';
-  tripAvailableVolume.value = ship?.cargoVolume ? String(ship.cargoVolume) : '';
-  tripAvailableWeight.value = ship?.cargoWeight ? String(ship.cargoWeight) : '';
+  tripAvailableVolume.value = ship?.cargoVolume !== undefined ? String(ship.cargoVolume) : '';
+  tripAvailableWeight.value = ship?.cargoWeight !== undefined ? String(ship.cargoWeight) : '';
   tripDescription.value = '';
 }
 
@@ -369,8 +371,10 @@ function cancelTripForm() {
 
 function computedDepartureISO(): string | null {
   if (tripDepartureMode.value === 'countdown') {
-    const h = parseInt(tripCountdownHours.value) || 0;
-    const m = parseInt(tripCountdownMinutes.value) || 0;
+    const hVal = parseInt(tripCountdownHours.value);
+    const mVal = parseInt(tripCountdownMinutes.value);
+    const h = Number.isNaN(hVal) ? 0 : hVal;
+    const m = Number.isNaN(mVal) ? 0 : mVal;
     if (h <= 0 && m <= 0) {
       return null;
     }
@@ -384,16 +388,20 @@ function computedDepartureISO(): string | null {
 
 const canSubmitTrip = computed(() => {
   if (tripDepartureMode.value === 'countdown') {
-    const h = parseInt(tripCountdownHours.value) || 0;
-    const m = parseInt(tripCountdownMinutes.value) || 0;
+    const hVal = parseInt(tripCountdownHours.value);
+    const mVal = parseInt(tripCountdownMinutes.value);
+    const h = Number.isNaN(hVal) ? 0 : hVal;
+    const m = Number.isNaN(mVal) ? 0 : mVal;
     return h > 0 || m > 0;
   }
   return !!tripDepartureTime.value;
 });
 
 async function handleCreateTrip(routeId: string) {
-  const volume = parseFloat(tripAvailableVolume.value) || 0;
-  const weight = parseFloat(tripAvailableWeight.value) || 0;
+  const volumeVal = parseFloat(tripAvailableVolume.value);
+  const weightVal = parseFloat(tripAvailableWeight.value);
+  const volume = Number.isNaN(volumeVal) ? 0 : volumeVal;
+  const weight = Number.isNaN(weightVal) ? 0 : weightVal;
   const departureISO = computedDepartureISO();
   if (!departureISO || volume <= 0 || weight <= 0) {
     return;
@@ -438,8 +446,10 @@ function cancelBookingForm() {
 }
 
 async function handleCreateBooking(tripId: string, routeId: string) {
-  const volume = parseFloat(bookingVolume.value) || 0;
-  const weight = parseFloat(bookingWeight.value) || 0;
+  const volumeVal = parseFloat(bookingVolume.value);
+  const weightVal = parseFloat(bookingWeight.value);
+  const volume = Number.isNaN(volumeVal) ? 0 : volumeVal;
+  const weight = Number.isNaN(weightVal) ? 0 : weightVal;
   if (volume <= 0 && weight <= 0) return;
 
   try {

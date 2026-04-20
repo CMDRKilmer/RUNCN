@@ -75,6 +75,6 @@ export default ts.config(
   },
 
   {
-    ignores: ['dist/**/*', 'eslint.config.mjs', 'src/types/unimport.d.ts', 'scripts/**', 'workers/**/*'],
+    ignores: ['dist/**/*', 'eslint.config.mjs', 'src/types/unimport.d.ts', 'scripts/**', 'workers/**/*', 'old.ts'],
   },
 );

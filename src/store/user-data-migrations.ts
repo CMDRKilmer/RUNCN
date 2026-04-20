@@ -55,7 +55,9 @@ const migrations: MigrationEntry[] = [
     '03.04.2026 Remove ship refuel actions',
     userData => {
       for (const pkg of userData.actionPackages ?? []) {
-        pkg.actions = (pkg.actions ?? []).filter((action: { type?: string }) => action.type !== 'Refuel');
+        pkg.actions = (pkg.actions ?? []).filter(
+          (action: { type?: string }) => action.type !== 'Refuel',
+        );
       }
     },
   ],

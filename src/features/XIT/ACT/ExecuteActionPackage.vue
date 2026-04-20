@@ -211,8 +211,8 @@ function clearLog() {
           </PrunButton>
           <label :class="$style.skipCheckbox">
             <input
-              type="checkbox"
-              v-model="config.globalOptions!.skipMissingMaterials" />跳过不足材料
+              v-model="config.globalOptions!.skipMissingMaterials"
+              type="checkbox" />跳过不足材料
           </label>
         </div>
       </template>
@@ -234,8 +234,8 @@ function clearLog() {
           </PrunButton>
           <label :class="$style.skipCheckbox">
             <input
-              type="checkbox"
-              v-model="config.globalOptions!.skipMissingMaterials" />跳过不足材料
+              v-model="config.globalOptions!.skipMissingMaterials"
+              type="checkbox" />跳过不足材料
           </label>
         </div>
       </template>

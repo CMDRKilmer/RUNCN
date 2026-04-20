@@ -662,11 +662,11 @@ export async function fetchProductionSummary(): Promise<ProductionSummaryRespons
   > = {};
 
   for (const row of productionRows) {
-    if (!byMember[row.company_name]) {
+    if (!(row.company_name in byMember)) {
       byMember[row.company_name] = {};
     }
     const existing = byMember[row.company_name][row.material_ticker];
-    if (!existing || row.report_date > existing.report_date) {
+    if (existing === undefined || row.report_date > existing.report_date) {
       byMember[row.company_name][row.material_ticker] = {
         id: row.id,
         ticker: row.material_ticker,
