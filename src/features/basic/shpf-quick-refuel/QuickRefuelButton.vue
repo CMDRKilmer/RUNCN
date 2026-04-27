@@ -15,7 +15,9 @@ const props = defineProps<{
   tile: PrunTile;
 }>();
 
-const registration = computed(() => props.registration ?? shipsStore.getById(props.id)?.registration);
+const registration = computed(
+  () => props.registration ?? shipsStore.getById(props.id)?.registration,
+);
 const label = computed(() => props.label ?? '一键加油');
 const isRunning = ref(false);
 

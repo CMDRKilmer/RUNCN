@@ -272,5 +272,4 @@ const progressClass = computed(() => {
   font-size: 11px;
   white-space: nowrap;
 }
-
 </style>

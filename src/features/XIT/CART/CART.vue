@@ -38,7 +38,7 @@ const exchangeOptions = computed(() => getExchangeOptions());
 watch(
   exchangeOptions,
   options => {
-    if (!cart.value.exchange && options[0]) {
+    if (!cart.value.exchange && options.length > 0) {
       cart.value.exchange = options[0].value;
     }
   },
@@ -113,12 +113,12 @@ function addMaterial(ticker: string, amount = 1) {
 }
 
 function addFirstFilteredMaterial() {
-  const first = filteredMaterials.value[0];
-  if (!first) {
+  if (filteredMaterials.value.length === 0) {
     setStatus('没有匹配的物品。', true);
     return;
   }
 
+  const first = filteredMaterials.value[0];
   addMaterial(first.ticker);
 }
 
@@ -147,7 +147,9 @@ function onCartDragLeave(event: DragEvent) {
 }
 
 function normalizeAmount(item: UserData.CartItem) {
-  item.amount = Math.max(1, Math.ceil(Number(item.amount) || 1));
+  const num = Number(item.amount);
+  const isValidNumber = Number.isFinite(num) && num > 0;
+  item.amount = Math.max(1, Math.ceil(isValidNumber ? num : 1));
 }
 
 function isSelected(ticker: string) {
@@ -303,8 +305,8 @@ function setStatus(message: string, isError = false) {
         </Active>
         <Active label="汇总">
           <span :class="$style.secondaryText">
-            {{ cart.items.length }} 种 / {{ totalUnits.toLocaleString() }} 件 / {{ fixed02(totalWeight) }} t /
-            {{ fixed02(totalVolume) }} m³
+            {{ cart.items.length }} 种 / {{ totalUnits.toLocaleString() }} 件 /
+            {{ fixed02(totalWeight) }} t / {{ fixed02(totalVolume) }} m³
           </span>
         </Active>
         <Active label="识别 XIT JSON">
@@ -312,10 +314,12 @@ function setStatus(message: string, isError = false) {
             v-model="importText"
             :class="[$style.surfaceInput, $style.jsonInput]"
             spellcheck="false"
-            placeholder="粘贴 XIT ACT JSON 或 { &quot;COF&quot;: 100 } 这样的物品清单" />
+            placeholder='粘贴 XIT ACT JSON 或 { "COF": 100 } 这样的物品清单' />
         </Active>
         <Active v-if="statusMessage" label="状态">
-          <span :class="[statusError ? $style.statusError : $style.statusOk]">{{ statusMessage }}</span>
+          <span :class="[statusError ? $style.statusError : $style.statusOk]">{{
+            statusMessage
+          }}</span>
         </Active>
       </form>
     </div>
@@ -344,7 +348,9 @@ function setStatus(message: string, isError = false) {
               </div>
               <PrunButton primary inline @click="addMaterial(material.ticker)">添加</PrunButton>
             </div>
-            <div v-if="filteredMaterials.length === 0" :class="$style.emptyState">没有匹配的物品。</div>
+            <div v-if="filteredMaterials.length === 0" :class="$style.emptyState"
+              >没有匹配的物品。</div
+            >
           </div>
         </div>
       </section>

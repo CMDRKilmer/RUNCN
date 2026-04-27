@@ -180,7 +180,7 @@ watch(
     uploadTimer = window.setTimeout(() => {
       const items = Object.entries(overall.burn).map(([ticker, burnValue]) => ({
         ticker,
-        quantity: Math.round((burnValue as any).dailyAmount),
+        quantity: Math.round(burnValue.dailyAmount),
       }));
 
       reportProduction(items)

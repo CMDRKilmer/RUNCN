@@ -23,6 +23,16 @@ import type { TransportRoute, ShipStatusReport, TransportTrip, MemberRole } from
 import $style from '../FactionPanel.module.css';
 import css from './FactionTransport.module.css';
 
+function safeParseFloat(str: string, defaultValue = 0): number {
+  const val = parseFloat(str);
+  return Number.isNaN(val) ? defaultValue : val;
+}
+
+function safeParseInt(str: string, defaultValue = 0): number {
+  const val = parseInt(str, 10);
+  return Number.isNaN(val) ? defaultValue : val;
+}
+
 const props = defineProps<{ myRole: MemberRole }>();
 
 const routes = ref<TransportRoute[]>([]);
@@ -167,8 +177,8 @@ function cancelForm() {
 }
 
 async function handleSubmit() {
-  const feePerTon = parseFloat(formFeePerTon.value) || 0;
-  const feePerM3 = parseFloat(formFeePerM3.value) || 0;
+  const feePerTon = Math.max(0, safeParseFloat(formFeePerTon.value));
+  const feePerM3 = Math.max(0, safeParseFloat(formFeePerM3.value));
   if (!formDeparture.value || !formDestination.value) return;
 
   const data = {
@@ -358,8 +368,8 @@ function startTripCreate(routeId: string, ship?: ShipStatusReport) {
   tripCountdownHours.value = '';
   tripCountdownMinutes.value = '';
   tripDepartureTime.value = '';
-  tripAvailableVolume.value = ship?.cargoVolume ? String(ship.cargoVolume) : '';
-  tripAvailableWeight.value = ship?.cargoWeight ? String(ship.cargoWeight) : '';
+  tripAvailableVolume.value = ship?.cargoVolume !== undefined ? String(ship.cargoVolume) : '';
+  tripAvailableWeight.value = ship?.cargoWeight !== undefined ? String(ship.cargoWeight) : '';
   tripDescription.value = '';
 }
 
@@ -369,8 +379,8 @@ function cancelTripForm() {
 
 function computedDepartureISO(): string | null {
   if (tripDepartureMode.value === 'countdown') {
-    const h = parseInt(tripCountdownHours.value) || 0;
-    const m = parseInt(tripCountdownMinutes.value) || 0;
+    const h = safeParseInt(tripCountdownHours.value);
+    const m = safeParseInt(tripCountdownMinutes.value);
     if (h <= 0 && m <= 0) {
       return null;
     }
@@ -384,16 +394,16 @@ function computedDepartureISO(): string | null {
 
 const canSubmitTrip = computed(() => {
   if (tripDepartureMode.value === 'countdown') {
-    const h = parseInt(tripCountdownHours.value) || 0;
-    const m = parseInt(tripCountdownMinutes.value) || 0;
+    const h = safeParseInt(tripCountdownHours.value);
+    const m = safeParseInt(tripCountdownMinutes.value);
     return h > 0 || m > 0;
   }
   return !!tripDepartureTime.value;
 });
 
 async function handleCreateTrip(routeId: string) {
-  const volume = parseFloat(tripAvailableVolume.value) || 0;
-  const weight = parseFloat(tripAvailableWeight.value) || 0;
+  const volume = Math.max(0, safeParseFloat(tripAvailableVolume.value));
+  const weight = Math.max(0, safeParseFloat(tripAvailableWeight.value));
   const departureISO = computedDepartureISO();
   if (!departureISO || volume <= 0 || weight <= 0) {
     return;
@@ -438,8 +448,8 @@ function cancelBookingForm() {
 }
 
 async function handleCreateBooking(tripId: string, routeId: string) {
-  const volume = parseFloat(bookingVolume.value) || 0;
-  const weight = parseFloat(bookingWeight.value) || 0;
+  const volume = Math.max(0, safeParseFloat(bookingVolume.value));
+  const weight = Math.max(0, safeParseFloat(bookingWeight.value));
   if (volume <= 0 && weight <= 0) return;
 
   try {

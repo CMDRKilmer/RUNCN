@@ -246,7 +246,6 @@ watch(
 
     // 全面搜索最优解，尽可能填满容量
     let bestDays = finalDays;
-    let bestResult = finalResult;
     let bestUtilization = (finalResult.weight / wCap + finalResult.volume / vCap) / 2;
 
     // 搜索范围：从当前天数的0.9倍到1.1倍
@@ -260,7 +259,6 @@ watch(
         const utilization = (testResult.weight / wCap + testResult.volume / vCap) / 2;
         if (utilization > bestUtilization) {
           bestDays = testDays;
-          bestResult = testResult;
           bestUtilization = utilization;
         }
       }

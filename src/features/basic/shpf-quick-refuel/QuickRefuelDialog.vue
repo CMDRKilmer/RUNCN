@@ -9,13 +9,10 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { atSameLocation, serializeStorage, storageSort } from '@src/features/XIT/ACT/actions/utils';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { getPrunId } from '@src/infrastructure/prun-ui/attributes';
-import { UI_TILES_CHANGE_COMMAND } from '@src/infrastructure/prun-api/client-messages';
-import { dispatchClientPrunMessage } from '@src/infrastructure/prun-api/prun-api-listener';
 import { changeInputValue, clickElement, focusElement } from '@src/util';
 import { sleep } from '@src/utils/sleep';
 
-const { onDone, registration, silent, tile } = defineProps<{
+const { onDone, registration, silent } = defineProps<{
   onDone?: () => void;
   registration?: string;
   silent?: boolean;
@@ -40,12 +37,6 @@ interface TransferBuffer {
 interface PreparedTransfer {
   buffer: TransferBuffer;
   plan: TransferPlan;
-  transferButton: HTMLElement;
-}
-
-interface PreparedTransfer {
-  plan: TransferPlan;
-  buffer: TransferBuffer;
   transferButton: HTMLElement;
 }
 
@@ -75,7 +66,10 @@ const ftlStore = computed(() => {
 const sfMaterial = computed(() => materialsStore.getByTicker('SF'));
 const ffMaterial = computed(() => materialsStore.getByTicker('FF'));
 
-function calcRefuelAmount(store: PrunApi.Store | undefined, material: PrunApi.Material | undefined) {
+function calcRefuelAmount(
+  store: PrunApi.Store | undefined,
+  material: PrunApi.Material | undefined,
+) {
   if (!store || !material) {
     return 0;
   }
@@ -93,15 +87,22 @@ const originStores = computed(() => {
     return [];
   }
   return stores
-    .filter(store => (store.type === 'STORE' || store.type === 'WAREHOUSE_STORE') && atSameLocation(store, currentStore))
+    .filter(
+      store =>
+        (store.type === 'STORE' || store.type === 'WAREHOUSE_STORE') &&
+        atSameLocation(store, currentStore),
+    )
     .sort(storageSort);
 });
 
 const origin = ref<string | undefined>(undefined);
 
 watchEffect(() => {
-  if (!originStores.value.some(store => serializeStorage(store) === origin.value)) {
-    origin.value = originStores.value[0] ? serializeStorage(originStores.value[0]) : undefined;
+  const stores = originStores.value;
+  const originVal = origin.value;
+  if (!stores.some(store => serializeStorage(store) === originVal)) {
+    const firstStore = stores[0];
+    origin.value = firstStore !== undefined ? serializeStorage(firstStore) : undefined;
   }
 });
 
@@ -124,11 +125,17 @@ const sfAvailable = computed(() => getAvailableAmount(selectedOrigin.value, 'SF'
 const ffAvailable = computed(() => getAvailableAmount(selectedOrigin.value, 'FF'));
 const needsAnyFuel = computed(() => sfNeeded.value > 0 || ffNeeded.value > 0);
 const hasTransferableFuel = computed(
-  () => (sfNeeded.value > 0 && sfAvailable.value > 0) || (ffNeeded.value > 0 && ffAvailable.value > 0),
+  () =>
+    (sfNeeded.value > 0 && sfAvailable.value > 0) || (ffNeeded.value > 0 && ffAvailable.value > 0),
 );
 const isFlying = computed(() => !!ship.value?.flightId);
 const canRefuel = computed(
-  () => !!ship.value && !!selectedOrigin.value && !isFlying.value && needsAnyFuel.value && hasTransferableFuel.value,
+  () =>
+    !!ship.value &&
+    selectedOrigin.value !== undefined &&
+    !isFlying.value &&
+    needsAnyFuel.value &&
+    hasTransferableFuel.value,
 );
 
 const executionStatus = ref('');
@@ -205,7 +212,7 @@ async function openTransferBuffer(command: string, closeWhen: Ref<boolean>) {
     autoClose: true,
     closeWhen,
   });
-  if (!window) {
+  if (window === undefined) {
     throw new Error(`无法打开 ${command}`);
   }
   const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
@@ -223,31 +230,6 @@ async function waitForTransferCommand(tileElement: HTMLElement, command: string)
     await sleep(50);
   }
   throw new Error(MTRA_SWITCH_TIMEOUT_ERROR);
-}
-
-async function changeTransferCommand(tileElement: HTMLElement, command: string) {
-  const id = getPrunId(tileElement);
-  if (!id) {
-    throw new Error('无法定位临时转移窗口。');
-  }
-
-  let message = UI_TILES_CHANGE_COMMAND(id, null);
-  if (!dispatchClientPrunMessage(message)) {
-    const changeButton = _$$(tileElement, C.TileControls.control).find(x => x.textContent === ':');
-    await clickElement(changeButton as HTMLElement);
-  } else {
-    await sleep(0);
-  }
-
-  message = UI_TILES_CHANGE_COMMAND(id, command);
-  if (!dispatchClientPrunMessage(message)) {
-    const input = (await $(tileElement, C.PanelSelector.input)) as HTMLInputElement;
-    changeInputValue(input, command);
-    input.form?.requestSubmit();
-  }
-
-  await waitForTransferCommand(tileElement, command);
-  return await readTransferBuffer(tileElement);
 }
 
 async function setupMtraBuffer(anchor: HTMLElement, ticker: string) {
@@ -280,30 +262,6 @@ async function setupMtraBuffer(anchor: HTMLElement, ticker: string) {
   }
 
   return { suggestionsContainer, suggestionsList };
-}
-
-async function changeTransferCommandWithRetry(
-  tileElement: HTMLElement,
-  command: string,
-  ticker: TransferPlan['ticker'],
-) {
-  let lastError: unknown;
-  for (let retry = 0; retry < MTRA_COMMAND_RETRIES; retry++) {
-    try {
-      return await changeTransferCommand(tileElement, command);
-    } catch (error: unknown) {
-      lastError = error;
-      const isSwitchTimeout =
-        error instanceof Error && error.message === MTRA_SWITCH_TIMEOUT_ERROR;
-      if (!isSwitchTimeout || retry === MTRA_COMMAND_RETRIES - 1) {
-        throw error;
-      }
-      appendLog(`${ticker} window switch retry ${retry + 1}/${MTRA_COMMAND_RETRIES}`);
-      await sleep(MTRA_RETRY_DELAY);
-    }
-  }
-
-  throw (lastError instanceof Error ? lastError : new Error(MTRA_SWITCH_TIMEOUT_ERROR));
 }
 
 async function setupTransferWithRetry(buffer: TransferBuffer, ticker: TransferPlan['ticker']) {
@@ -361,14 +319,22 @@ async function waitTransferFeedback(frame: HTMLElement) {
   if (overlay.classList.contains(C.ActionFeedback.error)) {
     const message = _$(overlay, C.ActionFeedback.message)?.textContent?.trim();
     const dismiss = _$(overlay, C.ActionFeedback.dismiss)?.textContent?.trim();
-    throw new Error(dismiss ? message?.replace(dismiss, '').trim() || '转移失败。' : message || '转移失败。');
+    throw new Error(
+      dismiss ? message?.replace(dismiss, '').trim() || '转移失败。' : message || '转移失败。',
+    );
   }
 
   throw new Error('收到未知的转移反馈。');
 }
 
-async function prepareTransfer(buffer: TransferBuffer, plan: TransferPlan): Promise<PreparedTransfer> {
-  const { suggestionsContainer, suggestionsList } = await setupTransferWithRetry(buffer, plan.ticker);
+async function prepareTransfer(
+  buffer: TransferBuffer,
+  plan: TransferPlan,
+): Promise<PreparedTransfer> {
+  const { suggestionsContainer, suggestionsList } = await setupTransferWithRetry(
+    buffer,
+    plan.ticker,
+  );
 
   suggestionsContainer.style.display = 'none';
   const match = _$$(suggestionsList, C.MaterialSelector.suggestionEntry).find(
@@ -382,7 +348,9 @@ async function prepareTransfer(buffer: TransferBuffer, plan: TransferPlan): Prom
   await clickElement(match as HTMLElement);
   suggestionsContainer.style.display = '';
 
-  const sliderNumbers = _$$(buffer.anchor, 'rc-slider-mark-text').map(x => Number(x.textContent ?? 0));
+  const sliderNumbers = _$$(buffer.anchor, 'rc-slider-mark-text').map(x =>
+    Number(x.textContent ?? 0),
+  );
   const maxAmount = Math.max(...sliderNumbers);
   if (!Number.isFinite(maxAmount) || maxAmount <= 0) {
     throw new Error(`${plan.ticker} 当前无法转移。`);
@@ -422,7 +390,9 @@ async function runRefuel() {
   }
   const plans = buildTransferPlans(selectedOrigin.value);
   if (plans.length === 0) {
-    executionStatus.value = needsAnyFuel.value ? '无法加油（来源库存不足）。' : '油箱已满，无需加油。';
+    executionStatus.value = needsAnyFuel.value
+      ? '无法加油（来源库存不足）。'
+      : '油箱已满，无需加油。';
     return;
   }
 
@@ -539,7 +509,9 @@ watch(origin, () => {
         <div v-for="(message, index) in logMessages" :key="index">{{ message }}</div>
       </div>
       <Commands>
-        <PrunButton primary :disabled="!canRefuel || isExecuting" @click="runRefuel">执行加油</PrunButton>
+        <PrunButton primary :disabled="!canRefuel || isExecuting" @click="runRefuel"
+          >执行加油</PrunButton
+        >
       </Commands>
     </form>
   </div>
