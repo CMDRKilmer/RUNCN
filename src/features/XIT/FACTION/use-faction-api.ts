@@ -30,6 +30,7 @@ import type {
   TripsResponse,
   PluginUser,
   PluginUsersResponse,
+  MemberRole,
 } from './types';
 
 const SUPABASE_URL = 'https://tnfncrvsengkativszlx.supabase.co';
@@ -656,18 +657,20 @@ export async function fetchProductionSummary(): Promise<ProductionSummaryRespons
     if (m.username) usernameMap[m.company_name] = m.username;
   }
 
-  const byMember: Record<
-    string,
-    Record<string, { id: string; ticker: string; quantity: number; report_date: string }>
-  > = {};
+  type LatestProductionItem = {
+    id: string;
+    ticker: string;
+    quantity: number;
+    report_date: string;
+  };
+
+  const byMember: Record<string, Record<string, LatestProductionItem | undefined> | undefined> = {};
 
   for (const row of productionRows) {
-    if (!(row.company_name in byMember)) {
-      byMember[row.company_name] = {};
-    }
-    const existing = byMember[row.company_name][row.material_ticker];
+    const tickerMap = (byMember[row.company_name] ??= {});
+    const existing = tickerMap[row.material_ticker];
     if (existing === undefined || row.report_date > existing.report_date) {
-      byMember[row.company_name][row.material_ticker] = {
+      tickerMap[row.material_ticker] = {
         id: row.id,
         ticker: row.material_ticker,
         quantity: row.quantity,
@@ -679,7 +682,7 @@ export async function fetchProductionSummary(): Promise<ProductionSummaryRespons
   const members = Object.entries(byMember).map(([companyName, tickerMap]) => ({
     companyName,
     username: usernameMap[companyName],
-    items: Object.values(tickerMap),
+    items: Object.values(tickerMap ?? {}).filter(item => item !== undefined),
   }));
   return { ok: true, date: today, members };
 }
@@ -1037,6 +1040,29 @@ export async function deleteBooking(bookingId: string): Promise<ApiSuccess> {
 
 // --- Plugin Users ---
 
+export async function fetchMyRole(): Promise<MemberRole> {
+  const { data: userDataResult, error: userError } = await supabase.auth.getUser();
+  if (userError !== null || userDataResult.user === null) {
+    throwApi('UNAUTHORIZED', '请先登录组织面板');
+  }
+
+  const { data, error } = await supabase
+    .from('members')
+    .select('role')
+    .eq('auth_uid', userDataResult.user.id)
+    .single();
+  if (error !== null || data === null) {
+    throwApi('UNAUTHORIZED', '未找到组织成员信息，请重新登录组织面板');
+  }
+
+  const role = data.role as MemberRole;
+  if (role !== 'member' && role !== 'partner' && role !== 'executive') {
+    throwApi('INVALID_ROLE', '组织角色无效');
+  }
+
+  return role;
+}
+
 export async function reportPluginUser(username: string, companyName: string): Promise<ApiSuccess> {
   const { error } = await supabase.from('plugin_users').upsert(
     {
@@ -1051,6 +1077,11 @@ export async function reportPluginUser(username: string, companyName: string): P
 }
 
 export async function fetchPluginUsers(): Promise<PluginUsersResponse> {
+  const role = await fetchMyRole();
+  if (role !== 'executive') {
+    throwApi('INSUFFICIENT_PERMISSION', '只有 executive 可以查看插件用户统计');
+  }
+
   const { data, error } = await supabase
     .from('plugin_users')
     .select('*')
