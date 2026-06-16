@@ -12,6 +12,7 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { clamp } from '@src/utils/clamp';
+import { sumBy } from '@src/utils/sum-by';
 
 act.addAction<Config>({
   type: 'Refuel',

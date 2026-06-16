@@ -75,7 +75,7 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel';
 
   interface ActionData {
     type: ActionType;
@@ -91,6 +91,8 @@ declare namespace UserData {
 
     origin?: string;
     dest?: string;
+
+    buyMissingFuel?: boolean;
   }
 
   interface TaskList {

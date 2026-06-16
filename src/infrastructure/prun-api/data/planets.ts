@@ -5,6 +5,7 @@ import { createMapGetter } from '@src/infrastructure/prun-api/data/create-map-ge
 interface Planet {
   naturalId: string;
   name: string;
+  cogcProgramType?: string | null;
 }
 
 const store = createEntityStore<Planet>({
