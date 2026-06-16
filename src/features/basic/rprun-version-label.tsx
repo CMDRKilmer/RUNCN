@@ -4,7 +4,7 @@ async function onFooterReady(footer: HTMLElement) {
   const userCount = await $(footer, C.UsersOnlineCount.container);
 
   function onClick() {
-    window.open('https://qm.qq.com/q/orvlELomcg', '_blank');
+    window.open('https://qm.qq.com/q/G8Gq8NmPym', '_blank');
   }
 
   createFragmentApp(() => (
