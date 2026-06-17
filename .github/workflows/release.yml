@@ -1,6 +1,6 @@
 env:
   DIRECTORY: dist
-  PROJECT_NAME: refined-prun
+  PROJECT_NAME: 琉璃小工具
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 name: Release
