@@ -6,4 +6,7 @@ export const useTileState = createTileStateHook({
   green: true,
   inf: true,
   expand: [] as string[],
+  prod: true,
+  wf: true,
+  io: true,
 });

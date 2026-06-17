@@ -96,7 +96,7 @@ function filterBurn(burn: BurnValues): BurnValues {
     const mat = burn[ticker];
     const hasProd = mat.input > 0 || mat.output > 0;
     const hasWf = mat.workforce > 0;
-    if (!(hasProd && prod.value) && !(hasWf && wf.value)) {
+    if (!(hasProd && prod.value === true) && !(hasWf && wf.value === true)) {
       continue;
     }
     filtered[ticker] = mat;
@@ -196,9 +196,10 @@ function onExpandAllClick() {
 // Exports all materials regardless of active color filters (RED/YELLOW/GREEN/INF)
 // so spreadsheet users always get the complete dataset.
 function formatBurnTable(burns: PlanetBurn[]) {
-  const header = io.value
-    ? '星球\t代号\t库存\t输入\t输出\t净变化\t天数'
-    : '星球\t代号\t库存\t消耗/天\t天数';
+  const header =
+    io.value === true
+      ? '星球\t代号\t库存\t输入\t输出\t净变化\t天数'
+      : '星球\t代号\t库存\t消耗/天\t天数';
   const lines = [header];
   for (const planet of burns) {
     const sorted = getSortedTickers(planet);
@@ -207,7 +208,7 @@ function formatBurnTable(burns: PlanetBurn[]) {
       // Floor needed here: per-planet burns are pre-floored, but overall burn is not.
       const days = mat.dailyAmount >= 0 ? '' : Math.floor(mat.daysLeft).toString();
       const burn = Math.round(mat.dailyAmount * 1000) / 1000;
-      if (io.value) {
+      if (io.value === true) {
         const inAmt = Math.round((mat.input + mat.workforce) * 1000) / 1000;
         const outAmt = Math.round(mat.output * 1000) / 1000;
         lines.push(
