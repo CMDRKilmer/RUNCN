@@ -1,10 +1,13 @@
 env:
   DIRECTORY: dist
   PROJECT_NAME: refined-prun
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 name: Release
 on:
   workflow_dispatch: null
+permissions:
+  contents: write
 jobs:
 
   build:

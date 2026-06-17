@@ -89,7 +89,15 @@ act.addMaterialGroup<Config>({
         continue;
       }
       const days = typeof data.days === 'number' ? data.days : parseFloat(data.days);
-      const need = Math.ceil((matBurn.daysLeft - days) * matBurn.dailyAmount);
+      const dailyConsume = -matBurn.dailyAmount;
+      const inventory = matBurn.inventory;
+      if ((data.useBaseInv ?? true) && inventory >= days * dailyConsume) {
+        continue;
+      }
+      const rawRequired = (data.useBaseInv ?? true)
+        ? days * dailyConsume - inventory
+        : days * dailyConsume;
+      const need = Math.floor(Math.max(0, rawRequired));
       if (need > 0) {
         parsedGroup[ticker] = need;
       }

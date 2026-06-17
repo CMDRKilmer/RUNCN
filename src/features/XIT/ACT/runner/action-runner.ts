@@ -58,12 +58,10 @@ export class ActionRunner {
       this.log.info('已为有效操作生成步骤：');
     }
     // 先计算总计并显示在最上方。
-    // 用 seenTickers 避免同一材料在不同步骤中重复计算重量/体积。
     const costByCurrency = new Map<string, number>();
     let missingPriceCount = 0;
     let totalWeight = 0;
     let totalVolume = 0;
-    const seenTickers = new Set<string>();
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
       if (stepInfo.cost) {
@@ -76,16 +74,11 @@ export class ActionRunner {
           missingPriceCount++;
         }
       }
-      const ticker = (step as ActionStep & { ticker?: string }).ticker;
-      const isNewTicker = !!ticker && !seenTickers.has(ticker);
-      if (stepInfo.weight !== undefined && isNewTicker) {
+      if (stepInfo.weight !== undefined) {
         totalWeight += stepInfo.weight(step) ?? 0;
       }
-      if (stepInfo.volume !== undefined && isNewTicker) {
+      if (stepInfo.volume !== undefined) {
         totalVolume += stepInfo.volume(step) ?? 0;
-      }
-      if (ticker) {
-        seenTickers.add(ticker);
       }
     }
     const totalCost = [...costByCurrency.values()].reduce((s, v) => s + v, 0);
