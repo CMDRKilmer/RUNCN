@@ -2,6 +2,7 @@ import MinimizeRow from './MinimizeRow.vue';
 import { streamHtmlCollection } from '@src/utils/stream-html-collection';
 import { computedTileState } from '@src/store/user-data-tiles';
 import { getTileState } from './tile-state';
+import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
 
 const MINIMIZE_ATTR = 'data-rp-minimize-row';
 
@@ -44,18 +45,26 @@ function setHeaders(tile: PrunTile, isMinimized: boolean) {
     if (label?.textContent === 'Minimize' || label?.textContent === '最小化') {
       continue;
     }
-    if (label?.textContent === 'Termination request') {
+    if (matchesLocalization(label, 'Contract.termination', 'Termination request')) {
       const value = _$(header, C.FormComponent.input);
       if (value?.textContent !== '--') {
         continue;
       }
     }
+    if (matchesLocalization(label, 'Contribution.stores', 'Inventory')) {
+      continue;
+    }
     header.style.display = isMinimized ? 'none' : 'flex';
   }
 }
 
+function matchesLocalization(element: Element | undefined, key: string, defaultValue: string) {
+  const text = PrunI18N[key]?.[0]?.value ?? defaultValue;
+  return element?.textContent === text;
+}
+
 function init() {
-  tiles.observe(['CX', 'CONT', 'LM', 'SYSI'], onTileReady);
+  tiles.observe(['CX', 'CONT', 'LM', 'SYSI', 'POPID'], onTileReady);
 }
 
 features.add(import.meta.url, init, '最小化 CX、CONT、LM 和 SYSI 中的标题栏。');

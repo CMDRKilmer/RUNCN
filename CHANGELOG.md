@@ -1,765 +1,819 @@
-# Changelog
+# 更新日志
 
-## Unreleased
+**日期**: 2026-06-17  
+**说明**: 同步了官方版本更新内容
 
-### Added
+## 26.5.18
 
-- `contribution-bulk-controls`: Adds NONE/ALL buttons to contribution sections
-- `contribution-maxed`: Automatically maxes contribution sliders in CoGC and population upkeep tiles
-- `flt-flex-fuel`: Allows the fuel column layout to better use available space
-- `sidebar-hide-zero-currencies`: Hides currencies with zero balance in the right sidebar
-- `sysi-blue-negative-value`: Makes lower negative planet values blue instead of red
+### 新增
 
-### Changed
+- `shpi-base-inv-button`: 当飞船停靠在基地时添加 INV 上下文按钮
+- `shpi-warehouse-button`: 当飞船停靠在有仓库的地址时添加 WAR 上下文按钮
+- `pli-cogc-label`: 将"全球商业商会"行标签替换为"CoGC ({program type})"
 
-- `XIT CONTS`: Add missing condition labels
-- `XIT CONTC`: Add missing condition descriptions
-- `flt-ship-condition`: Restore red/yellow thresholds; red at 79%, yellow at 81%
+### 修改
 
-### Fixed
+- `XIT BURN`: 将 PROD 和 WF 按钮改为仅排除非活动物料行，不影响输入/输出速率
+- `XIT ELEC`: 按选举结束日期升序排序选举
+- `inv-warehouse-button`: 将按钮移动到上下文栏
+- 按住 Shift 键删除交易所订单时跳过确认覆盖层
+- 优化从非 CXOS 位置删除自己订单的性能
 
-- `prun-bugs`: Fix the dot / arrow in system info being left skewed
-- `prun-bugs`: Fix layout shift when selecting inventory grid items
-- `prun-bugs`: Fix slider dot stretching and cursor styles
-- `prun-bugs`: Disable POPID sliders that can't be filled due to full reserves
-- Fix financial data collection failure when the user has no warehouses
+### 修复
+
+- `audio-volume-slider`: 修复某些情况下音量未应用的问题
+- `minimize-headers`: 修复 `POPID` 面板中库存选择器被最小化的问题
+- `mtra-auto-focus-amount`: 修复数量输入框无法自动聚焦的问题
+
+## 26.5.11
+
+### 新增
+
+- `XIT ELEC`: 显示您拥有基地的行星即将举行的选举
+- `XIT FXTS`: 列出您所有的外汇交易记录
+- `adm-hide-inactive-buttons`: 隐藏非活动按钮
+- `bs-warehouse-button`: 添加"仓库"按钮
+- `cxo-delete-order-button`: 添加删除按钮
+- `cxob-delete-own-exchange-orders`: 在自己的订单上添加删除按钮
+- `inv-shpt-condition-indicator`: 在 SHPT 和 BLCK 物品上添加合同条件指示器
+- `inv-warehouse-button`: 在基地库存中添加"仓库"按钮
+
+### 修改
+
+- `XIT ACT`: 在 `MTRA` 配置中根据所选来源过滤目标列表
+- `XIT BURN`: 添加 PROD、WF 和 I/O 过滤按钮
+- `XIT CONTC`: 在"贡献"条件中显示地址链接
+- `contribution-maxed`: 在 `POPID` 面板中禁用此功能
+- `cxpo-order-book`: 在自己的订单上添加删除按钮
+- `minimize-headers`: 在 `POPID` 面板中启用标题最小化
+- `nots-notification-type-label`: 为新通知类型添加标签
+
+### 修复
+
+- `XIT ACT`: 防止手动输入的数量/价格被订单簿更改覆盖
+- `XIT PROD`: 修复从 `XIT PROD` 打开的 `PRODQ` 面板中的订单删除问题
+- `prun-bugs`: 防止拖动项目时选择文本
+
+## 26.3.22
+
+### 新增
+
+- `XIT PROD`: 密集的跨基地生产概览
+- `contribution-bulk-controls`: 在贡献部分添加 NONE/ALL 按钮
+- `contribution-maxed`: 在 CoGC 和人口维护面板中自动最大化贡献滑块
+- `flt-flex-fuel`: 允许燃料列布局更好地利用可用空间
+- `sidebar-hide-zero-currencies`: 隐藏右侧边栏中余额为零的货币
+- `sysi-blue-negative-value`: 将较低的负行星值显示为蓝色而非红色
+
+### 修改
+
+- `XIT BURN`: 添加适合 Google Sheets 的复制按钮
+- `XIT CONTS`: 添加缺失的条件标签
+- `XIT CONTC`: 添加缺失的条件描述
+- `flt-ship-condition`: 恢复红色/黄色阈值；红色为 79%，黄色为 81%
+
+### 修复
+
+- `prun-bugs`: 修复系统信息中的点/箭头左偏问题
+- `prun-bugs`: 修复选择库存网格项目时的布局偏移
+- `prun-bugs`: 修复滑块点拉伸和光标样式问题
+- `prun-bugs`: 禁用因储备已满而无法填充的 POPID 滑块
+- `screen-tab-bar`: 修复触控板滚动抖动问题并添加水平手势支持
+- 修复用户没有仓库时财务数据收集失败的问题
 
 ## 26.1.24
 
-### Added
+### 新增
 
-- `expand-sidebar-contract-list`: Fully expands the contracts list in the sidebar
-- `mat-refined-prun-price`: Adds a "Refined PrUn Price" row
+- `expand-sidebar-contract-list`: 完全展开侧边栏中的合同列表
+- `mat-refined-prun-price`: 添加"精炼 PrUn 价格"行
 
-### Changed
+### 修改
 
-- `flt-ship-condition`: Move the yellow condition threshold to 80% and remove the red one
+- `flt-ship-condition`: 将黄色条件阈值移动到 80% 并移除红色阈值
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix errors related to orbiting ships
-- `XIT FINCH`: Fix the Y axis labels fraction digits
-- `XIT GIF`: Fix pillarboxing
-- `browser-tab-name`: Fix ghost notifications
-- `other-context-notification-count`: Fix ghost notifications (once and for all, I hope)
+- `XIT ACT`: 修复与轨道飞船相关的错误
+- `XIT FINCH`: 修复 Y 轴标签小数位数问题
+- `XIT GIF`: 修复黑边问题
+- `browser-tab-name`: 修复幽灵通知
+- `other-context-notification-count`: 修复幽灵通知（希望这次彻底解决）
 
-### Removed
+### 移除
 
-- `cxpc-default-1y`: This feature had too many edge cases
+- `cxpc-default-1y`: 此功能有太多边缘情况
 
 ## 26.1.15
 
-### Changed
+### 修改
 
-- `XIT FINCH`: Add a "(Partial)" suffix to the equity chart if the full equity mode is disabled
-- `XIT GIF`: Switch from Giphy to Klipy
+- `XIT FINCH`: 如果禁用完整权益模式，在权益图表上添加"(部分)"后缀
+- `XIT GIF`: 从 Giphy 切换到 Klipy
 
-### Fixed
+### 修复
 
-- `XIT SET BFR`: Fix the table header row misalignment
-- `browser-tab-name`: Fix ghost notification counter for deleted notifications
+- `XIT SET BFR`: 修复表格标题行对齐问题
+- `browser-tab-name`: 修复已删除通知的幽灵通知计数器
 
 ## 26.1.11
 
-### Added
+### 新增
 
-- `bbc-building-count`: Adds a building count label to the building icons
-- `browser-tab-name`: Renames the browser tab based on the current screen
+- `bbc-building-count`: 在建筑图标上添加建筑计数标签
+- `browser-tab-name`: 根据当前屏幕重命名浏览器标签
 
-### Changed
+### 修改
 
-- `XIT ACT`: Make the material group and action lists reorderable
-- `XIT FINBS`: Add vortex fuel stores to the "Fuel tanks" total
-- `XIT FINBS`: Add a button to each row to open `XIT FINCH` with the selected chart
-- `XIT FINCH`: Add charts to all entries from the balance sheet
-- `XIT SET`: Display the 12h/24h time format in the Default option
-- `XIT SET`: Make the sidebar button list reorderable
-- `XIT SET FIN`: Add an "Equity mode" toggle to switch between full and partial equity
-- `XIT SORT`: Make the sorting mode list reorderable
-- `flt-flight-status-icons`: Add icons for new status types and make the JUMP icon more distinctive
-- `inv-compress-inventory-info`: Add a small right padding to the unload button in `SHPI`
-- `inv-shorten-storage-types`: Use the short type labels from the base game instead of custom ones
-- `inv-shorten-storage-types`: Shorten storage types in the filter bar
-- Ignore planetary infrastructure inventories in all features
-- Disable the full equity mode for new Refined PrUn users that are less than 90 days old
+- `XIT ACT`: 使物料组和操作列表可重新排序
+- `XIT FINBS`: 将漩涡燃料存储添加到"燃料箱"总计中
+- `XIT FINBS`: 在每行添加按钮以使用所选图表打开 `XIT FINCH`
+- `XIT FINCH`: 为资产负债表中的所有条目添加图表
+- `XIT SET`: 在默认选项中显示 12h/24h 时间格式
+- `XIT SET`: 使侧边栏按钮列表可重新排序
+- `XIT SET FIN`: 添加"权益模式"切换以在完整和部分权益之间切换
+- `XIT SORT`: 使排序模式列表可重新排序
+- `flt-flight-status-icons`: 为新状态类型添加图标并使 JUMP 图标更具辨识度
+- `inv-compress-inventory-info`: 在 `SHPI` 中为卸载按钮添加右侧小填充
+- `inv-shorten-storage-types`: 使用基础游戏中的短类型标签而非自定义标签
+- `inv-shorten-storage-types`: 在过滤栏中缩短存储类型
+- 在所有功能中忽略行星基础设施库存
+- 对使用时间少于 90 天的新 Refined PrUn 用户禁用完整权益模式
 
-### Fixed
+### 修复
 
-- `cxpc-default-1y`: Fix the 1y chart not opening after it has been opened once
-- `nots-notification-type-label`: Add labels for the missing notification types
+- `cxpc-default-1y`: 修复打开一次后 1y 图表无法打开的问题
+- `nots-notification-type-label`: 为缺失的通知类型添加标签
 
 ## 25.12.30
 
-### Changed
+### 修改
 
-- Open `XIT CMDS` in the parameterless `XIT` command
+- 在无参数的 `XIT` 命令中打开 `XIT CMDS`
 
-### Fixed
+### 修复
 
-- `cxpc-default-1y`: Fix the 1y chart showing only 30d of data if opened not from `CXM`
-- Fix the `XIT` command with no parameters breaking all later `XIT` commands
+- `cxpc-default-1y`: 修复从非 `CXM` 打开时 1y 图表只显示 30 天数据的问题
+- 修复无参数的 `XIT` 命令破坏后续所有 `XIT` 命令的问题
 
 ## 25.12.28
 
-### Added
+### 新增
 
-- `audio-volume-slider`: Adds a volume slider to the game settings in the top-right corner of the screen
-- `cxpc-default-1y`: Selects the 1y chart on open
+- `audio-volume-slider`: 在屏幕右上角的游戏设置中添加音量滑块
+- `cxpc-default-1y`: 打开时选择 1y 图表
 
-### Changed
+### 修改
 
-- `XIT BURN`: Add support for a `NOT` filter, for example `XIT BURN NOT MALAHAT`
-- `correct-commands`: Add support for planets in system commands, for example `SYSI PROMITOR`
-- `correct-commands`: Add support for stations in system commands, for example `SYSI ANT`
-- `nots-notification-type-label`: Add labels for the new notification types
-- `nots-notification-type-label`: Adjust the colors to improve readability and consistency with the game's UI
-- Decrease the default audio volume to 40%
+- `XIT BURN`: 添加对 `NOT` 过滤器的支持，例如 `XIT BURN NOT MALAHAT`
+- `correct-commands`: 在系统命令中添加对行星的支持，例如 `SYSI PROMITOR`
+- `correct-commands`: 在系统命令中添加对空间站的支持，例如 `SYSI ANT`
+- `nots-notification-type-label`: 为新通知类型添加标签
+- `nots-notification-type-label`: 调整颜色以提高可读性并与游戏 UI 保持一致
+- 将默认音频音量降低到 40%
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix the CX Buy action failing to execute due to number formatting in some localizations
-- `bs-hide-zero-workforce`: Fix the broken tooltip in the "Current Workforce" column header
-- `co-base-count`: Fix the feature not working after the gateway update
-- `cxpo-auto-price`: Fix localized number formatting
-- `exp-expert-eta`: Fix the Infinityd bug for production lines without recurring orders
-- `hide-system-chat-messages`: Fix the vertical indicator not being visible after the gateway update
-- `inv-compress-inventory-info`: Fix the feature not working in `SHPI`
-- `other-context-notification-count`: Fix ghost INFRASTRUCTURE_UPGRADE_COMPLETED notifications
-- `screen-layout-lock`: Fix the feature not working when the game URL does not contain a screen id
+- `XIT ACT`: 修复 CX Buy 操作因某些本地化中的数字格式而执行失败的问题
+- `bs-hide-zero-workforce`: 修复"当前劳动力"列标题中的损坏工具提示
+- `co-base-count`: 修复网关更新后功能无法正常工作的问题
+- `cxpo-auto-price`: 修复本地化数字格式
+- `exp-expert-eta`: 修复没有重复订单的生产线的 Infinityd 错误
+- `hide-system-chat-messages`: 修复网关更新后垂直指示器不可见的问题
+- `inv-compress-inventory-info`: 修复 `SHPI` 中功能无法正常工作的问题
+- `other-context-notification-count`: 修复幽灵 INFRASTRUCTURE_UPGRADE_COMPLETED 通知
+- `screen-layout-lock`: 修复游戏 URL 不包含屏幕 ID 时功能无法正常工作的问题
 
 ## 25.11.16
 
-### Added
+### 新增
 
-- `screen-layout-lock`: Adds screen locking
-- `cxos-hide-delete-filled`: Hides the "Delete Filled" button when filters are hidden
+- `screen-layout-lock`: 添加屏幕锁定功能
+- `cxos-hide-delete-filled`: 过滤隐藏时隐藏"删除已填充"按钮
 
-### Changed
+### 修改
 
-- `XIT ACT`: Make the action package list reorderable
-- `XIT ACT`: Add an "Allow Unfilled" option to the CX Buy action
-- `XIT ACT`: Remove the Help button
-- `XIT SET`: Add a confirmation popup for restore from backup
-- `XIT SORT`: Add copy/paste buttons to sorting modes
-- `item-icons`: Add icons for colony-ship-related materials
-- `screen-tab-bar`: Make tab bar scrollable to allow offscreen tabs
+- `XIT ACT`: 使操作包列表可重新排序
+- `XIT ACT`: 在 CX Buy 操作中添加"允许未完成"选项
+- `XIT ACT`: 移除帮助按钮
+- `XIT SET`: 为从备份恢复添加确认弹窗
+- `XIT SORT`: 为排序模式添加复制/粘贴按钮
+- `item-icons`: 添加殖民船相关物料的图标
+- `screen-tab-bar`: 使标签栏可滚动以允许屏幕外标签
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix MTRA action getting stuck when the material amount is zero
-- `XIT ACT`: Fix CX Buy action getting stuck when the material amount is zero
-- `XIT CONTS`: Fix government partner display in contracts
-- `XIT CONTS`: Fix the display text of the "Construct Ship" condition
-- `XIT NOTE`: Fix material tickers being changed to the first one in the note
-- `correct-commands`: Fix url correction for links without http:// or https:// in XIT WEB
-- `sidebar-contracts-details`: Fix government partner display in contracts
-- Fix the color of materials in the "Infrastructure" category
+- `XIT ACT`: 修复物料数量为零时 MTRA 操作卡住的问题
+- `XIT ACT`: 修复物料数量为零时 CX Buy 操作卡住的问题
+- `XIT CONTS`: 修复合同中政府合作伙伴显示问题
+- `XIT CONTS`: 修复"建造飞船"条件的显示文本
+- `XIT NOTE`: 修复物料代码被更改为注释中第一个代码的问题
+- `correct-commands`: 修复 XIT WEB 中没有 http:// 或 https:// 的链接的 URL 修正
+- `sidebar-contracts-details`: 修复合同中政府合作伙伴显示问题
+- 修复"基础设施"类别中物料的颜色
 
 ## 25.8.16
 
-### Added
+### 新增
 
-- `bui-sort-recipes`: Sorts the recipes and materials by category/ticker/amount sort order
+- `bui-sort-recipes`: 按类别/代码/数量排序顺序对配方和物料进行排序
 
-### Changed
+### 修改
 
-- `XIT BURN`: Add an `OVERALL` optional parameter to display overall burn only
-- `shipping-per-unit-price`: Remove the currency symbol in the `LMP` per-unit price label
-- Improve the sorting order of "drones" and "ship kits" categories
+- `XIT BURN`: 添加 `OVERALL` 可选参数以仅显示总体消耗
+- `shipping-per-unit-price`: 移除 `LMP` 单价标签中的货币符号
+- 改进"无人机"和"飞船套件"类别的排序顺序
 
-### Fixed
+### 修复
 
-- `planet-commands`: Fix replacing station natural ids with planet natural ids
+- `planet-commands`: 修复将空间站自然 ID 替换为行星自然 ID 的问题
 
 ## 25.8.1
 
-### Added
+### 新增
 
-- `XIT PRUNSTAT`: Opens the PrUn Financial Report website
+- `XIT PRUNSTAT`: 打开 PrUn 财务报告网站
 
-### Changed
+### 修改
 
-- `XIT ACT`: Allow Refuel to process without sufficient fuel stored
-- `XIT ACT`: Add a Rename button
-- `XIT ACT`: Filter out fuel tanks from address selectors in the MTRA action
-- `XIT FIN`: Add a missing `XIT FINBS` command to FIN context bars
-- `XIT NOTE`: Make header clickable to allow renaming
-- `XIT TODO`: Make header clickable to allow renaming
+- `XIT ACT`: 允许加油操作在燃料存储不足时处理
+- `XIT ACT`: 添加重命名按钮
+- `XIT ACT`: 在 MTRA 操作的地址选择器中过滤掉燃料箱
+- `XIT FIN`: 在 FIN 上下文栏中添加缺失的 `XIT FINBS` 命令
+- `XIT NOTE`: 使标题可点击以允许重命名
+- `XIT TODO`: 使标题可点击以允许重命名
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix MTRA actions failing to execute if the material cannot be transferred in full
+- `XIT ACT`: 修复物料无法完全转移时 MTRA 操作执行失败的问题
 
 ## 25.7.19.1611
 
-### Fixed
+### 修复
 
-- Fix another case of the extension failing to load
+- 修复扩展无法加载的另一种情况
 
 ## 25.7.19
 
-### Added
+### 新增
 
-- `blck-item-destination`: Adds a destination address to BLCK items
-- `cxpc-chart-types`: Adds "Smooth" and "Aligned" chart types
-- `shorten-shpt-blck-address`: Shortens addresses in SHPT and BLCK items
-- `usr-subscription-level`: Adds user license info
+- `blck-item-destination`: 为 BLCK 物品添加目标地址
+- `cxpc-chart-types`: 添加"平滑"和"对齐"图表类型
+- `shorten-shpt-blck-address`: 缩短 SHPT 和 BLCK 物品中的地址
+- `usr-subscription-level`: 添加用户许可证信息
 
-### Changed
+### 修改
 
-- `XIT ACT`: Change the "No ships need refueling" message level to INFO
-- `prun-bugs`: Remove the `CONTD` condition saving fix
+- `XIT ACT`: 将"无需加油"消息级别更改为 INFO
+- `prun-bugs`: 移除 `CONTD` 条件保存修复
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix an off-by-one error in the Refuel action
-- `XIT FINPR`: Fix profitability calculation after PRO license expiration
-- `cxpo-order-book`: Fix form label text overflow
-- Fix the extension not loading in certain cases
+- `XIT ACT`: 修复加油操作中的差一错误
+- `XIT FINPR`: 修复 PRO 许可证到期后的盈利能力计算
+- `cxpo-order-book`: 修复表单标签文本溢出
+- 修复扩展在某些情况下无法加载的问题
 
-### Removed
+### 移除
 
-- `shipment-item-detail`: This feature is now natively implemented in the APEX
+- `shipment-item-detail`: 此功能现在已在 APEX 中原生实现
 
 ## 25.6.18
 
-### Added
+### 新增
 
-- `exp-expert-eta`: (new) Displays ETA for the next expert to appear
-- `show-space-remaining`: (new) Shows the remaining weight and volume capacity of the selected store in INV and SHPI
-- `wf-workforce-filters`: (new) Adds filters to hide zero workforce types and consumables
+- `exp-expert-eta`: (新) 显示下一位专家出现的预计时间
+- `show-space-remaining`: (新) 在 INV 和 SHPI 中显示所选存储的剩余重量和容量
+- `wf-workforce-filters`: (新) 添加过滤器以隐藏零劳动力类型和消耗品
 
-### Changed
+### 修改
 
-- `XIT ACT`: Add a Refuel action
-- `custom-left-sidebar`: Add ACT, BURN, and REP to the default left sidebar buttons
-- `input-math`: Add "k" replacement for 1000 in math expressions
+- `XIT ACT`: 添加加油操作
+- `custom-left-sidebar`: 将 ACT、BURN 和 REP 添加到默认左侧边栏按钮
+- `input-math`: 在数学表达式中添加"k"替换为 1000
 
-### Fixed
+### 修复
 
-- `XIT BURN`: Fix Burn values being incorrect in some occasions
-- `XIT CXTS`: Fix Amount column not being formatted properly
-- `other-context-notification-count`: Fix notification count sometimes including deleted notifications
-- Fix date/time/number formatting not respecting the selected language
+- `XIT BURN`: 修复某些情况下消耗值不正确的问题
+- `XIT CXTS`: 修复金额列格式不正确的问题
+- `other-context-notification-count`: 修复通知计数有时包含已删除通知的问题
+- 修复日期/时间/数字格式不尊重所选语言的问题
 
 ## 25.6.9.1557
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix CX Buy action getting stuck after unexpected order book updates
+- `XIT ACT`: 修复 CX Buy 操作在意外订单簿更新后卡住的问题
 
 ## 25.6.9
 
-### Fixed
+### 修复
 
-- `other-context-notification-count`: Fix counter displaying "ghost" notification count
+- `other-context-notification-count`: 修复计数器显示"幽灵"通知计数的问题
 
 ## 25.6.8
 
-### Added
+### 新增
 
-- `other-context-notification-count`: (new) Displays the number of notifications from other contexts in the NOTS header label
-- Add user data backups (up to 5, every 24 hours)
-- Add user data restore from backup after the extension reinstall
+- `other-context-notification-count`: (新) 在 NOTS 标题标签中显示来自其他上下文的通知数量
+- 添加用户数据备份（最多 5 个，每 24 小时）
+- 添加扩展重新安装后从备份恢复用户数据的功能
 
-### Changed
+### 修改
 
-- `XIT ACT`: Add an export button to the action editor
-- `XIT ACT`: Auto-focus the text input on action import prompt open
-- `XIT SET`: Reload the page after importing or resetting user data
-- `highlight-own-exchange-orders`: Make own order rows bold
-- `item-icons`: Add a detail to the INS icon
-- Swap the order of SF and FF in category sorting
+- `XIT ACT`: 在操作编辑器中添加导出按钮
+- `XIT ACT`: 在操作导入提示打开时自动聚焦文本输入框
+- `XIT SET`: 导入或重置用户数据后重新加载页面
+- `highlight-own-exchange-orders`: 将自己的订单行设为粗体
+- `item-icons`: 为 INS 图标添加细节
+- 交换类别排序中 SF 和 FF 的顺序
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix CX Buy action using stale order book data
-- `XIT WEB`: Fix iframe being a bit too big for Firefox to properly scroll
-- `cxob-depth-bars`: Fix feature not working for newly placed orders
-- `cxpo-order-book`: Fix price/quantity autofill number formatting
-- `cxpo-order-book`: Fix clicking on MM order amount not filling the price
-- `highlight-own-exchange-orders`: Fix feature not working for newly placed orders
-- `screen-tab-bar`: Fix SCRN list not being updated when the page url contains context id
+- `XIT ACT`: 修复 CX Buy 操作使用过期订单簿数据的问题
+- `XIT WEB`: 修复 iframe 对 Firefox 来说太大而无法正确滚动的问题
+- `cxob-depth-bars`: 修复新下达订单时功能无法正常工作的问题
+- `cxpo-order-book`: 修复价格/数量自动填充数字格式
+- `cxpo-order-book`: 修复点击 MM 订单金额时不填充价格的问题
+- `highlight-own-exchange-orders`: 修复新下达订单时功能无法正常工作的问题
+- `screen-tab-bar`: 修复页面 URL 包含上下文 ID 时 SCRN 列表不更新的问题
 
 ## 25.4.27
 
-### Added
+### 新增
 
-- `mu-fix-sector-names`: (new) Fixes sector names, for example LE => LS
+- `mu-fix-sector-names`: (新) 修复扇区名称，例如 LE => LS
 
-### Changed
+### 修改
 
-- `XIT ACT`: Add action package name validation
-- `XIT HELP`: Remove help for action packages
-- `cxpo-order-book`: Change the display of own orders - an amount link instead of a row highlight
-- `highlight-own-exchange-orders`: Change the display of own orders - an amount link instead of a row highlight
+- `XIT ACT`: 添加操作包名称验证
+- `XIT HELP`: 移除操作包帮助
+- `cxpo-order-book`: 更改自己订单的显示方式 - 使用金额链接而非行高亮
+- `highlight-own-exchange-orders`: 更改自己订单的显示方式 - 使用金额链接而非行高亮
 
-### Fixed
+### 修复
 
-- `cxob-depth-bars`: Fix feature not working in Firefox and older Chromium versions
+- `cxob-depth-bars`: 修复在 Firefox 和旧版 Chromium 中功能无法正常工作的问题
 
 ## 25.4.24
 
-### Added
+### 新增
 
-- `cmds-clickable-commands`: (new) Makes commands clickable
-- `cx-search-bar`: (new) Adds a search bar for materials
-- `cxob-center-on-open`: (new) Centers the order book on open
-- `cxob-depth-bars`: (new) Adds market depth bars
-- `cxob-hide-section-headers`: (new) Hides "Offers" and "Requests" headers
-- `cxob-supply-demand-values`: (new) Adds supply and demand value labels
-- `cxpo-auto-price`: (new) Adds automatic price calculation
-- `cxpo-bigger-buttons`: (new) Makes "Buy" and "Sell" buttons bigger
-- `macos-antialiased-font`: (new) Applies antialiased smoothing to all fonts on macOS
+- `cmds-clickable-commands`: (新) 使命令可点击
+- `cx-search-bar`: (新) 添加物料搜索栏
+- `cxob-center-on-open`: (新) 打开时居中订单簿
+- `cxob-depth-bars`: (新) 添加市场深度条形图
+- `cxob-hide-section-headers`: (新) 隐藏"报价"和"请求"标题
+- `cxob-supply-demand-values`: (新) 添加供需价值标签
+- `cxpo-auto-price`: (新) 添加自动价格计算
+- `cxpo-bigger-buttons`: (新) 增大"买入"和"卖出"按钮
+- `macos-antialiased-font`: (新) 在 macOS 上对所有字体应用抗锯齿平滑
 
-### Changed
+### 修改
 
-- `cxpo-order-book`: Add price and quantity autofill by clicking on the order amounts and prices
-- `cxpo-order-book`: Increase the default width of `CXPO` buffers by 60px
-- `cxpo-order-book`: Remove the "Offers" and "Requests" section headers
-- `prun-bugs`: Fix the tooltip arrow position in right and bottom tooltips
+- `cxpo-order-book`: 添加通过点击订单金额和价格自动填充价格和数量的功能
+- `cxpo-order-book`: 将 `CXPO` 缓冲区的默认宽度增加 60px
+- `cxpo-order-book`: 移除"报价"和"请求"部分标题
+- `prun-bugs`: 修复右侧和底部工具提示中的箭头位置
 
 ## 25.4.14
 
-### Changed
+### 修改
 
-- `XIT ACT`: Add total cost to CX Buy action step description
-- `XIT ACT`: Improve step generation and log messages for "buy partial" CX Buy actions
-- `XIT ACT`: Tag non-failed actions as skipped if they cannot be executed
-- `XIT ACT`: Make CX Buy and MTRA actions wait for the storage update before executing the next action
-- `XIT ACT`: Add an error for the CX Buy action when there is not enough space in the CX warehouse
+- `XIT ACT`: 在 CX Buy 操作步骤描述中添加总成本
+- `XIT ACT`: 改进"部分购买"CX Buy 操作的步骤生成和日志消息
+- `XIT ACT`: 如果操作无法执行，将未失败的操作标记为跳过
+- `XIT ACT`: 使 CX Buy 和 MTRA 操作在执行下一个操作前等待存储更新
+- `XIT ACT`: 当 CX 仓库空间不足时为 CX Buy 操作添加错误提示
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix the CX Buy action getting stuck when there are no orders in the order book and the "buy partial" toggle is on
-- `XIT ACT`: Fix opening a run tile for packages with configurable MTRA and no origins/destinations available
-- `XIT ACT`: Fix MTRA action getting stuck when there is no space in the destination inventory
-- `XIT ACT`: Fix MTRA action error when the material is not present in origin inventory
-- `XIT SET`: Fix financial data point deletion targeting the wrong data point
+- `XIT ACT`: 修复订单簿中没有订单且"部分购买"开关打开时 CX Buy 操作卡住的问题
+- `XIT ACT`: 修复没有可用来源/目标的可配置 MTRA 包打开运行面板的问题
+- `XIT ACT`: 修复目标库存没有空间时 MTRA 操作卡住的问题
+- `XIT ACT`: 修复来源库存中不存在物料时 MTRA 操作错误
+- `XIT SET`: 修复财务数据点删除目标错误数据点的问题
 
 ## 25.4.12
 
-### Added
+### 新增
 
-- `tile-controls-background`: (new) Adds a solid color background to the top-right tile controls
-- `prodco-order-eta`: (new) Adds a finish ETA label to orders
+- `tile-controls-background`: (新) 为右上角面板控件添加纯色背景
+- `prodco-order-eta`: (新) 为订单添加完成预计时间标签
 
-### Changed
+### 修改
 
-- `XIT ACT`: Add a quickstart flow for users without any action packages
-- `XIT ACT`: Add an ability to open missing tiles during a package run
-- `XIT ACT`: Add a companion tile for package runs in a floating buffer
-- `XIT ACT`: Add "Configure on Execute" as a planet option in Resupply and Repair actions
-- `XIT ACT`: Auto-select the material during the MTRA action
-- `XIT ACT`: Improve the "will not be transferred" warning wording during the MTRA action
-- `XIT ACT`: Stop a package run if there's not enough materials during CX Buy
-- `XIT ACT`: Improve sorting in inventory selection dropdown
-- `XIT ACT`: Add log auto-scrolling
-- `XIT ACT`: Show additional context data in the log
-- `XIT ACT`: Add auto-fetching burn data for Resupply material groups
-- `XIT ACT`: Change configuration UI to form-based
-- `XIT ACT`: Make UI layout more stable during a package run
-- `item-icons`: Add an icon for consumable bundles category
-- Change item sorting in the "consumable bundles" category to tier-based
+- `XIT ACT`: 为没有任何操作包的用户添加快速入门流程
+- `XIT ACT`: 添加在包运行期间打开缺失面板的功能
+- `XIT ACT`: 在浮动缓冲区中为包运行添加配套面板
+- `XIT ACT`: 在补给和维修操作中添加"执行时配置"作为行星选项
+- `XIT ACT`: 在 MTRA 操作期间自动选择物料
+- `XIT ACT`: 改进 MTRA 操作期间"不会被转移"警告的措辞
+- `XIT ACT`: CX Buy 期间物料不足时停止包运行
+- `XIT ACT`: 改进库存选择下拉菜单中的排序
+- `XIT ACT`: 添加日志自动滚动
+- `XIT ACT`: 在日志中显示额外的上下文数据
+- `XIT ACT`: 为补给物料组添加自动获取消耗数据
+- `XIT ACT`: 将配置 UI 更改为基于表单
+- `XIT ACT`: 使包运行期间的 UI 布局更稳定
+- `item-icons`: 添加消耗品捆绑类别的图标
+- 将"消耗品捆绑"类别中的项目排序更改为基于等级
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix the Resupply material amounts not matching the ones in `XIT BURN`
-- `XIT ACT`: Fix the action button displacement on buffer move during a package run
-- `XIT ACT`: Fix various issues for package runs in floating buffers
-- `XIT BURN`: Fix zero amount being displayed as "-0" sometimes
-- `prodco-order-eta`: Fix broken feature caused by recent game update
-- `prodq-order-eta`: Fix eta missing in order slots that were initially empty
-- `prun-bugs`: Fix user search results box being too big for the `GIFT` tile
-- `table-rows-alternating-colors`: Fix a rendering issue in Firefox
-- Fix stacking overlays (like in `XIT ACT`) not displaying correctly
-- Fix item color of consumable bundles in icons made by the extension
+- `XIT ACT`: 修复补给物料数量与 `XIT BURN` 中的数量不匹配的问题
+- `XIT ACT`: 修复包运行期间缓冲区移动时操作按钮位移的问题
+- `XIT ACT`: 修复浮动缓冲区中包运行的各种问题
+- `XIT BURN`: 修复零金额有时显示为"-0"的问题
+- `prodco-order-eta`: 修复最近游戏更新导致的功能损坏
+- `prodq-order-eta`: 修复初始为空的订单槽中缺少预计时间的问题
+- `prun-bugs`: 修复 `GIFT` 面板中用户搜索结果框过大的问题
+- `table-rows-alternating-colors`: 修复 Firefox 中的渲染问题
+- 修复堆叠覆盖层（如 `XIT ACT` 中的）显示不正确的问题
+- 修复扩展制作的图标中消耗品捆绑的项目颜色
 
 ## 25.3.24
 
-### Added
+### 新增
 
-- `header-hide-controls-button`: (new) Adds buttons to hide and show context controls for tiles containing them
-- `lead-per-day-column`: (new) Adds a "Per Day" column to the "Commodity Production" leaderboard
-- `prodq-hide-government-links`: (new) Hides fee collector links
-- `prodq-order-eta`: (new) Adds a finish ETA label to orders
-- `prodq-shorten-material-links`: (new) Shortens material full names into their ticker with a link
+- `header-hide-controls-button`: (新) 为包含上下文控件的面板添加隐藏和显示上下文控件的按钮
+- `lead-per-day-column`: (新) 在"商品生产"排行榜中添加"每日"列
+- `prodq-hide-government-links`: (新) 隐藏费用收集器链接
+- `prodq-order-eta`: (新) 为订单添加完成预计时间标签
+- `prodq-shorten-material-links`: (新) 将物料全名缩短为带链接的代码
 
-### Changed
+### 修改
 
-- `inv-compress-inventory-info`: Move feature to the basic feature set
-- `nots-notification-type-label`: Make notification layout more space-efficient in smaller buffer sizes
+- `inv-compress-inventory-info`: 将功能移至基础功能集
+- `nots-notification-type-label`: 在较小缓冲区尺寸中使通知布局更节省空间
 
-### Fixed
+### 修复
 
-- `XIT CXTS`: Fix incorrect date display when there is a gap between days
+- `XIT CXTS`: 修复日期之间有间隔时日期显示不正确的问题
 
 ## 25.3.17
 
-### Added
+### 新增
 
-- `contd-condition-address-placeholder`: (new) Sets the current address as the placeholder for the address field of the
-  condition editor
+- `contd-condition-address-placeholder`: (新) 将当前地址设置为条件编辑器地址字段的占位符
 
-### Changed
+### 修改
 
-- `XIT HQUC`: Uncap HQ level
-- `XIT REP`: Use planet id in the `BRA` context button
+- `XIT HQUC`: 取消 HQ 等级上限
+- `XIT REP`: 在 `BRA` 上下文按钮中使用行星 ID
 
-### Fixed
+### 修复
 
-- `XIT GIF`: Fix borked gifs
-- `focus-buffers-on-click`: Disable this feature in `HQ` to fix relocation input resetting
-- `prun-bugs`: Fix scrollbar gutter in `PROD` taking up space without a scrollbar present
+- `XIT GIF`: 修复损坏的 GIF
+- `focus-buffers-on-click`: 在 `HQ` 中禁用此功能以修复重新定位输入重置问题
+- `prun-bugs`: 修复 `PROD` 中滚动条槽在没有滚动条时占用空间的问题
 
-### Removed
+### 移除
 
-- `contd-fill-condition-address`: Superseded by `contd-condition-address-placeholder`
+- `contd-fill-condition-address`: 被 `contd-condition-address-placeholder` 取代
 
 ## 25.3.8
 
-### Added
+### 新增
 
-- `contd-fill-condition-address`: (new) Fills the address field in the condition editor
-- `highlight-production-order-error`: (new) Highlights production orders with errors in `PROD`, `PRODQ`, and `PRODCO`
-- `shipment-item-detail`: Add font auto-sizing
+- `contd-fill-condition-address`: (新) 填充条件编辑器中的地址字段
+- `highlight-production-order-error`: (新) 在 `PROD`、`PRODQ` 和 `PRODCO` 中高亮显示有错误的生产订单
+- `shipment-item-detail`: 添加字体自动调整大小
 
-### Fixed
+### 修复
 
-- `prun-bugs`: Fix `CONTD` condition saving issues when amount is not changed
-- Fix incorrect bolding of commands in context controls added by Refined PrUn
+- `prun-bugs`: 修复金额不变时 `CONTD` 条件保存问题
+- 修复 Refined PrUn 添加的上下文控件中命令的错误加粗
 
 ## 25.2.27
 
-### Fixed
+### 修复
 
-- `XIT SHEET`: Fix parsing Document IDs with underscores
-- `inv-compress-inventory-info`: Fix usability issues in smaller tiles and bring back address link
+- `XIT SHEET`: 修复带下划线的文档 ID 解析问题
+- `inv-compress-inventory-info`: 修复较小面板中的可用性问题并恢复地址链接
 
 ## 25.2.25
 
-### Added
+### 新增
 
-- `XIT CXTS`: Add purchases/sales to the daily summary
-- `XIT SHEET`: Add an optional parameter for Sheet ID
-- `context-controls-no-hover`: (new) Prevents the context controls from displaying description while hovering over
-- `inv-compress-inventory-info`: (new) Compresses specific inventory info into a row
-- `prod-hide-percent`: (new) Hides percent value from production lines
+- `XIT CXTS`: 在每日摘要中添加购买/销售
+- `XIT SHEET`: 添加 Sheet ID 的可选参数
+- `context-controls-no-hover`: (新) 防止在悬停时显示上下文控件的描述
+- `inv-compress-inventory-info`: (新) 将特定库存信息压缩到一行
+- `prod-hide-percent`: (新) 隐藏生产线中的百分比值
 
-### Changed
+### 修改
 
-- `XIT CXTS`: Hide daily summary for days with only a single trade
+- `XIT CXTS`: 隐藏只有单笔交易的日期的每日摘要
 
-### Fixed
+### 修复
 
-- `prod-order-eta`: Fix completion time being calculated incorrectly
-- `prun-bugs`: Fix material icons in the PROD and PRODQ buffers not being clickable
-- Fix duplication of Materials in Transit asset value in Long-Term Materials Receivable
+- `prod-order-eta`: 修复完成时间计算不正确的问题
+- `prun-bugs`: 修复 PROD 和 PRODQ 缓冲区中的物料图标不可点击的问题
+- 修复运输中物料资产价值在长期应收物料中的重复计算
 
 ## 25.2.11
 
-### Fixed
+### 修复
 
-- `custom-item-sorting`: Fix "+" button not opening `XIT SORT`
-- `mtra-transfer-on-enter`: Fix feature not working for docked tiles
-- Fix overlays not showing up
+- `custom-item-sorting`: 修复"+"按钮无法打开 `XIT SORT` 的问题
+- `mtra-transfer-on-enter`: 修复停靠面板中功能无法正常工作的问题
+- 修复覆盖层不显示的问题
 
 ## 25.2.6.1805
 
-### Fixed
+### 修复
 
-- `custom-item-sorting`: Fix several bugs introduced by the previous update
+- `custom-item-sorting`: 修复上一次更新引入的几个错误
 
 ## 25.2.6
 
-### Added
+### 新增
 
-- `XIT CONTS`: Add CONTRIBUTION condition type support
-- `mtra-auto-focus-amount`: `MTRA`: Automatically focuses the amount input on buffer open
-- `mtra-transfer-on-enter`: `MTRA`: Triggers transfer on Enter and closes the buffer on success
+- `XIT CONTS`: 添加 CONTRIBUTION 条件类型支持
+- `mtra-auto-focus-amount`: `MTRA`: 打开缓冲区时自动聚焦金额输入框
+- `mtra-transfer-on-enter`: `MTRA`: 按 Enter 触发转移并在成功时关闭缓冲区
 
-### Changed
+### 修改
 
-- `custom-item-sorting`: Remember the last selected sorting mode
-- `nots-clean-notifications`: Add shortening of "X fulfilled condition Y" notifications
+- `custom-item-sorting`: 记住最后选择的排序模式
+- `nots-clean-notifications`: 添加"X 满足条件 Y"通知的缩短
 
 ## 25.1.28
 
-### Added
+### 新增
 
-- `focus-buffers-on-click`: Focuses buffers on click anywhere, not just the header
-- `item-icons`: Add a HCB icon
-- `nots-notification-type-label`: Add a label for the RELEASE_NOTES notification type
+- `focus-buffers-on-click`: 点击任意位置聚焦缓冲区，而不仅仅是标题
+- `item-icons`: 添加 HCB 图标
+- `nots-notification-type-label`: 为 RELEASE_NOTES 通知类型添加标签
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix the "Missing UI elements" error during MTRA actions
-- `shipment-item-detail`: Fix missing destination labels
+- `XIT ACT`: 修复 MTRA 操作期间"缺少 UI 元素"错误
+- `shipment-item-detail`: 修复缺失的目标标签
 
-### Removed
+### 移除
 
-- `mtra-sync-amount-slider`: This feature is now natively implemented in the APEX
-- `nots-ship-name`: This feature is now natively implemented in the APEX
+- `mtra-sync-amount-slider`: 此功能现在已在 APEX 中原生实现
+- `nots-ship-name`: 此功能现在已在 APEX 中原生实现
 
 ## 25.1.19
 
-### Added
+### 新增
 
-- `XIT YAPT`: Opens the Yet Another PrUn Tool website
-- `XIT HQUC`: Add HQ level 52
+- `XIT YAPT`: 打开 Yet Another PrUn Tool 网站
+- `XIT HQUC`: 添加 HQ 等级 52
 
-### Changed
+### 修改
 
-- `XIT ACT`: Move group/action type selector inside the edit overlay
-- `XIT ACT`: Add validation to some required fields
-- `XIT ACT`: Automatically change material tickers to upper-case
-- `XIT CALC`: Change color scheme to match APEX one
-- `XIT CALC`: Display in minimalist mode
+- `XIT ACT`: 将组/操作类型选择器移动到编辑覆盖层内
+- `XIT ACT`: 为一些必填字段添加验证
+- `XIT ACT`: 自动将物料代码转换为大写
+- `XIT CALC`: 更改配色方案以匹配 APEX
+- `XIT CALC`: 以极简模式显示
 
-### Removed
+### 移除
 
-- `productivity-through-depression`: Gray profit numbers were retired because even Castillo-Ito thought they were too
-  bleak, and that’s saying something
+- `productivity-through-depression`: 灰色利润数字已取消，因为即使 Castillo-Ito 也认为它们太暗淡了，这说明了一些问题
 
 ## 25.1.7
 
-### Added
+### 新增
 
-- `XIT DEV`: Add pu-debug switch
-- `XIT SET`: Add a "Buffers" tab with custom buffer size configuration
-- `auto-resize-buffers`: Automatically resizes a buffer on command change
-- `productivity-through-depression`: Promitor's finest
+- `XIT DEV`: 添加 pu-debug 开关
+- `XIT SET`: 添加带有自定义缓冲区大小配置的"缓冲区"选项卡
+- `auto-resize-buffers`: 命令更改时自动调整缓冲区大小
+- `productivity-through-depression`: Promitor 的最佳作品
 
-### Changed
+### 修改
 
-- `XIT CONTC`: Add context buttons
-- `XIT CONTC`: Display up to 2 decimal places in payment conditions
-- `XIT CONTS`: Add context buttons
-- `XIT CONTS`: Shorten column names
+- `XIT CONTC`: 添加上下文按钮
+- `XIT CONTC`: 在支付条件中最多显示 2 位小数
+- `XIT CONTS`: 添加上下文按钮
+- `XIT CONTS`: 缩短列名
 
-### Fixed
+### 修复
 
-- `XIT CONTS`: Fix pending condition status detection
-- `custom-item-sorting`: Fix sorting shift on initial inventory open
-- `sfc-flight-eta`: Fix ETA conflicts if more than one `SFC` tile is open
-- Fix default sizes of buffers to match the vanilla ones
+- `XIT CONTS`: 修复待处理条件状态检测
+- `custom-item-sorting`: 修复初始库存打开时的排序偏移
+- `sfc-flight-eta`: 修复多个 `SFC` 面板打开时的预计时间冲突
+- 修复缓冲区的默认大小以匹配原始大小
 
-### Removed
+### 移除
 
-- `hide-bfrs-button`: It is safe to disable the bottom bar now after molp released a change related to BFRS
+- `hide-bfrs-button`: molp 发布与 BFRS 相关的更改后，现在可以安全地禁用底部栏
 
 ## 25.1.5
 
-### Added
+### 新增
 
-- `XIT CMDL`: Command Lists (port of `XIT LIST` from PMMG)
-- `hide-ctx-name`: Hides the current context name label (CTX)
+- `XIT CMDL`: 命令列表（从 PMMG 移植的 `XIT LIST`）
+- `hide-ctx-name`: 隐藏当前上下文名称标签 (CTX)
 
-### Changed
+### 修改
 
-- `XIT BURN`: Open `INV` with a short inventory id
-- `XIT CONTS`: Add more condition status colors
-- `XIT SET PMMG`: Add pmmg-lists.json import support
-- `lm-clean-ads`: Replace from/to with an arrow in shipping ads
-- `lm-clean-ads`: Show the current location in shipping ads
-- `mtra-sync-amount-slider`: Prevent setting the amount value on tile load
+- `XIT BURN`: 使用短库存 ID 打开 `INV`
+- `XIT CONTS`: 添加更多条件状态颜色
+- `XIT SET PMMG`: 添加 pmmg-lists.json 导入支持
+- `lm-clean-ads`: 在运输广告中用箭头替换 from/to
+- `lm-clean-ads`: 在运输广告中显示当前位置
+- `mtra-sync-amount-slider`: 防止在面板加载时设置金额值
 
-### Fixed
+### 修复
 
-- `XIT SORT`: Fix numbering of material categories
-- `XIT TODO`: Fix due date time zone offset
-- `custom-item-sorting`: Fix sorting order shifts
-- `lm-clean-ads`: Fix fraction truncation in non-English localizations
-- Optimize overall CPU and memory usage
+- `XIT SORT`: 修复物料类别编号
+- `XIT TODO`: 修复截止日期时区偏移
+- `custom-item-sorting`: 修复排序顺序偏移
+- `lm-clean-ads`: 修复非英语本地化中的分数截断
+- 优化整体 CPU 和内存使用
 
 ## 24.12.18.2202
 
-### Fixed
+### 修复
 
-- Fix page reload in Firefox when updating from older versions
+- 修复从旧版本更新时 Firefox 中的页面重新加载问题
 
 ## 24.12.18
 
-### Added
+### 新增
 
-- `mtra-sync-amount-slider`: `MTRA`: Syncs the "Amount" slider with the input field
-- `nots-ship-arrival-inventory`: `NOTS`: Opens ship inventory on "ship arrived" notification click
+- `mtra-sync-amount-slider`: `MTRA`: 将"金额"滑块与输入字段同步
+- `nots-ship-arrival-inventory`: `NOTS`: 点击"飞船到达"通知时打开飞船库存
 
-### Changed:
+### 修改
 
-- `XIT BURN`: Add an expand/collapse all button
-- `XIT FIN`: Clarify Quick Assets/Liabilities tooltips
-- `screen-tab-bar`: Change the styling of the "hide"/"show" button to look like the "copy" button
-- Change the way Refined PrUn integrates into APEX, leading to less CPU usage
+- `XIT BURN`: 添加全部展开/折叠按钮
+- `XIT FIN`: 澄清速动资产/负债工具提示
+- `screen-tab-bar`: 将"隐藏"/"显示"按钮的样式更改为看起来像"复制"按钮
+- 更改 Refined PrUn 集成到 APEX 的方式，减少 CPU 使用
 
-### Fixed:
+### 修复
 
-- `XIT BURN`: Fix inf values being filtered out when "green" filter is off
-- `XIT BURN`: Fix disappearing table borders on Firefox
-- `nots-clean-notifications`: Fix "Component fail to render" error
-- `screen-tab-bar`: Fix tab reorder animation
-- Fix MM Materials price not being equal to MM Bid price in some places
-- Fix new buffers not opening when trying to open an invalid command (like `CO undefined`)
-- Optimize CPU usage of `bs-satisfaction-percentage`, `bs-merge-area-stats` and `shipping-per-unit-price`
-- Optimize Refined PrUn startup time
+- `XIT BURN`: 修复"绿色"过滤器关闭时 inf 值被过滤掉的问题
+- `XIT BURN`: 修复 Firefox 上表格边框消失的问题
+- `nots-clean-notifications`: 修复"组件渲染失败"错误
+- `screen-tab-bar`: 修复标签重新排序动画
+- 修复某些地方 MM 物料价格不等于 MM 买入价格的问题
+- 修复尝试打开无效命令（如 `CO undefined`）时新缓冲区无法打开的问题
+- 优化 `bs-satisfaction-percentage`、`bs-merge-area-stats` 和 `shipping-per-unit-price` 的 CPU 使用
+- 优化 Refined PrUn 启动时间
 
 ## 24.12.12
 
-### Added
+### 新增
 
-- `co-base-count`: `CO`: Displays a base count in the "Bases" label
-- `prevent-delete-button-misclicks`: Makes the "delete" button in chats work only when shift is held down
-- REPAIR_SHIP condition support in `XIT CONTS` and `XIT CONTC`
+- `co-base-count`: `CO`: 在"基地"标签中显示基地数量
+- `prevent-delete-button-misclicks`: 使聊天中的"删除"按钮仅在按住 shift 时生效
+- `XIT CONTS` 和 `XIT CONTC` 中的 REPAIR_SHIP 条件支持
 
-### Changed
+### 修改
 
-- `XIT ACT`: Remove the "Stale data" error
-- `XIT REP`: Use a natural id instead of a name in planet links
-- `search-auto-focus`: Disable in docked tiles
+- `XIT ACT`: 移除"陈旧数据"错误
+- `XIT REP`: 在行星链接中使用自然 ID 而非名称
+- `search-auto-focus`: 在停靠面板中禁用
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix actions not being able to buy the full required amount of materials
-- `table-rows-alternating-colors`: Optimize rendering performance
-- Trim spaces when parsing tile commands
+- `XIT ACT`: 修复操作无法购买所需全部物料的问题
+- `table-rows-alternating-colors`: 优化渲染性能
+- 解析面板命令时修剪空格
 
 ## 24.11.29.2317
 
-### Added
+### 新增
 
-- `search-auto-focus`: Auto-focuses the search bar in PLI and SYSI
+- `search-auto-focus`: 在 PLI 和 SYSI 中自动聚焦搜索栏
 
-### Changed
+### 修改
 
-- `XIT BURN`: Show a minus sign for negative values in the Burn column
-- `XIT CXTS`: Change time display to hh:mm
+- `XIT BURN`: 在消耗列中为负值显示减号
+- `XIT CXTS`: 将时间显示更改为 hh:mm
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Replace an existing package if an imported package has the same name (for real this time)
+- `XIT ACT`: 如果导入的包名称相同，则替换现有包（这次是真的）
 
 ## 24.11.29
 
-### Added
+### 新增
 
-- `XIT CONTS`: An icon for contracts that the partner can accept
-- `XIT HELP`: PMMG settings import entry
-- `XIT HQUC`: Level 51
-- `XIT NOTE`: "Create" button if a note is not found
-- `XIT TODO`: "Create" button if a task list is not found
-- `XIT REP`: `BRA` context button
+- `XIT CONTS`: 合作伙伴可以接受的合同图标
+- `XIT HELP`: PMMG 设置导入条目
+- `XIT HQUC`: 等级 51
+- `XIT NOTE`: 如果未找到注释则显示"创建"按钮
+- `XIT TODO`: 如果未找到任务列表则显示"创建"按钮
+- `XIT REP`: `BRA` 上下文按钮
 
-### Changed
+### 修改
 
-- `XIT ACT`: Replace an existing package if an imported package has the same name
-- `XIT CXTS`: Round number to a whole in the Total column
-- `XIT REP`: Hide the Target column in single-target `XIT REP`
-- `screen-tab-bar`: Make tabs reorderable and add a hide/show button to the screen list
-- `header-calculator-button`: Add 1px to top margin
-- Apply `FLT`-related features to `FLTP` and `FLTS` as well
+- `XIT ACT`: 如果导入的包名称相同，则替换现有包
+- `XIT CXTS`: 在总计列中将数字四舍五入为整数
+- `XIT REP`: 在单目标 `XIT REP` 中隐藏目标列
+- `screen-tab-bar`: 使标签可重新排序并在屏幕列表中添加隐藏/显示按钮
+- `header-calculator-button`: 顶部边距增加 1px
+- 将 `FLT` 相关功能应用于 `FLTP` 和 `FLTS`
 
-### Fixed
+### 修复
 
-- `XIT ACT`: Fix manual material group overwriting on execute
-- `XIT ACT`: Fix the "Source inventory not found" error for planets
-- `XIT CHAT`: Fix username overflow
-- `XIT NOTE`: Fix notes with material tickers not being able to render
-- `inv-search`: Fix the search bar styling
-- Fix context controls duplication in `XIT` commands on tile move
+- `XIT ACT`: 修复执行时手动物料组被覆盖的问题
+- `XIT ACT`: 修复行星的"来源库存未找到"错误
+- `XIT CHAT`: 修复用户名溢出
+- `XIT NOTE`: 修复包含物料代码的注释无法渲染的问题
+- `inv-search`: 修复搜索栏样式
+- 修复面板移动时 `XIT` 命令中上下文控件重复的问题
 
 ## 24.11.25
 
-### New commands
+### 新命令
 
-- `XIT CONTC`: Pending Contract Conditions
-- `XIT CXTS`: Commodity Exchange Trades
-- `XIT FINBS`: Balance Statement
-- `XIT GIF`: Random GIF (The main reason for this one is `XIT GIF CORGI`)
-- `XIT HQUC`: HQ Upgrade Calculator
-- `XIT MATS`: Material list
-- `XIT WEB`: Open any web page (Pro tip! Try `XIT WEB https://www.youtube.com/embed/dQw4w9WgXcQ`)
+- `XIT CONTC`: 待处理合同条件
+- `XIT CXTS`: 商品交易所交易
+- `XIT FINBS`: 资产负债表
+- `XIT GIF`: 随机 GIF（主要原因是 `XIT GIF CORGI`）
+- `XIT HQUC`: HQ 升级计算器
+- `XIT MATS`: 物料列表
+- `XIT WEB`: 打开任何网页（专业提示！试试 `XIT WEB https://www.youtube.com/embed/dQw4w9WgXcQ`）
 
-### Added
+### 新增
 
-- `BS`: Building list summary.
-- `FINLA`: New columns with liquid assets - CX/FX Deposits and MM Materials.
-- `FLT`: Ship condition label.
-- `INV`: Reverse sorting for custom sorting modes.
-- `LM`: Commodity and shipment icons.
-- `XIT BURN`: New column with context buttons: `BS` and `INV` for planets, `CXM` for materials.
-- `XIT CONTS`: Inbox icon in contracts that the player can accept.
-- `XIT CONTS`: SHPT icon in contracts with shipment condition.
-- `XIT FINCH`: Equity History Chart smoothing with SMA.
-- `XIT FINPR`: New columns - Repairs and Margin (Profit / Revenue).
-- `XIT SET`: Currency symbol customization.
-- `XIT REP`: New columns in the material table - Weight, Volume, and Cost.
-- Destination labels for SHPT and BLCK items.
-- Auto-capitalization of a material ticker for commands: `CXM`, `CXOB`, `CXP`, `CXPC`, `CXPO`, `MAT`.
-  For example: `CXPO h2o.ai1` will change to `CXPO H2O.AI1` when you hit Enter.
-- System name replacement for system commands (`FLTS`, `INF`, `MS`, and `SYSI`).
-- Ship name replacement for ship commands (`SFC`, `SHP`, `SHPF`, `SHPI`, and `SI`).
-- Compatibility with non-English localizations.
+- `BS`: 建筑列表摘要。
+- `FINLA`: 新增流动资产列 - CX/FX 存款和 MM 物料。
+- `FLT`: 飞船状态标签。
+- `INV`: 自定义排序模式的反向排序。
+- `LM`: 商品和运输图标。
+- `XIT BURN`: 新的上下文按钮列：行星的 `BS` 和 `INV`，物料的 `CXM`。
+- `XIT CONTS`: 玩家可以接受的合同中的收件箱图标。
+- `XIT CONTS`: 带运输条件的合同中的 SHPT 图标。
+- `XIT FINCH`: 使用 SMA 平滑权益历史图表。
+- `XIT FINPR`: 新列 - 维修和利润率（利润/收入）。
+- `XIT SET`: 货币符号自定义。
+- `XIT REP`: 物料表中的新列 - 重量、体积和成本。
+- SHPT 和 BLCK 物品的目标标签。
+- 命令中物料代码的自动大写：`CXM`、`CXOB`、`CXP`、`CXPC`、`CXPO`、`MAT`。
+  例如：`CXPO h2o.ai1` 按 Enter 后将变为 `CXPO H2O.AI1`。
+- 系统命令 (`FLTS`、`INF`、`MS` 和 `SYSI`) 的系统名称替换。
+- 飞船命令 (`SFC`、`SHP`、`SHPF`、`SHPI` 和 `SI`) 的飞船名称替换。
+- 支持非英语本地化。
 
-### Changed
+### 修改
 
-- `CONTD`: Partner search results are shown above the search bar.
-- `FINLA`: ECD row is hidden.
-- `LM`: Ads are more compact.
-- `LM`: Rating icon is hidden.
-- `LM`: BUYING/SELLING ads are highlighted in green/red.
-- `LM`: Own orders are highlighted (like own orders in `CXOB`).
-- `INV`: Changed BRN sorting to favor outputs over inputs/consumables, and inputs over consumables.
-- `INV`: Enhanced CAT material sorting for consumables, prefabs, and SHPT items.
-- `MAT`: Material category is clickable and opens `XIT MATS` with material category.
-- `XIT BURN`: Works without `ALL` parameter.
-- `XIT BURN`: Rows are denser.
-- `XIT BURN`: Changed sorting to days remaining (ascending).
-- `XIT BURN`: `Additional Days` setting is changed to `Resupply`, representing total days for resupply.
-- `XIT CALC`: Changed to https://desmos.com/scientific.
-- `XIT CHECK`: Changed to `XIT TODO`.
-- `XIT CONTS`: Changed sorting in the opposite direction, with the newest contracts being at the top of the list.
-- `XIT FIN_CHARTS`: Changed to `XIT FINCH`.
-- `XIT FINCH`: Equity history chart shows only the latest point per day.
-- `XIT FIN_PRODUCTION`: Changed to `XIT FINPR`.
-- `XIT FIN_SET`: Changed to `XIT SET FIN`.
-- `XIT FIN_SUMMARY`: Changed to `XIT FIN`.
-- `XIT FIN`: Changed Key Figures. Check the tooltips for more info.
-- `XIT SHEETS`: Displays Google Sheets in minimalist mode.
-- Clicking on the APEX logo opens player company information.
-- Prices are calculated with VWAP formula over all exchanges, leading to more stable equity values.
-- Equity includes ships, HQ upgrades, and APEX Representation Center. A new "Liquidation Value"
-  metric is added to represent the old equity metric.
-- Blocked/Shipped materials are included in assets.
-- Materials in "Pick up shipment" contract condition are included in assets.
-- Materials requests in faction contracts are included in liabilities.
-- Materials rewards in faction contracts are included in assets.
-- Materials in not yet started shipyard projects are included in assets.
-- Materials for buildings are gradually depreciated when counted towards total asset value.
-- Input/output materials and fee in production orders are included in assets.
-- Debt interest is only counted as a liability if it is due in current period (deadline <7d).
-- `CONT` button on the left sidebar pulsates when there are contracts yet to be accepted.
-- Font size of material amount labels is 1px bigger.
-- Input fields with math support don't require a '=' sign at the beginning.
-- Input fields with math support show a math icon when focused.
-- Input fields with math support evaluate formulas on Tab press in addition to Enter.
-- All XIT commands support spaces between parameters.
-- "User deleted this message" messages are hidden in chats.
-- More planet commands (like `INV`) support planet names.
-- Tile controls are always visible.
-- Table rows alternate color between odd and even rows.
-- The close button is hidden on single tile windows where it does nothing.
-- Changed chart library to Chart.js, with Firefox support.
-- Unnamed planets in named systems are displayed like in vanilla PrUn (system name + letter).
+- `CONTD`: 合作伙伴搜索结果显示在搜索栏上方。
+- `FINLA`: 隐藏 ECD 行。
+- `LM`: 广告更紧凑。
+- `LM`: 隐藏评级图标。
+- `LM`: BUYING/SELLING 广告以绿色/红色高亮显示。
+- `LM`: 自己的订单高亮显示（如 `CXOB` 中的自己订单）。
+- `INV`: 更改 BRN 排序以优先输出而非输入/消耗品，输入优先于消耗品。
+- `INV`: 增强消耗品、预制件和 SHPT 物品的 CAT 物料排序。
+- `MAT`: 物料类别可点击并使用物料类别打开 `XIT MATS`。
+- `XIT BURN`: 无需 `ALL` 参数即可工作。
+- `XIT BURN`: 行更密集。
+- `XIT BURN`: 更改为按剩余天数排序（升序）。
+- `XIT BURN`: "额外天数"设置更改为"补给"，表示补给的总天数。
+- `XIT CALC`: 更改为 https://desmos.com/scientific。
+- `XIT CHECK`: 更改为 `XIT TODO`。
+- `XIT CONTS`: 反向排序，最新合同位于列表顶部。
+- `XIT FIN_CHARTS`: 更改为 `XIT FINCH`。
+- `XIT FINCH`: 权益历史图表每天只显示最新的点。
+- `XIT FIN_PRODUCTION`: 更改为 `XIT FINPR`。
+- `XIT FIN_SET`: 更改为 `XIT SET FIN`。
+- `XIT FIN_SUMMARY`: 更改为 `XIT FIN`。
+- `XIT FIN`: 更改关键指标。查看工具提示了解更多信息。
+- `XIT SHEETS`: 以极简模式显示 Google Sheets。
+- 点击 APEX 徽标打开玩家公司信息。
+- 价格通过所有交易所的 VWAP 公式计算，使权益价值更稳定。
+- 权益包括飞船、HQ 升级和 APEX 代表中心。添加新的"清算价值"指标来表示旧权益指标。
+- 已阻止/已运输的物料包含在资产中。
+- "提取运输"合同条件中的物料包含在资产中。
+- 派系合同中的物料请求包含在负债中。
+- 派系合同中的物料奖励包含在资产中。
+- 尚未开始的船坞项目中的物料包含在资产中。
+- 建筑物料在计入总资产价值时逐渐折旧。
+- 生产订单中的输入/输出物料和费用包含在资产中。
+- 债务利息仅在当前期间到期（截止日期 <7d）时才计入负债。
+- 左侧边栏上的 `CONT` 按钮在有待接受的合同时会脉动。
+- 物料数量标签的字体大小增加 1px。
+- 支持数学的输入字段不需要开头的 '=' 符号。
+- 支持数学的输入字段在聚焦时显示数学图标。
+- 支持数学的输入字段除 Enter 外还在 Tab 键按下时计算公式。
+- 所有 XIT 命令支持参数之间的空格。
+- 聊天中隐藏"用户删除此消息"消息。
+- 更多行星命令（如 `INV`）支持行星名称。
+- 面板控件始终可见。
+- 表格行在奇数行和偶数行之间交替颜色。
+- 在不执行任何操作的单面板窗口上隐藏关闭按钮。
+- 将图表库更改为 Chart.js，支持 Firefox。
+- 命名系统中的未命名行星按原始 PrUn 方式显示（系统名称 + 字母）。
 
-### Fixed
+### 修复
 
-- `NOTS`: Fixed text wrapping when the notification type label is present.
-- Fixed floating point number rounding after math evaluation.
+- `NOTS`: 修复通知类型标签存在时的文本换行。
+- 修复数学评估后的浮点数舍入。
 
-### Removed:
+### 移除
 
-- Pricing scheme selection.
-- Old `XIT FIN` landing page, in favor of context buttons.
-- Refresh button of XIT buffers.
+- 定价方案选择。
+- 旧的 `XIT FIN` 登陆页面，改用上下文按钮。
+- XIT 缓冲区的刷新按钮。
 - `XIT INV`
 - `XIT LIST`

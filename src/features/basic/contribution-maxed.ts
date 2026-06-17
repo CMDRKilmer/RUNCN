@@ -17,11 +17,7 @@ function onTileReady(tile: PrunTile) {
 }
 
 function init() {
-  tiles.observe(['COGCU', 'POPID'], onTileReady);
+  tiles.observe('COGCU', onTileReady);
 }
 
-features.add(
-  import.meta.url,
-  init,
-  'Automatically maxes the contribution sliders in CoGC and population upkeep tiles.',
-);
+features.add(import.meta.url, init, 'COGCU：自动最大化贡献滑块。');

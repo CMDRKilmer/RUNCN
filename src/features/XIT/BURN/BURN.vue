@@ -1,21 +1,23 @@
 <script setup lang="ts">
+import CopyButton from '@src/components/CopyButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import { getPlanetBurn, MaterialBurn } from '@src/core/burn';
+import { BurnValues, getPlanetBurn, MaterialBurn, PlanetBurn } from '@src/core/burn';
 import { comparePlanets } from '@src/util';
 import BurnSection from '@src/features/XIT/BURN/BurnSection.vue';
 import { useTileState } from '@src/features/XIT/BURN/tile-state';
 import Tooltip from '@src/components/Tooltip.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import MaterialRow from '@src/features/XIT/BURN/MaterialRow.vue';
-import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
-import { isAuthenticated, reportProduction } from '@src/features/XIT/FACTION/use-faction-api';
-import { userData } from '@src/store/user-data';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
-import { countDays } from '@src/features/XIT/BURN/utils';
+import { countDays, getSortedTickers } from '@src/features/XIT/BURN/utils';
 import InlineFlex from '@src/components/InlineFlex.vue';
 import { findWithQuery } from '@src/utils/find-with-query';
 import { convertToPlanetNaturalId } from '@src/core/planet-natural-id';
+import { isAuthenticated, reportProduction } from '@src/features/XIT/FACTION/use-faction-api';
+import { userData } from '@src/store/user-data';
+
 const parameters = useXitParameters();
 
 // 用于整体消耗的虚拟基地。
@@ -80,6 +82,28 @@ function findSites(term: string, parts: string[]) {
   return sitesStore.getByPlanetNaturalId(naturalId);
 }
 
+const red = useTileState('red');
+const yellow = useTileState('yellow');
+const green = useTileState('green');
+const inf = useTileState('inf');
+const prod = useTileState('prod');
+const wf = useTileState('wf');
+const io = useTileState('io');
+
+function filterBurn(burn: BurnValues): BurnValues {
+  const filtered: BurnValues = {};
+  for (const ticker of Object.keys(burn)) {
+    const mat = burn[ticker];
+    const hasProd = mat.input > 0 || mat.output > 0;
+    const hasWf = mat.workforce > 0;
+    if (!(hasProd && prod.value) && !(hasWf && wf.value)) {
+      continue;
+    }
+    filtered[ticker] = mat;
+  }
+  return filtered;
+}
+
 const planetBurn = computed(() => {
   if (queryResult.value === undefined) {
     return undefined;
@@ -88,7 +112,8 @@ const planetBurn = computed(() => {
   const filtered = queryResult.value.sites
     .filter(x => x !== overall)
     .map(getPlanetBurn)
-    .filter(x => x !== undefined);
+    .filter(x => x !== undefined)
+    .map(x => ({ ...x, burn: filterBurn(x.burn) }));
   if (filtered.length <= 1) {
     return filtered;
   }
@@ -102,43 +127,47 @@ const planetBurn = computed(() => {
     return comparePlanets(a.naturalId, b.naturalId);
   });
 
-  const overallBurn = {};
-  for (const burn of filtered) {
-    for (const mat of Object.keys(burn.burn)) {
-      if (overallBurn[mat]) {
-        overallBurn[mat].dailyAmount += burn.burn[mat].dailyAmount;
-        overallBurn[mat].inventory += burn.burn[mat].inventory;
-      } else {
-        overallBurn[mat] = {};
-        overallBurn[mat].dailyAmount = burn.burn[mat].dailyAmount;
-        overallBurn[mat].inventory = burn.burn[mat].inventory;
-      }
+  const overallBurn: BurnValues = {};
+  for (const planet of filtered) {
+    for (const ticker of Object.keys(planet.burn)) {
+      const mat = planet.burn[ticker];
+      overallBurn[ticker] ??= {
+        input: 0,
+        output: 0,
+        workforce: 0,
+        dailyAmount: 0,
+        inventory: 0,
+        daysLeft: 0,
+        type: 'output',
+      };
+      overallBurn[ticker].input += mat.input;
+      overallBurn[ticker].output += mat.output;
+      overallBurn[ticker].workforce += mat.workforce;
+      overallBurn[ticker].inventory += mat.inventory;
     }
   }
 
-  for (const mat of Object.keys(overallBurn)) {
-    if (overallBurn[mat].dailyAmount >= 0) {
-      overallBurn[mat].daysLeft = 1000;
+  for (const ticker of Object.keys(overallBurn)) {
+    const mat = overallBurn[ticker];
+    mat.dailyAmount = mat.output - mat.input - mat.workforce;
+    if (mat.dailyAmount >= 0) {
+      mat.daysLeft = 1000;
     } else {
-      overallBurn[mat].daysLeft = -overallBurn[mat].inventory / overallBurn[mat].dailyAmount;
+      mat.daysLeft = -mat.inventory / mat.dailyAmount;
     }
   }
 
   const overallSection = { burn: overallBurn, planetName: '总览', naturalId: '', storeId: '' };
+
   if (queryResult.value.overallOnly) {
     return [overallSection];
   }
-
+  const sections = filtered.slice();
   if (queryResult.value.includeOverall) {
-    filtered.push(overallSection);
+    sections.push(overallSection);
   }
-  return filtered;
+  return sections;
 });
-
-const red = useTileState('red');
-const yellow = useTileState('yellow');
-const green = useTileState('green');
-const inf = useTileState('inf');
 
 const fakeBurn: MaterialBurn = {
   dailyAmount: -100000,
@@ -164,6 +193,41 @@ function onExpandAllClick() {
   }
 }
 
+// Exports all materials regardless of active color filters (RED/YELLOW/GREEN/INF)
+// so spreadsheet users always get the complete dataset.
+function formatBurnTable(burns: PlanetBurn[]) {
+  const header = io.value
+    ? '星球\t代号\t库存\t输入\t输出\t净变化\t天数'
+    : '星球\t代号\t库存\t消耗/天\t天数';
+  const lines = [header];
+  for (const planet of burns) {
+    const sorted = getSortedTickers(planet);
+    for (const material of sorted) {
+      const mat = planet.burn[material.ticker];
+      // Floor needed here: per-planet burns are pre-floored, but overall burn is not.
+      const days = mat.dailyAmount >= 0 ? '' : Math.floor(mat.daysLeft).toString();
+      const burn = Math.round(mat.dailyAmount * 1000) / 1000;
+      if (io.value) {
+        const inAmt = Math.round((mat.input + mat.workforce) * 1000) / 1000;
+        const outAmt = Math.round(mat.output * 1000) / 1000;
+        lines.push(
+          `${planet.planetName}\t${material.ticker}\t${mat.inventory}\t${inAmt}\t${outAmt}\t${burn}\t${days}`,
+        );
+      } else {
+        lines.push(`${planet.planetName}\t${material.ticker}\t${mat.inventory}\t${burn}\t${days}`);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+function copyBurnTable() {
+  if (!planetBurn.value) {
+    return '';
+  }
+  return formatBurnTable(planetBurn.value);
+}
+
 let uploadTimer: number | undefined;
 let hasReportedThisRender = false;
 
@@ -186,7 +250,6 @@ watch(
       reportProduction(items)
         .then(() => {
           hasReportedThisRender = true;
-          // Optionally sync date just in case, but we don't block on it anymore
           const today = new Date().toISOString().slice(0, 10);
           userData.lastAutoProductionDate = today;
         })
@@ -205,6 +268,27 @@ watch(
       <RadioItem v-model="yellow" horizontal>黄色</RadioItem>
       <RadioItem v-model="green" horizontal>绿色</RadioItem>
       <RadioItem v-model="inf" horizontal>无限</RadioItem>
+      <div :class="$style.separator" />
+      <RadioItem
+        v-model="prod"
+        horizontal
+        :class="$style.radioItemWithTooltip"
+        data-tooltip="切换生产消耗的材料。关闭时，仅隐藏生产中使用的材料。"
+        data-tooltip-position="bottom">
+        生产
+      </RadioItem>
+      <RadioItem
+        v-model="wf"
+        horizontal
+        :class="$style.radioItemWithTooltip"
+        data-tooltip="切换劳动力消耗的材料。关闭时，仅隐藏劳动力消耗的材料。"
+        data-tooltip-position="bottom">
+        劳动力
+      </RadioItem>
+      <div :class="$style.separator" />
+      <RadioItem v-model="io" horizontal>I/O</RadioItem>
+      <div :class="$style.spacer" />
+      <CopyButton :copy-fn="copyBurnTable" data-tooltip-position="bottom" />
     </div>
     <table>
       <thead>
@@ -214,7 +298,12 @@ watch(
           </th>
           <th v-else />
           <th>库存</th>
-          <th>
+          <template v-if="io">
+            <th>输入</th>
+            <th>输出</th>
+            <th>净变化</th>
+          </template>
+          <th v-else>
             <InlineFlex>
               消耗
               <Tooltip position="bottom" tooltip="每天消耗的材料量。" />
@@ -247,6 +336,17 @@ watch(
   visibility: collapse;
 }
 
+.spacer {
+  flex: 1;
+}
+
+.separator {
+  width: 1px;
+  align-self: stretch;
+  background-color: #2b485a;
+  margin: 0 0.25rem;
+}
+
 .expand {
   text-align: center;
   cursor: pointer;
@@ -254,5 +354,9 @@ watch(
   font-size: 12px;
   padding-left: 18px;
   font-weight: bold;
+}
+
+.radioItemWithTooltip {
+  padding: 0;
 }
 </style>
