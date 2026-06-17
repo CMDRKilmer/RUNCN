@@ -54,7 +54,7 @@ jobs:
           gh release create "$DAILY_VERSION" "$FILENAME" --draft --notes-file ../LIULILOG.md
 
   chrome:
-    if: ${{ needs.build.outputs.created == 'true' }}
+    if: needs.build.outputs.created
     needs: build
     name: Submit (Chrome)
     environment: Chrome
@@ -66,33 +66,35 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
       - run: npx chrome-webstore-upload-cli@3
-        working-directory: .
+        working-directory: dist
         env:
           EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
 
-  # firefox:
-  #   if: ${{ needs.build.outputs.created == 'true' }}
-  #   needs: build
-  #   name: Submit (Firefox)
-  #   environment: Firefox
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         lfs: 'true'
-  #     - name: Zip source code
-  #       run: git archive --output source.zip HEAD
-  #
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: dist
-  #     - name: Upload build and source code
-  #       run: npx web-ext@8 sign --channel listed --upload-source-code ../source.zip
-  #       working-directory: .
-  #       env:
-  #         WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
-  #         WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
+  firefox:
+    if: needs.build.outputs.created
+    needs: build
+    name: Submit (Firefox)
+    environment: Firefox
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: 'true'
+      - name: Zip source code
+        run: git archive --output source.zip HEAD
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Upload build and source code
+        run: npx web-ext@8 sign --channel listed --upload-source-code ../source.zip
+        working-directory: dist
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
+          WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
