@@ -1,6 +1,6 @@
-# RUNCN — Refined PrUn 中文汉化版
+# 琉璃小工具
 
-> 基于 [Refined PrUn](https://github.com/refined-prun/refined-prun) 的全面中文汉化分支
+> 基于 [Refined PrUn](https://github.com/refined-prun/refined-prun) 的全面中文汉化分支并添加了自定义功能
 
 浏览器扩展，用于简化 [Prosperous Universe](https://prosperousuniverse.com/) 游戏界面并添加实用功能。本版本将所有英文界面、按钮、提示、描述及代码注释翻译为中文，方便中文玩家使用。
 
