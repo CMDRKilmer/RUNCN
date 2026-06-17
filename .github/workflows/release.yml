@@ -5,7 +5,7 @@ env:
 
 name: Release
 on:
-  workflow_dispatch: null
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -40,6 +40,7 @@ jobs:
         if: env.DAILY_VERSION_CREATED
         uses: actions/upload-artifact@v4
         with:
+          name: dist
           path: ${{ env.DIRECTORY }}
       - name: Create release
         if: env.DAILY_VERSION_CREATED
@@ -50,10 +51,10 @@ jobs:
           FILENAME="$PROJECT_NAME-$DAILY_VERSION-for-local-testing-only.zip"
           zip -r "$FILENAME" ./*
           # Create as draft to curate it before sending it out
-          gh release create "$DAILY_VERSION" "$FILENAME" --notes-file ../LIULILOG.md
+          gh release create "$DAILY_VERSION" "$FILENAME" --draft --notes-file ../LIULILOG.md
 
   chrome:
-    if: needs.build.outputs.created
+    if: ${{ needs.build.outputs.created == 'true' }}
     needs: build
     name: Submit (Chrome)
     environment: Chrome
@@ -63,8 +64,10 @@ jobs:
         with:
           lfs: 'true'
       - uses: actions/download-artifact@v4
+        with:
+          name: dist
       - run: npx chrome-webstore-upload-cli@3
-        working-directory: artifact
+        working-directory: .
         env:
           EXTENSION_ID: ${{ secrets.EXTENSION_ID }}
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -72,7 +75,7 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
 
   firefox:
-    if: needs.build.outputs.created
+    if: ${{ needs.build.outputs.created == 'true' }}
     needs: build
     name: Submit (Firefox)
     environment: Firefox
@@ -85,9 +88,11 @@ jobs:
         run: git archive --output source.zip HEAD
 
       - uses: actions/download-artifact@v4
+        with:
+          name: dist
       - name: Upload build and source code
         run: npx web-ext@8 sign --channel listed --upload-source-code ../source.zip
-        working-directory: artifact
+        working-directory: .
         env:
           WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
           WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
