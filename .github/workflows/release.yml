@@ -47,10 +47,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         working-directory: ${{ env.DIRECTORY }}
         run: |
-          FILENAME="$PROJECT_NAME-$DAILY_VERSION-for-local-testing-only.zip"
-          zip -r "$FILENAME" ./*
-          # Create as draft to curate it before sending it out
-          gh release create "$DAILY_VERSION" "$FILENAME" --draft --notes-file ../LIULILOG.md
+          FILENAME_ZIP="$PROJECT_NAME-$DAILY_VERSION-for-local-testing-only.zip"
+          FILENAME_CRX="$PROJECT_NAME-$DAILY_VERSION.crx"
+          zip -r "$FILENAME_ZIP" ./*
+          npx crx pack . -o "$FILENAME_CRX"
+          gh release create "$DAILY_VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" --draft --notes-file ../LIULILOG.md
 
   chrome:
     if: needs.build.outputs.created
