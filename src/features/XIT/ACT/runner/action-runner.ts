@@ -58,12 +58,15 @@ export class ActionRunner {
       this.log.info('已为有效操作生成步骤：');
     }
     // 先计算总计并显示在最上方。
+    // 用 ticker 聚合重量/体积：避免同一物料在 CXPO_BUY + MTRA_TRANSFER
+    // 两类步骤中重复累加；但同一物料的多个购买/转移步骤仍会按 amount 累加。
     const costByCurrency = new Map<string, number>();
     let missingPriceCount = 0;
-    let totalWeight = 0;
-    let totalVolume = 0;
+    const weightByTicker = new Map<string, number>();
+    const volumeByTicker = new Map<string, number>();
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
+      if (!stepInfo) continue;
       if (stepInfo.cost) {
         const cost = stepInfo.cost(step);
         if (cost !== undefined) {
@@ -74,12 +77,24 @@ export class ActionRunner {
           missingPriceCount++;
         }
       }
+      const ticker = (step as ActionStep & { ticker?: string }).ticker;
+      if (!ticker) continue;
       if (stepInfo.weight !== undefined) {
-        totalWeight += stepInfo.weight(step) ?? 0;
+        const w = stepInfo.weight(step) ?? 0;
+        weightByTicker.set(ticker, (weightByTicker.get(ticker) ?? 0) + w);
       }
       if (stepInfo.volume !== undefined) {
-        totalVolume += stepInfo.volume(step) ?? 0;
+        const v = stepInfo.volume(step) ?? 0;
+        volumeByTicker.set(ticker, (volumeByTicker.get(ticker) ?? 0) + v);
       }
+    }
+    let totalWeight = 0;
+    for (const w of weightByTicker.values()) {
+      totalWeight += w;
+    }
+    let totalVolume = 0;
+    for (const v of volumeByTicker.values()) {
+      totalVolume += v;
     }
     const totalCost = [...costByCurrency.values()].reduce((s, v) => s + v, 0);
     if (totalCost > 0 || totalWeight > 0 || totalVolume > 0) {
@@ -105,6 +120,7 @@ export class ActionRunner {
     // 再显示每个步骤的详情
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
+      if (!stepInfo) continue;
       this.log.action(stepInfo.description(step));
     }
   }
