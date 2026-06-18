@@ -59,8 +59,8 @@ export class ActionRunner {
     // 静默预加载 CXPO 价格数据
     await this.preloadPriceData(steps);
     // 先计算总计并显示在最上方。
-    // 用 ticker 聚合重量/体积：避免同一物料在 CXPO_BUY + MTRA_TRANSFER
-    // 两类步骤中重复累加；但同一物料的多个购买/转移步骤仍会按 amount 累加。
+    // 用 ticker 聚合重量/体积：同一物料有 CXPO_BUY + MTRA_TRANSFER 两类步骤，
+    // MTRA 转移的就是 CXPO 刚买的同一批货，取 max 避免重复计算。
     const costByCurrency = new Map<string, number>();
     let missingPriceCount = 0;
     const weightByTicker = new Map<string, number>();
@@ -81,11 +81,11 @@ export class ActionRunner {
       if (!ticker) continue;
       if (stepInfo.weight !== undefined) {
         const w = stepInfo.weight(step) ?? 0;
-        weightByTicker.set(ticker, (weightByTicker.get(ticker) ?? 0) + w);
+        weightByTicker.set(ticker, Math.max(weightByTicker.get(ticker) ?? 0, w));
       }
       if (stepInfo.volume !== undefined) {
         const v = stepInfo.volume(step) ?? 0;
-        volumeByTicker.set(ticker, (volumeByTicker.get(ticker) ?? 0) + v);
+        volumeByTicker.set(ticker, Math.max(volumeByTicker.get(ticker) ?? 0, v));
       }
     }
     let totalWeight = 0;
