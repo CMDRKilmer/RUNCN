@@ -14,6 +14,25 @@ import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { clamp } from '@src/utils/clamp';
 import { sumBy } from '@src/utils/sum-by';
 
+interface FuelTypeConfig {
+  storageType: string;
+  materialTicker: string;
+  warningMessage: string;
+}
+
+const FUEL_TYPES: FuelTypeConfig[] = [
+  {
+    storageType: 'STL_FUEL_STORE',
+    materialTicker: 'SF',
+    warningMessage: 'Not enough SF at the origin. Some ships will not be refueled.',
+  },
+  {
+    storageType: 'FTL_FUEL_STORE',
+    materialTicker: 'FF',
+    warningMessage: 'Not enough FF at the origin. Some ships will not be refueled.',
+  },
+];
+
 act.addAction<Config>({
   type: 'Refuel',
   description: action => {
@@ -28,7 +47,7 @@ act.addAction<Config>({
     return data.origin !== configurableValue || config.origin !== undefined;
   },
   generateSteps: async ctx => {
-    const { data, config, log, emitStep } = ctx;
+    const { data, config, log } = ctx;
     const assert: AssertFn = ctx.assert;
 
     const serializedOrigin = data.origin === configurableValue ? config?.origin : data.origin;
@@ -38,108 +57,103 @@ act.addAction<Config>({
     const exchangeCode = getExchangeCode(origin);
     const isCX = exchangeCode !== undefined;
 
-    const dockedStl =
-      storagesStore.getByType('STL_FUEL_STORE')?.filter(x => atSameLocation(x, origin)) ?? [];
+    const hasDockedShips = FUEL_TYPES.some(fuelType => {
+      const dockedStores =
+        storagesStore.getByType(fuelType.storageType)?.filter(x => atSameLocation(x, origin)) ?? [];
+      return dockedStores.length > 0;
+    });
 
-    const dockedFtl =
-      storagesStore.getByType('FTL_FUEL_STORE')?.filter(x => atSameLocation(x, origin)) ?? [];
-
-    if (dockedStl.length === 0 && dockedFtl.length === 0) {
+    if (!hasDockedShips) {
       log.warning('No ships are docked near the origin');
       return;
     }
 
-    const stlMaterial = materialsStore.getByTicker('SF');
-    assert(stlMaterial, 'SF material not found');
+    let totalRefuel = 0;
+    for (const fuelConfig of FUEL_TYPES) {
+      const { totalRefuel: fuelRefuel } = processFuelType(
+        ctx,
+        origin,
+        fuelConfig,
+        isCX,
+        data.buyMissingFuel,
+        exchangeCode,
+      );
+      totalRefuel += fuelRefuel;
+    }
 
-    const ftlMaterial = materialsStore.getByTicker('FF');
-    assert(ftlMaterial, 'FF material not found');
-
-    const totalStlRefuel = sumBy(dockedStl, x => calculateRefuelAmount(x, stlMaterial));
-    const totalFtlRefuel = sumBy(dockedFtl, x => calculateRefuelAmount(x, ftlMaterial));
-
-    if (totalFtlRefuel === 0 && totalStlRefuel === 0) {
+    if (totalRefuel === 0) {
       log.info('No ships need refueling');
       return;
     }
-
-    let presentStlFuel =
-      origin.items.find(x => x.quantity?.material.ticker === stlMaterial.ticker)?.quantity
-        ?.amount ?? 0;
-
-    if (presentStlFuel < totalStlRefuel) {
-      if (isCX && data.buyMissingFuel) {
-        emitStep(
-          CXPO_BUY({
-            exchange: exchangeCode,
-            ticker: stlMaterial.ticker,
-            amount: totalStlRefuel - presentStlFuel,
-            priceLimit: Number.POSITIVE_INFINITY,
-            buyPartial: false,
-            allowUnfilled: false,
-          }),
-        );
-        presentStlFuel = totalStlRefuel;
-      } else {
-        log.warning('Not enough SF at the origin. Some ships will not be refueled.');
-      }
-    }
-
-    let presentFtlFuel =
-      origin.items.find(x => x.quantity?.material.ticker === ftlMaterial.ticker)?.quantity
-        ?.amount ?? 0;
-
-    if (presentFtlFuel < totalFtlRefuel) {
-      if (isCX && data.buyMissingFuel) {
-        emitStep(
-          CXPO_BUY({
-            exchange: exchangeCode,
-            ticker: ftlMaterial.ticker,
-            amount: totalFtlRefuel - presentFtlFuel,
-            priceLimit: Number.POSITIVE_INFINITY,
-            buyPartial: false,
-            allowUnfilled: false,
-          }),
-        );
-        presentFtlFuel = totalFtlRefuel;
-      } else {
-        log.warning('Not enough FF at the origin. Some ships will not be refueled.');
-      }
-    }
-
-    for (const store of dockedStl) {
-      const amount = clamp(calculateRefuelAmount(store, stlMaterial), 0, presentStlFuel);
-      if (amount === 0) {
-        continue;
-      }
-      emitStep(
-        MTRA_TRANSFER({
-          from: origin.id,
-          to: store.id,
-          ticker: stlMaterial.ticker,
-          amount,
-        }),
-      );
-      presentStlFuel -= amount;
-    }
-
-    for (const store of dockedFtl) {
-      const amount = clamp(calculateRefuelAmount(store, ftlMaterial), 0, presentFtlFuel);
-      if (amount === 0) {
-        continue;
-      }
-      emitStep(
-        MTRA_TRANSFER({
-          from: origin.id,
-          to: store.id,
-          ticker: ftlMaterial.ticker,
-          amount,
-        }),
-      );
-      presentFtlFuel -= amount;
-    }
   },
 });
+
+function processFuelType(
+  ctx: ActionContext,
+  origin: PrunApi.Store,
+  fuelConfig: FuelTypeConfig,
+  isCX: boolean,
+  buyMissingFuel: boolean | undefined,
+  exchangeCode?: string,
+): { totalRefuel: number } {
+  const { log, emitStep } = ctx;
+  const assert: AssertFn = ctx.assert;
+
+  const dockedStores =
+    storagesStore.getByType(fuelConfig.storageType)?.filter(x => atSameLocation(x, origin)) ?? [];
+
+  if (dockedStores.length === 0) {
+    return { totalRefuel: 0 };
+  }
+
+  const material = materialsStore.getByTicker(fuelConfig.materialTicker);
+  assert(material, `${fuelConfig.materialTicker} material not found`);
+
+  const totalRefuel = sumBy(dockedStores, x => calculateRefuelAmount(x, material));
+
+  if (totalRefuel === 0) {
+    return { totalRefuel };
+  }
+
+  let presentFuel =
+    origin.items.find(x => x.quantity?.material.ticker === material.ticker)?.quantity?.amount ?? 0;
+
+  if (presentFuel < totalRefuel) {
+    if (isCX && buyMissingFuel && exchangeCode) {
+      emitStep(
+        CXPO_BUY({
+          exchange: exchangeCode,
+          ticker: material.ticker,
+          amount: totalRefuel - presentFuel,
+          priceLimit: Number.POSITIVE_INFINITY,
+          buyPartial: false,
+          allowUnfilled: false,
+        }),
+      );
+      presentFuel = totalRefuel;
+    } else {
+      log.warning(fuelConfig.warningMessage);
+    }
+  }
+
+  for (const store of dockedStores) {
+    const amount = clamp(calculateRefuelAmount(store, material), 0, presentFuel);
+    if (amount === 0) {
+      continue;
+    }
+    emitStep(
+      MTRA_TRANSFER({
+        from: origin.id,
+        to: store.id,
+        ticker: material.ticker,
+        amount,
+      }),
+    );
+    presentFuel -= amount;
+  }
+
+  return { totalRefuel };
+}
 
 function getExchangeCode(store: PrunApi.Store) {
   const warehouse = warehousesStore.getById(store.addressableId);
@@ -149,8 +163,6 @@ function getExchangeCode(store: PrunApi.Store) {
 }
 
 function calculateRefuelAmount(store: PrunApi.Store, material: PrunApi.Material) {
-  // Fuel stores have the same volume/weight capacity ratio as the material,
-  // so we can use either one.
   const freeVolume = store.volumeCapacity - store.volumeLoad;
   return Math.round(freeVolume / material.volume);
 }

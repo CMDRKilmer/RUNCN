@@ -78,9 +78,7 @@ function addActionStep<T>(info: ActionStepInfo<T>) {
 }
 
 function getActionStepInfo(type: string) {
-  // 这里使用 ! 操作符，因为运行时保证
-  // 所有操作步骤都有对应的类型（参见 addActionStep）。
-  return actionSteps.find(x => x.type === type)!;
+  return actionSteps.find(x => x.type === type);
 }
 
 export const act = {

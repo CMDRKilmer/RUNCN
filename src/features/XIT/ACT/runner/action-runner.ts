@@ -1,4 +1,5 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
+import { C } from '@src/infrastructure/prun-ui/prun-css';
 import { deepToRaw } from '@src/utils/deep-to-raw';
 import { Logger } from '@src/features/XIT/ACT/runner/logger';
 import { TileAllocator } from '@src/features/XIT/ACT/runner/tile-allocator';
@@ -52,11 +53,11 @@ export class ActionRunner {
     if (steps.length === 0) {
       return;
     }
-    // 静默预加载 CXPO 价格数据
-    await this.preloadPriceData(steps);
     if (fail) {
       this.log.info('已为有效操作生成步骤：');
     }
+    // 静默预加载 CXPO 价格数据
+    await this.preloadPriceData(steps);
     // 先计算总计并显示在最上方。
     // 用 ticker 聚合重量/体积：避免同一物料在 CXPO_BUY + MTRA_TRANSFER
     // 两类步骤中重复累加；但同一物料的多个购买/转移步骤仍会按 amount 累加。
@@ -198,12 +199,16 @@ export class ActionRunner {
     }
     // close temp windows
     for (const win of opened) {
-      const buttons = win.getElementsByClassName(C.Window.button);
-      const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
-        | HTMLElement
-        | undefined;
-      closeBtn?.click();
+      this.closeWindow(win);
     }
+  }
+
+  private closeWindow(win: Element) {
+    const buttons = win.getElementsByClassName(C.Window.button);
+    const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
+      | HTMLElement
+      | undefined;
+    closeBtn?.click();
   }
 
   private async preOpenTiles(steps: ActionStep[]) {
@@ -232,11 +237,7 @@ export class ActionRunner {
 
   private closePreOpenedWindows() {
     for (const win of this.preOpenedWindows) {
-      const buttons = win.getElementsByClassName(C.Window.button);
-      const closeButton = Array.from(buttons).find(x => x.textContent === 'x') as
-        | HTMLElement
-        | undefined;
-      closeButton?.click();
+      this.closeWindow(win);
     }
     this.preOpenedWindows = [];
   }
