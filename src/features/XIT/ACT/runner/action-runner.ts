@@ -58,13 +58,13 @@ export class ActionRunner {
     }
     // 静默预加载 CXPO 价格数据
     await this.preloadPriceData(steps);
-    // 先计算总计并显示在最上方。
-    // 用 ticker 聚合重量/体积：同一物料有 CXPO_BUY + MTRA_TRANSFER 两类步骤，
-    // MTRA 转移的就是 CXPO 刚买的同一批货，取 max 避免重复计算。
+    // 计算总计并显示在最上方。
     const costByCurrency = new Map<string, number>();
     let missingPriceCount = 0;
-    const weightByTicker = new Map<string, number>();
-    const volumeByTicker = new Map<string, number>();
+    let buyWeight = 0;
+    let buyVolume = 0;
+    let transferWeight = 0;
+    let transferVolume = 0;
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
       if (stepInfo.cost) {
@@ -81,21 +81,23 @@ export class ActionRunner {
       if (!ticker) continue;
       if (stepInfo.weight !== undefined) {
         const w = stepInfo.weight(step) ?? 0;
-        weightByTicker.set(ticker, Math.max(weightByTicker.get(ticker) ?? 0, w));
+        if (step.type === 'CXPO_BUY') {
+          buyWeight += w;
+        } else if (step.type === 'MTRA_TRANSFER') {
+          transferWeight += w;
+        }
       }
       if (stepInfo.volume !== undefined) {
         const v = stepInfo.volume(step) ?? 0;
-        volumeByTicker.set(ticker, Math.max(volumeByTicker.get(ticker) ?? 0, v));
+        if (step.type === 'CXPO_BUY') {
+          buyVolume += v;
+        } else if (step.type === 'MTRA_TRANSFER') {
+          transferVolume += v;
+        }
       }
     }
-    let totalWeight = 0;
-    for (const w of weightByTicker.values()) {
-      totalWeight += w;
-    }
-    let totalVolume = 0;
-    for (const v of volumeByTicker.values()) {
-      totalVolume += v;
-    }
+    const totalWeight = Math.max(buyWeight, transferWeight);
+    const totalVolume = Math.max(buyVolume, transferVolume);
     const totalCost = [...costByCurrency.values()].reduce((s, v) => s + v, 0);
     if (totalCost > 0 || totalWeight > 0 || totalVolume > 0) {
       const parts: string[] = [];
@@ -116,6 +118,18 @@ export class ActionRunner {
         parts.push(`体积 ${fixed2(totalVolume)} m3`);
       }
       this.log.summary(`总计：${parts.join('，')}`);
+    }
+    if (buyWeight > 0 || buyVolume > 0) {
+      const buyParts: string[] = [];
+      if (buyWeight > 0) buyParts.push(`重量 ${fixed2(buyWeight)} t`);
+      if (buyVolume > 0) buyParts.push(`体积 ${fixed2(buyVolume)} m3`);
+      this.log.summary(`购买：${buyParts.join('，')}`);
+    }
+    if (transferWeight > 0 || transferVolume > 0) {
+      const transferParts: string[] = [];
+      if (transferWeight > 0) transferParts.push(`重量 ${fixed2(transferWeight)} t`);
+      if (transferVolume > 0) transferParts.push(`体积 ${fixed2(transferVolume)} m3`);
+      this.log.summary(`转移：${transferParts.join('，')}`);
     }
     // 再显示每个步骤的详情
     for (const step of steps) {
