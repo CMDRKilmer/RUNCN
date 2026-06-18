@@ -4,7 +4,11 @@ import Configure from '@src/features/XIT/ACT/actions/refuel/Configure.vue';
 import { Config } from '@src/features/XIT/ACT/actions/refuel/config';
 import { CXPO_BUY } from '@src/features/XIT/ACT/action-steps/CXPO_BUY';
 import { MTRA_TRANSFER } from '@src/features/XIT/ACT/action-steps/MTRA_TRANSFER';
-import { AssertFn, configurableValue } from '@src/features/XIT/ACT/shared-types';
+import {
+  AssertFn,
+  ActionStepGenerateContext,
+  configurableValue,
+} from '@src/features/XIT/ACT/shared-types';
 import { atSameLocation, deserializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
@@ -89,7 +93,7 @@ act.addAction<Config>({
 });
 
 function processFuelType(
-  ctx: ActionContext,
+  ctx: ActionStepGenerateContext<Config>,
   origin: PrunApi.Store,
   fuelConfig: FuelTypeConfig,
   isCX: boolean,

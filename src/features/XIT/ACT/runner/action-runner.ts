@@ -67,7 +67,6 @@ export class ActionRunner {
     const volumeByTicker = new Map<string, number>();
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
-      if (!stepInfo) continue;
       if (stepInfo.cost) {
         const cost = stepInfo.cost(step);
         if (cost !== undefined) {
@@ -121,7 +120,6 @@ export class ActionRunner {
     // 再显示每个步骤的详情
     for (const step of steps) {
       const stepInfo = act.getActionStepInfo(step.type);
-      if (!stepInfo) continue;
       this.log.action(stepInfo.description(step));
     }
   }
