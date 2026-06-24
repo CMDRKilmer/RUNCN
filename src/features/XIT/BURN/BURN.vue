@@ -4,7 +4,7 @@ import RadioItem from '@src/components/forms/RadioItem.vue';
 import { BurnValues, getPlanetBurn, MaterialBurn, PlanetBurn } from '@src/core/burn';
 import { comparePlanets } from '@src/util';
 import BurnSection from '@src/features/XIT/BURN/BurnSection.vue';
-import { useTileState } from '@src/features/XIT/BURN/tile-state';
+import { useBurnTileState, useBurnFilters } from '@src/features/XIT/BURN/burn-state';
 import Tooltip from '@src/components/Tooltip.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import MaterialRow from '@src/features/XIT/BURN/MaterialRow.vue';
@@ -13,8 +13,7 @@ import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { countDays, getSortedTickers } from '@src/features/XIT/BURN/utils';
 import InlineFlex from '@src/components/InlineFlex.vue';
-import { findWithQuery } from '@src/utils/find-with-query';
-import { convertToPlanetNaturalId } from '@src/core/planet-natural-id';
+import { querySites } from '@src/features/XIT/shared/site-query';
 import { isAuthenticated, reportProduction } from '@src/features/XIT/FACTION/use-faction-api';
 import { userData } from '@src/store/user-data';
 
@@ -28,67 +27,20 @@ const queryResult = computed(() => {
     return undefined;
   }
 
-  const allSites = sitesStore.all.value;
-  if (parameters.length === 0) {
-    return {
-      sites: allSites,
-      includeOverall: true,
-      overallOnly: false,
-    };
-  }
-  const result = findWithQuery(parameters, findSites);
-  let matches = result.include;
-  if (result.includeAll) {
-    matches = allSites;
-  }
-  if (result.excludeAll) {
-    matches = [];
-  }
-  matches = matches.filter(x => !result.exclude.has(x));
-  const nonOverallMatches = matches.filter(x => x !== overall);
-  const overallIncluded =
-    nonOverallMatches.length > 1 ||
-    matches.length !== nonOverallMatches.length ||
-    result.includeAll;
-  const overallExcluded = result.exclude.has(overall) || result.excludeAll;
-
-  let includeOverall = overallIncluded && !overallExcluded;
-  let overallOnly = false;
-  let overallOnlySites = allSites;
-  if (matches.length === 1 && matches[0] === overall && !overallExcluded) {
-    // `XIT BURN OVERALL`,
-    overallOnlySites = allSites.filter(x => !result.exclude.has(x));
-    includeOverall = true;
-    overallOnly = true;
-  }
-
-  return {
-    sites: overallOnly ? overallOnlySites : nonOverallMatches,
-    includeOverall,
-    overallOnly,
-  };
+  return querySites(parameters, {
+    includeOverall: true,
+    overallSite: overall,
+  });
 });
 
-function findSites(term: string, parts: string[]) {
-  if (term === 'all') {
-    return sitesStore.all.value;
-  }
-
-  if (term === 'overall') {
-    return overall;
-  }
-
-  const naturalId = convertToPlanetNaturalId(term, parts);
-  return sitesStore.getByPlanetNaturalId(naturalId);
-}
-
-const red = useTileState('red');
-const yellow = useTileState('yellow');
-const green = useTileState('green');
-const inf = useTileState('inf');
-const prod = useTileState('prod');
-const wf = useTileState('wf');
-const io = useTileState('io');
+const red = useBurnTileState('red');
+const yellow = useBurnTileState('yellow');
+const green = useBurnTileState('green');
+const inf = useBurnTileState('inf');
+const prod = useBurnTileState('prod');
+const wf = useBurnTileState('wf');
+const io = useBurnTileState('io');
+const filters = useBurnFilters();
 
 function filterBurn(burn: BurnValues): BurnValues {
   const filtered: BurnValues = {};
@@ -96,7 +48,7 @@ function filterBurn(burn: BurnValues): BurnValues {
     const mat = burn[ticker];
     const hasProd = mat.input > 0 || mat.output > 0;
     const hasWf = mat.workforce > 0;
-    if (!(hasProd && prod.value === true) && !(hasWf && wf.value === true)) {
+    if (!(hasProd && filters.value.prod) && !(hasWf && filters.value.wf)) {
       continue;
     }
     filtered[ticker] = mat;
@@ -181,7 +133,7 @@ const fakeBurn: MaterialBurn = {
 
 const rat = materialsStore.getByTicker('RAT')!;
 
-const expand = useTileState('expand');
+const expand = useBurnTileState('expand');
 
 const anyExpanded = computed(() => expand.value.length > 0);
 

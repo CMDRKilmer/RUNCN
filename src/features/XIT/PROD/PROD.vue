@@ -6,21 +6,12 @@ import { useTileState } from './tile-state';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { findWithQuery } from '@src/utils/find-with-query';
-import { convertToPlanetNaturalId } from '@src/core/planet-natural-id';
+import { createSiteFinder } from '@src/features/XIT/shared/site-query';
 import { matchesProductionFilter } from './utils';
 import { sumBy } from '@src/utils/sum-by';
 import FakeRow from './FakeRow.vue';
 
 const parameters = useXitParameters();
-
-function findSites(term: string, parts: string[]) {
-  if (term === 'all') {
-    return sitesStore.all.value;
-  }
-
-  const naturalId = convertToPlanetNaturalId(term, parts);
-  return sitesStore.getByPlanetNaturalId(naturalId);
-}
 
 function byTotalCapacityDesc(a: PlanetProduction, b: PlanetProduction) {
   return sumBy(b.production, x => x.capacity) - sumBy(a.production, x => x.capacity);
@@ -32,6 +23,8 @@ const inactive = useTileState('inactive');
 const notQueued = useTileState('notQueued');
 const headers = useTileState('headers');
 const expand = useTileState('expandPlanets');
+
+const findSites = createSiteFinder();
 
 const planetProduction = computed(() => {
   let sites = findWithQuery(parameters, findSites).include;

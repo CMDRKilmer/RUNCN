@@ -32,7 +32,7 @@ const allowUnfilled = ref(action.allowUnfilled ?? false);
 const useCXInv = ref(action.useCXInv ?? true);
 
 function onEditPriceLimitsClick(e: Event) {
-  showTileOverlay(e, EditPriceLimits, reactive({ priceLimits }));
+  showTileOverlay(e, EditPriceLimits, reactive({ priceLimits, exchange: exchange.value }));
 }
 
 function validate() {
