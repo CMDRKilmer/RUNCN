@@ -56,7 +56,7 @@ export async function fetchPrices() {
   cxStore.fetched = true;
 }
 
-interface TickerPriceInfo {
+export interface TickerPriceInfo {
   MaterialTicker: string;
   ExchangeCode: string;
   MMBuy?: number | null;

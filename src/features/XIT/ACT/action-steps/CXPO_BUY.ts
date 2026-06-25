@@ -1,5 +1,5 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
-import { fixed0, fixed02 } from '@src/utils/format';
+import { fixed0, fixed01, fixed02 } from '@src/utils/format';
 import { changeInputValue, clickElement } from '@src/util';
 import { fillAmount } from '@src/features/XIT/ACT/actions/cx-buy/utils';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -9,6 +9,7 @@ import { watchWhile } from '@src/utils/watch';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { watchEffect } from 'vue';
 import { AssertFn } from '@src/features/XIT/ACT/shared-types';
+import { cxStore } from '@src/infrastructure/fio/cx';
 
 interface Data {
   exchange: string;
@@ -18,6 +19,50 @@ interface Data {
   buyPartial: boolean;
   allowUnfilled: boolean;
   skipMissing?: boolean;
+}
+
+function getHistoricalComparison(ticker: string, exchange: string): string | undefined {
+  if (!cxStore.fetched) {
+    return undefined;
+  }
+  const info = cxStore.prices.get(exchange)?.get(ticker);
+  if (!info) {
+    return undefined;
+  }
+  const vwap7D = info.VWAP7D ?? null;
+  const vwap30D = info.VWAP30D ?? null;
+  if (vwap7D === null && vwap30D === null) {
+    return undefined;
+  }
+
+  // Calculate the effective price the buy would execute at (priceLimit if set, else best ask).
+  const effective = info.Ask ?? null;
+  const deviation7D = computeDeviation(effective, vwap7D);
+  const deviation30D = computeDeviation(effective, vwap30D);
+
+  const parts: string[] = [];
+  if (vwap7D !== null) {
+    parts.push(`7D均价 ${fixed02(vwap7D)}${deviation7D ? ` (${deviation7D})` : ''}`);
+  }
+  if (vwap30D !== null) {
+    parts.push(`30D均价 ${fixed02(vwap30D)}${deviation30D ? ` (${deviation30D})` : ''}`);
+  }
+  return parts.join(' | ');
+}
+
+function computeDeviation(current: number | null, average: number | null) {
+  if (current === null || average === null) {
+    return undefined;
+  }
+  if (average === 0) {
+    return undefined;
+  }
+  const d = (current - average) / average;
+  if (Math.abs(d) < 0.0005) {
+    return undefined;
+  }
+  const sign = d > 0 ? '+' : '';
+  return `${sign}${fixed01(d * 100)}%`;
 }
 
 export const CXPO_BUY = act.addActionStep<Data>({
@@ -38,6 +83,10 @@ export const CXPO_BUY = act.addActionStep<Data>({
         description += `，价格 ${fixed02(data.priceLimit)}`;
         description += `（总费用 ${fixed0(data.amount * data.priceLimit)}）`;
       }
+      const comparison = getHistoricalComparison(ticker, exchange);
+      if (comparison) {
+        description += ` [${comparison}]`;
+      }
       return description;
     }
 
@@ -49,6 +98,10 @@ export const CXPO_BUY = act.addActionStep<Data>({
       description += `（总费用 ${fixed0(filled.cost)}）`;
     } else {
       description += '（暂无价格数据）';
+    }
+    const comparison = getHistoricalComparison(ticker, exchange);
+    if (comparison) {
+      description += ` [${comparison}]`;
     }
     return description;
   },

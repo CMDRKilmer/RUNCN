@@ -7,7 +7,7 @@ import Active from '@src/components/forms/Active.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
-import { cxStore } from '@src/infrastructure/fio/cx';
+import PriceInfo from '@src/features/XIT/ACT/actions/cx-buy/PriceInfo.vue';
 
 const props = defineProps<{
   priceLimits: [string, number][];
@@ -19,17 +19,9 @@ const emit = defineEmits<{ (e: 'close'): void }>();
 const pairs = computed(() =>
   props.priceLimits.map((pair, i) => {
     const [ticker] = pair;
-    const info = getPriceInfo(ticker);
-    return { pair, info, index: i };
+    return { pair, ticker, index: i };
   }),
 );
-
-function getPriceInfo(ticker: string) {
-  if (!ticker || !props.exchange || !cxStore.fetched) {
-    return undefined;
-  }
-  return cxStore.prices.get(props.exchange)?.get(ticker);
-}
 
 function onAddClick() {
   props.priceLimits.push(['', 0]);
@@ -47,9 +39,7 @@ function onAddClick() {
         <Active :label="`价格限制 #${item.index + 1}`">
           <NumberInput v-model="item.pair[1]" />
         </Active>
-        <div v-if="item.info" :class="$style.avgPrice">
-          7日均价: {{ item.info.VWAP7D ?? '-' }} | 30日均价: {{ item.info.VWAP30D ?? '-' }}
-        </div>
+        <PriceInfo v-if="item.ticker" :ticker="item.ticker" :exchange="props.exchange ?? ''" />
       </template>
       <Commands>
         <PrunButton primary @click="onAddClick">添加</PrunButton>
@@ -60,11 +50,3 @@ function onAddClick() {
     </form>
   </div>
 </template>
-
-<style module>
-.avgPrice {
-  color: #888;
-  font-size: 0.85em;
-  margin: -4px 4px 6px;
-}
-</style>

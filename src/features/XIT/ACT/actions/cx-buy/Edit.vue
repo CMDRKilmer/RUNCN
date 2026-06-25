@@ -6,6 +6,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import EditPriceLimits from '@src/features/XIT/ACT/actions/cx-buy/EditPriceLimits.vue';
+import PriceInfo from '@src/features/XIT/ACT/actions/cx-buy/PriceInfo.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 
 const { action, pkg } = defineProps<{
@@ -30,6 +31,10 @@ const buyPartial = ref(action.buyPartial ?? false);
 
 const allowUnfilled = ref(action.allowUnfilled ?? false);
 const useCXInv = ref(action.useCXInv ?? true);
+
+const priceLimitTickers = computed(() =>
+  priceLimits.value.map(([ticker]) => ticker).filter(t => !!t),
+);
 
 function onEditPriceLimitsClick(e: Event) {
   showTileOverlay(e, EditPriceLimits, reactive({ priceLimits, exchange: exchange.value }));
@@ -77,4 +82,29 @@ defineExpose({ validate, save });
   <Active label="使用 CX 库存" tooltip="计算需要购买的数量时是否使用 CX 仓库中的库存。">
     <RadioItem v-model="useCXInv">使用 CX 库存</RadioItem>
   </Active>
+  <div v-if="priceLimitTickers.length > 0" :class="$style.priceOverview">
+    <div :class="$style.priceOverviewHeader">价格概览（基于当前价格限制）</div>
+    <PriceInfo
+      v-for="ticker in priceLimitTickers"
+      :key="ticker"
+      :ticker="ticker"
+      :exchange="exchange" />
+  </div>
 </template>
+
+<style module>
+.priceOverview {
+  margin: 4px 4px 8px;
+  padding: 4px 6px;
+  border: 1px solid #2b485a;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.priceOverviewHeader {
+  color: #888;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+</style>
