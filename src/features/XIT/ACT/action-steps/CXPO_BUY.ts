@@ -21,7 +21,11 @@ interface Data {
   skipMissing?: boolean;
 }
 
-function getHistoricalComparison(ticker: string, exchange: string): string | undefined {
+function getHistoricalComparison(
+  ticker: string,
+  exchange: string,
+  priceLimit?: number,
+): string | undefined {
   if (!cxStore.fetched) {
     return undefined;
   }
@@ -36,7 +40,7 @@ function getHistoricalComparison(ticker: string, exchange: string): string | und
   }
 
   // Calculate the effective price the buy would execute at (priceLimit if set, else best ask).
-  const effective = info.Ask ?? null;
+  const effective = priceLimit ?? info.Ask ?? null;
   const deviation7D = computeDeviation(effective, vwap7D);
   const deviation30D = computeDeviation(effective, vwap30D);
 
@@ -83,7 +87,11 @@ export const CXPO_BUY = act.addActionStep<Data>({
         description += `，价格 ${fixed02(data.priceLimit)}`;
         description += `（总费用 ${fixed0(data.amount * data.priceLimit)}）`;
       }
-      const comparison = getHistoricalComparison(ticker, exchange);
+      const comparison = getHistoricalComparison(
+        ticker,
+        exchange,
+        isFinite(priceLimit) ? priceLimit : undefined,
+      );
       if (comparison) {
         description += ` [${comparison}]`;
       }
@@ -99,7 +107,11 @@ export const CXPO_BUY = act.addActionStep<Data>({
     } else {
       description += '（暂无价格数据）';
     }
-    const comparison = getHistoricalComparison(ticker, exchange);
+    const comparison = getHistoricalComparison(
+      ticker,
+      exchange,
+      isFinite(priceLimit) ? priceLimit : undefined,
+    );
     if (comparison) {
       description += ` [${comparison}]`;
     }
