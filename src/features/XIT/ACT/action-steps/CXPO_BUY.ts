@@ -84,7 +84,7 @@ export const CXPO_BUY = act.addActionStep<Data>({
     if (!willFillCompletely && allowUnfilled) {
       let description = `在 ${exchange} 上投标 ${fixed0(data.amount)} ${ticker}`;
       if (isFinite(priceLimit)) {
-        description += `，价格 ${fixed02(data.priceLimit)}`;
+        description += `，价格 ${fixed02(priceLimit)}`;
         description += `（总费用 ${fixed0(data.amount * priceLimit)}）`;
       }
       const comparison = getHistoricalComparison(
