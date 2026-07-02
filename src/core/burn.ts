@@ -14,6 +14,7 @@ export interface MaterialBurn {
   output: number;
   workforce: number;
   dailyAmount: number;
+  remainingAllocation: number;
   inventory: number;
   daysLeft: number;
   type: 'input' | 'output' | 'workforce';
@@ -83,6 +84,7 @@ export function calculatePlanetBurn(
         output: 0,
         workforce: 0,
         dailyAmount: 0,
+        remainingAllocation: 0,
         inventory: 0,
         daysLeft: 0,
         type: 'output',
@@ -125,6 +127,7 @@ export function calculatePlanetBurn(
       for (const need of tier.needs) {
         const materialBurn = getBurnValue(need.material.ticker);
         materialBurn.workforce += need.unitsPerInterval;
+        materialBurn.remainingAllocation = need.remainingAllocation ?? 0;
       }
     }
   }

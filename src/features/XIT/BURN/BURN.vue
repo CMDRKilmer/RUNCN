@@ -88,6 +88,7 @@ const planetBurn = computed(() => {
         output: 0,
         workforce: 0,
         dailyAmount: 0,
+        remainingAllocation: 0,
         inventory: 0,
         daysLeft: 0,
         type: 'output',
@@ -129,6 +130,7 @@ const fakeBurn: MaterialBurn = {
   input: 100000,
   output: 100000,
   workforce: 0,
+  remainingAllocation: 0,
 };
 
 const rat = materialsStore.getByTicker('RAT')!;
