@@ -127,7 +127,7 @@ const fakeBurn: MaterialBurn = {
   inventory: 100000,
   type: 'input',
   input: 100000,
-  output: 0,
+  output: 100000,
   workforce: 0,
 };
 

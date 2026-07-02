@@ -159,7 +159,7 @@ export function calculatePlanetBurn(
           materialBurn.daysLeft =
             materialBurn.dailyAmount > 0
               ? 1000
-              : Math.floor(-materialBurn.inventory / materialBurn.dailyAmount);
+              : -materialBurn.inventory / materialBurn.dailyAmount;
         }
       }
     }
