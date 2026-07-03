@@ -2,7 +2,7 @@ import MinimizeRow from './MinimizeRow.vue';
 import { streamHtmlCollection } from '@src/utils/stream-html-collection';
 import { computedTileState } from '@src/store/user-data-tiles';
 import { getTileState } from './tile-state';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 const MINIMIZE_ATTR = 'data-rp-minimize-row';
 
@@ -26,7 +26,6 @@ function onTileReady(tile: PrunTile) {
           },
         }),
       ).before(header);
-      // Mark the created MinimizeRow so setHeaders can skip it
       const minimizeEl = header.previousElementSibling;
       if (minimizeEl) {
         minimizeEl.setAttribute(MINIMIZE_ATTR, '');
@@ -37,7 +36,6 @@ function onTileReady(tile: PrunTile) {
 
 function setHeaders(tile: PrunTile, isMinimized: boolean) {
   for (const header of _$$(tile.anchor, C.FormComponent.containerPassive)) {
-    // Skip the MinimizeRow added by this feature
     if (header.hasAttribute(MINIMIZE_ATTR)) {
       continue;
     }
@@ -59,7 +57,7 @@ function setHeaders(tile: PrunTile, isMinimized: boolean) {
 }
 
 function matchesLocalization(element: Element | undefined, key: string, defaultValue: string) {
-  const text = PrunI18N[key]?.[0]?.value ?? defaultValue;
+  const text = getI18nValue(key, defaultValue);
   return element?.textContent === text;
 }
 

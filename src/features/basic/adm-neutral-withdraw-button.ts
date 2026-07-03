@@ -1,9 +1,9 @@
 import { refTextContent } from '@src/utils/reactive-dom';
 import { watchEffectWhileNodeAlive } from '@src/utils/watch';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 function onTileReady(tile: PrunTile) {
-  const withdraw = PrunI18N['AdminCenter.upcoming.action.withdrawVote']?.[0]?.value;
+  const withdraw = getI18nValue('AdminCenter.upcoming.action.withdrawVote');
   if (!withdraw) {
     return;
   }

@@ -1,4 +1,4 @@
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { setI18nValue } from '@src/infrastructure/prun-ui/i18n';
 import $style from './flt-flight-status-icons.module.css';
 
 function init() {
@@ -53,12 +53,7 @@ function init() {
     },
   ];
   for (const { key, icon } of replacements) {
-    PrunI18N[key] = [
-      {
-        type: 0,
-        value: icon,
-      },
-    ];
+    setI18nValue(key, icon);
   }
   applyCssRule(['FLT', 'FLTS', 'FLTP'], `td:nth-child(4)`, $style.status);
 }

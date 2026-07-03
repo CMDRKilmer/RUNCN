@@ -3,10 +3,9 @@ import { refPrunId } from '@src/infrastructure/prun-ui/attributes';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import { isEmpty } from 'ts-extras';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { PrunI18N, setI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 function onTileReady(tile: PrunTile) {
-  // 仅处理 BS {base} 磁贴
   if (!tile.parameter) {
     return;
   }
@@ -33,10 +32,12 @@ function onTileReady(tile: PrunTile) {
 }
 
 function init() {
-  const localized = PrunI18N['SiteWorkforces.table.currentWorkforce']?.[0];
-  if (localized) {
-    localized.value = localized.value.replace('Current Workforce', 'Current');
-  }
+  const original =
+    PrunI18N['SiteWorkforces.table.currentWorkforce']?.[0]?.value ?? 'Current Workforce';
+  setI18nValue(
+    'SiteWorkforces.table.currentWorkforce',
+    original.replace('Current Workforce', 'Current'),
+  );
   tiles.observe('BS', onTileReady);
 }
 

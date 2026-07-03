@@ -1,12 +1,12 @@
 import { planetsStore } from '@src/infrastructure/prun-api/data/planets';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 function formatCogcLabel(programType?: string | null) {
   if (!programType) {
     return 'CoGC (Inactive)';
   }
 
-  let localized = PrunI18N[`CoGCProgram.${programType}_SHORT`]?.[0]?.value;
+  let localized = getI18nValue(`CoGCProgram.${programType}_SHORT`);
   localized ??= programType
     .replace(/^(ADVERTISING|WORKFORCE)_/, '')
     .replace(/^\w/, c => c.toUpperCase())
@@ -15,8 +15,7 @@ function formatCogcLabel(programType?: string | null) {
 }
 
 function onTileReady(tile: PrunTile) {
-  const localizedLabel =
-    PrunI18N['PlanetaryProjects.COGC']?.[0]?.value ?? 'Chamber of Global Commerce';
+  const localizedLabel = getI18nValue('PlanetaryProjects.COGC', 'Chamber of Global Commerce');
   subscribe($$(tile.anchor, C.PlanetaryProjectsList.row), async row => {
     const link = await $(row, C.Link.link);
     if (link.textContent !== localizedLabel) {

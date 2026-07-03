@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 const { hasMore } = defineProps<{ hasMore: boolean }>();
 const emit = defineEmits<{ (e: 'loadMore'): void }>();
@@ -45,6 +45,6 @@ onBeforeUnmount(() => observer?.disconnect());
     ref="sentinel"
     :class="[C.EndlessScrollControl.loadMore, { [C.EndlessScrollControl.hidden]: !hasMore }]"
     @click="loadMore">
-    {{ PrunI18N['EndlessScrollControl.label.loadmore']?.[0]?.value }}
+    {{ getI18nValue('EndlessScrollControl.label.loadmore') }}
   </button>
 </template>

@@ -1,7 +1,7 @@
 import { refPrunId } from '@src/infrastructure/prun-ui/attributes';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { watchEffectWhileNodeAlive } from '@src/utils/watch';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 const storeTypes = [
   'STORE',
@@ -46,7 +46,6 @@ function shortenTableLabels(tile: PrunTile) {
       return storage ? map.get(storage?.type) : undefined;
     });
     watchEffectWhileNodeAlive(row, () => {
-      // tr -> td -> span（DOM 结构）
       const typeLabel = row.firstChild?.firstChild;
       if (typeLabel && name.value !== undefined) {
         typeLabel.textContent = name.value;
@@ -56,11 +55,11 @@ function shortenTableLabels(tile: PrunTile) {
 }
 
 function getFullName(type: string) {
-  return PrunI18N[`StoreTypeLabel.${type}`]?.[0]?.value ?? type;
+  return getI18nValue(`StoreTypeLabel.${type}`, type);
 }
 
 function getShortName(type: string) {
-  return PrunI18N[`StoreTypeLabel.${type}_SHORT`]?.[0]?.value ?? type;
+  return getI18nValue(`StoreTypeLabel.${type}_SHORT`, type);
 }
 
 function init() {

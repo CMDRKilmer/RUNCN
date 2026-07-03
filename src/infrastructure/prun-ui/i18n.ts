@@ -19,8 +19,18 @@ export function loadPrunI18N() {
   }
 }
 
+export function getI18nValue(key: string): string | undefined;
+export function getI18nValue(key: string, defaultValue: string): string;
+export function getI18nValue(key: string, defaultValue?: string): string | undefined {
+  return PrunI18N[key]?.[0]?.value ?? defaultValue;
+}
+
+export function setI18nValue(key: string, value: string): void {
+  PrunI18N[key] = [{ type: 0, value }];
+}
+
 export function getMaterialName(material?: PrunApi.Material | null) {
-  return material ? PrunI18N[`Material.${material?.name}.name`]?.[0]?.value : undefined;
+  return material ? getI18nValue(`Material.${material?.name}.name`) : undefined;
 }
 
 export function getMaterialByName(name?: string | null) {

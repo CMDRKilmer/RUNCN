@@ -1,5 +1,5 @@
 import css from '@src/utils/css-utils.module.css';
-import { PrunI18N } from '@src/infrastructure/prun-ui/i18n';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 
 function onTileReady(tile: PrunTile) {
   subscribe($$(tile.anchor, C.FormComponent.containerPassive), async container => {
@@ -10,7 +10,7 @@ function onTileReady(tile: PrunTile) {
 }
 
 function hideField(container: HTMLElement, label: HTMLElement, localizedKey: string) {
-  const localizedValue = PrunI18N[localizedKey]?.[0]?.value;
+  const localizedValue = getI18nValue(localizedKey);
   if (label?.textContent === localizedValue) {
     container.classList.add(css.hidden);
   }
