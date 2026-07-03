@@ -23,3 +23,5 @@ git_log_*.txt
 .tmp
 dist.zip
 dist.rar
+.trae/
+.trae-/
