@@ -4,6 +4,7 @@ import { cxosStore } from '@src/infrastructure/prun-api/data/cxos';
 import DateRow from '@src/features/XIT/CXTS/DateRow.vue';
 import TradeRow from '@src/features/XIT/CXTS/TradeRow.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import PrunButton from '@src/components/PrunButton.vue';
 import { isEmpty } from 'ts-extras';
 import { clamp } from '@src/utils/clamp';
 
@@ -115,21 +116,24 @@ stepRender();
   <LoadingSpinner v-if="orders === undefined" />
   <template v-else>
     <div :class="$style.controls">
-      <button
-        :class="[$style.button, { [$style.active]: granularity === 'daily' }]"
+      <PrunButton
+        :neutral="granularity !== 'daily'"
+        :primary="granularity === 'daily'"
         @click="granularity = 'daily'">
         每日
-      </button>
-      <button
-        :class="[$style.button, { [$style.active]: granularity === 'weekly' }]"
+      </PrunButton>
+      <PrunButton
+        :neutral="granularity !== 'weekly'"
+        :primary="granularity === 'weekly'"
         @click="granularity = 'weekly'">
         每周
-      </button>
-      <button
-        :class="[$style.button, { [$style.active]: granularity === 'monthly' }]"
+      </PrunButton>
+      <PrunButton
+        :neutral="granularity !== 'monthly'"
+        :primary="granularity === 'monthly'"
         @click="granularity = 'monthly'">
         每月
-      </button>
+      </PrunButton>
     </div>
     <table>
       <thead>
@@ -172,26 +176,5 @@ stepRender();
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
-}
-
-.button {
-  padding: 6px 12px;
-  border: 1px solid #2b485a;
-  border-radius: 4px;
-  background: #1a2f3c;
-  color: #9cb8c8;
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.button:hover {
-  background: #2b485a;
-  color: #ffffff;
-}
-
-.active {
-  background: #3a5f7a;
-  color: #ffffff;
-  border-color: #5a8faa;
 }
 </style>
