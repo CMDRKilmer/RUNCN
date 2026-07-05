@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { watch } from 'vue';
+import { watch, reactive } from 'vue';
 import { cxosStore } from '@src/infrastructure/prun-api/data/cxos';
 import DateRow from '@src/features/XIT/CXTS/DateRow.vue';
 import TradeRow from '@src/features/XIT/CXTS/TradeRow.vue';
@@ -95,8 +95,11 @@ function getDateComponent(dateTime: number) {
 const daysToRender = ref(1);
 let id = 0;
 
+const expandedGroups = reactive<Record<number, boolean | undefined>>({});
+
 watch(granularity, () => {
   daysToRender.value = 1;
+  Object.keys(expandedGroups).forEach(key => delete expandedGroups[Number(key)]);
 });
 
 function stepRender() {
@@ -157,13 +160,17 @@ stepRender();
               :date="days[group - 1].date"
               :totals="days[group - 1].totals"
               :hide-totals="days[group - 1].trades.length === 1"
-              :granularity="granularity" />
-            <TradeRow
-              v-for="trade in days[group - 1].trades"
-              :key="trade.trade.id"
-              :date="trade.date"
-              :order="trade.order"
-              :trade="trade.trade" />
+              :granularity="granularity"
+              :expanded="expandedGroups[days[group - 1].date] === true"
+              @update:expanded="expandedGroups[days[group - 1].date] = $event" />
+            <template v-if="expandedGroups[days[group - 1].date]">
+              <TradeRow
+                v-for="trade in days[group - 1].trades"
+                :key="trade.trade.id"
+                :date="trade.date"
+                :order="trade.order"
+                :trade="trade.trade" />
+            </template>
           </template>
         </template>
       </tbody>

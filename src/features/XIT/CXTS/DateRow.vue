@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { fixed0, ddmm, ddmmyyyy, mmyyyy } from '@src/utils/format';
+import RowExpandButton from '@src/features/XIT/FINBS/RowExpandButton.vue';
 
 type Granularity = 'daily' | 'weekly' | 'monthly';
 
@@ -9,6 +10,8 @@ const props = defineProps<{
   totals: { [currency: string]: { purchases: number; sales: number } };
   granularity: Granularity;
 }>();
+
+const expanded = defineModel<boolean>('expanded');
 
 const totalsLabels = computed(() => {
   return Object.keys(props.totals)
@@ -35,11 +38,18 @@ const dateLabel = computed(() => {
     }
   }
 });
+
+function toggleExpand() {
+  if (!props.hideTotals) {
+    expanded.value = !expanded.value;
+  }
+}
 </script>
 
 <template>
-  <tr>
+  <tr :class="[$style.row, { [$style.clickable]: !hideTotals }]" @click="toggleExpand">
     <td colspan="2" :class="$style.column">
+      <RowExpandButton v-if="!hideTotals" v-model="expanded" @click.stop />
       <span>{{ dateLabel }}</span>
     </td>
     <!-- 需要这个 <tr> 以保证另外两个 <tr> 颜色相同 -->
@@ -71,6 +81,18 @@ const dateLabel = computed(() => {
 </template>
 
 <style module>
+.row {
+  cursor: default;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover {
+  background-color: rgba(43, 72, 90, 0.3);
+}
+
 .column {
   border-left: none;
   border-bottom: 1px solid #2b485a;
