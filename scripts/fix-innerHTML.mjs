@@ -18,10 +18,12 @@ function processDir(dir) {
         // Add a dynamic key variable at the top to avoid static analysis detection
         const prefix = 'const __iH__ = "inner" + "HTML";\n';
         // Replace property access and assignments
-        content = prefix + content
-          .replaceAll('.innerHTML', '[__iH__]')
-          .replaceAll('"innerHTML"', '__iH__')
-          .replaceAll('innerHTML', 'innerH_TML');
+        content =
+          prefix +
+          content
+            .replaceAll('.innerHTML', '[__iH__]')
+            .replaceAll('"innerHTML"', '__iH__')
+            .replaceAll('innerHTML', 'innerH_TML');
         writeFileSync(fullPath, content, 'utf-8');
         console.log(`Patched innerHTML in: ${fullPath}`);
       }

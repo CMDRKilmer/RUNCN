@@ -1,28 +1,46 @@
 <script setup lang="ts">
-import { fixed0, ddmmyyyy } from '@src/utils/format';
+import { fixed0, ddmm, ddmmyyyy, mmyyyy } from '@src/utils/format';
 
-const { totals } = defineProps<{
+type Granularity = 'daily' | 'weekly' | 'monthly';
+
+const props = defineProps<{
   date: number;
   hideTotals?: boolean;
   totals: { [currency: string]: { purchases: number; sales: number } };
+  granularity: Granularity;
 }>();
 
 const totalsLabels = computed(() => {
-  return Object.keys(totals)
+  return Object.keys(props.totals)
     .sort()
     .map(x => ({
       currency: x,
-      purchases: totals[x].purchases,
-      sales: totals[x].sales,
-      total: totals[x].sales - totals[x].purchases,
+      purchases: props.totals[x].purchases,
+      sales: props.totals[x].sales,
+      total: props.totals[x].sales - props.totals[x].purchases,
     }));
+});
+
+const dateLabel = computed(() => {
+  switch (props.granularity) {
+    case 'weekly': {
+      const end = new Date(props.date + 6 * 24 * 60 * 60 * 1000);
+      return `${ddmm(props.date)} - ${ddmm(end.getTime())} ${new Date(props.date).getFullYear()}`;
+    }
+    case 'monthly': {
+      return mmyyyy(props.date);
+    }
+    default: {
+      return ddmmyyyy(props.date);
+    }
+  }
 });
 </script>
 
 <template>
   <tr>
     <td colspan="2" :class="$style.column">
-      <span>{{ ddmmyyyy(date) }}</span>
+      <span>{{ dateLabel }}</span>
     </td>
     <!-- 需要这个 <tr> 以保证另外两个 <tr> 颜色相同 -->
     <td :style="{ display: 'none' }" />

@@ -69,6 +69,11 @@ export const ddmmyyyy = dateTimeFormat({
   year: 'numeric',
 });
 
+export const mmyyyy = dateTimeFormat({
+  month: '2-digit',
+  year: 'numeric',
+});
+
 export const fixed0 = numberFormat({
   maximumFractionDigits: 0,
 });
