@@ -97,17 +97,15 @@ const planetBurn = computed(() => {
       overallBurn[ticker].output += mat.output;
       overallBurn[ticker].workforce += mat.workforce;
       overallBurn[ticker].inventory += mat.inventory;
+      overallBurn[ticker].remainingAllocation += mat.remainingAllocation;
     }
   }
 
   for (const ticker of Object.keys(overallBurn)) {
     const mat = overallBurn[ticker];
     mat.dailyAmount = mat.output - mat.input - mat.workforce;
-    if (mat.dailyAmount >= 0) {
-      mat.daysLeft = 1000;
-    } else {
-      mat.daysLeft = -mat.inventory / mat.dailyAmount;
-    }
+    const inv = mat.remainingAllocation + mat.inventory;
+    mat.daysLeft = mat.dailyAmount >= 0 ? Number.POSITIVE_INFINITY : inv / -mat.dailyAmount;
   }
 
   const overallSection = { burn: overallBurn, planetName: '总览', naturalId: '', storeId: '' };

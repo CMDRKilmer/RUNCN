@@ -127,7 +127,7 @@ export function calculatePlanetBurn(
       for (const need of tier.needs) {
         const materialBurn = getBurnValue(need.material.ticker);
         materialBurn.workforce += need.unitsPerInterval;
-        materialBurn.remainingAllocation = need.remainingAllocation ?? 0;
+        materialBurn.remainingAllocation += need.remainingAllocation ?? 0;
       }
     }
   }
@@ -158,14 +158,14 @@ export function calculatePlanetBurn(
           continue;
         }
         materialBurn.inventory += quantity.amount;
-        if (quantity.amount != 0) {
-          materialBurn.daysLeft =
-            materialBurn.dailyAmount > 0
-              ? 1000
-              : -materialBurn.inventory / materialBurn.dailyAmount;
-        }
       }
     }
+  }
+
+  for (const ticker of Object.keys(burnValues)) {
+    const mat = burnValues[ticker];
+    const inv = mat.remainingAllocation + mat.inventory;
+    mat.daysLeft = mat.dailyAmount >= 0 ? Number.POSITIVE_INFINITY : inv / -mat.dailyAmount;
   }
 
   return burnValues;
