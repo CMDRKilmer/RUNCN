@@ -7,8 +7,7 @@
     "allowJs": true,
     "noEmit": true,
     "allowImportingTsExtensions": false,
-    "downlevelIteration": true,
-    "ignoreDeprecations": "5.0",
+    "ignoreDeprecations": "6.0",
     "isolatedModules": true,
     "strict": true,
     "noImplicitAny": false,
@@ -20,13 +19,13 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noImplicitReturns": true,
-    "baseUrl": "./",
-    "verbatimModuleSyntax": false,
-    "types": ["vite/client", "node", "chrome"],
+    "baseUrl": ".",
     "paths": {
       "@src/*": ["src/*"],
       "~/*": ["src/assets/*"]
     },
+    "verbatimModuleSyntax": false,
+    "types": ["vite/client", "node", "chrome"],
     "lib": ["DOM", "WebWorker", "ESNext"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "src/**/*.vue", "vite.config.mts"]
