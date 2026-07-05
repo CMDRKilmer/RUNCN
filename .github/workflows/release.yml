@@ -48,7 +48,7 @@ jobs:
         run: |
           FILENAME_ZIP="$PROJECT_NAME-$DAILY_VERSION-for-local-testing-only.zip"
           FILENAME_CRX="$PROJECT_NAME-$DAILY_VERSION.crx"
-          cd "$DIRECTORY" && zip -r "$FILENAME_ZIP" ./* && npx crx pack . -o "$FILENAME_CRX" && gh release create "$DAILY_VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" --draft --notes-file ../LIULILOG.md
+          cd "$DIRECTORY" && zip -r "$FILENAME_ZIP" ./* && npx crx pack . -o "$FILENAME_CRX" && gh release create "$DAILY_VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" --draft --generate-notes
 
   chrome:
     if: needs.build.outputs.created
