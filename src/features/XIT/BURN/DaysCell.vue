@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { userData } from '@src/store/user-data';
-import { fixed0, fixed01 } from '@src/utils/format';
+import { fixed0, fixed01, fixed02 } from '@src/utils/format';
 
 const { days } = defineProps<{ days: number }>();
 
@@ -11,7 +11,10 @@ const formattedDays = computed(() => {
   if (days >= 10) {
     return fixed0(Math.floor(days));
   }
-  return fixed01(days);
+  if (days >= 1) {
+    return fixed01(days);
+  }
+  return fixed02(days);
 });
 
 const burnClass = computed(() => {
