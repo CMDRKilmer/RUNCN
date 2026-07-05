@@ -286,3 +286,59 @@ export function calculateContractReceivable(contract: PrunApi.Contract): {
 
   return { total, currency };
 }
+
+export interface ShipmentIconItem {
+  type: 'SHIPMENT';
+  shipmentId: string;
+  fulfilled: boolean;
+}
+
+export interface MaterialIconItem {
+  type: 'MATERIAL';
+  ticker: string;
+  amount: number;
+  fulfilled: boolean;
+}
+
+export type ContractIconItem = ShipmentIconItem | MaterialIconItem;
+
+/**
+ * 提取合同条件中的物品图标列表
+ * @param contract 合同对象
+ * @returns 图标项列表，包含货物装运和材料图标
+ */
+export function getContractIcons(contract: PrunApi.Contract): ContractIconItem[] {
+  const result: ContractIconItem[] = [];
+  for (const condition of contract.conditions) {
+    switch (condition.type) {
+      case 'DELIVERY_SHIPMENT': {
+        if (isSelfCondition(contract, condition)) {
+          result.push({
+            type: 'SHIPMENT',
+            shipmentId: condition.shipmentItemId!,
+            fulfilled: condition.status === 'FULFILLED',
+          });
+          continue;
+        }
+        break;
+      }
+      case 'PROVISION':
+      case 'PICKUP_SHIPMENT': {
+        continue;
+      }
+    }
+
+    const quantity = condition.quantity;
+    if (!quantity?.material) {
+      continue;
+    }
+
+    result.push({
+      type: 'MATERIAL',
+      ticker: quantity.material.ticker,
+      amount: quantity.amount,
+      fulfilled: condition.status === 'FULFILLED',
+    });
+  }
+  return result;
+}

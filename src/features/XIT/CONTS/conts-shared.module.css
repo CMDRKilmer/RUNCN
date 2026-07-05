@@ -1,0 +1,98 @@
+.container {
+  padding: 4px;
+}
+
+.empty {
+  text-align: center;
+  opacity: 0.5;
+  padding: 12px;
+}
+
+.fulfilled {
+  color: var(--rp-color-green);
+}
+
+.active {
+  color: var(--rp-color-orange);
+}
+
+.failed {
+  color: var(--rp-color-red);
+}
+
+.pending {
+  color: var(--rp-color-text);
+}
+
+.totalsBar {
+  display: flex;
+  gap: 16px;
+  padding: 6px 8px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  opacity: 0.8;
+}
+
+.receivableText {
+  color: var(--rp-color-green);
+}
+
+.payableText {
+  color: var(--rp-color-orange);
+}
+
+.warningText {
+  color: var(--rp-color-orange);
+  font-weight: bold;
+}
+
+.sectionHeader {
+  text-align: left;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 6px 8px;
+  border-bottom: 1px solid #2b485a;
+}
+
+.summary {
+  font-weight: normal;
+  font-size: 12px;
+  margin-left: 12px;
+  opacity: 0.7;
+}
+
+.secondTable {
+  margin-top: 12px;
+}
+
+.iconGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  align-items: center;
+}
+
+.dimmed {
+  opacity: 0.3;
+  filter: grayscale(0.6);
+}
+
+.receivable {
+  color: var(--rp-color-green);
+  white-space: nowrap;
+}
+
+.payable {
+  color: var(--rp-color-orange);
+  white-space: nowrap;
+}
+
+.deadlineCell {
+  color: var(--rp-color-accent-primary);
+  white-space: nowrap;
+}
+
+.nextPaymentAmount {
+  font-size: 12px;
+  opacity: 0.8;
+}

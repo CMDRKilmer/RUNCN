@@ -12,9 +12,9 @@ import { isEmpty } from 'ts-extras';
 import {
   canAcceptContract,
   isFactionContract,
-  isSelfCondition,
   calculateContractTotals,
   calculateContractReceivable,
+  getContractIcons,
   formatAmount,
   calculateProgress,
   getStatusText,
@@ -24,6 +24,7 @@ import { timestampEachSecond } from '@src/utils/dayjs';
 import { objectId } from '@src/utils/object-id';
 import dayjs from 'dayjs';
 import '@src/utils/dayjs';
+import $style from '../CONTS/conts-shared.module.css';
 
 const activeFilters = ref(
   new Set<string>(['OPEN', 'CLOSED', 'PARTIALLY_FULFILLED', 'DEADLINE_EXCEEDED']),
@@ -48,61 +49,6 @@ function compareContracts(a: PrunApi.Contract, b: PrunApi.Contract) {
 }
 
 const totals = computed(() => calculateContractTotals(filtered.value));
-
-// 物品图标列表（小尺寸）
-interface ShipmentIconProps {
-  type: 'SHIPMENT';
-  shipmentId: string;
-  fulfilled: boolean;
-}
-
-interface MaterialIconProps {
-  type: 'MATERIAL';
-  ticker: string;
-  amount: number;
-  fulfilled: boolean;
-}
-
-function getIcons(contract: PrunApi.Contract) {
-  const result: (ShipmentIconProps | MaterialIconProps)[] = [];
-  for (const condition of contract.conditions) {
-    switch (condition.type) {
-      case 'DELIVERY_SHIPMENT': {
-        if (isSelfCondition(contract, condition)) {
-          result.push({
-            type: 'SHIPMENT',
-            shipmentId: condition.shipmentItemId!,
-            fulfilled: condition.status === 'FULFILLED',
-          });
-          continue;
-        }
-        break;
-      }
-      case 'PROVISION':
-      case 'PICKUP_SHIPMENT': {
-        continue;
-      }
-    }
-
-    const quantity = condition.quantity;
-    if (
-      quantity === null ||
-      quantity === undefined ||
-      quantity.material === null ||
-      quantity.material === undefined
-    ) {
-      continue;
-    }
-
-    result.push({
-      type: 'MATERIAL',
-      ticker: quantity.material.ticker,
-      amount: quantity.amount,
-      fulfilled: condition.status === 'FULFILLED',
-    });
-  }
-  return result;
-}
 
 // 待收款（对方需要付给我的）
 function getReceivable(contract: PrunApi.Contract) {
@@ -163,7 +109,7 @@ function getDeadline(contract: PrunApi.Contract): string {
             </td>
             <td>
               <div :class="$style.iconGrid">
-                <template v-for="icon in getIcons(contract)" :key="objectId(icon)">
+                <template v-for="icon in getContractIcons(contract)" :key="objectId(icon)">
                   <div :class="[icon.fulfilled && $style.dimmed]">
                     <ShipmentIcon
                       v-if="icon.type === 'SHIPMENT'"
@@ -201,71 +147,3 @@ function getDeadline(contract: PrunApi.Contract): string {
     </table>
   </div>
 </template>
-
-<style module>
-.container {
-  padding: 4px;
-}
-
-.totalsBar {
-  display: flex;
-  gap: 16px;
-  padding: 6px 8px;
-  font-size: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  opacity: 0.8;
-}
-
-.receivableText {
-  color: var(--rp-color-green);
-}
-
-.warningText {
-  color: var(--rp-color-orange);
-  font-weight: bold;
-}
-
-.deadlineCell {
-  color: var(--rp-color-accent-primary);
-  white-space: nowrap;
-}
-
-.iconGrid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  align-items: center;
-}
-
-.dimmed {
-  opacity: 0.3;
-  filter: grayscale(0.6);
-}
-
-.receivable {
-  color: var(--rp-color-green);
-  white-space: nowrap;
-}
-
-.fulfilled {
-  color: var(--rp-color-green);
-}
-
-.active {
-  color: var(--rp-color-orange);
-}
-
-.failed {
-  color: var(--rp-color-red);
-}
-
-.pending {
-  color: var(--rp-color-text);
-}
-
-.empty {
-  text-align: center;
-  opacity: 0.5;
-  padding: 12px;
-}
-</style>

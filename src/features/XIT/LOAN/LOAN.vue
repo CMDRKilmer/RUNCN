@@ -6,6 +6,7 @@ import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import LoanRow from '@src/features/XIT/LOAN/LoanRow.vue';
 import { isEmpty } from 'ts-extras';
 import { isLoanContract, formatAmount } from '@src/features/XIT/CONTS/utils';
+import $style from '../CONTS/conts-shared.module.css';
 
 const activeFilters = ref(
   new Set<string>(['OPEN', 'CLOSED', 'PARTIALLY_FULFILLED', 'DEADLINE_EXCEEDED']),
@@ -171,32 +172,3 @@ const lentSummary = computed(() => getLoanSummary(lent.value));
     </table>
   </div>
 </template>
-
-<style module>
-.container {
-  padding: 4px;
-}
-
-.sectionHeader {
-  text-align: left;
-  font-size: 14px;
-  padding: 6px 8px;
-}
-
-.summary {
-  font-weight: normal;
-  font-size: 12px;
-  margin-left: 12px;
-  opacity: 0.7;
-}
-
-.secondTable {
-  margin-top: 12px;
-}
-
-.empty {
-  text-align: center;
-  opacity: 0.5;
-  padding: 12px;
-}
-</style>

@@ -9,13 +9,12 @@ import {
   getStatusClass,
   calculateProgress,
 } from '@src/features/XIT/CONTS/utils';
+import $style from '../CONTS/conts-shared.module.css';
 
 const { contract } = defineProps<{
   contract: PrunApi.Contract;
   type: 'carrier' | 'shipper';
 }>();
-
-const $style = useCssModule();
 
 // 格式化地址
 function formatAddress(address?: PrunApi.Address): string {
@@ -103,21 +102,3 @@ const statusClass = computed(() => $style[getStatusClass(contract.status)]);
     <td :class="statusClass">{{ statusText }}</td>
   </tr>
 </template>
-
-<style module>
-.fulfilled {
-  color: var(--rp-color-green);
-}
-
-.active {
-  color: var(--rp-color-orange);
-}
-
-.failed {
-  color: var(--rp-color-red);
-}
-
-.pending {
-  color: var(--rp-color-text);
-}
-</style>

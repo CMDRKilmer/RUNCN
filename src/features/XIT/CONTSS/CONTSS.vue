@@ -10,6 +10,7 @@ import {
   calculateContractTotals,
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
+import $style from '../CONTS/conts-shared.module.css';
 
 const activeFilters = ref(
   new Set<string>(['OPEN', 'CLOSED', 'PARTIALLY_FULFILLED', 'DEADLINE_EXCEEDED']),
@@ -85,37 +86,3 @@ const totals = computed(() => calculateContractTotals(filtered.value));
     </table>
   </div>
 </template>
-
-<style module>
-.container {
-  padding: 4px;
-}
-
-.totalsBar {
-  display: flex;
-  gap: 16px;
-  padding: 6px 8px;
-  font-size: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  opacity: 0.8;
-}
-
-.receivableText {
-  color: var(--rp-color-green);
-}
-
-.payableText {
-  color: var(--rp-color-orange);
-}
-
-.warningText {
-  color: var(--rp-color-orange);
-  font-weight: bold;
-}
-
-.empty {
-  text-align: center;
-  opacity: 0.5;
-  padding: 12px;
-}
-</style>

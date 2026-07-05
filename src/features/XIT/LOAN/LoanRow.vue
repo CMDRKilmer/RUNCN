@@ -4,13 +4,12 @@ import ContractLink from '@src/features/XIT/CONTS/ContractLink.vue';
 import PartnerLink from '@src/features/XIT/CONTS/PartnerLink.vue';
 import ProgressBarWithText from '@src/components/ProgressBarWithText.vue';
 import { formatAmount, getStatusText, getStatusClass } from '@src/features/XIT/CONTS/utils';
+import $style from '../CONTS/conts-shared.module.css';
 
 const { contract } = defineProps<{
   contract: PrunApi.Contract;
   type: 'borrow' | 'lend';
 }>();
-
-const $style = useCssModule();
 
 // 贷款发放条件
 const payoutCondition = computed(() => contract.conditions.find(c => c.type === 'LOAN_PAYOUT'));
@@ -120,26 +119,3 @@ const nextPaymentAmount = computed(() => {
     <td :class="statusClass">{{ statusText }}</td>
   </tr>
 </template>
-
-<style module>
-.fulfilled {
-  color: var(--rp-color-green);
-}
-
-.active {
-  color: var(--rp-color-orange);
-}
-
-.failed {
-  color: var(--rp-color-red);
-}
-
-.pending {
-  color: var(--rp-color-text);
-}
-
-.nextPaymentAmount {
-  font-size: 12px;
-  opacity: 0.8;
-}
-</style>
