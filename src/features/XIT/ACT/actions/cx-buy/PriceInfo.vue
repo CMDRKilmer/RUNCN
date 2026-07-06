@@ -29,19 +29,22 @@ function deviation(current?: number | null, average?: number | null) {
   return (current - average) / average;
 }
 
-// Ask 是否明显偏离 7D 均价（>10%），用于加粗显示
-const isAskFarFrom7D = computed(() => {
+// Ask 与 7D 均价的偏离方向及是否触发高亮（>10%）
+const askVs7DSign = computed(() => {
   const d = askVs7D.value;
-  return d !== undefined && Math.abs(d) > 0.1;
+  if (d === undefined || Math.abs(d) <= 0.1) return undefined;
+  return d > 0 ? 'up' : 'down';
 });
+
+// Ask 是否明显偏离 7D 均价（>10%），用于加粗显示
+const isAskFarFrom7D = computed(() => askVs7DSign.value !== undefined);
 
 const style = useCssModule();
 
-function priceClass(d: number | undefined) {
-  if (d === undefined) return undefined;
-  if (d > 0) return style.priceHigh;
-  if (d < 0) return style.priceLow;
-  return undefined;
+// 仅在偏离超过 10% 时返回颜色类；否则不染色
+function priceClass(sign: 'up' | 'down' | undefined) {
+  if (sign === undefined) return undefined;
+  return sign === 'up' ? style.priceHigh : style.priceLow;
 }
 
 function formatPercent(d: number | undefined) {
@@ -75,11 +78,14 @@ function nullable(v: number | null | undefined) {
       <div :class="$style.row">
         <span :class="$style.label">Ask</span>
         <span
-          :class="[$style.value, priceClass(askVs7D), isAskFarFrom7D && $style.bold]"
+          :class="[$style.value, priceClass(askVs7DSign), isAskFarFrom7D && $style.bold]"
           :data-tooltip="
             askVs7D !== undefined ? `相对 7D 均价 ${formatPercent(askVs7D)}` : '无 7D 均价数据'
           ">
           {{ formatCurrency(nullable(info.Ask), fixed01) }}
+          <span v-if="askVs7DSign" :class="[$style.deviation, priceClass(askVs7DSign)]">
+            {{ askVs7DSign === 'up' ? '▲' : '▼' }}{{ formatPercent(askVs7D) }}
+          </span>
         </span>
         <span :class="$style.label">Bid</span>
         <span :class="$style.value">{{ formatCurrency(nullable(info.Bid), fixed01) }}</span>
@@ -157,6 +163,11 @@ function nullable(v: number | null | undefined) {
 
 .priceLow {
   color: rgb(92, 184, 92);
+}
+
+.deviation {
+  margin-left: 6px;
+  font-weight: 700;
 }
 
 .bold {
