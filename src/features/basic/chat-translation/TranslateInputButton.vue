@@ -2,6 +2,7 @@
 import fa from '@src/utils/font-awesome.module.css';
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import Tooltip from '@src/components/Tooltip.vue';
 import { changeInputValue } from '@src/util';
 import { userData } from '@src/store/user-data';
 import { getLanguageLabel } from './languages';
@@ -16,7 +17,12 @@ const errorMsg = ref('');
 const originalCache = ref<string | null>(null);
 
 const enabled = computed(() => userData.settings.translation.enabled);
-const targetLabel = computed(() => getLanguageLabel(userData.settings.translation.targetLanguage));
+const targetLabel = computed(() =>
+  getLanguageLabel(
+    userData.settings.translation.inputTargetLanguage ||
+      userData.settings.translation.targetLanguage,
+  ),
+);
 const tooltip = computed(() => `翻译输入为${targetLabel.value}`);
 
 async function onClick() {
@@ -38,7 +44,9 @@ async function onClick() {
     }
     const result = await translate({
       text: value,
-      targetLanguage: userData.settings.translation.targetLanguage,
+      targetLanguage:
+        userData.settings.translation.inputTargetLanguage ||
+        userData.settings.translation.targetLanguage,
     });
     changeInputValue(input, result.translatedText);
     state.value = 'done';
@@ -56,21 +64,49 @@ function onRestore() {
   state.value = 'idle';
   errorMsg.value = '';
 }
+
+// 将按钮内嵌到输入框：在挂载时调整父容器和输入框内边距，卸载时恢复
+let parentOriginalPosition: string | null = null;
+let inputOriginalPaddingRight: string | null = null;
+onMounted(() => {
+  const parent = input.parentElement;
+  if (!parent) return;
+  const style = window.getComputedStyle(parent);
+  if (style.position === 'static') {
+    parentOriginalPosition = parent.style.position || null;
+    parent.style.position = 'relative';
+  }
+  const inpStyle = window.getComputedStyle(input);
+  inputOriginalPaddingRight = input.style.paddingRight || null;
+  const extra = 42; // 留出按钮宽度
+  const current = parseFloat(inpStyle.paddingRight || '0');
+  input.style.paddingRight = `${current + extra}px`;
+});
+
+onUnmounted(() => {
+  const parent = input.parentElement;
+  if (parent && parentOriginalPosition !== null) {
+    parent.style.position = parentOriginalPosition;
+  }
+  if (inputOriginalPaddingRight !== null) {
+    input.style.paddingRight = inputOriginalPaddingRight;
+  }
+});
 </script>
 
 <template>
-  <span v-if="enabled" :class="$style.root">
-    <button
-      type="button"
-      :class="[C.Button.btn, C.Button.inline, $style.button]"
-      :data-tooltip="tooltip"
-      data-tooltip-position="top"
+  <span v-if="enabled" :class="[$style.root, $style.inInput]">
+    <PrunButton
+      dark
+      inline
+      :class="$style.button"
+      :aria-label="tooltip"
       :disabled="state === 'loading'"
       @click="onClick">
-      <span :class="fa.solid">\uf1ab</span>
+      <span :class="fa.solid">&#xf0ac;</span>
       <span v-if="state === 'loading'"><LoadingSpinner /></span>
-      <span v-else>翻译输入</span>
-    </button>
+    </PrunButton>
+    <Tooltip v-if="state !== 'done'" :tooltip="tooltip" position="top" />
     <PrunButton v-if="state === 'done' && originalCache !== null" dark inline @click="onRestore">
       恢复原始输入
     </PrunButton>
@@ -84,6 +120,14 @@ function onRestore() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.inInput {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
 }
 
 .button {
