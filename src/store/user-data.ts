@@ -56,6 +56,15 @@ export const initialUserData = deepFreeze({
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
     mutedDesktopNotifications: [] as string[],
+    translation: {
+      enabled: true,
+      provider: 'LIBRE',
+      targetLanguage: 'zh',
+      apiKey: '',
+      apiUrl: 'https://translate.argosopentech.com',
+      fontSize: 14,
+      backgroundColor: '#2a2a2a',
+    } as UserData.TranslationSettings,
   },
   sorting: {} as Record<string, UserData.StoreSortingData>,
   balanceHistory: {

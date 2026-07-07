@@ -17,6 +17,22 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '07.07.2026 Add translation settings',
+    userData => {
+      if (!userData.settings.translation) {
+        userData.settings.translation = {
+          enabled: true,
+          provider: 'LIBRE',
+          targetLanguage: 'zh',
+          apiKey: '',
+          apiUrl: 'https://translate.argosopentech.com',
+          fontSize: 14,
+          backgroundColor: '#2a2a2a',
+        };
+      }
+    },
+  ],
+  [
     '03.04.2026 Rename default cart name',
     userData => {
       if (!userData.cart) {

@@ -144,4 +144,16 @@ declare namespace UserData {
     customOutputPrices: Record<string, number>;
     customWfPrices: Record<string, number>;
   }
+
+  type TranslationProviderId = 'LIBRE' | 'GOOGLE' | 'DEEP';
+
+  interface TranslationSettings {
+    enabled: boolean;
+    provider: TranslationProviderId;
+    targetLanguage: string;
+    apiKey: string;
+    apiUrl: string;
+    fontSize: number;
+    backgroundColor: string;
+  }
 }
