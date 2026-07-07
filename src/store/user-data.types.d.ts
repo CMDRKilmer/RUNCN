@@ -145,15 +145,18 @@ declare namespace UserData {
     customWfPrices: Record<string, number>;
   }
 
-  type TranslationProviderId = 'LIBRE' | 'GOOGLE' | 'DEEP';
+  type TranslationProviderId = 'MICROSOFT' | 'GOOGLE' | 'DEEP' | 'HUGGINGFACE' | 'CUSTOM';
 
   interface TranslationSettings {
     enabled: boolean;
     provider: TranslationProviderId;
     targetLanguage: string;
+    inputTargetLanguage: string;
     apiKey: string;
     apiUrl: string;
-    fontSize: number;
-    backgroundColor: string;
+    apiPreset: string;
+    apiRegion: string;
+    translatedColor: string;
+    showOriginal: boolean;
   }
 }

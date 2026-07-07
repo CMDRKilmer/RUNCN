@@ -3,11 +3,17 @@ import TranslateInputButton from './TranslateInputButton.vue';
 
 function onTileReady(tile: PrunTile) {
   // Input translate button: one per channel controls bar.
-  subscribe($$(tile.anchor, C.Channel.controls), controls => {
+  subscribe($$(tile.anchor, C.Channel.controls), () => {
     subscribe($$(tile.anchor, C.Channel.prompt), async prompt => {
       // The chat input is an <input> inside the prompt area.
       const input = await $(prompt, 'input');
-      createFragmentApp(TranslateInputButton, reactive({ input })).appendTo(controls);
+      // 将翻译按钮放入输入框内部（通过绝对定位在父容器中实现）
+      const parent = input.parentElement!;
+      const parentStyle = window.getComputedStyle(parent);
+      if (parentStyle.position === 'static') {
+        parent.style.position = 'relative';
+      }
+      createFragmentApp(TranslateInputButton, reactive({ input })).appendTo(parent);
     });
   });
 
@@ -27,7 +33,9 @@ function onTileReady(tile: PrunTile) {
       if (text.length === 0) {
         return;
       }
-      createFragmentApp(TranslateMessageButton, reactive({ text })).appendTo(textEl.parentElement!);
+      createFragmentApp(TranslateMessageButton, reactive({ text, textElement: textEl })).appendTo(
+        textEl.parentElement!,
+      );
     });
   });
 }

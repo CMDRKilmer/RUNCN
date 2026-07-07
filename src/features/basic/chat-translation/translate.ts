@@ -12,5 +12,6 @@ export async function translate(request: TranslationRequest): Promise<Translatio
     throw new TranslationError('翻译功能已禁用。请在 XIT SET 翻译设置中启用。', false);
   }
   const provider = getProvider(settings.provider);
-  return provider.translate({ text, targetLanguage: settings.targetLanguage }, settings);
+  const target = request.targetLanguage ?? settings.targetLanguage;
+  return provider.translate({ text, targetLanguage: target }, settings);
 }

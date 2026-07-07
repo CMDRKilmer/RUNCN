@@ -19,9 +19,12 @@ const label = computed(() => {
   return source ? `[已翻译：${source} → ${target}]` : `[已翻译：${target}]`;
 });
 
+const DEFAULT_FONT_SIZE = 14;
+const DEFAULT_BACKGROUND = '#2a2a2a';
+
 const containerStyle = computed(() => ({
-  fontSize: `${settings.value.fontSize}px`,
-  backgroundColor: settings.value.backgroundColor,
+  fontSize: `${DEFAULT_FONT_SIZE}px`,
+  backgroundColor: DEFAULT_BACKGROUND,
 }));
 </script>
 

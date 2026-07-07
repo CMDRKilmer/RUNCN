@@ -22,13 +22,23 @@ const migrations: MigrationEntry[] = [
       if (!userData.settings.translation) {
         userData.settings.translation = {
           enabled: true,
-          provider: 'LIBRE',
+          provider: 'MICROSOFT',
           targetLanguage: 'zh',
+          inputTargetLanguage: 'zh',
           apiKey: '',
-          apiUrl: 'https://translate.argosopentech.com',
-          fontSize: 14,
-          backgroundColor: '#2a2a2a',
+          apiUrl: '',
+          apiPreset: 'AZURE_GLOBAL',
+          apiRegion: '',
+          showOriginal: false,
         };
+      } else {
+        userData.settings.translation.showOriginal ??= false;
+        userData.settings.translation.inputTargetLanguage ??=
+          userData.settings.translation.targetLanguage ?? 'zh';
+        userData.settings.translation.apiPreset ??= 'AZURE_GLOBAL';
+        userData.settings.translation.apiRegion ??= '';
+        userData.settings.translation.apiUrl ??= '';
+        userData.settings.translation.translatedColor ??= '#28a745';
       }
     },
   ],
