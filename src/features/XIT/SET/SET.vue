@@ -5,6 +5,7 @@ import GAME from '@src/features/XIT/SET/GAME.vue';
 import FEAT from '@src/features/XIT/SET/FEAT.vue';
 import FIN from '@src/features/XIT/SET/FIN.vue';
 import BFR from '@src/features/XIT/SET/BFR.vue';
+import TRANSLATE from '@src/features/XIT/SET/TRANSLATE.vue';
 
 const tabs: Tab[] = [
   {
@@ -26,6 +27,11 @@ const tabs: Tab[] = [
     id: 'BFR',
     label: '缓冲区',
     component: BFR,
+  },
+  {
+    id: 'TRANSLATE',
+    label: '翻译',
+    component: TRANSLATE,
   },
 ];
 
