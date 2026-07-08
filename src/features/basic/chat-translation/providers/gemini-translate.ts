@@ -4,7 +4,7 @@ import { buildTranslationPrompt } from './llm-openai-compat';
 
 const DEFAULT_URL_TEMPLATE =
   'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent';
-const DEFAULT_MODEL = 'gemini-1.5-flash';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 export const geminiTranslateProvider: TranslationProvider = {
   id: 'GEMINI',
