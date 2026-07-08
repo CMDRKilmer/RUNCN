@@ -3,7 +3,7 @@ import { TranslationError } from '../types';
 import { buildTranslationPrompt } from './llm-openai-compat';
 
 const DEFAULT_URL = 'https://api.anthropic.com/v1/messages';
-const DEFAULT_MODEL = 'claude-3-5-haiku-latest';
+const DEFAULT_MODEL = 'claude-haiku-4-5';
 
 export const anthropicTranslateProvider: TranslationProvider = {
   id: 'ANTHROPIC',
