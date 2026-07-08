@@ -18,7 +18,10 @@ export const googleTranslateProvider: TranslationProvider = {
     if (!providerConfig.apiKey) {
       throw new TranslationError('未配置 Google API 密钥。', false);
     }
-    const url = `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(providerConfig.apiKey)}`;
+    // Pass the API key via the X-Goog-Api-Key header rather than a URL
+    // query param. Query strings leak into browser history, proxy logs,
+    // Referer headers and any fetch/XHR monkey-patch on the page.
+    const url = 'https://translation.googleapis.com/language/translate/v2';
     const body = {
       q: request.text,
       target: request.targetLanguage,
@@ -29,11 +32,14 @@ export const googleTranslateProvider: TranslationProvider = {
     try {
       response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': providerConfig.apiKey,
+        },
         body: JSON.stringify(body),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到 Google 翻译服务。');
     }
     if (!response.ok) {
       throw new TranslationError(`Google 翻译错误：${response.status} ${response.statusText}`);
@@ -51,10 +57,3 @@ export const googleTranslateProvider: TranslationProvider = {
     };
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) {
-    return e.message;
-  }
-  return String(e);
-}

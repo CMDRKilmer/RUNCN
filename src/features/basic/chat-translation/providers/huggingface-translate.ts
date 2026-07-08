@@ -21,6 +21,9 @@ export const huggingfaceTranslateProvider: TranslationProvider = {
     if (!url) {
       throw new TranslationError('未配置 Hugging Face 模型 API 地址。', false);
     }
+    if (!url.startsWith('https://')) {
+      throw new TranslationError('Hugging Face API 地址必须使用 HTTPS 协议。', false);
+    }
     if (!providerConfig.apiKey) {
       throw new TranslationError('未配置 Hugging Face API 密钥。', false);
     }
@@ -36,7 +39,7 @@ export const huggingfaceTranslateProvider: TranslationProvider = {
         body: JSON.stringify({ inputs: request.text }),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：无法连接到 Hugging Face 服务。${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到 Hugging Face 服务。');
     }
 
     if (!response.ok) {
@@ -84,9 +87,4 @@ function isTranslationResponse(value: unknown): value is { translations: Array<{
     'text' in firstTranslation &&
     typeof (firstTranslation as Record<string, unknown>).text === 'string'
   );
-}
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
 }

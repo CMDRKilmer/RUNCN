@@ -19,6 +19,9 @@ export const customHttpTranslateProvider: TranslationProvider = {
     if (!url) {
       throw new TranslationError('未配置自定义翻译 API 地址。', false);
     }
+    if (!url.startsWith('https://')) {
+      throw new TranslationError('自定义翻译 API 地址必须使用 HTTPS 协议。', false);
+    }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (providerConfig.apiKey) headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
@@ -31,7 +34,7 @@ export const customHttpTranslateProvider: TranslationProvider = {
         body: JSON.stringify({ q: request.text, target: request.targetLanguage }),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：无法连接到自定义翻译服务。${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到自定义翻译服务。');
     }
 
     if (!response.ok) {
@@ -58,8 +61,3 @@ export const customHttpTranslateProvider: TranslationProvider = {
     throw new TranslationError('自定义翻译服务未返回可识别的翻译结果。');
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
-}

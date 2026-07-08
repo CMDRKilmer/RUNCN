@@ -51,11 +51,17 @@ async function loadUserData() {
     if (e.source !== window) {
       return;
     }
+    // Reject messages from any other origin. The page script posts with
+    // targetOrigin=location.origin, so a mismatch indicates an injected
+    // frame or spoofed sender we should not trust.
+    if (e.origin !== location.origin) {
+      return;
+    }
     if (e.data.type === 'rp-save-user-data') {
       await chrome.storage.local.set({
         [userDataKey]: e.data.userData,
       });
-      window.postMessage({ type: 'rp-user-data-saved' }, '*');
+      window.postMessage({ type: 'rp-user-data-saved' }, location.origin);
     }
   });
   const userData = await chrome.storage.local.get(userDataKey);

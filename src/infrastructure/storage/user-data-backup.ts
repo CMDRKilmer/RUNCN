@@ -48,13 +48,35 @@ export function backupUserData(data: any) {
     return;
   }
   backups.unshift({
-    data,
+    // Strip credentials before writing to localStorage. Any same-origin
+    // script can read localStorage with no effort, so secrets must not live
+    // there. Users restoring from backup will need to re-enter API keys.
+    data: sanitizeForBackup(data),
     timestamp: Date.now(),
   });
   while (backups.length > maxBackups) {
     backups.pop();
   }
   saveBackups(backups);
+}
+
+// Returns a deep clone with all credential-bearing fields blanked out.
+function sanitizeForBackup(data: any): any {
+  // JSON round-trip gives a plain clone of the already-toRaw'd userData.
+  const clone = JSON.parse(JSON.stringify(data));
+  if (clone?.settings?.translation?.providerConfigs) {
+    for (const id of Object.keys(clone.settings.translation.providerConfigs)) {
+      const config = clone.settings.translation.providerConfigs[id];
+      if (config && typeof config === 'object') {
+        config.apiKey = '';
+      }
+    }
+  }
+  if (clone) {
+    clone.factionToken = undefined;
+    clone.supabaseAuth = undefined;
+  }
+  return clone;
 }
 
 export function deleteUserDataBackup(backup: UserDataBackup) {
