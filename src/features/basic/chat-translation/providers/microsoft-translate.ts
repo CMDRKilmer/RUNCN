@@ -1,5 +1,6 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 function mapLang(code: string): string {
   // Map simple codes to Azure Translator codes where necessary
@@ -57,19 +58,18 @@ export const microsoftTranslateProvider: TranslationProvider = {
       headers['Ocp-Apim-Subscription-Region'] = settings.apiRegion;
     }
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers,
         body: JSON.stringify([{ Text: request.text }]),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到翻译服务。');
-    }
+      },
+      'Microsoft Translator',
+    );
 
     if (!response.ok) {
-      throw new TranslationError(`翻译服务返回错误：${response.status} ${response.statusText}`);
+      throw errorForStatus('Microsoft Translator', response.status);
     }
 
     const data = (await response.json()) as Array<{

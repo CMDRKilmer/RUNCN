@@ -1,5 +1,6 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 export const googleTranslateProvider: TranslationProvider = {
   id: 'GOOGLE',
@@ -28,21 +29,20 @@ export const googleTranslateProvider: TranslationProvider = {
       format: 'text',
     };
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': providerConfig.apiKey,
         },
         body: JSON.stringify(body),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到 Google 翻译服务。');
-    }
+      },
+      'Google Translate',
+    );
     if (!response.ok) {
-      throw new TranslationError(`Google 翻译错误：${response.status} ${response.statusText}`);
+      throw errorForStatus('Google Translate', response.status);
     }
     const data = (await response.json()) as {
       data?: { translations?: { translatedText?: string; detectedSourceLanguage?: string }[] };

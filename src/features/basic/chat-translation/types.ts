@@ -6,6 +6,10 @@ export interface TranslationRequest {
 export interface TranslationResult {
   translatedText: string;
   detectedSourceLanguage?: string;
+  // Set when the input was longer than the safety cap and silently
+  // truncated before being sent to the provider. The UI should
+  // surface this so the user knows only a prefix was translated.
+  truncated?: boolean;
 }
 
 export interface TranslationProvider {

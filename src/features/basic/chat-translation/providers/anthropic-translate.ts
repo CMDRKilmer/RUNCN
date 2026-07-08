@@ -1,6 +1,7 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
 import { buildTranslationPrompt } from './llm-openai-compat';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 const DEFAULT_URL = 'https://api.anthropic.com/v1/messages';
 const DEFAULT_MODEL = 'claude-haiku-4-5';
@@ -32,9 +33,9 @@ export const anthropicTranslateProvider: TranslationProvider = {
     const model = providerConfig.apiModel || DEFAULT_MODEL;
     const prompt = buildTranslationPrompt(request.targetLanguage);
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers: {
           'x-api-key': providerConfig.apiKey,
@@ -47,13 +48,12 @@ export const anthropicTranslateProvider: TranslationProvider = {
           system: prompt,
           messages: [{ role: 'user', content: request.text }],
         }),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到 Anthropic。');
-    }
+      },
+      'Anthropic',
+    );
 
     if (!response.ok) {
-      throw new TranslationError(`Anthropic 返回错误：${response.status} ${response.statusText}`);
+      throw errorForStatus('Anthropic', response.status);
     }
 
     const data = (await response.json()) as {

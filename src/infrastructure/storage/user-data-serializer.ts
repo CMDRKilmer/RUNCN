@@ -46,7 +46,16 @@ function watchUserData() {
     userData,
     () => {
       if (import.meta.env.DEV) {
-        console.log(userData);
+        // Never log the live object: providerConfigs[*].apiKey stores
+        // plaintext API keys and would be captured by the browser console.
+        const translation = userData.settings.translation;
+        const provider = translation.provider;
+        const hasKey = (translation.providerConfigs[provider]?.apiKey ?? '').length > 0;
+        console.log('userData changed', {
+          provider,
+          hasApiKey: hasKey,
+          enabled: translation.enabled,
+        });
       }
       if (!saveQueued) {
         setTimeout(() => {

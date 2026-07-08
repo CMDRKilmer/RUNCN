@@ -15,6 +15,7 @@ const state = ref<State>('idle');
 const error = ref<TranslationError | null>(null);
 const originalText = ref(text);
 const translatedText = ref('');
+const truncated = ref(false);
 let translatedNode: HTMLElement | null = null;
 let originalNode: HTMLElement | null = null;
 
@@ -83,10 +84,16 @@ async function onClick() {
       text,
       targetLanguage: userData.settings.translation.targetLanguage,
     });
+    truncated.value = result.truncated === true;
     renderTranslatedText(result.translatedText);
     state.value = 'done';
   } catch (e) {
-    error.value = e instanceof TranslationError ? e : new TranslationError(String(e));
+    // TranslateMessageButton renders error.message into the DOM. If a
+    // non-TranslationError reaches us (e.g. a raw TypeError from fetch
+    // that mentions URLs/CORS state) we surface a generic message
+    // instead so we never leak internal detail into the chat UI.
+    error.value =
+      e instanceof TranslationError ? e : new TranslationError('翻译失败，请稍后重试。');
     state.value = 'error';
   }
 }
@@ -95,6 +102,7 @@ function onRestore() {
   textElement.textContent = originalText.value;
   state.value = 'idle';
   error.value = null;
+  truncated.value = false;
 }
 </script>
 
@@ -117,6 +125,9 @@ function onRestore() {
       <PrunButton v-if="error!.retryable" dark inline @click="onClick">重试</PrunButton>
     </template>
     <PrunButton v-if="state === 'done'" dark inline @click="onRestore">恢复原文</PrunButton>
+    <span v-if="state === 'done' && truncated" :class="$style.warning"
+      >⚠ 已截断（仅翻译前 2000 字符）</span
+    >
   </span>
 </template>
 
@@ -138,5 +149,10 @@ function onRestore() {
 .error {
   color: #d9534f;
   font-size: 12px;
+}
+
+.warning {
+  color: #d9822b;
+  font-size: 11px;
 }
 </style>

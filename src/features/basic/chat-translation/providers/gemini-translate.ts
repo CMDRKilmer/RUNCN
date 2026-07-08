@@ -1,6 +1,7 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
 import { buildTranslationPrompt } from './llm-openai-compat';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 const DEFAULT_URL_TEMPLATE =
   'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent';
@@ -34,11 +35,9 @@ export const geminiTranslateProvider: TranslationProvider = {
     }
     const prompt = buildTranslationPrompt(request.targetLanguage);
 
-    let response: Response;
-    try {
-      // Pass the key via the x-goog-api-key header instead of a URL query
-      // param to keep it out of history, proxy logs and Referer headers.
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -49,15 +48,12 @@ export const geminiTranslateProvider: TranslationProvider = {
           contents: [{ role: 'user', parts: [{ text: request.text }] }],
           generationConfig: { temperature: 0 },
         }),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到 Google Gemini。');
-    }
+      },
+      'Google Gemini',
+    );
 
     if (!response.ok) {
-      throw new TranslationError(
-        `Google Gemini 返回错误：${response.status} ${response.statusText}`,
-      );
+      throw errorForStatus('Google Gemini', response.status);
     }
 
     const data = (await response.json()) as {

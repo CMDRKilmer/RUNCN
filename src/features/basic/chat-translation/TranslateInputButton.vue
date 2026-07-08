@@ -15,6 +15,7 @@ type State = 'idle' | 'loading' | 'done' | 'error';
 const state = ref<State>('idle');
 const errorMsg = ref('');
 const originalCache = ref<string | null>(null);
+const truncated = ref(false);
 
 const enabled = computed(() => userData.settings.translation.enabled);
 const targetLabel = computed(() =>
@@ -48,6 +49,7 @@ async function onClick() {
         userData.settings.translation.inputTargetLanguage ||
         userData.settings.translation.targetLanguage,
     });
+    truncated.value = result.truncated === true;
     changeInputValue(input, result.translatedText);
     state.value = 'done';
   } catch (e) {
@@ -63,6 +65,7 @@ function onRestore() {
   }
   state.value = 'idle';
   errorMsg.value = '';
+  truncated.value = false;
 }
 
 // 将按钮内嵌到输入框：在挂载时调整父容器和输入框内边距，卸载时恢复
@@ -112,6 +115,9 @@ onUnmounted(() => {
     </PrunButton>
     <PrunButton v-if="state === 'error'" dark inline @click="onClick">重试</PrunButton>
     <span v-if="state === 'error'" :class="$style.error">{{ errorMsg }}</span>
+    <span v-if="state === 'done' && truncated" :class="$style.warning"
+      >⚠ 已截断（仅翻译前 2000 字符）</span
+    >
   </span>
 </template>
 
@@ -140,5 +146,10 @@ onUnmounted(() => {
 .error {
   color: #d9534f;
   font-size: 12px;
+}
+
+.warning {
+  color: #d9822b;
+  font-size: 11px;
 }
 </style>

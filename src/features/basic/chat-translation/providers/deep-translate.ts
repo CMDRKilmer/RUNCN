@@ -1,5 +1,6 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 export const deepTranslateProvider: TranslationProvider = {
   id: 'DEEP',
@@ -28,18 +29,17 @@ export const deepTranslateProvider: TranslationProvider = {
     params.set('text', request.text);
     params.set('target_lang', request.targetLanguage.toUpperCase());
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到 DeepL 服务。');
-    }
+      },
+      'DeepL',
+    );
     if (!response.ok) {
-      throw new TranslationError(`DeepL 错误：${response.status} ${response.statusText}`);
+      throw errorForStatus('DeepL', response.status);
     }
     const data = (await response.json()) as {
       translations?: { text?: string; detected_source_language?: string }[];

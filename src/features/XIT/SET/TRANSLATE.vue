@@ -73,6 +73,15 @@ async function onChange() {
 
 <template>
   <SectionHeader>翻译设置</SectionHeader>
+  <div v-if="showLlmSettings" :class="$style.llmWarning">
+    <strong>⚠ 内容将发送到第三方 LLM 服务</strong>
+    <div :class="$style.llmWarningBody">
+      你选中的翻译服务（{{
+        currentProvider?.name ?? settings.provider
+      }}）会将你点击翻译的聊天原文发送到该服务商的服务器以获取翻译结果。
+      请勿翻译包含账号密码、支付信息等高度敏感内容。
+    </div>
+  </div>
   <form>
     <Active label="启用翻译功能" tooltip="关闭后所有翻译按钮将隐藏。">
       <input v-model="settings.enabled" type="checkbox" @change="onChange" />
@@ -199,5 +208,20 @@ async function onChange() {
   color: #999;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.llmWarning {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid #d9822b;
+  background: rgba(217, 130, 43, 0.12);
+  color: #d9822b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.llmWarningBody {
+  margin-top: 4px;
+  color: #b3b3b3;
 }
 </style>

@@ -1,5 +1,6 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 export const huggingfaceTranslateProvider: TranslationProvider = {
   id: 'HUGGINGFACE',
@@ -28,24 +29,21 @@ export const huggingfaceTranslateProvider: TranslationProvider = {
       throw new TranslationError('未配置 Hugging Face API 密钥。', false);
     }
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${providerConfig.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ inputs: request.text }),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到 Hugging Face 服务。');
-    }
+      },
+      'Hugging Face',
+    );
 
     if (!response.ok) {
-      throw new TranslationError(
-        `Hugging Face 返回错误：${response.status} ${response.statusText}`,
-      );
+      throw errorForStatus('Hugging Face', response.status);
     }
 
     const data = await response.json();

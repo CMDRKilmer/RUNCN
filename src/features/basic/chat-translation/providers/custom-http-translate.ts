@@ -1,5 +1,6 @@
 import type { TranslationProvider, TranslationRequest, TranslationResult } from '../types';
 import { TranslationError } from '../types';
+import { errorForStatus, fetchWithTimeout } from '../security';
 
 export const customHttpTranslateProvider: TranslationProvider = {
   id: 'CUSTOM',
@@ -26,21 +27,18 @@ export const customHttpTranslateProvider: TranslationProvider = {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (providerConfig.apiKey) headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
 
-    let response: Response;
-    try {
-      response = await fetch(url, {
+    const response = await fetchWithTimeout(
+      url,
+      {
         method: 'POST',
         headers,
         body: JSON.stringify({ q: request.text, target: request.targetLanguage }),
-      });
-    } catch (e) {
-      throw new TranslationError('网络错误：无法连接到自定义翻译服务。');
-    }
+      },
+      '自定义翻译服务',
+    );
 
     if (!response.ok) {
-      throw new TranslationError(
-        `自定义翻译服务返回错误：${response.status} ${response.statusText}`,
-      );
+      throw errorForStatus('自定义翻译服务', response.status);
     }
 
     const data = await response.json();
