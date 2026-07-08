@@ -5,6 +5,7 @@ import { deepToRaw } from '@src/utils/deep-to-raw';
 import { backupUserData, getUserDataBackups } from '@src/infrastructure/storage/user-data-backup';
 import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import dayjs from 'dayjs';
+import { isEncryptedApiKeyValue, postSaveSecretKeys, resolveApiKey } from './api-key-gateway';
 
 const fileType = 'rp-user-data';
 
@@ -46,8 +47,10 @@ function watchUserData() {
     userData,
     () => {
       if (import.meta.env.DEV) {
-        // Never log the live object: providerConfigs[*].apiKey stores
-        // plaintext API keys and would be captured by the browser console.
+        // Never log the live object: providerConfigs[*].apiKey holds
+        // either an encrypted-at-rest wrapper or (transiently) a
+        // plaintext. Either way we only report whether *something* is
+        // configured, never the key itself.
         const translation = userData.settings.translation;
         const provider = translation.provider;
         const hasKey = (translation.providerConfigs[provider]?.apiKey ?? '').length > 0;
@@ -71,6 +74,36 @@ function watchUserData() {
 
 export async function saveUserData() {
   const data = deepToRaw(userData);
+  // The apiKey fields in userData are wrapped ciphertext by default.
+  // Pull the plaintext out for any non-empty wrapped key and ship it
+  // to the content script in a dedicated, separately-encrypted
+  // message. The main userData blob is persisted with the ciphertext
+  // values unchanged so reads on the next page load are self
+  // contained.
+  const configs = (data as { settings?: { translation?: { providerConfigs?: unknown } } })?.settings
+    ?.translation?.providerConfigs as Record<string, { apiKey?: string }> | undefined;
+  const secretKeys: Record<string, string> = {};
+  if (configs !== undefined) {
+    for (const id of Object.keys(configs)) {
+      const config = configs[id];
+      if (config === undefined || typeof config !== 'object' || config === null) {
+        continue;
+      }
+      const wrapped = config.apiKey;
+      if (typeof wrapped !== 'string' || wrapped.length === 0) {
+        continue;
+      }
+      if (!isEncryptedApiKeyValue(wrapped)) {
+        // Plaintext key (e.g. legacy data). Just ship it as-is.
+        secretKeys[id] = wrapped;
+        continue;
+      }
+      const plain = await resolveApiKey(wrapped);
+      if (plain.length > 0) {
+        secretKeys[id] = plain;
+      }
+    }
+  }
   backupUserData(data);
   await new Promise<void>(resolve => {
     const listener = (e: MessageEvent) => {
@@ -88,6 +121,9 @@ export async function saveUserData() {
     // share the same origin (apex.prosperousuniverse.com).
     window.postMessage({ type: 'rp-save-user-data', userData: data }, location.origin);
   });
+  if (Object.keys(secretKeys).length > 0) {
+    await postSaveSecretKeys(secretKeys);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

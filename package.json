@@ -16,7 +16,8 @@
     "fix": "pnpm exec eslint ./ --fix --concurrency auto",
     "lint": "pnpm exec eslint --concurrency auto",
     "prepare": "husky",
-    "prettier": "prettier . --write --ignore-path .prettierignore"
+    "prettier": "prettier . --write --ignore-path .prettierignore",
+    "test": "vitest run"
   },
   "type": "module",
   "dependencies": {
@@ -64,7 +65,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "^7.18.0",
     "unimport": "^6.3.0",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "vitest": "^4.1.10"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,vue}": [

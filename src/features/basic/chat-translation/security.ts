@@ -26,7 +26,9 @@ export function errorForStatus(providerName: string, status: number): Translatio
   if (status >= 500) {
     return new TranslationError(`${name} 服务暂时不可用，请稍后重试。`);
   }
-  return new TranslationError(`${name} 请求失败。`);
+  // Other 4xx (e.g. 400, 404, 422) are typically caused by a bad
+  // request, not a transient failure, so retrying is unlikely to help.
+  return new TranslationError(`${name} 请求失败（${status}）。`, false);
 }
 
 export function errorForNetwork(providerName: string): TranslationError {
