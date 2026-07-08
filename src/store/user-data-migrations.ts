@@ -17,6 +17,32 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '07.07.2026 Add translation settings',
+    userData => {
+      if (!userData.settings.translation) {
+        userData.settings.translation = {
+          enabled: true,
+          provider: 'MICROSOFT',
+          targetLanguage: 'zh',
+          inputTargetLanguage: 'zh',
+          apiKey: '',
+          apiUrl: '',
+          apiPreset: 'AZURE_GLOBAL',
+          apiRegion: '',
+          showOriginal: false,
+        };
+      } else {
+        userData.settings.translation.showOriginal ??= false;
+        userData.settings.translation.inputTargetLanguage ??=
+          userData.settings.translation.targetLanguage ?? 'zh';
+        userData.settings.translation.apiPreset ??= 'AZURE_GLOBAL';
+        userData.settings.translation.apiRegion ??= '';
+        userData.settings.translation.apiUrl ??= '';
+        userData.settings.translation.translatedColor ??= '#28a745';
+      }
+    },
+  ],
+  [
     '03.04.2026 Rename default cart name',
     userData => {
       if (!userData.cart) {

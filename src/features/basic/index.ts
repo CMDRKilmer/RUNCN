@@ -18,6 +18,7 @@ import './bs-satisfaction-percentage';
 import './bs-warehouse-button';
 import './bui-sort-recipes';
 import './chat-images';
+import './chat-translation/chat-translation';
 import './clickable-apex-logo';
 import './close-all-buffers/close-all-buffers';
 import './cmds-clickable-commands';

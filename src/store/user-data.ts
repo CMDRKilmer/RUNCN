@@ -56,6 +56,18 @@ export const initialUserData = deepFreeze({
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
     mutedDesktopNotifications: [] as string[],
+    translation: {
+      enabled: true,
+      provider: 'MICROSOFT',
+      targetLanguage: 'zh',
+      inputTargetLanguage: 'zh',
+      apiKey: '',
+      apiUrl: '',
+      apiPreset: 'AZURE_GLOBAL',
+      apiRegion: '',
+      translatedColor: '#28a745',
+      showOriginal: false,
+    } as UserData.TranslationSettings,
   },
   sorting: {} as Record<string, UserData.StoreSortingData>,
   balanceHistory: {

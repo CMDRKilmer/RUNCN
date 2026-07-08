@@ -1,0 +1,155 @@
+<script setup lang="ts">
+import SectionHeader from '@src/components/SectionHeader.vue';
+import Active from '@src/components/forms/Active.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
+import Tooltip from '@src/components/Tooltip.vue';
+import { userData } from '@src/store/user-data';
+import { saveUserData } from '@src/infrastructure/storage/user-data-serializer';
+import { TRANSLATION_LANGUAGES } from '@src/features/basic/chat-translation/languages';
+import { ALL_PROVIDERS } from '@src/features/basic/chat-translation/providers';
+
+const settings = computed(() => userData.settings.translation);
+
+const providerOptions = ALL_PROVIDERS.map(p => ({ label: p.name, value: p.id }));
+
+const languageOptions = TRANSLATION_LANGUAGES.map(l => ({ label: l.label, value: l.code }));
+
+const currentProvider = computed(() => ALL_PROVIDERS.find(p => p.id === settings.value.provider));
+const showApiKey = computed(() => currentProvider.value?.requiresApiKey ?? false);
+const showMicrosoftApiSettings = computed(() => settings.value.provider === 'MICROSOFT');
+const showHfSettings = computed(() => settings.value.provider === 'HUGGINGFACE');
+const showCustomSettings = computed(() => settings.value.provider === 'CUSTOM');
+const showGoogleSettings = computed(() => settings.value.provider === 'GOOGLE');
+const showDeepSettings = computed(() => settings.value.provider === 'DEEP');
+
+const presetOptions = [
+  { label: 'Azure (Global)', value: 'AZURE_GLOBAL' },
+  { label: 'Azure (China)', value: 'AZURE_CHINA' },
+  { label: '自定义', value: 'CUSTOM' },
+];
+
+async function onChange() {
+  await saveUserData();
+}
+</script>
+
+<template>
+  <SectionHeader>翻译设置</SectionHeader>
+  <form>
+    <Active label="启用翻译功能" tooltip="关闭后所有翻译按钮将隐藏。">
+      <input v-model="settings.enabled" type="checkbox" @change="onChange" />
+    </Active>
+    <Active
+      label="翻译服务"
+      tooltip="选择翻译服务提供商。Microsoft Translator 需要 Azure 订阅密钥。">
+      <SelectInput
+        v-model="settings.provider"
+        :options="providerOptions"
+        @update:model-value="onChange" />
+    </Active>
+    <Active label="目标语言" tooltip="所有翻译结果的目标语言。你的选择会被记住。">
+      <SelectInput
+        v-model="settings.targetLanguage"
+        :options="languageOptions"
+        @update:model-value="onChange" />
+    </Active>
+    <Active label="输入翻译目标语言" tooltip="仅用于输入框翻译的目标语言（可与上方不同）。">
+      <SelectInput
+        v-model="settings.inputTargetLanguage"
+        :options="languageOptions"
+        @update:model-value="onChange" />
+    </Active>
+    <Active
+      v-if="showMicrosoftApiSettings"
+      label="API 入口"
+      tooltip="选择 Azure 翻译服务入口或使用自定义地址。">
+      <SelectInput
+        v-model="settings.apiPreset"
+        :options="presetOptions"
+        @update:model-value="onChange" />
+      <TextInput
+        v-if="settings.apiPreset === 'CUSTOM'"
+        v-model="settings.apiUrl"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
+    </Active>
+    <Active
+      v-if="showMicrosoftApiSettings"
+      label="API 区域"
+      tooltip="Azure 资源所在区域（需要时填写，例如 eastasia）。">
+      <TextInput v-model="settings.apiRegion" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+    <Active
+      v-if="showHfSettings"
+      label="Hugging Face API"
+      tooltip="填写 Hugging Face API 接口与密钥。">
+      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+    <Active
+      v-if="showCustomSettings"
+      label="自定义 API"
+      tooltip="填写自定义翻译 API 的接口与密钥。">
+      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+
+    <Active
+      v-if="showGoogleSettings"
+      label="Google Translate API"
+      tooltip="填写 Google 翻译 API 的接口与密钥。">
+      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+
+    <Active v-if="showDeepSettings" label="DeepL API" tooltip="填写 DeepL API 的接口与密钥。">
+      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+    <Active
+      v-if="showApiKey"
+      label="API 密钥"
+      tooltip="所选翻译服务所需的 API 密钥。密钥保存在本地，不会上传。">
+      <TextInput v-model="settings.apiKey" @keyup.enter="onChange" @focusout="onChange" />
+    </Active>
+    <!-- 已移除：结果字体大小 与 结果背景颜色 设置 -->
+    <Active label="译文颜色" tooltip="译文文本的颜色（CSS 颜色值），默认绿色。">
+      <input v-model="settings.translatedColor" type="color" @input="onChange" />
+      <span
+        :style="{
+          display: 'inline-block',
+          width: '18px',
+          height: '18px',
+          'margin-left': '8px',
+          'vertical-align': 'middle',
+          'border-radius': '3px',
+          background: settings.translatedColor,
+        }"></span>
+    </Active>
+    <Active label="显示原文" tooltip="翻译后是否在消息中同时显示原文。">
+      <input v-model="settings.showOriginal" type="checkbox" @change="onChange" />
+    </Active>
+  </form>
+  <SectionHeader>
+    说明
+    <Tooltip :class="$style.tooltip" tooltip="所有翻译均为显式触发，不会自动翻译任何内容。" />
+  </SectionHeader>
+  <div :class="$style.note">
+    翻译功能仅在用户点击翻译按钮时调用翻译服务，不会自动发送任何聊天内容。 API
+    接口与密钥在此处填写，密钥保存在本地浏览器存储中。
+  </div>
+</template>
+
+<style module>
+.tooltip {
+  float: revert;
+  font-size: 12px;
+  margin-top: -4px;
+}
+
+.note {
+  padding: 6px 8px;
+  color: #999;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* example styles removed */
+</style>

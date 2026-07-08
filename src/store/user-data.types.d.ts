@@ -144,4 +144,19 @@ declare namespace UserData {
     customOutputPrices: Record<string, number>;
     customWfPrices: Record<string, number>;
   }
+
+  type TranslationProviderId = 'MICROSOFT' | 'GOOGLE' | 'DEEP' | 'HUGGINGFACE' | 'CUSTOM';
+
+  interface TranslationSettings {
+    enabled: boolean;
+    provider: TranslationProviderId;
+    targetLanguage: string;
+    inputTargetLanguage: string;
+    apiKey: string;
+    apiUrl: string;
+    apiPreset: string;
+    apiRegion: string;
+    translatedColor: string;
+    showOriginal: boolean;
+  }
 }
