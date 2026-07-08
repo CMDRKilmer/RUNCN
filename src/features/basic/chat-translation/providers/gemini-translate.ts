@@ -28,13 +28,22 @@ export const geminiTranslateProvider: TranslationProvider = {
     const model = providerConfig.apiModel || DEFAULT_MODEL;
     const urlTemplate = providerConfig.apiUrl || DEFAULT_URL_TEMPLATE;
     const url = urlTemplate.replace('{model}', model).replace(/\/+$/, '');
+    // Reject non-HTTPS overrides so the x-goog-api-key header cannot be sniffed.
+    if (!url.startsWith('https://')) {
+      throw new TranslationError('Google Gemini API 地址必须使用 HTTPS 协议。', false);
+    }
     const prompt = buildTranslationPrompt(request.targetLanguage);
 
     let response: Response;
     try {
-      response = await fetch(`${url}?key=${encodeURIComponent(providerConfig.apiKey)}`, {
+      // Pass the key via the x-goog-api-key header instead of a URL query
+      // param to keep it out of history, proxy logs and Referer headers.
+      response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': providerConfig.apiKey,
+        },
         body: JSON.stringify({
           system_instruction: { parts: [{ text: prompt }] },
           contents: [{ role: 'user', parts: [{ text: request.text }] }],
@@ -42,7 +51,7 @@ export const geminiTranslateProvider: TranslationProvider = {
         }),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：无法连接到 Google Gemini。${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到 Google Gemini。');
     }
 
     if (!response.ok) {
@@ -65,8 +74,3 @@ export const geminiTranslateProvider: TranslationProvider = {
     return { translatedText };
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
-}

@@ -36,7 +36,7 @@ export const deepTranslateProvider: TranslationProvider = {
         body: params.toString(),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到 DeepL 服务。');
     }
     if (!response.ok) {
       throw new TranslationError(`DeepL 错误：${response.status} ${response.statusText}`);
@@ -54,10 +54,3 @@ export const deepTranslateProvider: TranslationProvider = {
     };
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) {
-    return e.message;
-  }
-  return String(e);
-}

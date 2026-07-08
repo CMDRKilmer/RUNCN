@@ -27,12 +27,18 @@ export const microsoftTranslateProvider: TranslationProvider = {
       apiUrl: '',
       apiModel: '',
     };
+    if (!providerConfig.apiKey) {
+      throw new TranslationError('未配置 Microsoft Translator API 密钥。', false);
+    }
     const preset = settings.apiPreset || 'AZURE_GLOBAL';
     let baseUrl = '';
     if (preset === 'CUSTOM') {
       baseUrl = (providerConfig.apiUrl || '').replace(/\/+$/, '');
       if (!baseUrl) {
         throw new TranslationError('自定义 API 地址为空。', false);
+      }
+      if (!baseUrl.startsWith('https://')) {
+        throw new TranslationError('自定义 API 地址必须使用 HTTPS 协议。', false);
       }
     } else if (preset === 'AZURE_CHINA') {
       baseUrl = 'https://api.cognitive.chinacloudapi.cn';
@@ -59,7 +65,7 @@ export const microsoftTranslateProvider: TranslationProvider = {
         body: JSON.stringify([{ Text: request.text }]),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：无法连接到翻译服务。${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到翻译服务。');
     }
 
     if (!response.ok) {
@@ -88,8 +94,3 @@ export const microsoftTranslateProvider: TranslationProvider = {
     };
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
-}

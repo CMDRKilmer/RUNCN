@@ -25,6 +25,10 @@ export const anthropicTranslateProvider: TranslationProvider = {
       throw new TranslationError('未配置 Anthropic API 密钥。', false);
     }
     const url = (providerConfig.apiUrl || DEFAULT_URL).replace(/\/+$/, '');
+    // Reject non-HTTPS overrides so the x-api-key header cannot be sniffed.
+    if (!url.startsWith('https://')) {
+      throw new TranslationError('Anthropic API 地址必须使用 HTTPS 协议。', false);
+    }
     const model = providerConfig.apiModel || DEFAULT_MODEL;
     const prompt = buildTranslationPrompt(request.targetLanguage);
 
@@ -45,7 +49,7 @@ export const anthropicTranslateProvider: TranslationProvider = {
         }),
       });
     } catch (e) {
-      throw new TranslationError(`网络错误：无法连接到 Anthropic。${formatErr(e)}`);
+      throw new TranslationError('网络错误：无法连接到 Anthropic。');
     }
 
     if (!response.ok) {
@@ -66,8 +70,3 @@ export const anthropicTranslateProvider: TranslationProvider = {
     return { translatedText };
   },
 };
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
-}

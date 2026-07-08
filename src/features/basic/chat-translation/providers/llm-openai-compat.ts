@@ -69,6 +69,11 @@ export function createOpenAiCompatProvider(config: LlmProviderConfig): Translati
         throw new TranslationError(`未配置 ${config.name} API 密钥。`, false);
       }
       const url = (providerConfig.apiUrl || config.defaultUrl).replace(/\/+$/, '');
+      // Reject non-HTTPS overrides so credentials in the Authorization
+      // header cannot be sniffed over plaintext transport.
+      if (!url.startsWith('https://')) {
+        throw new TranslationError(`${config.name} API 地址必须使用 HTTPS 协议。`, false);
+      }
       const model = providerConfig.apiModel || config.defaultModel;
       const prompt = buildTranslationPrompt(request.targetLanguage);
 
@@ -90,7 +95,7 @@ export function createOpenAiCompatProvider(config: LlmProviderConfig): Translati
           }),
         });
       } catch (e) {
-        throw new TranslationError(`网络错误：无法连接到 ${config.name}。${formatErr(e)}`);
+        throw new TranslationError(`网络错误：无法连接到 ${config.name}。`);
       }
 
       if (!response.ok) {
@@ -113,9 +118,4 @@ export function createOpenAiCompatProvider(config: LlmProviderConfig): Translati
       return { translatedText };
     },
   };
-}
-
-function formatErr(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  return String(e);
 }

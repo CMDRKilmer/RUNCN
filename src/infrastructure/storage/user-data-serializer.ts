@@ -74,7 +74,10 @@ export async function saveUserData() {
       }
     };
     window.addEventListener('message', listener);
-    window.postMessage({ type: 'rp-save-user-data', userData: data }, '*');
+    // Use a specific targetOrigin instead of '*' so a malicious frame in a
+    // different origin cannot receive the payload. Page and content script
+    // share the same origin (apex.prosperousuniverse.com).
+    window.postMessage({ type: 'rp-save-user-data', userData: data }, location.origin);
   });
 }
 
