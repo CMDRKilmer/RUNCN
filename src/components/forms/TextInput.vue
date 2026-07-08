@@ -1,7 +1,10 @@
 <script setup lang="ts">
 const model = defineModel<string>();
 
-const { focusOnMount = false } = defineProps<{ focusOnMount?: boolean }>();
+const { focusOnMount = false, type = 'text' } = defineProps<{
+  focusOnMount?: boolean;
+  type?: string;
+}>();
 
 const input = useTemplateRef<HTMLInputElement>('input');
 
@@ -17,7 +20,7 @@ onMounted(() => {
     <input
       ref="input"
       v-model="model"
-      type="text"
+      :type="type"
       autocomplete="off"
       data-1p-ignore="true"
       data-lpignore="true" />

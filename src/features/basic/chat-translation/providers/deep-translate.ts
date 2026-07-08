@@ -10,16 +10,21 @@ export const deepTranslateProvider: TranslationProvider = {
     request: TranslationRequest,
     settings: UserData.TranslationSettings,
   ): Promise<TranslationResult> {
-    if (!settings.apiKey) {
+    const providerConfig = settings.providerConfigs.DEEP ?? {
+      apiKey: '',
+      apiUrl: '',
+      apiModel: '',
+    };
+    if (!providerConfig.apiKey) {
       throw new TranslationError('未配置 DeepL API 密钥。', false);
     }
     // Free keys end with ':fx' and must use the free host.
-    const host = settings.apiKey.endsWith(':fx')
+    const host = providerConfig.apiKey.endsWith(':fx')
       ? 'https://api-free.deepl.com'
       : 'https://api.deepl.com';
     const url = `${host}/v2/translate`;
     const params = new URLSearchParams();
-    params.set('auth_key', settings.apiKey);
+    params.set('auth_key', providerConfig.apiKey);
     params.set('text', request.text);
     params.set('target_lang', request.targetLanguage.toUpperCase());
 

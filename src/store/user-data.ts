@@ -61,8 +61,10 @@ export const initialUserData = deepFreeze({
       provider: 'MICROSOFT',
       targetLanguage: 'zh',
       inputTargetLanguage: 'zh',
-      apiKey: '',
-      apiUrl: '',
+      providerConfigs: {} as Record<
+        UserData.TranslationProviderId,
+        UserData.TranslationProviderConfig
+      >,
       apiPreset: 'AZURE_GLOBAL',
       apiRegion: '',
       translatedColor: '#28a745',

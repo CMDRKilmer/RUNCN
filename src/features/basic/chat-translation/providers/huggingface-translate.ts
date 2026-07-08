@@ -10,13 +10,18 @@ export const huggingfaceTranslateProvider: TranslationProvider = {
     request: TranslationRequest,
     settings: UserData.TranslationSettings,
   ): Promise<TranslationResult> {
-    // Expect settings.apiUrl to be a full model endpoint, e.g.
+    const providerConfig = settings.providerConfigs.HUGGINGFACE ?? {
+      apiKey: '',
+      apiUrl: '',
+      apiModel: '',
+    };
+    // Expect providerConfig.apiUrl to be a full model endpoint, e.g.
     // https://api-inference.huggingface.co/models/Helsinki-NLP/opus-mt-en-zh
-    const url = (settings.apiUrl || '').replace(/\/+$/, '');
+    const url = (providerConfig.apiUrl || '').replace(/\/+$/, '');
     if (!url) {
-      throw new TranslationError('未配置 Hugging Face 模型 API 地址（settings.apiUrl）。', false);
+      throw new TranslationError('未配置 Hugging Face 模型 API 地址。', false);
     }
-    if (!settings.apiKey) {
+    if (!providerConfig.apiKey) {
       throw new TranslationError('未配置 Hugging Face API 密钥。', false);
     }
 
@@ -25,7 +30,7 @@ export const huggingfaceTranslateProvider: TranslationProvider = {
       response = await fetch(url, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${settings.apiKey}`,
+          Authorization: `Bearer ${providerConfig.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ inputs: request.text }),

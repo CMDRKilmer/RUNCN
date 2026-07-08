@@ -17,6 +17,49 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '08.07.2026 Migrate to per-provider API configs',
+    userData => {
+      const translation = userData.settings.translation;
+      if (!translation) {
+        return;
+      }
+      if (!translation.providerConfigs) {
+        translation.providerConfigs = {};
+      }
+      const providerIds: UserData.TranslationProviderId[] = [
+        'MICROSOFT',
+        'GOOGLE',
+        'DEEP',
+        'HUGGINGFACE',
+        'CUSTOM',
+        'DEEPSEEK',
+        'MINIMAX',
+        'ZHIPU',
+        'QWEN',
+        'MOONSHOT',
+        'ERNIE',
+        'HUNYUAN',
+        'LINGYI',
+        'STEPFUN',
+        'OPENAI_LLM',
+        'ANTHROPIC',
+        'GEMINI',
+      ];
+      for (const providerId of providerIds) {
+        if (!translation.providerConfigs[providerId]) {
+          translation.providerConfigs[providerId] = {
+            apiKey: translation.apiKey ?? '',
+            apiUrl: translation.apiUrl ?? '',
+            apiModel: translation.apiModel ?? '',
+          };
+        }
+      }
+      delete translation.apiKey;
+      delete translation.apiUrl;
+      delete translation.apiModel;
+    },
+  ],
+  [
     '07.07.2026 Add translation settings',
     userData => {
       if (!userData.settings.translation) {
@@ -27,6 +70,7 @@ const migrations: MigrationEntry[] = [
           inputTargetLanguage: 'zh',
           apiKey: '',
           apiUrl: '',
+          apiModel: '',
           apiPreset: 'AZURE_GLOBAL',
           apiRegion: '',
           showOriginal: false,
@@ -38,6 +82,7 @@ const migrations: MigrationEntry[] = [
         userData.settings.translation.apiPreset ??= 'AZURE_GLOBAL';
         userData.settings.translation.apiRegion ??= '';
         userData.settings.translation.apiUrl ??= '';
+        userData.settings.translation.apiModel ??= '';
         userData.settings.translation.translatedColor ??= '#28a745';
       }
     },

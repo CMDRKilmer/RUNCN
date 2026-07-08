@@ -10,10 +10,15 @@ export const googleTranslateProvider: TranslationProvider = {
     request: TranslationRequest,
     settings: UserData.TranslationSettings,
   ): Promise<TranslationResult> {
-    if (!settings.apiKey) {
+    const providerConfig = settings.providerConfigs.GOOGLE ?? {
+      apiKey: '',
+      apiUrl: '',
+      apiModel: '',
+    };
+    if (!providerConfig.apiKey) {
       throw new TranslationError('未配置 Google API 密钥。', false);
     }
-    const url = `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(settings.apiKey)}`;
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${encodeURIComponent(providerConfig.apiKey)}`;
     const body = {
       q: request.text,
       target: request.targetLanguage,

@@ -22,10 +22,15 @@ export const microsoftTranslateProvider: TranslationProvider = {
     request: TranslationRequest,
     settings: UserData.TranslationSettings,
   ): Promise<TranslationResult> {
+    const providerConfig = settings.providerConfigs.MICROSOFT ?? {
+      apiKey: '',
+      apiUrl: '',
+      apiModel: '',
+    };
     const preset = settings.apiPreset || 'AZURE_GLOBAL';
     let baseUrl = '';
     if (preset === 'CUSTOM') {
-      baseUrl = (settings.apiUrl || '').replace(/\/+$/, '');
+      baseUrl = (providerConfig.apiUrl || '').replace(/\/+$/, '');
       if (!baseUrl) {
         throw new TranslationError('自定义 API 地址为空。', false);
       }
@@ -40,7 +45,7 @@ export const microsoftTranslateProvider: TranslationProvider = {
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Ocp-Apim-Subscription-Key': settings.apiKey,
+      'Ocp-Apim-Subscription-Key': providerConfig.apiKey,
     };
     if (settings.apiRegion) {
       headers['Ocp-Apim-Subscription-Region'] = settings.apiRegion;

@@ -20,14 +20,51 @@ const showApiKey = computed(() => currentProvider.value?.requiresApiKey ?? false
 const showMicrosoftApiSettings = computed(() => settings.value.provider === 'MICROSOFT');
 const showHfSettings = computed(() => settings.value.provider === 'HUGGINGFACE');
 const showCustomSettings = computed(() => settings.value.provider === 'CUSTOM');
-const showGoogleSettings = computed(() => settings.value.provider === 'GOOGLE');
-const showDeepSettings = computed(() => settings.value.provider === 'DEEP');
+
+const LLM_PROVIDER_IDS = new Set<UserData.TranslationProviderId>([
+  'DEEPSEEK',
+  'MINIMAX',
+  'ZHIPU',
+  'QWEN',
+  'MOONSHOT',
+  'ERNIE',
+  'HUNYUAN',
+  'LINGYI',
+  'STEPFUN',
+  'OPENAI_LLM',
+  'ANTHROPIC',
+  'GEMINI',
+]);
+const showLlmSettings = computed(() => LLM_PROVIDER_IDS.has(settings.value.provider));
 
 const presetOptions = [
   { label: 'Azure (Global)', value: 'AZURE_GLOBAL' },
   { label: 'Azure (China)', value: 'AZURE_CHINA' },
   { label: '自定义', value: 'CUSTOM' },
 ];
+
+const currentProviderConfig = computed(
+  () => settings.value.providerConfigs[settings.value.provider],
+);
+
+function ensureAllProviderConfigs() {
+  for (const provider of ALL_PROVIDERS) {
+    if (settings.value.providerConfigs[provider.id] === undefined) {
+      settings.value.providerConfigs[provider.id] = { apiKey: '', apiUrl: '', apiModel: '' };
+    }
+    const config = settings.value.providerConfigs[provider.id]!;
+    if (LLM_PROVIDER_IDS.has(provider.id)) {
+      if (!config.apiUrl && provider.defaultUrl) {
+        config.apiUrl = provider.defaultUrl;
+      }
+      if (!config.apiModel && provider.defaultModel) {
+        config.apiModel = provider.defaultModel;
+      }
+    }
+  }
+}
+
+ensureAllProviderConfigs();
 
 async function onChange() {
   await saveUserData();
@@ -70,7 +107,7 @@ async function onChange() {
         @update:model-value="onChange" />
       <TextInput
         v-if="settings.apiPreset === 'CUSTOM'"
-        v-model="settings.apiUrl"
+        v-model="currentProviderConfig.apiUrl"
         @keyup.enter="onChange"
         @focusout="onChange" />
     </Active>
@@ -83,33 +120,46 @@ async function onChange() {
     <Active
       v-if="showHfSettings"
       label="Hugging Face API"
-      tooltip="填写 Hugging Face API 接口与密钥。">
-      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+      tooltip="填写模型 API 地址（完整 endpoint）。">
+      <TextInput
+        v-model="currentProviderConfig.apiUrl"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
+    </Active>
+    <Active v-if="showCustomSettings" label="自定义 API" tooltip="填写自定义翻译 API 地址。">
+      <TextInput
+        v-model="currentProviderConfig.apiUrl"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
     </Active>
     <Active
-      v-if="showCustomSettings"
-      label="自定义 API"
-      tooltip="填写自定义翻译 API 的接口与密钥。">
-      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+      v-if="showLlmSettings"
+      label="API 地址"
+      tooltip="切换服务商时自动填充默认地址，可填写自定义代理或兼容端点。">
+      <TextInput
+        v-model="currentProviderConfig.apiUrl"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
     </Active>
-
     <Active
-      v-if="showGoogleSettings"
-      label="Google Translate API"
-      tooltip="填写 Google 翻译 API 的接口与密钥。">
-      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
-    </Active>
-
-    <Active v-if="showDeepSettings" label="DeepL API" tooltip="填写 DeepL API 的接口与密钥。">
-      <TextInput v-model="settings.apiUrl" @keyup.enter="onChange" @focusout="onChange" />
+      v-if="showLlmSettings"
+      label="模型"
+      tooltip="切换服务商时自动填充默认模型，可填写该服务商支持的其他模型名。">
+      <TextInput
+        v-model="currentProviderConfig.apiModel"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
     </Active>
     <Active
       v-if="showApiKey"
       label="API 密钥"
-      tooltip="所选翻译服务所需的 API 密钥。密钥保存在本地，不会上传。">
-      <TextInput v-model="settings.apiKey" @keyup.enter="onChange" @focusout="onChange" />
+      tooltip="所选翻译服务所需的 API 密钥。密钥保存在本地，不会上传。每个服务商独立保存。">
+      <TextInput
+        v-model="currentProviderConfig.apiKey"
+        type="password"
+        @keyup.enter="onChange"
+        @focusout="onChange" />
     </Active>
-    <!-- 已移除：结果字体大小 与 结果背景颜色 设置 -->
     <Active label="译文颜色" tooltip="译文文本的颜色（CSS 颜色值），默认绿色。">
       <input v-model="settings.translatedColor" type="color" @input="onChange" />
       <span
@@ -150,6 +200,4 @@ async function onChange() {
   font-size: 12px;
   line-height: 1.5;
 }
-
-/* example styles removed */
 </style>

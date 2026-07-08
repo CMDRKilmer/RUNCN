@@ -12,6 +12,8 @@ export interface TranslationProvider {
   readonly id: UserData.TranslationProviderId;
   readonly name: string;
   readonly requiresApiKey: boolean;
+  readonly defaultUrl?: string;
+  readonly defaultModel?: string;
   translate(
     request: TranslationRequest,
     settings: UserData.TranslationSettings,

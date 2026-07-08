@@ -10,13 +10,18 @@ export const customHttpTranslateProvider: TranslationProvider = {
     request: TranslationRequest,
     settings: UserData.TranslationSettings,
   ): Promise<TranslationResult> {
-    const url = (settings.apiUrl || '').replace(/\/+$/, '');
+    const providerConfig = settings.providerConfigs.CUSTOM ?? {
+      apiKey: '',
+      apiUrl: '',
+      apiModel: '',
+    };
+    const url = (providerConfig.apiUrl || '').replace(/\/+$/, '');
     if (!url) {
-      throw new TranslationError('未配置自定义翻译 API 地址（settings.apiUrl）。', false);
+      throw new TranslationError('未配置自定义翻译 API 地址。', false);
     }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (settings.apiKey) headers['Authorization'] = `Bearer ${settings.apiKey}`;
+    if (providerConfig.apiKey) headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
 
     let response: Response;
     try {
