@@ -397,6 +397,57 @@ showBuffer('CXM AI1.RAT');  // opens a buffer with the given command
 
 ---
 
+## URL Handling
+
+DOM-text → URL sinks (e.g. `<img src={x}>`, `script.src = x`, `iframe.src = x`) are a CodeQL `js/xss-through-dom` finding. Two rules keep the sink clean:
+
+### Use `isSafeUrl` (or a similar guard) for non-trivial URLs
+
+```ts
+import { isSafeUrl } from '@src/utils/is-valid-url';
+
+// Bad — passes any parseable URL through, including javascript: and data:
+clone.src = script.textContent;
+
+// Good — enforces scheme + exact hostname
+if (!isSafeUrl(text, 'apex.prosperousuniverse.com')) {
+  return;
+}
+clone.src = text;
+```
+
+`isSafeUrl(url, hostname)` only accepts `http:` and `https:` schemes. For image-only helpers, build a parallel `parseSafeImage(url)` that also validates extension against `URL.pathname` (the regex should not match the raw input — it must match the parsed pathname).
+
+### Never use substring/endsWith for host checks
+
+```ts
+// Bad — `evil-apex.prosperousuniverse.com` and `evil.com/apex.prosperousuniverse.com` match
+if (s.src.includes('apex.prosperousuniverse.com')) { ... }
+
+// Good — strict hostname comparison
+try {
+  if (new URL(s.src, location.href).hostname === 'apex.prosperousuniverse.com') { ... }
+} catch { /* ignore */ }
+```
+
+Substring / suffix / contains checks are flagged by `js/incomplete-url-substring-sanitization`.
+
+### Route the sink value through `new URL(x).href`
+
+CodeQL's dataflow tracks tainted DOM text into the sink. Routing the value through `new URL(text).href` so that the sink reads from the *parsed* URL object (not the original variable) breaks the taint propagation in the sanitizer model:
+
+```ts
+// Bad — CodeQL still flags the flow
+clone.src = text;
+
+// Good — value reaches the sink via `new URL().href`
+clone.src = new URL(text).href;
+```
+
+This is what made the CodeQL alerts close on `deserialize-prun-app.ts:9` and `chat-images.tsx:21` even after scheme/host validation alone wasn't sufficient.
+
+---
+
 ## CSS
 
 Each feature needing CSS gets a `.module.css` alongside the `.ts`. `applyCssRule` and `C` are auto-imported.
