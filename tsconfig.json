@@ -25,8 +25,8 @@
       "~/*": ["src/assets/*"]
     },
     "verbatimModuleSyntax": false,
-    "types": ["vite/client", "node", "chrome"],
+    "types": ["vite/client", "node", "chrome", "vitest"],
     "lib": ["DOM", "WebWorker", "ESNext"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "src/**/*.vue", "vite.config.mts", "vitest.config.mts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "src/**/*.vue", "vite.config.mts", "vite.content.config.mts", "vitest.config.mts"]
 }

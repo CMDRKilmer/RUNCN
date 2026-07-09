@@ -28,7 +28,7 @@ export const geminiTranslateProvider: TranslationProvider = {
     }
     const model = providerConfig.apiModel || DEFAULT_MODEL;
     const urlTemplate = providerConfig.apiUrl || DEFAULT_URL_TEMPLATE;
-    const url = urlTemplate.replace('{model}', model).replace(/\/+$/, '');
+    const url = urlTemplate.replace('{model}', encodeURIComponent(model)).replace(/\/+$/, '');
     // Reject non-HTTPS overrides so the x-goog-api-key header cannot be sniffed.
     if (!url.startsWith('https://')) {
       throw new TranslationError('Google Gemini API 地址必须使用 HTTPS 协议。', false);

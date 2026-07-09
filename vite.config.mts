@@ -74,9 +74,8 @@ export default defineConfig({
     reportCompressedSize: false,
     lib: {
       entry: {
-        'refined-prun-prepare': resolve(srcDir, 'refined-prun-prepare.ts'),
-        'refined-prun-startup': resolve(srcDir, 'refined-prun-startup.ts'),
         'refined-prun': resolve(srcDir, 'refined-prun.ts'),
+        'refined-prun-prepare': resolve(srcDir, 'refined-prun-prepare.ts'),
       },
       formats: ['es'],
     },

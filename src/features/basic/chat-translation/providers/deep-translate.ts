@@ -25,7 +25,6 @@ export const deepTranslateProvider: TranslationProvider = {
       : 'https://api.deepl.com';
     const url = `${host}/v2/translate`;
     const params = new URLSearchParams();
-    params.set('auth_key', providerConfig.apiKey);
     params.set('text', request.text);
     params.set('target_lang', request.targetLanguage.toUpperCase());
 
@@ -33,7 +32,10 @@ export const deepTranslateProvider: TranslationProvider = {
       url,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Authorization: `DeepL-Auth-Key ${providerConfig.apiKey}`,
+        },
         body: params.toString(),
       },
       'DeepL',

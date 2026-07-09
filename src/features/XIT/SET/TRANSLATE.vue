@@ -136,6 +136,9 @@ async function onChange() {
         @focusout="onChange" />
     </Active>
     <Active v-if="showCustomSettings" label="自定义 API" tooltip="填写自定义翻译 API 地址。">
+      <div :class="$style.customWarning">
+        ⚠ 请仅使用您完全信任的 API 地址。自定义接口将以您的身份发送请求。
+      </div>
       <TextInput
         v-model="currentProviderConfig.apiUrl"
         @keyup.enter="onChange"
@@ -223,5 +226,15 @@ async function onChange() {
 .llmWarningBody {
   margin-top: 4px;
   color: #b3b3b3;
+}
+
+.customWarning {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-left: 3px solid #d9822b;
+  background: rgba(217, 130, 43, 0.12);
+  color: #d9822b;
+  font-size: 12px;
+  line-height: 1.4;
 }
 </style>

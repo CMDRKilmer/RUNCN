@@ -37,30 +37,68 @@ function base64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-function getSessionStorage(): chrome.storage.SessionStorageArea | null {
-  const candidate = (chrome.storage as { session?: chrome.storage.SessionStorageArea }).session;
-  return candidate ?? null;
+let sessionStorageAvailable: boolean | null = null;
+
+async function isChromeBrowser(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.userAgent.includes('Firefox')) {
+    return false;
+  }
+  return true;
+}
+
+async function isSessionStorageAvailable(): Promise<boolean> {
+  if (sessionStorageAvailable !== null) {
+    return sessionStorageAvailable;
+  }
+  if (!(await isChromeBrowser())) {
+    sessionStorageAvailable = false;
+    return false;
+  }
+  const storage = (chrome.storage as { session?: chrome.storage.SessionStorageArea }).session;
+  if (storage === undefined) {
+    sessionStorageAvailable = false;
+    return false;
+  }
+  try {
+    await storage.get('__rp_test__');
+    sessionStorageAvailable = true;
+    return true;
+  } catch {
+    sessionStorageAvailable = false;
+    return false;
+  }
 }
 
 export async function loadSessionKey(): Promise<CryptoKey> {
   if (sessionKey !== null) {
     return sessionKey;
   }
-  const storage = getSessionStorage();
+  const storageAvailable = await isSessionStorageAvailable();
+  const storage = storageAvailable
+    ? (chrome.storage as { session: chrome.storage.SessionStorageArea }).session
+    : null;
   let material: Uint8Array | null = null;
   if (storage !== null) {
-    const stored = await storage.get(SESSION_KEY_ID);
-    const envelope = stored[SESSION_KEY_ID];
-    if (isEnvelope(envelope)) {
-      material = base64ToBytes(envelope.k);
+    try {
+      const stored = await storage.get(SESSION_KEY_ID);
+      const envelope = stored[SESSION_KEY_ID];
+      if (isEnvelope(envelope)) {
+        material = base64ToBytes(envelope.k);
+      }
+    } catch {
+      material = null;
     }
   }
   if (material === null) {
     material = randomBytes(32);
     if (storage !== null) {
-      await storage.set({
-        [SESSION_KEY_ID]: { v: SESSION_KEY_VERSION, k: bytesToBase64(material) },
-      });
+      try {
+        await storage.set({
+          [SESSION_KEY_ID]: { v: SESSION_KEY_VERSION, k: bytesToBase64(material) },
+        });
+      } catch {
+        // Session storage unavailable, key stays in memory only
+      }
     }
   }
   sessionKey = await crypto.subtle.importKey(

@@ -10,9 +10,9 @@
   },
   "scripts": {
     "compile": "tsc --noEmit",
-    "build": "pnpm run clean && pnpm run compile && vite build && node scripts/fix-innerHTML.mjs",
+    "build": "pnpm run clean && pnpm run compile && vite build && vite build --config vite.content.config.mts && node scripts/fix-innerHTML.mjs",
     "clean": "rimraf dist",
-    "dev": "cross-env NODE_ENV=development vite build -w --mode development",
+    "dev": "cross-env NODE_ENV=development vite build --config vite.content.config.mts --mode development && vite build -w --mode development",
     "fix": "pnpm exec eslint ./ --fix --concurrency auto",
     "lint": "pnpm exec eslint --concurrency auto",
     "prepare": "husky",
