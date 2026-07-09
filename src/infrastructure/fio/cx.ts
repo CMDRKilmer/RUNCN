@@ -7,53 +7,57 @@ const updateInterval = dayjs.duration(15, 'minutes').asMilliseconds();
 export async function fetchPrices() {
   setTimeout(fetchPrices, updateInterval);
 
-  const url = 'https://refined-prun.github.io/refined-prices/all.json';
-  const response = await fetch(url);
-  const tickersInfo = (await response.json()) as TickerPriceInfo[];
+  try {
+    const url = 'https://refined-prun.github.io/refined-prices/all.json';
+    const response = await fetch(url);
+    const tickersInfo = (await response.json()) as TickerPriceInfo[];
 
-  const prices = new Map<string, CXPriceInfo>();
-  const tickers = new Set<string>();
-  for (const tickerInfo of tickersInfo) {
-    const code = tickerInfo.ExchangeCode;
-    let cxPrices = prices.get(code);
-    if (!cxPrices) {
-      cxPrices = new Map<string, TickerPriceInfo>();
-      prices.set(code, cxPrices);
+    const prices = new Map<string, CXPriceInfo>();
+    const tickers = new Set<string>();
+    for (const tickerInfo of tickersInfo) {
+      const code = tickerInfo.ExchangeCode;
+      let cxPrices = prices.get(code);
+      if (!cxPrices) {
+        cxPrices = new Map<string, TickerPriceInfo>();
+        prices.set(code, cxPrices);
+      }
+      const ticker = tickerInfo.MaterialTicker;
+      cxPrices.set(ticker, tickerInfo);
+      tickers.add(ticker);
     }
-    const ticker = tickerInfo.MaterialTicker;
-    cxPrices.set(ticker, tickerInfo);
-    tickers.add(ticker);
-  }
 
-  const universe = new Map<string, TickerPriceInfo>();
-  prices.set('UNIVERSE', universe);
-  for (const ticker of tickers.values()) {
-    const tickerInfos = Array.from(prices.values()).map(x => x.get(ticker));
-    const tickerInfo: TickerPriceInfo = {
-      MaterialTicker: ticker,
-      ExchangeCode: 'UNIVERSE',
-      MMBuy: weightedAverage(tickerInfos, x => x.MMBuy),
-      MMSell: weightedAverage(tickerInfos, x => x.MMSell),
-      PriceAverage: weightedAverage(tickerInfos, x => x.PriceAverage),
-      Ask: weightedAverage(tickerInfos, x => x.Ask),
-      Bid: weightedAverage(tickerInfos, x => x.Bid),
-      VWAP7D: weightedAverage(
-        tickerInfos,
-        x => x.VWAP7D,
-        x => x.Traded7D,
-      ),
-      VWAP30D: weightedAverage(
-        tickerInfos,
-        x => x.VWAP30D,
-        x => x.Traded30D,
-      ),
-    };
-    universe.set(ticker, tickerInfo);
-  }
+    const universe = new Map<string, TickerPriceInfo>();
+    prices.set('UNIVERSE', universe);
+    for (const ticker of tickers.values()) {
+      const tickerInfos = Array.from(prices.values()).map(x => x.get(ticker));
+      const tickerInfo: TickerPriceInfo = {
+        MaterialTicker: ticker,
+        ExchangeCode: 'UNIVERSE',
+        MMBuy: weightedAverage(tickerInfos, x => x.MMBuy),
+        MMSell: weightedAverage(tickerInfos, x => x.MMSell),
+        PriceAverage: weightedAverage(tickerInfos, x => x.PriceAverage),
+        Ask: weightedAverage(tickerInfos, x => x.Ask),
+        Bid: weightedAverage(tickerInfos, x => x.Bid),
+        VWAP7D: weightedAverage(
+          tickerInfos,
+          x => x.VWAP7D,
+          x => x.Traded7D,
+        ),
+        VWAP30D: weightedAverage(
+          tickerInfos,
+          x => x.VWAP30D,
+          x => x.Traded30D,
+        ),
+      };
+      universe.set(ticker, tickerInfo);
+    }
 
-  cxStore.age = Date.now();
-  cxStore.prices = prices;
-  cxStore.fetched = true;
+    cxStore.age = Date.now();
+    cxStore.prices = prices;
+    cxStore.fetched = true;
+  } catch (error) {
+    console.warn('Failed to fetch CX prices:', error);
+  }
 }
 
 export interface TickerPriceInfo {

@@ -82,6 +82,10 @@ async function onChange() {
       请勿翻译包含账号密码、支付信息等高度敏感内容。
     </div>
   </div>
+  <div v-if="showCustomSettings" :class="$style.llmWarning">
+    <strong>⚠ 请仅使用您完全信任的 API 地址</strong>
+    <div :class="$style.llmWarningBody"> 自定义接口将以您的身份发送请求。 </div>
+  </div>
   <form>
     <Active label="启用翻译功能" tooltip="关闭后所有翻译按钮将隐藏。">
       <input v-model="settings.enabled" type="checkbox" @change="onChange" />
@@ -136,9 +140,6 @@ async function onChange() {
         @focusout="onChange" />
     </Active>
     <Active v-if="showCustomSettings" label="自定义 API" tooltip="填写自定义翻译 API 地址。">
-      <div :class="$style.customWarning">
-        ⚠ 请仅使用您完全信任的 API 地址。自定义接口将以您的身份发送请求。
-      </div>
       <TextInput
         v-model="currentProviderConfig.apiUrl"
         @keyup.enter="onChange"
