@@ -1,11 +1,12 @@
-import { isValidUrl } from '@src/utils/is-valid-url';
+import { isSafeUrl } from '@src/utils/is-valid-url';
 
 const scripts = document.head.getElementsByTagName('script');
 for (let i = 0; i < scripts.length; i++) {
   const script = scripts[i];
-  if (script.textContent && isValidUrl(script.textContent)) {
+  const text = script.textContent;
+  if (text && isSafeUrl(text, 'apex.prosperousuniverse.com')) {
     const clone = document.createElement('script');
-    clone.src = script.textContent;
+    clone.src = text;
     clone.defer = script.defer;
     clone.async = script.async;
     clone.type = script.type;
