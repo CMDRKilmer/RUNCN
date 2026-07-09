@@ -12,7 +12,7 @@ const orders = computed(() => cxosStore.all.value);
 
 type Granularity = 'daily' | 'weekly' | 'monthly';
 
-const granularity = ref<Granularity>('daily');
+const granularity = ref<Granularity>('weekly');
 
 interface OrderTrade {
   order: PrunApi.CXOrder;
@@ -103,6 +103,16 @@ watch(granularity, () => {
   daysToRender.value = 1;
   Object.keys(expandedGroups).forEach(key => delete expandedGroups[Number(key)]);
 });
+
+watch(
+  [days, daysToRender],
+  () => {
+    if (daysToRender.value === 1 && days.value.length > 0) {
+      expandedGroups[days.value[0].date] = true;
+    }
+  },
+  { immediate: true },
+);
 
 function stepRender() {
   id = requestAnimationFrame(stepRender);
