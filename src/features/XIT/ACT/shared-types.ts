@@ -15,8 +15,9 @@ export interface ActionRunnerContext<T> {
   log: Logger;
 }
 
-export interface MaterialGroupGenerateContext<TConfig>
-  extends ActionRunnerContext<UserData.MaterialGroupData> {
+export interface MaterialGroupGenerateContext<
+  TConfig,
+> extends ActionRunnerContext<UserData.MaterialGroupData> {
   config: TConfig;
   globalOptions: { skipMissingMaterials?: boolean };
   setStatus: (status: string) => void;
@@ -25,8 +26,9 @@ export interface MaterialGroupGenerateContext<TConfig>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AssertFn = (condition: any, message: string) => asserts condition;
 
-export interface ActionStepGenerateContext<TConfig>
-  extends ActionRunnerContext<UserData.ActionData> {
+export interface ActionStepGenerateContext<
+  TConfig,
+> extends ActionRunnerContext<UserData.ActionData> {
   config: TConfig;
   globalOptions: { skipMissingMaterials?: boolean };
   fail: (message?: string) => void;

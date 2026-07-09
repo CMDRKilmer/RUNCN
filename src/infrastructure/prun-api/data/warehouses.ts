@@ -22,9 +22,8 @@ onApiMessage({
   },
 });
 
-const getByEntityNaturalId = createMapGetter(
-  state.all,
-  x => getEntityNaturalIdFromAddress(x.address)!,
+const getByEntityNaturalId = createMapGetter(state.all, x =>
+  getEntityNaturalIdFromAddress(x.address)!,
 );
 
 const getByEntityName = createMapGetter(state.all, x => getEntityNameFromAddress(x.address)!);
