@@ -27,8 +27,11 @@ interface DayTrades {
 }
 
 const days = computed(() => {
+  if (!orders.value) {
+    return [];
+  }
   const trades: OrderTrade[] = [];
-  for (const order of orders.value!) {
+  for (const order of orders.value) {
     for (const trade of order.trades) {
       let ts = trade.time.timestamp;
       if (ts < 1e12) ts = ts * 1000; // Normalize seconds -> milliseconds
