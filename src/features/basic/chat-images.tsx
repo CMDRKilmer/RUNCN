@@ -6,7 +6,7 @@ function onTileReady(tile: PrunTile) {
 
 function processLink(element: HTMLElement) {
   const link = element.textContent;
-  if (!link || !isImage(link)) {
+  if (!link || !isSafeImage(link)) {
     return;
   }
 
@@ -23,8 +23,16 @@ function processLink(element: HTMLElement) {
   )).appendTo(element.parentElement!);
 }
 
-function isImage(url: string) {
-  return /\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(url);
+function isSafeImage(url: string) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    return /\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function init() {
