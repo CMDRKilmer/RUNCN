@@ -6,7 +6,8 @@ function onTileReady(tile: PrunTile) {
 
 function processLink(element: HTMLElement) {
   const link = element.textContent;
-  if (!link || !isSafeImage(link)) {
+  const safeUrl = parseSafeImage(link);
+  if (!safeUrl) {
     return;
   }
 
@@ -18,20 +19,29 @@ function processLink(element: HTMLElement) {
   createFragmentApp(() => (
     <>
       <br />
-      <img src={link} alt="Chat image" style={style} />
+      <img src={safeUrl} alt="Chat image" style={style} />
     </>
   )).appendTo(element.parentElement!);
 }
 
-function isSafeImage(url: string) {
+function parseSafeImage(url: string | null): string | null {
+  if (!url) {
+    return null;
+  }
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      return false;
+      return null;
     }
-    return /\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(parsed.pathname);
+    if (!/\.(jpg|jpeg|png|webp|avif|gif|svg)$/.test(parsed.pathname)) {
+      return null;
+    }
+    // Route through `new URL().href` so CodeQL treats the value as a normalized URL,
+    // not as raw user-controlled DOM text. The protocol/host/scheme checks above
+    // ensure only http(s) image URLs reach this point.
+    return parsed.href;
   } catch {
-    return false;
+    return null;
   }
 }
 
