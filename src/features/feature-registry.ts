@@ -71,7 +71,6 @@ function init() {
     features.current = feature.id;
     try {
       feature.init();
-      log.info('✅', feature.id);
     } catch (error) {
       log.error(feature.id, error);
     } finally {

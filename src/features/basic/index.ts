@@ -29,6 +29,7 @@ import './contribution-bulk-controls';
 import './contribution-maxed';
 import './correct-commands/correct-commands';
 import './custom-left-sidebar/custom-left-sidebar';
+import './cx-price-deviation';
 import './cx-search-bar';
 import './cxo-delete-order-button';
 import './cxob-center-on-open';
