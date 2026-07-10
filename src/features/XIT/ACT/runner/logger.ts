@@ -1,5 +1,13 @@
 export type LogTag =
-  null | 'INFO' | 'ACTION' | 'SUCCESS' | 'ERROR' | 'SKIP' | 'WARNING' | 'CANCEL' | 'SUMMARY';
+  | null
+  | 'INFO'
+  | 'ACTION'
+  | 'SUCCESS'
+  | 'ERROR'
+  | 'SKIP'
+  | 'WARNING'
+  | 'CANCEL'
+  | 'SUMMARY';
 
 export class Logger {
   constructor(public readonly logMessage: (tag: LogTag, msg: string) => void) {}
