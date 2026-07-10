@@ -60,6 +60,7 @@ function add(path: string, init: () => void, description: string) {
 
 function init() {
   const disabledFeatures = new Set(userData.settings.disabled);
+  let loaded = 0;
   for (const feature of registry) {
     if (userData.settings.mode !== 'FULL' && feature.advanced) {
       continue;
@@ -71,12 +72,14 @@ function init() {
     features.current = feature.id;
     try {
       feature.init();
+      loaded++;
     } catch (error) {
       log.error(feature.id, error);
     } finally {
       features.current = undefined;
     }
   }
+  log.info(`✅ ${loaded} features loaded`);
 }
 
 const features = {
