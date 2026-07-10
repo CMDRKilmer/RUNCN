@@ -9,7 +9,6 @@ import {
   getStatusClass,
   calculateProgress,
 } from '@src/features/XIT/CONTS/utils';
-import $style from '../CONTS/conts-shared.module.css';
 
 const { contract } = defineProps<{
   contract: PrunApi.Contract;
@@ -78,7 +77,7 @@ const progress = computed(() => calculateProgress(contract));
 
 // 合同状态
 const statusText = computed(() => getStatusText(contract.status));
-const statusClass = computed(() => $style[getStatusClass(contract.status)]);
+const statusClass = computed(() => getStatusClass(contract.status));
 </script>
 
 <template>

@@ -181,21 +181,25 @@ export function getStatusText(status: string): string {
 /**
  * 获取合同状态的样式类名
  * @param status 合同状态
- * @returns 样式类名
+ * @returns 原生 ContractStatus 类名（与游戏原生列表对齐）
  */
 export function getStatusClass(status: string): string {
   switch (status) {
     case 'FULFILLED':
-      return 'fulfilled';
+      return C.ContractStatus.good;
     case 'CLOSED':
     case 'PARTIALLY_FULFILLED':
-      return 'active';
+    case 'SIGNED':
+      return C.ContractStatus.partial;
     case 'BREACHED':
     case 'TERMINATED':
     case 'DEADLINE_EXCEEDED':
-      return 'failed';
+    case 'REJECTED':
+    case 'CANCELLED':
+      return C.ContractStatus.bad;
     case 'OPEN':
-      return 'pending';
+    case 'DRAFT':
+      return C.ContractStatus.neutral;
     default:
       return '';
   }

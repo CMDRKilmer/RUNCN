@@ -41,7 +41,7 @@ const totalCount = computed(() => installments.value.length);
 
 // 合同状态
 const statusText = computed(() => getStatusText(contract.status));
-const statusClass = computed(() => $style[getStatusClass(contract.status)]);
+const statusClass = computed(() => getStatusClass(contract.status));
 
 // 格式化日期函数
 function formatDate(item: { timestamp: number }): string {

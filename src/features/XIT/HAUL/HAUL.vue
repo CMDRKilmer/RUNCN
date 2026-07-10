@@ -86,7 +86,7 @@ const shippingSummary = computed(() => getTransportSummary(shipping.value));
 
 <template>
   <LoadingSpinner v-if="!contractsStore.fetched" />
-  <div v-else :class="$style.container">
+  <div v-else :class="[$style.container, C.type.typeRegular, C.fonts.fontRegular]">
     <!-- 筛选栏 -->
     <StatusFilter v-model="activeFilters" v-model:show-filters="showFilters" />
 
