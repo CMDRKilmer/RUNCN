@@ -47,6 +47,11 @@ function onTileReady(tile: PrunTile) {
       }
 
       const vwap7d = cxStore.prices.get(exchange)?.get(ticker)?.VWAP7D;
+      if (vwap7d === undefined || vwap7d === null) {
+        change.textContent = '--(--)';
+        return;
+      }
+
       const dev = deviation(ask, vwap7d);
 
       if (dev === undefined) {
@@ -55,7 +60,7 @@ function onTileReady(tile: PrunTile) {
       }
 
       if (dev === 0) {
-        change.textContent = `${formatPrice(vwap7d!)}`;
+        change.textContent = `${formatPrice(vwap7d)}`;
         return;
       }
 
@@ -65,7 +70,7 @@ function onTileReady(tile: PrunTile) {
         current.classList.add($style.priceLow);
       }
       const arrow = dev > 0 ? '▲' : '▼';
-      change.textContent = `${arrow}${formatPercent(dev)} / ${formatPrice(vwap7d!)}`;
+      change.textContent = `${arrow}${formatPercent(dev)} / ${formatPrice(vwap7d)}`;
     });
   });
 }
