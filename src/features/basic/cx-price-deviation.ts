@@ -31,21 +31,41 @@ function onTileReady(tile: PrunTile) {
         return;
       }
 
-      const info = cxStore.prices.get(exchange)?.get(ticker);
-      const dev = deviation(info?.PriceAverage, info?.VWAP7D);
+      // 从 current 列（游戏当前显示的实时价格）获取价格
+      const askText = current.textContent;
+
+      const match = askText.match(/^([\d,]+(?:\.\d+)?)/);
+      if (!match) {
+        change.textContent = '--(--)';
+        return;
+      }
+
+      const ask = parseFloat(match[1].replace(/,/g, ''));
+      if (isNaN(ask)) {
+        change.textContent = '--(--)';
+        return;
+      }
+
+      const vwap7d = cxStore.prices.get(exchange)?.get(ticker)?.VWAP7D;
+      const dev = deviation(ask, vwap7d);
 
       if (dev === undefined) {
         change.textContent = '--(--)';
         return;
       }
 
+      if (dev === 0) {
+        change.textContent = `${formatPrice(vwap7d!)}`;
+        return;
+      }
+
       if (dev > 0) {
         current.classList.add($style.priceHigh);
-        change.textContent = `▲${formatPercent(dev)}`;
       } else {
         current.classList.add($style.priceLow);
-        change.textContent = `▼${formatPercent(dev)}`;
       }
+      const arrow = dev > 0 ? '▲' : '▼';
+      change.textContent = `${arrow}${formatPercent(dev)} / ${formatPrice(vwap7d!)}`;
     });
   });
 }
@@ -65,6 +85,10 @@ function deviation(current?: number | null, average?: number | null) {
 
 function formatPercent(d: number) {
   return `${fixed01(d * 100)}%`;
+}
+
+function formatPrice(p: number) {
+  return p.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function init() {
