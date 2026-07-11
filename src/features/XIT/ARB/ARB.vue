@@ -77,16 +77,24 @@ const checkedTickers = ref<Set<string>>(new Set());
 
 // 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
 // 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
-function unitVolume(): number {
-  // executability.volume 是「可成交总件数」，假设按 50kg/m³ 标准。
-  // 单件体积 = 1 / 50 = 0.02 m³（按 PrUn 实际数据调整）。
-  // 更稳妥：单件 ~0.02 m³。
+function unitVolume(opp: ArbOpportunity): number {
+  // 优先用材料定义的真实单件体积。PrUn 中每件材料同时拥有 weight (kg) 和 volume (m³)，
+  // 飞船容量按 m³ 计量，优先取 volume；缺失则用 weight/50 (50 kg/m³) 估算；都没有则回退 0.02。
+  const material = materialsStore.getByTicker(opp.ticker);
+  if (material !== undefined) {
+    if (material.volume > 0) {
+      return material.volume;
+    }
+    if (material.weight > 0) {
+      return material.weight / 50;
+    }
+  }
   return 0.02;
 }
 
 function maxUnitsFor(opp: ArbOpportunity): number {
   if (shipCapacity.value <= 0) return opp.executableVolume ?? 0;
-  return Math.min(opp.executableVolume ?? 0, Math.floor(shipCapacity.value / unitVolume()));
+  return Math.min(opp.executableVolume ?? 0, Math.floor(shipCapacity.value / unitVolume(opp)));
 }
 
 function shipFitsAll(opp: ArbOpportunity): boolean {
@@ -129,7 +137,7 @@ const suggestedUnits = (() => {
     let mine = 0;
     // 贪心：按 profitPerUnit / vol 降序，每个商品能装多少装多少。
     const sorted = items
-      .map(o => ({ o, vol: unitVolume(), density: o.profitPerUnit / unitVolume() }))
+      .map(o => ({ o, vol: unitVolume(o), density: o.profitPerUnit / unitVolume(o) }))
       .sort((a, b) => b.density - a.density);
     for (const it of sorted) {
       const units = Math.min(maxUnitsFor(it.o), Math.floor(remaining / it.vol));
