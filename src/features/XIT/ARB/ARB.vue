@@ -8,8 +8,11 @@ import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
+import PrunButton from '@src/components/PrunButton.vue';
+import { userData } from '@src/store/user-data';
 import {
   computeOpportunities,
   getArbExchanges,
@@ -27,6 +30,9 @@ const sortKey = ref('profitPct');
 const allExchanges = computed(() => getArbExchanges());
 const exchangeOptions = computed(() =>
   allExchanges.value.map(x => ({ label: x.code, value: x.code })),
+);
+const destCurrency = computed(
+  () => allExchanges.value.find(x => x.code === destExchange.value)?.currency ?? '',
 );
 const sourceExchange = ref('IC1');
 const destExchange = ref('');
@@ -106,7 +112,18 @@ const selectedSelected = computed(
 );
 
 // 用户手动勾选的商品 ticker 集合。
-const checkedTickers = ref<Set<string>>(new Set());
+// 默认全选「过滤后」的所有商品；当用户手动取消勾选后从集合移除。
+// 追踪哪些 ticker 被用户显式取消过（避免过滤变化时自动重新勾选）。
+const manuallyUnchecked = ref<Set<string>>(new Set());
+const checkedTickers = computed<Set<string>>(() => {
+  const set = new Set<string>();
+  for (const o of filtered.value) {
+    if (!manuallyUnchecked.value.has(o.ticker) && shipFitsAll(o)) {
+      set.add(o.ticker);
+    }
+  }
+  return set;
+});
 
 // 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
 // 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
@@ -154,10 +171,13 @@ function shipFitsAll(opp: ArbOpportunity): boolean {
 
 function toggleChecked(ticker: string, ev: Event) {
   const checked = (ev.target as HTMLInputElement).checked;
-  const next = new Set(checkedTickers.value);
-  if (checked) next.add(ticker);
-  else next.delete(ticker);
-  checkedTickers.value = next;
+  const next = new Set(manuallyUnchecked.value);
+  if (checked) {
+    next.delete(ticker);
+  } else {
+    next.add(ticker);
+  }
+  manuallyUnchecked.value = next;
 }
 
 // 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / max(vol, weight/50)"贪心
@@ -251,6 +271,73 @@ const filtered = computed(() => {
   return list.slice().sort((a, b) => sortValue(b) - sortValue(a));
 });
 
+// 该商品预期装载后的总利润（基于贪心算法分配的件数）。
+function expectedProfitFor(opp: ArbOpportunity): number {
+  return suggestedUnits(opp) * opp.profitPerUnit;
+}
+
+// 总体汇总：总重量、总容积、总预期利润（基于勾选 + 飞船 + 贪心分配）。
+const summary = computed(() => {
+  let totalWeight = 0;
+  let totalVolume = 0;
+  let totalProfit = 0;
+  for (const o of filtered.value) {
+    if (!checkedTickers.value.has(o.ticker)) continue;
+    const units = suggestedUnits(o);
+    if (units <= 0) continue;
+    totalWeight += unitWeight(o) * units;
+    totalVolume += unitVolume(o) * units;
+    totalProfit += expectedProfitFor(o);
+  }
+  return { totalWeight, totalVolume, totalProfit };
+});
+
+// 一键生成 ACT 脚本：把勾选 + 贪心分配的商品打包成一个 CX Buy action package，
+// 推入 userData.actionPackages 并自动打开 ACT_EDIT 缓冲窗。
+function generateActScript() {
+  if (!selectedSelected.value || checkedTickers.value.size === 0) return;
+
+  const materials: Record<string, number> = {};
+  for (const o of filtered.value) {
+    if (!checkedTickers.value.has(o.ticker)) continue;
+    const units = suggestedUnits(o);
+    if (units <= 0) continue;
+    materials[o.ticker] = (materials[o.ticker] ?? 0) + units;
+  }
+  if (Object.keys(materials).length === 0) return;
+
+  const ship = selectedSelected.value.ship;
+  const exchange = sourceExchange.value;
+  const groupName = `ARB_${ship.registration}`;
+  const pkgName = `ARB_${ship.registration}_${exchange}_${Date.now()}`;
+
+  const pkg: UserData.ActionPackageData = {
+    global: { name: pkgName },
+    groups: [
+      {
+        type: 'Manual',
+        name: groupName,
+        materials,
+      },
+    ],
+    actions: [
+      {
+        type: 'CX Buy',
+        name: 'ARB Buy',
+        group: groupName,
+        exchange,
+        priceLimits: {},
+        buyPartial: false,
+        allowUnfilled: false,
+        useCXInv: true,
+      },
+    ],
+  };
+
+  userData.actionPackages.push(pkg);
+  showBuffer('XIT ACT_EDIT_' + pkgName.split(' ').join('_'));
+}
+
 function localizedName(o: ArbOpportunity): string {
   const material = materialsStore.getByTicker(o.ticker);
   return getMaterialName(material) ?? o.name;
@@ -306,6 +393,22 @@ function localizedCategory(o: ArbOpportunity): string {
       </span>
     </div>
 
+    <div v-if="selectedSelected" :class="$style.summaryBar">
+      <span :class="$style.summaryItem">
+        计划装载 ·
+        <strong>{{ fixed0(summary.totalWeight) }}</strong> t ·
+        <strong>{{ fixed0(summary.totalVolume) }}</strong> m³
+      </span>
+      <span :class="[$style.summaryItem, $style.summaryProfit]">
+        预期总利润 ·
+        <strong>{{ fixed0(summary.totalProfit) }}</strong>
+        {{ destCurrency }}
+      </span>
+      <PrunButton primary :disabled="checkedTickers.size === 0" @click="generateActScript">
+        生成 ACT 一键购买脚本 ({{ checkedTickers.size }})
+      </PrunButton>
+    </div>
+
     <div :class="$style.tableWrap">
       <table :class="$style.table">
         <thead>
@@ -319,17 +422,18 @@ function localizedCategory(o: ArbOpportunity): string {
             <th :class="$style.numCol">利润率</th>
             <th :class="$style.numCol">可成交量</th>
             <th :class="$style.numCol">建议装载</th>
+            <th :class="$style.numCol">预期利润</th>
             <th :class="$style.numCol">总利润</th>
           </tr>
         </thead>
         <tbody v-if="noData">
           <tr>
-            <td colspan="10" :class="$style.empty">正在加载 FIO 价格数据，请稍候…</td>
+            <td colspan="11" :class="$style.empty">正在加载 FIO 价格数据，请稍候…</td>
           </tr>
         </tbody>
         <tbody v-else-if="filtered.length === 0">
           <tr>
-            <td colspan="10" :class="$style.empty">没有符合条件的套利机会。</td>
+            <td colspan="11" :class="$style.empty">没有符合条件的套利机会。</td>
           </tr>
         </tbody>
         <tbody v-else>
@@ -391,6 +495,9 @@ function localizedCategory(o: ArbOpportunity): string {
                 {{ fixed0(suggestedUnits(o)) }}
               </span>
               <span v-else>--</span>
+            </td>
+            <td :class="[$style.numCell, expectedProfitFor(o) > 0 ? $style.pos : $style.neg]">
+              {{ expectedProfitFor(o) > 0 ? fixed0(expectedProfitFor(o)) : '--' }}
             </td>
             <td :class="[$style.numCell, o.profitPerUnit > 0 ? $style.pos : $style.neg]">
               {{ o.totalProfit !== null ? fixed0(o.totalProfit) : '--' }}
@@ -482,6 +589,33 @@ function localizedCategory(o: ArbOpportunity): string {
 
 .shipInfo strong {
   color: rgb(255, 176, 0);
+}
+
+.summaryBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgba(255, 176, 0, 0.06);
+  border-radius: 4px;
+}
+
+.summaryItem {
+  color: rgb(200, 208, 214);
+  font-size: 12px;
+}
+
+.summaryItem strong {
+  color: rgb(255, 176, 0);
+  font-size: 13px;
+  padding: 0 2px;
+}
+
+.summaryProfit strong {
+  color: rgb(126, 217, 87);
 }
 
 .checkCol {
