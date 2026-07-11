@@ -8,14 +8,16 @@ type Option =
       value: string;
     };
 
-defineProps<{ options: Option[] }>();
+withDefaults(defineProps<{ options: Option[]; width?: number | string }>(), { width: 158 });
 
 const value = (option: Option) => (typeof option === 'string' ? option : option.value);
 const label = (option: Option) => (typeof option === 'string' ? option : option.label);
 </script>
 
 <template>
-  <div :class="$style.container">
+  <div
+    :class="$style.container"
+    :style="{ width: typeof width === 'number' ? `${width}px` : width }">
     <select v-model="model" :class="$style.select">
       <option v-for="option in options" :key="value(option)" :value="value(option)">
         {{ label(option) }}
@@ -26,7 +28,6 @@ const label = (option: Option) => (typeof option === 'string' ? option : option.
 
 <style module>
 .container {
-  width: 158px;
   margin-right: 0;
   margin-left: auto;
 }

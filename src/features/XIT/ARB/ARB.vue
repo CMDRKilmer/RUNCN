@@ -215,19 +215,19 @@ function localizedCategory(o: ArbOpportunity): string {
       <input v-model="search" :class="$style.input" type="text" placeholder="搜索 ticker 或名称" />
       <label :class="$style.control">
         <span :class="$style.controlLabel">类别</span>
-        <SelectInput v-model="categoryFilter" :options="categoryOptions" />
+        <SelectInput v-model="categoryFilter" :options="categoryOptions" :width="100" />
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">排序</span>
-        <SelectInput v-model="sortKey" :options="sortOptions" />
+        <SelectInput v-model="sortKey" :options="sortOptions" :width="80" />
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">出发地</span>
-        <SelectInput v-model="sourceExchange" :options="exchangeOptions" />
+        <SelectInput v-model="sourceExchange" :options="exchangeOptions" :width="60" />
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">目的地</span>
-        <SelectInput v-model="destExchange" :options="exchangeOptions" />
+        <SelectInput v-model="destExchange" :options="exchangeOptions" :width="60" />
       </label>
       <label :class="$style.checkbox">
         <input v-model="onlyPositive" type="checkbox" />
@@ -235,7 +235,7 @@ function localizedCategory(o: ArbOpportunity): string {
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
-        <SelectInput v-model="selectedShipId" :options="shipOptions" />
+        <SelectInput v-model="selectedShipId" :options="shipOptions" :width="180" />
       </label>
       <span v-if="selectedShip" :class="$style.shipInfo">
         {{ selectedShip.registration }} · 容量 <strong>{{ fixed0(selectedShip.volume) }}</strong> m³
@@ -367,7 +367,7 @@ function localizedCategory(o: ArbOpportunity): string {
 
 .input {
   box-sizing: border-box;
-  width: 200px;
+  width: 140px;
   padding: 4px 6px;
   border: 1px solid rgb(61, 74, 84);
   background: rgb(26, 33, 38);
