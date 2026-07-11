@@ -60,7 +60,7 @@ const noData = computed(() => !cxStore.fetched);
 const positiveCount = computed(() => opportunities.value.filter(o => o.profitPerUnit > 0).length);
 
 // 飞船选择 + 容量优化。
-const ships = computed(() => shipsStore.all.value.filter(s => s.address !== null));
+const ships = computed(() => shipsStore.all.value ?? []);
 const shipOptions = computed(() => [
   { label: '不选飞船', value: '' },
   ...ships.value.map(s => ({
