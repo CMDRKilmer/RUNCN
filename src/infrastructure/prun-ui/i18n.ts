@@ -55,18 +55,29 @@ function lookupMaterialCategoryI18n(category: { id: string; name: string }) {
     .replaceAll('-', '')
     .replaceAll('(', '')
     .replaceAll(')', '');
+  // 游戏的 i18n key 形如 `consumables_basic_`：name 小写 + 空格/括号替换为 `_`。
+  // 同时去掉末尾下划线以兼容带末尾 `_` 的格式（如 `consumables_basic_`）。
+  const underscored = spaced
+    .toLowerCase()
+    .replaceAll(' ', '_')
+    .replaceAll('-', '_')
+    .replaceAll('(', '_')
+    .replaceAll(')', '_')
+    .replace(/_+$/, '');
   const variants = new Set<string>();
-  // 1. id 原样（某些版本用 id 当 key，例如 `MaterialCategory.consumablesBasic`）
+  // 1. id 原样
   variants.add(category.id);
   // 2. id 小写
   variants.add(category.id.toLowerCase());
-  // 3. 全小写无分隔（基于 name）。例如 `consumablesbasic`
+  // 3. 全小写无分隔。例如 `consumablesbasic`
   variants.add(stripped);
-  // 4. 全小写带空格。例如 `consumables basic`
+  // 4. 全小写下划线分隔（游戏实际格式）。例如 `consumables_basic_`
+  variants.add(underscored);
+  // 5. 全小写带空格。例如 `consumables basic`
   variants.add(spaced.toLowerCase());
-  // 5. name 原样（区分大小写）
+  // 6. name 原样
   variants.add(category.name);
-  // 6. name 全小写
+  // 7. name 全小写
   variants.add(category.name.toLowerCase());
 
   for (const key of variants) {
