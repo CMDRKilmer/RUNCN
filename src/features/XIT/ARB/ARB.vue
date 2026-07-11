@@ -4,11 +4,16 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
-import { getMaterialCategoryName, getMaterialName } from '@src/infrastructure/prun-ui/i18n';
+import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
-import { computeOpportunities, getCategories, type ArbOpportunity } from './arb-utils';
+import {
+  computeOpportunities,
+  getCategories,
+  resolveCategoryLabel,
+  type ArbOpportunity,
+} from './arb-utils';
 
 const search = ref('');
 const categoryFilter = ref('ALL');
@@ -17,10 +22,7 @@ const sortKey = ref('profitPct');
 
 const categoryOptions = computed(() => [
   { label: '全部类别', value: 'ALL' },
-  ...getCategories().map(category => ({
-    label: getMaterialCategoryName(category) ?? category,
-    value: category,
-  })),
+  ...getCategories().map(id => ({ label: resolveCategoryLabel(id), value: id })),
 ]);
 
 const sortOptions = [
@@ -83,7 +85,7 @@ function localizedName(o: ArbOpportunity): string {
 }
 
 function localizedCategory(o: ArbOpportunity): string {
-  return getMaterialCategoryName(o.category) ?? o.category;
+  return resolveCategoryLabel(o.category);
 }
 </script>
 

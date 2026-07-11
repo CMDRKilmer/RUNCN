@@ -3,6 +3,7 @@ import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { getMaterialCategoryName } from '@src/infrastructure/prun-ui/i18n';
 
 export interface ArbOpportunity {
   ticker: string;
@@ -35,10 +36,21 @@ export function getArbExchanges(): ArbExchange[] {
     .map(x => ({ code: x.code, currency: x.currency.code }));
 }
 
-// Distinct material category names (human-readable), sorted. Used by the category filter.
+// Distinct material category ids, sorted. Used by the category filter. id 是 i18n
+// 缓存的 key（见 i18n.ts 的 `categoryNameById`）。
 export function getCategories(): string[] {
   const categories = materialCategoriesStore.all.value ?? [];
-  return categories.map(x => x.name).sort();
+  return categories.map(x => x.id).sort();
+}
+
+// 把类别 id 解析为本地化显示名（找不到时回退到可读 name）。
+export function resolveCategoryLabel(id: string): string {
+  const localized = getMaterialCategoryName(id);
+  if (localized) {
+    return localized;
+  }
+  const fallback = materialCategoriesStore.getById(id)?.name;
+  return fallback ?? id;
 }
 
 interface MarketQuote {
@@ -128,7 +140,7 @@ export function computeOpportunities(): ArbOpportunity[] {
     opportunities.push({
       ticker: material.ticker,
       name: material.name,
-      category: materialCategoriesStore.getById(material.category)?.name ?? material.category,
+      category: material.category,
       buyExchange: bestBuy.exchange,
       buyCurrency: bestBuy.currency,
       buyPrice: bestBuy.price,
