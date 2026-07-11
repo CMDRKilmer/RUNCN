@@ -7,6 +7,7 @@ import { cxStore } from '@src/infrastructure/fio/cx';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
 import {
@@ -60,17 +61,44 @@ const noData = computed(() => !cxStore.fetched);
 const positiveCount = computed(() => opportunities.value.filter(o => o.profitPerUnit > 0).length);
 
 // 飞船选择 + 容量优化。
-const ships = computed(() => shipsStore.all.value ?? []);
+// 飞船的「载货容量」是其 SHIP_STORE 的 volumeCapacity（减去已装载的 volumeLoad），
+// 不是 Ship.volume（后者是飞船物理排水体积）。
+interface ShipWithCargo {
+  ship: PrunApi.Ship;
+  cargoVolume: number;
+  cargoWeight: number;
+  freeVolume: number;
+  freeWeight: number;
+}
+
+const ships = computed<ShipWithCargo[]>(() => {
+  const all = shipsStore.all.value ?? [];
+  return all
+    .map(s => {
+      const stores = storagesStore.getByAddressableId(s.id) ?? [];
+      const cargoStore = stores.find(x => x.type === 'SHIP_STORE');
+      const cargoVolume = cargoStore?.volumeCapacity ?? 0;
+      const cargoWeight = cargoStore?.weightCapacity ?? 0;
+      const freeVolume = Math.max(0, cargoVolume - (cargoStore?.volumeLoad ?? 0));
+      const freeWeight = Math.max(0, cargoWeight - (cargoStore?.weightLoad ?? 0));
+      return { ship: s, cargoVolume, cargoWeight, freeVolume, freeWeight };
+    })
+    .filter(x => x.cargoVolume > 0);
+});
+
 const shipOptions = computed(() => [
   { label: '不选飞船', value: '' },
-  ...ships.value.map(s => ({
-    label: `${s.registration} ${s.name} (${fixed0(s.volume)} m³)`,
-    value: s.id,
+  ...ships.value.map(x => ({
+    label: `${x.ship.registration} ${x.ship.name} (${fixed0(x.freeVolume)}/${fixed0(x.cargoVolume)} m³)`,
+    value: x.ship.id,
   })),
 ]);
 const selectedShipId = ref('');
-const selectedShip = computed(() => ships.value.find(s => s.id === selectedShipId.value) ?? null);
-const shipCapacity = computed(() => selectedShip.value?.volume ?? 0);
+const selectedSelected = computed(
+  () => ships.value.find(x => x.ship.id === selectedShipId.value) ?? null,
+);
+const selectedShip = computed(() => selectedSelected.value?.ship ?? null);
+const shipCapacity = computed(() => selectedSelected.value?.freeVolume ?? 0);
 
 // 用户手动勾选的商品 ticker 集合。
 const checkedTickers = ref<Set<string>>(new Set());
@@ -237,8 +265,10 @@ function localizedCategory(o: ArbOpportunity): string {
         <span :class="$style.controlLabel">飞船</span>
         <SelectInput v-model="selectedShipId" :options="shipOptions" :width="180" />
       </label>
-      <span v-if="selectedShip" :class="$style.shipInfo">
-        {{ selectedShip.registration }} · 容量 <strong>{{ fixed0(selectedShip.volume) }}</strong> m³
+      <span v-if="selectedSelected" :class="$style.shipInfo">
+        {{ selectedSelected.ship.registration }} · 余
+        <strong>{{ fixed0(selectedSelected.freeVolume) }}</strong> /
+        {{ fixed0(selectedSelected.cargoVolume) }} m³
       </span>
     </div>
 
