@@ -8,6 +8,7 @@ import TextInput from '@src/components/forms/TextInput.vue';
 import { sortMaterials } from '@src/core/sort-materials';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { userData } from '@src/store/user-data';
 import { fixed02 } from '@src/utils/format';
 import { uploadJson } from '@src/utils/json-file';
@@ -24,6 +25,10 @@ import {
   normalizeCartName,
   parseCartImport,
 } from './cart-utils';
+
+function localizedMaterialName(material?: PrunApi.Material | null) {
+  return getMaterialName(material) ?? material?.name ?? '';
+}
 
 const cart = computed(() => userData.cart);
 const search = ref('');
@@ -62,7 +67,8 @@ const filteredMaterials = computed(() => {
   }
 
   return materials.filter(material => {
-    const haystack = `${material.ticker} ${material.name}`.toLowerCase();
+    const haystack =
+      `${material.ticker} ${material.name} ${localizedMaterialName(material)}`.toLowerCase();
     return haystack.includes(query);
   });
 });
@@ -344,7 +350,7 @@ function setStatus(message: string, isError = false) {
               @dragstart="onCatalogDragStart($event, material.ticker)">
               <div :class="$style.materialMeta">
                 <strong :class="$style.materialTicker">{{ material.ticker }}</strong>
-                <span :class="$style.materialName">{{ material.name }}</span>
+                <span :class="$style.materialName">{{ localizedMaterialName(material) }}</span>
               </div>
               <PrunButton primary inline @click="addMaterial(material.ticker)">添加</PrunButton>
             </div>
@@ -399,7 +405,7 @@ function setStatus(message: string, isError = false) {
                 </td>
                 <td :class="$style.materialCell">
                   <strong>{{ row.item.ticker }}</strong>
-                  <span>{{ row.material?.name ?? '未知物品' }}</span>
+                  <span>{{ row.material ? localizedMaterialName(row.material) : '未知物品' }}</span>
                 </td>
                 <td :class="$style.amountColumn">
                   <input

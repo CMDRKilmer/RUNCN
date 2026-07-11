@@ -4,6 +4,8 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
+import { getMaterialCategoryName, getMaterialName } from '@src/infrastructure/prun-ui/i18n';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
 import { computeOpportunities, getCategories, type ArbOpportunity } from './arb-utils';
@@ -15,7 +17,10 @@ const sortKey = ref('profitPct');
 
 const categoryOptions = computed(() => [
   { label: '全部类别', value: 'ALL' },
-  ...getCategories().map(category => ({ label: category, value: category })),
+  ...getCategories().map(category => ({
+    label: getMaterialCategoryName(category) ?? category,
+    value: category,
+  })),
 ]);
 
 const sortOptions = [
@@ -64,10 +69,22 @@ const filtered = computed(() => {
   }
   const query = search.value.trim().toLowerCase();
   if (query) {
-    list = list.filter(o => `${o.ticker} ${o.name}`.toLowerCase().includes(query));
+    list = list.filter(o => {
+      const localized = localizedName(o).toLowerCase();
+      return `${o.ticker} ${o.name} ${localized}`.toLowerCase().includes(query);
+    });
   }
   return list.slice().sort((a, b) => sortValue(b) - sortValue(a));
 });
+
+function localizedName(o: ArbOpportunity): string {
+  const material = materialsStore.getByTicker(o.ticker);
+  return getMaterialName(material) ?? o.name;
+}
+
+function localizedCategory(o: ArbOpportunity): string {
+  return getMaterialCategoryName(o.category) ?? o.category;
+}
 </script>
 
 <template>
@@ -126,10 +143,10 @@ const filtered = computed(() => {
               <MaterialIcon :ticker="o.ticker" size="medium" />
               <div :class="$style.materialMeta">
                 <strong>{{ o.ticker }}</strong>
-                <span>{{ o.name }}</span>
+                <span>{{ localizedName(o) }}</span>
               </div>
             </td>
-            <td :class="$style.categoryCell">{{ o.category }}</td>
+            <td :class="$style.categoryCell">{{ localizedCategory(o) }}</td>
             <td :class="$style.marketCell">
               <PrunLink inline :command="`CXPO ${o.ticker}.${o.buyExchange}`">
                 {{ o.buyExchange }}
