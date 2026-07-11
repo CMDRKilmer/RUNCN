@@ -186,8 +186,7 @@ async function loadUserData() {
   if (userData !== undefined && typeof userData === 'object') {
     const data = userData as { settings?: { translation?: { providerConfigs?: unknown } } };
     const configs = data?.settings?.translation?.providerConfigs as
-      | Record<string, { apiKey?: string }>
-      | undefined;
+      Record<string, { apiKey?: string }> | undefined;
     if (configs !== undefined) {
       for (const id of Object.keys(configs)) {
         const config = configs[id];

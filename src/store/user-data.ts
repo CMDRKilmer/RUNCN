@@ -95,8 +95,7 @@ export const initialUserData = deepFreeze({
   commandLists: [] as UserData.CommandList[],
   factionToken: undefined as string | undefined,
   factionCache: undefined as
-    | { cachedAt: number; members?: unknown[]; balance?: number; bulletins?: unknown[] }
-    | undefined,
+    { cachedAt: number; members?: unknown[]; balance?: number; bulletins?: unknown[] } | undefined,
   factionLastSeenBulletinAt: undefined as string | undefined,
   supabaseAuth: undefined as Record<string, string> | undefined,
   lastAutoProductionDate: undefined as string | undefined,
