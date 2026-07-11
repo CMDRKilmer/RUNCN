@@ -72,23 +72,18 @@ interface ShipWithCargo {
   hasCargo: boolean;
 }
 
-// 直接遍历所有 SHIP_STORE，按 addressableId (shipId) 索引，
-// 避免依赖 getByAddressableId 的大小写/缓存行为。
-const cargoStoreByShipId = computed(() => {
-  const map = new Map<string, PrunApi.Store>();
-  const allShipStores = storagesStore.getByType('SHIP_STORE') ?? [];
-  for (const store of allShipStores) {
-    map.set(store.addressableId.toUpperCase(), store);
-  }
-  return map;
-});
+// 直接用 ship.idShipStore 查找对应的 SHIP_STORE。
+// 这是项目里既定的查找模式（见 src/core/store-id.ts:23）。
+function findShipCargoStore(ship: PrunApi.Ship): PrunApi.Store | undefined {
+  const stores = storagesStore.all.value ?? [];
+  return stores.find(x => x.id === ship.idShipStore && x.type === 'SHIP_STORE');
+}
 
 const ships = computed<ShipWithCargo[]>(() => {
   const allShips = shipsStore.all.value ?? [];
-  const cargoMap = cargoStoreByShipId.value;
   return allShips
     .map(s => {
-      const cargoStore = cargoMap.get(s.id.toUpperCase());
+      const cargoStore = findShipCargoStore(s);
       const cargoVolume = cargoStore?.volumeCapacity ?? 0;
       const cargoWeight = cargoStore?.weightCapacity ?? 0;
       const freeVolume = Math.max(0, cargoVolume - (cargoStore?.volumeLoad ?? 0));
