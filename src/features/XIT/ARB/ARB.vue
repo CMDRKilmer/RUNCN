@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import SectionHeader from '@src/components/SectionHeader.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import PrunLink from '@src/components/PrunLink.vue';
@@ -112,18 +111,8 @@ const selectedSelected = computed(
 );
 
 // 用户手动勾选的商品 ticker 集合。
-// 默认全选「过滤后」的所有商品；当用户手动取消勾选后从集合移除。
-// 追踪哪些 ticker 被用户显式取消过（避免过滤变化时自动重新勾选）。
-const manuallyUnchecked = ref<Set<string>>(new Set());
-const checkedTickers = computed<Set<string>>(() => {
-  const set = new Set<string>();
-  for (const o of filtered.value) {
-    if (!manuallyUnchecked.value.has(o.ticker) && shipFitsAll(o)) {
-      set.add(o.ticker);
-    }
-  }
-  return set;
-});
+// 用户手动勾选的商品 ticker 集合（默认空，用户需主动勾选）。
+const checkedTickers = ref<Set<string>>(new Set());
 
 // 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
 // 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
@@ -171,13 +160,10 @@ function shipFitsAll(opp: ArbOpportunity): boolean {
 
 function toggleChecked(ticker: string, ev: Event) {
   const checked = (ev.target as HTMLInputElement).checked;
-  const next = new Set(manuallyUnchecked.value);
-  if (checked) {
-    next.delete(ticker);
-  } else {
-    next.add(ticker);
-  }
-  manuallyUnchecked.value = next;
+  const next = new Set(checkedTickers.value);
+  if (checked) next.add(ticker);
+  else next.delete(ticker);
+  checkedTickers.value = next;
 }
 
 // 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / max(vol, weight/50)"贪心
@@ -359,7 +345,6 @@ function localizedCategory(o: ArbOpportunity): string {
 
 <template>
   <div :class="$style.page">
-    <SectionHeader>倒货助手 · Arbitrage</SectionHeader>
     <div :class="$style.subTitle">
       市场信息有时效性，倒货需谨慎
       <span v-if="dataAgeMinutes !== null" :class="$style.age">
