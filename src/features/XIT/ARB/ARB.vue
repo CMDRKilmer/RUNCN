@@ -69,21 +69,33 @@ interface ShipWithCargo {
   cargoWeight: number;
   freeVolume: number;
   freeWeight: number;
+  hasCargo: boolean;
 }
 
+// 直接遍历所有 SHIP_STORE，按 addressableId (shipId) 索引，
+// 避免依赖 getByAddressableId 的大小写/缓存行为。
+const cargoStoreByShipId = computed(() => {
+  const map = new Map<string, PrunApi.Store>();
+  const allShipStores = storagesStore.getByType('SHIP_STORE') ?? [];
+  for (const store of allShipStores) {
+    map.set(store.addressableId.toUpperCase(), store);
+  }
+  return map;
+});
+
 const ships = computed<ShipWithCargo[]>(() => {
-  const all = shipsStore.all.value ?? [];
-  return all
+  const allShips = shipsStore.all.value ?? [];
+  const cargoMap = cargoStoreByShipId.value;
+  return allShips
     .map(s => {
-      const stores = storagesStore.getByAddressableId(s.id) ?? [];
-      const cargoStore = stores.find(x => x.type === 'SHIP_STORE');
+      const cargoStore = cargoMap.get(s.id.toUpperCase());
       const cargoVolume = cargoStore?.volumeCapacity ?? 0;
       const cargoWeight = cargoStore?.weightCapacity ?? 0;
       const freeVolume = Math.max(0, cargoVolume - (cargoStore?.volumeLoad ?? 0));
       const freeWeight = Math.max(0, cargoWeight - (cargoStore?.weightLoad ?? 0));
-      return { ship: s, cargoVolume, cargoWeight, freeVolume, freeWeight };
+      return { ship: s, cargoVolume, cargoWeight, freeVolume, freeWeight, hasCargo: !!cargoStore };
     })
-    .filter(x => x.cargoVolume > 0);
+    .filter(x => x.hasCargo);
 });
 
 const shipOptions = computed(() => [
