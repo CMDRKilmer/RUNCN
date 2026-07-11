@@ -6,6 +6,7 @@ import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
 import {
@@ -57,6 +58,89 @@ const opportunities = computed(() =>
 const noData = computed(() => !cxStore.fetched);
 
 const positiveCount = computed(() => opportunities.value.filter(o => o.profitPerUnit > 0).length);
+
+// 飞船选择 + 容量优化。
+const ships = computed(() => shipsStore.all.value.filter(s => s.address !== null));
+const shipOptions = computed(() => [
+  { label: '不选飞船', value: '' },
+  ...ships.value.map(s => ({
+    label: `${s.registration} ${s.name} (${fixed0(s.volume)} m³)`,
+    value: s.id,
+  })),
+]);
+const selectedShipId = ref('');
+const selectedShip = computed(() => ships.value.find(s => s.id === selectedShipId.value) ?? null);
+const shipCapacity = computed(() => selectedShip.value?.volume ?? 0);
+
+// 用户手动勾选的商品 ticker 集合。
+const checkedTickers = ref<Set<string>>(new Set());
+
+// 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
+// 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
+function unitVolume(): number {
+  // executability.volume 是「可成交总件数」，假设按 50kg/m³ 标准。
+  // 单件体积 = 1 / 50 = 0.02 m³（按 PrUn 实际数据调整）。
+  // 更稳妥：单件 ~0.02 m³。
+  return 0.02;
+}
+
+function maxUnitsFor(opp: ArbOpportunity): number {
+  if (shipCapacity.value <= 0) return opp.executableVolume ?? 0;
+  return Math.min(opp.executableVolume ?? 0, Math.floor(shipCapacity.value / unitVolume()));
+}
+
+function shipFitsAll(opp: ArbOpportunity): boolean {
+  if (shipCapacity.value <= 0) return true;
+  const units = maxUnitsFor(opp);
+  return units > 0;
+}
+
+function toggleChecked(ticker: string, ev: Event) {
+  const checked = (ev.target as HTMLInputElement).checked;
+  const next = new Set(checkedTickers.value);
+  if (checked) next.add(ticker);
+  else next.delete(ticker);
+  checkedTickers.value = next;
+}
+
+// 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / 单件体积"贪心分配剩余容量。
+const suggestedUnits = (() => {
+  const cache = new Map<string, number>();
+  return (opp: ArbOpportunity): number => {
+    if (!selectedShip.value) return 0;
+    const key = `${selectedShipId.value}|${opp.ticker}|${checkedTickers.value.size}`;
+    const cached = cache.get(key);
+    if (cached !== undefined) return cached;
+
+    if (!checkedTickers.value.has(opp.ticker)) {
+      cache.set(key, 0);
+      return 0;
+    }
+
+    const items = filtered.value.filter(
+      o => checkedTickers.value.has(o.ticker) && o.profitPerUnit > 0 && shipFitsAll(o),
+    );
+    if (items.length === 0) {
+      cache.set(key, 0);
+      return 0;
+    }
+
+    let remaining = shipCapacity.value;
+    let mine = 0;
+    // 贪心：按 profitPerUnit / vol 降序，每个商品能装多少装多少。
+    const sorted = items
+      .map(o => ({ o, vol: unitVolume(), density: o.profitPerUnit / unitVolume() }))
+      .sort((a, b) => b.density - a.density);
+    for (const it of sorted) {
+      const units = Math.min(maxUnitsFor(it.o), Math.floor(remaining / it.vol));
+      if (units <= 0) continue;
+      remaining -= units * it.vol;
+      if (it.o.ticker === opp.ticker) mine = units;
+    }
+    cache.set(key, mine);
+    return mine;
+  };
+})();
 
 // Reactive data age (re-evaluates each minute via timestampEachMinute).
 const dataAgeMinutes = computed(() => {
@@ -141,12 +225,20 @@ function localizedCategory(o: ArbOpportunity): string {
         <input v-model="onlyPositive" type="checkbox" />
         <span>仅正机会 ({{ positiveCount }})</span>
       </label>
+      <label :class="$style.control">
+        <span :class="$style.controlLabel">飞船</span>
+        <SelectInput v-model="selectedShipId" :options="shipOptions" />
+      </label>
+      <span v-if="selectedShip" :class="$style.shipInfo">
+        {{ selectedShip.registration }} · 容量 <strong>{{ fixed0(selectedShip.volume) }}</strong> m³
+      </span>
     </div>
 
     <div :class="$style.tableWrap">
       <table :class="$style.table">
         <thead>
           <tr>
+            <th :class="$style.checkCol">选</th>
             <th :class="$style.materialCol">商品</th>
             <th :class="$style.categoryCol">类别</th>
             <th :class="$style.marketCol">买入 (最低 ask)</th>
@@ -154,21 +246,29 @@ function localizedCategory(o: ArbOpportunity): string {
             <th :class="$style.numCol">单价利润</th>
             <th :class="$style.numCol">利润率</th>
             <th :class="$style.numCol">可成交量</th>
+            <th :class="$style.numCol">建议装载</th>
             <th :class="$style.numCol">总利润</th>
           </tr>
         </thead>
         <tbody v-if="noData">
           <tr>
-            <td colspan="8" :class="$style.empty">正在加载 FIO 价格数据，请稍候…</td>
+            <td colspan="10" :class="$style.empty">正在加载 FIO 价格数据，请稍候…</td>
           </tr>
         </tbody>
         <tbody v-else-if="filtered.length === 0">
           <tr>
-            <td colspan="8" :class="$style.empty">没有符合条件的套利机会。</td>
+            <td colspan="10" :class="$style.empty">没有符合条件的套利机会。</td>
           </tr>
         </tbody>
         <tbody v-else>
           <tr v-for="o in filtered" :key="o.ticker">
+            <td :class="$style.checkCell">
+              <input
+                type="checkbox"
+                :checked="checkedTickers.has(o.ticker)"
+                :disabled="!shipFitsAll(o)"
+                @change="toggleChecked(o.ticker, $event)" />
+            </td>
             <td :class="$style.materialCell">
               <MaterialIcon :ticker="o.ticker" size="medium" />
             </td>
@@ -213,6 +313,12 @@ function localizedCategory(o: ArbOpportunity): string {
             </td>
             <td :class="$style.numCell">
               {{ o.executableVolume !== null ? fixed0(o.executableVolume) : '--' }}
+            </td>
+            <td :class="$style.numCell">
+              <span v-if="suggestedUnits(o) > 0" :class="$style.suggestedBadge">
+                {{ fixed0(suggestedUnits(o)) }}
+              </span>
+              <span v-else>--</span>
             </td>
             <td :class="[$style.numCell, o.profitPerUnit > 0 ? $style.pos : $style.neg]">
               {{ o.totalProfit !== null ? fixed0(o.totalProfit) : '--' }}
@@ -294,6 +400,48 @@ function localizedCategory(o: ArbOpportunity): string {
 
 .checkbox input {
   accent-color: rgb(255, 176, 0);
+}
+
+.shipInfo {
+  color: rgb(167, 176, 183);
+  font-size: 12px;
+  padding-left: 4px;
+}
+
+.shipInfo strong {
+  color: rgb(255, 176, 0);
+}
+
+.checkCol {
+  width: 32px;
+  text-align: center;
+  padding: 2px 4px;
+}
+
+.checkCell {
+  text-align: center;
+  padding: 2px 4px;
+  border-bottom: 1px solid rgb(36, 44, 52);
+}
+
+.checkCell input {
+  accent-color: rgb(255, 176, 0);
+  cursor: pointer;
+}
+
+.checkCell input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.suggestedBadge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(255, 176, 0, 0.2);
+  color: rgb(255, 200, 64);
+  font-weight: 600;
+  font-size: 11px;
 }
 
 .tableWrap {
