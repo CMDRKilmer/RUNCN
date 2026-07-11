@@ -168,12 +168,20 @@ function toggleChecked(ticker: string, ev: Event) {
 
 // 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / max(vol, weight/50)"贪心
 // 同时分配剩余体积和重量。剩余体积/重量被独立追踪；每个商品取两者允许的较小上限。
+// 缓存键包含飞船 id + 已勾选商品的拼接指纹，避免 size 相同时碰撞。
 const suggestedUnits = (() => {
   const cache = new Map<string, number>();
+  const computeFingerprint = (): string => {
+    const checked = filtered.value
+      .filter(o => checkedTickers.value.has(o.ticker))
+      .map(o => o.ticker)
+      .sort();
+    return `${selectedShipId.value}|${checked.join(',')}`;
+  };
   return (opp: ArbOpportunity): number => {
     if (!selectedSelected.value) return 0;
-    const sel = selectedSelected.value;
-    const key = `${selectedShipId.value}|${opp.ticker}|${checkedTickers.value.size}`;
+    const fingerprint = computeFingerprint();
+    const key = `${fingerprint}|${opp.ticker}`;
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
 
@@ -190,6 +198,7 @@ const suggestedUnits = (() => {
       return 0;
     }
 
+    const sel = selectedSelected.value;
     let remVol = sel.freeVolume;
     let remWt = sel.freeWeight;
     let mine = 0;
@@ -704,8 +713,6 @@ function localizedCategory(o: ArbOpportunity): string {
 .marketCell {
   padding: 2px 6px;
   border-left: 2px solid rgb(46, 56, 64);
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .marketExchange {
@@ -713,6 +720,7 @@ function localizedCategory(o: ArbOpportunity): string {
   align-items: center;
   gap: 4px;
   vertical-align: middle;
+  cursor: pointer;
 }
 
 .marketPrice {
