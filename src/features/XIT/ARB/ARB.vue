@@ -119,10 +119,10 @@ function localizedCategory(o: ArbOpportunity): string {
       <table :class="$style.table">
         <thead>
           <tr>
-            <th>商品</th>
-            <th>类别</th>
-            <th>买入 (最低 ask)</th>
-            <th>卖出 (最高 bid)</th>
+            <th :class="$style.materialCol">商品</th>
+            <th :class="$style.categoryCol">类别</th>
+            <th :class="$style.marketCol">买入 (最低 ask)</th>
+            <th :class="$style.marketCol">卖出 (最高 bid)</th>
             <th :class="$style.numCol">单价利润</th>
             <th :class="$style.numCol">利润率</th>
             <th :class="$style.numCol">可成交量</th>
@@ -298,6 +298,21 @@ function localizedCategory(o: ArbOpportunity): string {
 .table td:first-child,
 .table th:first-child {
   width: auto;
+}
+
+.materialCol {
+  width: 22%;
+  min-width: 180px;
+}
+
+.categoryCol {
+  width: 12%;
+  min-width: 80px;
+}
+
+.marketCol {
+  width: 16%;
+  min-width: 130px;
 }
 
 .numCol {
