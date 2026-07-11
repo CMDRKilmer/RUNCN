@@ -46,9 +46,8 @@ onApiMessage({
   },
 });
 
-const getByPlanetNaturalId = createMapGetter(
-  state.all,
-  x => getEntityNaturalIdFromAddress(x.address)!,
+const getByPlanetNaturalId = createMapGetter(state.all, x =>
+  getEntityNaturalIdFromAddress(x.address)!,
 );
 
 const getByPlanetName = createMapGetter(state.all, x => getEntityNameFromAddress(x.address)!);
