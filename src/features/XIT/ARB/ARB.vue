@@ -276,10 +276,13 @@ function expectedProfitFor(opp: ArbOpportunity): number {
   return suggestedUnits(opp) * opp.profitPerUnit;
 }
 
-// 总体汇总：总重量、总容积、总预期利润（基于勾选 + 飞船 + 贪心分配）。
+// 总体汇总：总重量、总容积、总花费、总预期利润（基于勾选 + 飞船 + 贪心分配）。
+// 总花费 = Σ 买入价 × 建议装载件数（以出发地交易所币种计价）。
+// 总利润 = Σ 卖出价 × 件数 − 总花费（以目的地币种计价，FX 1:1 假设）。
 const summary = computed(() => {
   let totalWeight = 0;
   let totalVolume = 0;
+  let totalCost = 0;
   let totalProfit = 0;
   for (const o of filtered.value) {
     if (!checkedTickers.value.has(o.ticker)) continue;
@@ -287,10 +290,16 @@ const summary = computed(() => {
     if (units <= 0) continue;
     totalWeight += unitWeight(o) * units;
     totalVolume += unitVolume(o) * units;
+    totalCost += o.buyPrice * units;
     totalProfit += expectedProfitFor(o);
   }
-  return { totalWeight, totalVolume, totalProfit };
+  return { totalWeight, totalVolume, totalCost, totalProfit };
 });
+
+// 出发地交易所币种（用于显示总花费）。
+const sourceCurrency = computed(
+  () => allExchanges.value.find(x => x.code === sourceExchange.value)?.currency ?? '',
+);
 
 // 一键生成 ACT 脚本：把勾选 + 贪心分配的商品打包成一个 CX Buy action package，
 // 推入 userData.actionPackages 并自动打开 ACT_EDIT 缓冲窗。
@@ -398,6 +407,11 @@ function localizedCategory(o: ArbOpportunity): string {
         计划装载 ·
         <strong>{{ fixed0(summary.totalWeight) }}</strong> t ·
         <strong>{{ fixed0(summary.totalVolume) }}</strong> m³
+      </span>
+      <span :class="$style.summaryItem">
+        总花费 ·
+        <strong>{{ fixed0(summary.totalCost) }}</strong>
+        {{ sourceCurrency }}
       </span>
       <span :class="[$style.summaryItem, $style.summaryProfit]">
         预期总利润 ·
