@@ -80,7 +80,11 @@ function readMarket(ticker: string, exchangeCode: string): MarketQuote {
 // For every material, find the cheapest ask (buy target) and the highest bid
 // (sell target) across all CX exchanges, then derive the arbitrage metrics.
 // Currency comparison is 1:1 per the feature spec (no FX conversion).
-export function computeOpportunities(): ArbOpportunity[] {
+// `sourceExchange` / `destExchange` 如果指定则只在该交易所寻找买入/卖出机会。
+export function computeOpportunities(
+  sourceExchange?: string,
+  destExchange?: string,
+): ArbOpportunity[] {
   const materials = materialsStore.all.value;
   if (!materials || !cxStore.fetched) {
     return [];
@@ -108,22 +112,30 @@ export function computeOpportunities(): ArbOpportunity[] {
     for (const exchange of exchanges) {
       const quote = readMarket(material.ticker, exchange.code);
       if (quote.ask !== null && quote.ask > 0 && quote.ask < bestBuy.price) {
-        bestBuy = {
-          exchange: exchange.code,
-          currency: exchange.currency,
-          price: quote.ask,
-          supply: quote.supply ?? 0,
-          live: quote.live,
-        };
+        if (sourceExchange && exchange.code !== sourceExchange) {
+          // 指定了出发地，只在该交易所买入
+        } else {
+          bestBuy = {
+            exchange: exchange.code,
+            currency: exchange.currency,
+            price: quote.ask,
+            supply: quote.supply ?? 0,
+            live: quote.live,
+          };
+        }
       }
       if (quote.bid !== null && quote.bid > 0 && quote.bid > bestSell.price) {
-        bestSell = {
-          exchange: exchange.code,
-          currency: exchange.currency,
-          price: quote.bid,
-          demand: quote.demand ?? 0,
-          live: quote.live,
-        };
+        if (destExchange && exchange.code !== destExchange) {
+          // 指定了目的地，只在该交易所卖出
+        } else {
+          bestSell = {
+            exchange: exchange.code,
+            currency: exchange.currency,
+            price: quote.bid,
+            demand: quote.demand ?? 0,
+            live: quote.live,
+          };
+        }
       }
     }
 

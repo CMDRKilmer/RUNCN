@@ -10,6 +10,7 @@ import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed2, percent2 } from '@src/utils/format';
 import {
   computeOpportunities,
+  getArbExchanges,
   getCategories,
   resolveCategoryLabel,
   type ArbOpportunity,
@@ -19,6 +20,23 @@ const search = ref('');
 const categoryFilter = ref('ALL');
 const onlyPositive = ref(true);
 const sortKey = ref('profitPct');
+
+// 路线选择：出发地（买入）/ 目的地（卖出）。
+const allExchanges = computed(() => getArbExchanges());
+const exchangeOptions = computed(() =>
+  allExchanges.value.map(x => ({ label: x.code, value: x.code })),
+);
+const sourceExchange = ref('IC1');
+const destExchange = ref('');
+watch(
+  allExchanges,
+  list => {
+    if (list.length > 0 && !destExchange.value) {
+      destExchange.value = list.find(x => x.code === 'AI1')?.code ?? list.at(-1)?.code ?? '';
+    }
+  },
+  { immediate: true },
+);
 
 const categoryOptions = computed(() => [
   { label: '全部类别', value: 'ALL' },
@@ -32,7 +50,9 @@ const sortOptions = [
   { label: '可成交量', value: 'executableVolume' },
 ];
 
-const opportunities = computed(() => computeOpportunities());
+const opportunities = computed(() =>
+  computeOpportunities(sourceExchange.value, destExchange.value),
+);
 
 const noData = computed(() => !cxStore.fetched);
 
@@ -93,7 +113,7 @@ function localizedCategory(o: ArbOpportunity): string {
   <div :class="$style.page">
     <SectionHeader>倒货助手</SectionHeader>
     <div :class="$style.subTitle">
-      跨 CX 交易所价差 · 6 市场 · FX 1:1 假设 · 不含运输/手续费
+      跨 CX 交易所价差 · FX 1:1 假设 · 不含运输/手续费
       <span v-if="dataAgeMinutes !== null" :class="$style.age">
         FIO 数据：{{ dataAgeMinutes }} 分钟前
       </span>
@@ -108,6 +128,14 @@ function localizedCategory(o: ArbOpportunity): string {
       <label :class="$style.control">
         <span :class="$style.controlLabel">排序</span>
         <SelectInput v-model="sortKey" :options="sortOptions" />
+      </label>
+      <label :class="$style.control">
+        <span :class="$style.controlLabel">出发地</span>
+        <SelectInput v-model="sourceExchange" :options="exchangeOptions" />
+      </label>
+      <label :class="$style.control">
+        <span :class="$style.controlLabel">目的地</span>
+        <SelectInput v-model="destExchange" :options="exchangeOptions" />
       </label>
       <label :class="$style.checkbox">
         <input v-model="onlyPositive" type="checkbox" />
@@ -143,18 +171,17 @@ function localizedCategory(o: ArbOpportunity): string {
           <tr v-for="o in filtered" :key="o.ticker">
             <td :class="$style.materialCell">
               <MaterialIcon :ticker="o.ticker" size="medium" />
-              <div :class="$style.materialMeta">
-                <strong>{{ o.ticker }}</strong>
-                <span>{{ localizedName(o) }}</span>
-              </div>
             </td>
             <td :class="$style.categoryCell">{{ localizedCategory(o) }}</td>
-            <td :class="$style.marketCell">
-              <PrunLink inline :command="`CXPO ${o.ticker}.${o.buyExchange}`">
-                {{ o.buyExchange }}
-              </PrunLink>
-              <span :class="$style.price">
-                {{ fixed2(o.buyPrice) }} {{ o.buyCurrency }}
+            <td :class="[$style.marketCell, $style.marketCellBuy]">
+              <span :class="[$style.marketBadge, $style.buyBadge]">买</span>
+              <span :class="$style.marketExchange">
+                <PrunLink inline :command="`CXPO ${o.ticker}.${o.buyExchange}`">
+                  {{ o.buyExchange }}
+                </PrunLink>
+                <span :class="$style.marketPrice"
+                  >{{ fixed2(o.buyPrice) }} {{ o.buyCurrency }}</span
+                >
                 <span
                   v-if="o.buyLive"
                   :class="$style.liveDot"
@@ -162,12 +189,15 @@ function localizedCategory(o: ArbOpportunity): string {
                   data-tooltip-position="top"></span>
               </span>
             </td>
-            <td :class="$style.marketCell">
-              <PrunLink inline :command="`CXPO ${o.ticker}.${o.sellExchange}`">
-                {{ o.sellExchange }}
-              </PrunLink>
-              <span :class="$style.price">
-                {{ fixed2(o.sellPrice) }} {{ o.sellCurrency }}
+            <td :class="[$style.marketCell, $style.marketCellSell]">
+              <span :class="[$style.marketBadge, $style.sellBadge]">卖</span>
+              <span :class="$style.marketExchange">
+                <PrunLink inline :command="`CXPO ${o.ticker}.${o.sellExchange}`">
+                  {{ o.sellExchange }}
+                </PrunLink>
+                <span :class="$style.marketPrice"
+                  >{{ fixed2(o.sellPrice) }} {{ o.sellCurrency }}</span
+                >
                 <span
                   v-if="o.sellLive"
                   :class="$style.liveDot"
@@ -295,14 +325,12 @@ function localizedCategory(o: ArbOpportunity): string {
   background: rgb(40, 49, 56);
 }
 
-.table td:first-child,
-.table th:first-child {
-  width: auto;
+.materialCol {
+  width: 54px;
 }
 
-.materialCol {
-  width: 22%;
-  min-width: 180px;
+.materialCell {
+  text-align: center;
 }
 
 .categoryCol {
@@ -310,38 +338,9 @@ function localizedCategory(o: ArbOpportunity): string {
   min-width: 80px;
 }
 
-.marketCol {
-  width: 16%;
-  min-width: 130px;
-}
-
 .numCol {
   width: 92px;
   text-align: right;
-}
-
-.materialCell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.materialMeta {
-  min-width: 0;
-}
-
-.materialMeta strong {
-  display: block;
-  color: rgb(255, 176, 0);
-}
-
-.materialMeta span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgb(167, 176, 183);
-  font-size: 11px;
 }
 
 .categoryCell {
@@ -350,9 +349,58 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .marketCell {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  padding: 2px 6px;
+  border-left: 2px solid rgb(46, 56, 64);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.marketExchange {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  vertical-align: middle;
+}
+
+.marketPrice {
+  color: rgb(200, 208, 214);
+  font-size: 11px;
+}
+
+.marketCellBuy {
+  background: rgba(129, 199, 132, 0.08);
+  border-left-color: rgb(129, 199, 132);
+}
+
+.marketCellSell {
+  background: rgba(229, 115, 115, 0.08);
+  border-left-color: rgb(229, 115, 115);
+}
+
+.marketBadge {
+  display: inline-block;
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: bold;
+  color: rgb(26, 33, 38);
+}
+
+.buyBadge {
+  background: rgb(129, 199, 132);
+}
+
+.sellBadge {
+  background: rgb(229, 115, 115);
+  color: rgb(255, 255, 255);
+}
+
+.marketCol {
+  width: 18%;
+  min-width: 180px;
 }
 
 .price {
