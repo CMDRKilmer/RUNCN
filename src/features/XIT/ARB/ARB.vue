@@ -96,7 +96,7 @@ const ships = computed<ShipWithCargo[]>(() => {
 const shipOptions = computed(() => [
   { label: '不选飞船', value: '' },
   ...ships.value.map(x => ({
-    label: `${x.ship.registration} ${x.ship.name} (${fixed0(x.freeVolume)}/${fixed0(x.cargoVolume)} m³)`,
+    label: `${x.ship.registration} ${x.ship.name} | 余 ${fixed0(x.freeWeight)}/${fixed0(x.cargoWeight)} t · 余 ${fixed0(x.freeVolume)}/${fixed0(x.cargoVolume)} m³`,
     value: x.ship.id,
   })),
 ]);
@@ -104,8 +104,6 @@ const selectedShipId = ref('');
 const selectedSelected = computed(
   () => ships.value.find(x => x.ship.id === selectedShipId.value) ?? null,
 );
-const selectedShip = computed(() => selectedSelected.value?.ship ?? null);
-const shipCapacity = computed(() => selectedSelected.value?.freeVolume ?? 0);
 
 // 用户手动勾选的商品 ticker 集合。
 const checkedTickers = ref<Set<string>>(new Set());
@@ -113,8 +111,7 @@ const checkedTickers = ref<Set<string>>(new Set());
 // 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
 // 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
 function unitVolume(opp: ArbOpportunity): number {
-  // 优先用材料定义的真实单件体积。PrUn 中每件材料同时拥有 weight (kg) 和 volume (m³)，
-  // 飞船容量按 m³ 计量，优先取 volume；缺失则用 weight/50 (50 kg/m³) 估算；都没有则回退 0.02。
+  // 优先用材料定义的真实单件体积 (m³)。缺失时按 weight/50 (50 kg/m³) 估算；都没有则回退 0.02。
   const material = materialsStore.getByTicker(opp.ticker);
   if (material !== undefined) {
     if (material.volume > 0) {
@@ -127,13 +124,30 @@ function unitVolume(opp: ArbOpportunity): number {
   return 0.02;
 }
 
+function unitWeight(opp: ArbOpportunity): number {
+  // 单件重量 (kg)。直接用 material.weight；缺失则按 volume*50 反推；都没有则回退 1。
+  const material = materialsStore.getByTicker(opp.ticker);
+  if (material !== undefined) {
+    if (material.weight > 0) {
+      return material.weight;
+    }
+    if (material.volume > 0) {
+      return material.volume * 50;
+    }
+  }
+  return 1;
+}
+
 function maxUnitsFor(opp: ArbOpportunity): number {
-  if (shipCapacity.value <= 0) return opp.executableVolume ?? 0;
-  return Math.min(opp.executableVolume ?? 0, Math.floor(shipCapacity.value / unitVolume(opp)));
+  if (!selectedSelected.value) return opp.executableVolume ?? 0;
+  const sel = selectedSelected.value;
+  const byVol = sel.freeVolume > 0 ? Math.floor(sel.freeVolume / unitVolume(opp)) : Infinity;
+  const byWeight = sel.freeWeight > 0 ? Math.floor(sel.freeWeight / unitWeight(opp)) : Infinity;
+  return Math.min(opp.executableVolume ?? Infinity, byVol, byWeight);
 }
 
 function shipFitsAll(opp: ArbOpportunity): boolean {
-  if (shipCapacity.value <= 0) return true;
+  if (!selectedSelected.value) return true;
   const units = maxUnitsFor(opp);
   return units > 0;
 }
@@ -146,11 +160,13 @@ function toggleChecked(ticker: string, ev: Event) {
   checkedTickers.value = next;
 }
 
-// 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / 单件体积"贪心分配剩余容量。
+// 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / max(vol, weight/50)"贪心
+// 同时分配剩余体积和重量。剩余体积/重量被独立追踪；每个商品取两者允许的较小上限。
 const suggestedUnits = (() => {
   const cache = new Map<string, number>();
   return (opp: ArbOpportunity): number => {
-    if (!selectedShip.value) return 0;
+    if (!selectedSelected.value) return 0;
+    const sel = selectedSelected.value;
     const key = `${selectedShipId.value}|${opp.ticker}|${checkedTickers.value.size}`;
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
@@ -168,17 +184,26 @@ const suggestedUnits = (() => {
       return 0;
     }
 
-    let remaining = shipCapacity.value;
+    let remVol = sel.freeVolume;
+    let remWt = sel.freeWeight;
     let mine = 0;
-    // 贪心：按 profitPerUnit / vol 降序，每个商品能装多少装多少。
+    // 贪心：按 profitPerUnit / max(vol, weight/50) 降序分配容量。
     const sorted = items
-      .map(o => ({ o, vol: unitVolume(o), density: o.profitPerUnit / unitVolume(o) }))
+      .map(o => {
+        const v = unitVolume(o);
+        const w = unitWeight(o);
+        const norm = Math.max(v, w / 50);
+        return { o, v, w, norm, density: o.profitPerUnit / norm };
+      })
       .sort((a, b) => b.density - a.density);
     for (const it of sorted) {
-      const units = Math.min(maxUnitsFor(it.o), Math.floor(remaining / it.vol));
-      if (units <= 0) continue;
-      remaining -= units * it.vol;
-      if (it.o.ticker === opp.ticker) mine = units;
+      const byVol = it.v > 0 ? Math.floor(remVol / it.v) : Infinity;
+      const byWt = it.w > 0 ? Math.floor(remWt / it.w) : Infinity;
+      const cap = Math.min(maxUnitsFor(it.o), byVol, byWt);
+      if (cap <= 0) continue;
+      remVol -= cap * it.v;
+      remWt -= cap * it.w;
+      if (it.o.ticker === opp.ticker) mine = cap;
     }
     cache.set(key, mine);
     return mine;
@@ -270,10 +295,12 @@ function localizedCategory(o: ArbOpportunity): string {
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
-        <SelectInput v-model="selectedShipId" :options="shipOptions" :width="180" />
+        <SelectInput v-model="selectedShipId" :options="shipOptions" :width="280" />
       </label>
       <span v-if="selectedSelected" :class="$style.shipInfo">
-        {{ selectedSelected.ship.registration }} · 余
+        {{ selectedSelected.ship.registration }} · 重量 余
+        <strong>{{ fixed0(selectedSelected.freeWeight) }}</strong> /
+        {{ fixed0(selectedSelected.cargoWeight) }} t · 容积 余
         <strong>{{ fixed0(selectedSelected.freeVolume) }}</strong> /
         {{ fixed0(selectedSelected.cargoVolume) }} m³
       </span>
