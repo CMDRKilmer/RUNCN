@@ -312,8 +312,10 @@ function generateActScript() {
 
   const ship = selectedSelected.value.ship;
   const exchange = sourceExchange.value;
-  const groupName = `ARB_${ship.registration}`;
-  const pkgName = `ARB_${ship.registration}_${exchange}_${Date.now()}`;
+  // 包名必须用空格分隔。ACT.vue 的参数解析会把 _ 拆开再 join(' ') 还原，
+  // 但如果 name 本身就含 _，lookup 时找不到。
+  const groupName = `ARB ${ship.registration}`;
+  const pkgName = `ARB ${ship.registration} ${exchange} ${Date.now()}`;
 
   const pkg: UserData.ActionPackageData = {
     global: { name: pkgName },
