@@ -359,11 +359,11 @@ function localizedCategory(o: ArbOpportunity): string {
 
 <template>
   <div :class="$style.page">
-    <SectionHeader>倒货助手</SectionHeader>
+    <SectionHeader>倒货助手 · Arbitrage</SectionHeader>
     <div :class="$style.subTitle">
-      跨 CX 交易所价差 · FX 1:1 假设 · 不含运输/手续费
+      市场信息有时效性，倒货需谨慎
       <span v-if="dataAgeMinutes !== null" :class="$style.age">
-        FIO 数据：{{ dataAgeMinutes }} 分钟前
+        · FIO 数据 {{ dataAgeMinutes }} 分钟前
       </span>
     </div>
 
@@ -525,7 +525,7 @@ function localizedCategory(o: ArbOpportunity): string {
 
 <style module>
 .page {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .subTitle {
