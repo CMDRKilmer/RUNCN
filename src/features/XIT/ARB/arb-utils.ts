@@ -1,6 +1,7 @@
 import { cxStore } from '@src/infrastructure/fio/cx';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 
 export interface ArbOpportunity {
@@ -34,14 +35,10 @@ export function getArbExchanges(): ArbExchange[] {
     .map(x => ({ code: x.code, currency: x.currency.code }));
 }
 
-// Distinct material category names, sorted. Used by the category filter.
+// Distinct material category names (human-readable), sorted. Used by the category filter.
 export function getCategories(): string[] {
-  const materials = materialsStore.all.value ?? [];
-  const categories = new Set<string>();
-  for (const material of materials) {
-    categories.add(material.category);
-  }
-  return Array.from(categories).sort();
+  const categories = materialCategoriesStore.all.value ?? [];
+  return categories.map(x => x.name).sort();
 }
 
 interface MarketQuote {
@@ -131,7 +128,7 @@ export function computeOpportunities(): ArbOpportunity[] {
     opportunities.push({
       ticker: material.ticker,
       name: material.name,
-      category: material.category,
+      category: materialCategoriesStore.getById(material.category)?.name ?? material.category,
       buyExchange: bestBuy.exchange,
       buyCurrency: bestBuy.currency,
       buyPrice: bestBuy.price,
