@@ -56,6 +56,12 @@ act.addAction({
         log.error(ticker + ' 的价格限制不是数字');
         continue;
       }
+      // 「允许未满足」会以 priceLimit 为投标价下单，必须有有限的价格限制，
+      // 否则会把 fixed02(Infinity) = "∞" 写入价格输入框并提交。
+      if (allowUnfilled && !isFinite(priceLimit)) {
+        log.error(ticker + ' 启用了「允许未满足」但未设置价格限制，无法确定投标价格');
+        continue;
+      }
 
       const cxTicker = `${ticker}.${data.exchange}`;
       const filled = fillAmount(cxTicker, amount, priceLimit);

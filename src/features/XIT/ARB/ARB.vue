@@ -22,6 +22,7 @@ import {
   resolveCategoryLabel,
   type ArbOpportunity,
 } from './arb-utils';
+import { computeAllocatedProfit } from './arb-profit';
 
 const search = ref('');
 const categoryFilter = ref('ALL');
@@ -247,7 +248,7 @@ const suggestedUnits = (() => {
     const checked = Array.from(checkedTickers.value).sort();
     return `${selectedShipId.value}|${checked.join(',')}`;
   };
-  return (opp: ArbOpportunity): number => {
+  const compute = (opp: ArbOpportunity): number => {
     if (!selectedSelected.value) return 0;
     const fingerprint = computeFingerprint();
     const itemKey = `${opp.ticker}|${opp.buyExchange}|${opp.buyPrice}`;
@@ -296,7 +297,25 @@ const suggestedUnits = (() => {
     cache.set(cacheKey, mine);
     return mine;
   };
+  return Object.assign(compute, { clear: () => cache.clear() });
 })();
+
+// 同一买入价位 (ticker, buyExchange, buyPrice) 的 `units` 件货会分散到该价位下
+// 的多个卖出配对（每个配对有自己的 sellQuantity 与 profitPerUnit）。实际执行时
+// 先吃掉利润最高的卖单，每档受其 sellQuantity 封顶。直接用 units × 最高利润
+// 会把最高卖价套到所有件上、虚增「预期利润」，因此按档加权计算。
+function profitForBuyLevel(opp: ArbOpportunity, units: number): number {
+  if (units <= 0) {
+    return 0;
+  }
+  const pairs = filtered.value
+    .filter(
+      o =>
+        o.ticker === opp.ticker && o.buyExchange === opp.buyExchange && o.buyPrice === opp.buyPrice,
+    )
+    .map(o => ({ qty: o.sellQuantity, profitPerUnit: o.profitPerUnit }));
+  return computeAllocatedProfit(pairs, units);
+}
 
 // 该 ticker 的预期总利润（按 ticker 聚合所有行）。
 // 同 (ticker, buyExchange, buyPrice) 价位下多 sell 配对只计一次，否则同一贪心
@@ -311,7 +330,7 @@ function totalExpectedProfitFor(ticker: string): number {
     const units = suggestedUnits(o);
     if (units <= 0) continue;
     counted.add(itemKey);
-    total += units * o.profitPerUnit;
+    total += profitForBuyLevel(o, units);
   }
   return total;
 }
@@ -370,6 +389,11 @@ const filtered = computed(() => {
   return list.slice().sort((a, b) => sortValue(b) - sortValue(a));
 });
 
+// 缓存仅在单次渲染内去重。filtered（价格/数量）或飞船余量变化时必须清空，
+// 否则点击「更新价格」或飞船货舱变化后仍返回旧装载量，导致汇总与 ACT 脚本
+// 使用过期数据（缓存 key 不含数量/余量，会命中旧值）。
+watch([filtered, selectedSelected], () => suggestedUnits.clear());
+
 // 总体汇总：总重量、总容积、总花费、总预期利润。
 // 按 (ticker, buyExchange, buyPrice) 去重累加，否则同价位下多个卖出配对会让
 // suggestedUnits 缓存命中并被重复计入会虚增总重量/体积。
@@ -389,7 +413,7 @@ const summary = computed(() => {
     totalWeight += unitWeight(o) * units;
     totalVolume += unitVolume(o) * units;
     totalCost += o.buyPrice * units;
-    totalProfit += units * o.profitPerUnit;
+    totalProfit += profitForBuyLevel(o, units);
   }
   return { totalWeight, totalVolume, totalCost, totalProfit };
 });

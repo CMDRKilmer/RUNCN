@@ -83,14 +83,16 @@ export const CXPO_BUY = act.addActionStep<Data>({
 
     if (!willFillCompletely && allowUnfilled) {
       let description = `在 ${exchange} 上投标 ${fixed0(data.amount)} ${ticker}`;
-      if (isFinite(priceLimit)) {
-        description += `，价格 ${fixed02(priceLimit)}`;
-        description += `（总费用 ${fixed0(data.amount * priceLimit)}）`;
+      // 投标价是 data.priceLimit（与 execute 一致），而非成交价 filled.priceLimit，
+      // 否则会展示一个比实际投标价更低的「总费用」误导用户。
+      if (isFinite(data.priceLimit)) {
+        description += `，价格 ${fixed02(data.priceLimit)}`;
+        description += `（总费用 ${fixed0(data.amount * data.priceLimit)}）`;
       }
       const comparison = getHistoricalComparison(
         ticker,
         exchange,
-        isFinite(priceLimit) ? priceLimit : undefined,
+        isFinite(data.priceLimit) ? data.priceLimit : undefined,
       );
       if (comparison) {
         description += ` [${comparison}]`;
@@ -224,6 +226,14 @@ export const CXPO_BUY = act.addActionStep<Data>({
       }
 
       if (data.allowUnfilled) {
+        // 投标价就是 priceLimit；非有限值（如未设置限制时的 Infinity）会被
+        // fixed02 格式化为 "∞" 并写入价格输入框。cx-buy.generateSteps 已拦截，
+        // 这里对导入的 action package 等其它入口再做一次防御。
+        if (!isFinite(data.priceLimit)) {
+          shouldUnwatch = true;
+          fail(`${ticker} 启用了「允许未满足」但未设置价格限制，无法确定投标价格`);
+          return;
+        }
         changeInputValue(quantityInput, data.amount.toString());
         changeInputValue(priceInput, fixed02(data.priceLimit));
       } else {
