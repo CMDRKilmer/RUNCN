@@ -8,9 +8,12 @@ import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
+import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { timestampEachMinute } from '@src/utils/dayjs';
-import { fixed0, fixed2, percent2 } from '@src/utils/format';
+import { fixed0, fixed02, fixed2, percent2 } from '@src/utils/format';
 import PrunButton from '@src/components/PrunButton.vue';
 import { userData } from '@src/store/user-data';
 import {
@@ -221,6 +224,9 @@ interface ShipmentItem {
 }
 
 function buildShipmentItems(): ShipmentItem[] {
+  // 同一买入价位 (ticker, buyExchange, buyPrice) 是唯一货源，总容量受限于该价位
+  // 的买单总量；不能把同价位下多个卖出配对的 executableVolume 加总，否则会超过
+  // 实际可买到的件数（同一个买单无法同时被多个卖单全部拿走）。
   const byKey = new Map<string, ShipmentItem>();
   for (const o of filtered.value) {
     if (!checkedTickers.value.has(o.ticker) || o.profitPerUnit <= 0) continue;
@@ -234,12 +240,12 @@ function buildShipmentItems(): ShipmentItem[] {
         buyExchange: o.buyExchange,
         buyPrice: o.buyPrice,
         profitPerUnit: o.profitPerUnit,
-        totalCapacity: o.executableVolume,
+        totalCapacity: o.buyQuantity,
         v,
         w,
       });
     } else {
-      existing.totalCapacity += o.executableVolume;
+      existing.totalCapacity = Math.min(existing.totalCapacity, o.buyQuantity);
     }
   }
   return Array.from(byKey.values());
@@ -401,6 +407,15 @@ function generateActScript() {
   const groupName = `ARB ${ship.registration}`;
   const pkgName = `ARB ${ship.registration} ${exchange} ${Date.now()}`;
 
+  // 解析 CX Buy 落地仓库（买到的货存在这里）以及飞船 cargo 仓库，
+  // 以便后面追加 MTRA action 把买到的货转移到飞船。
+  const naturalId = exchangesStore.getNaturalIdFromCode(exchange);
+  const cxWarehouse = warehousesStore.getByEntityNaturalId(naturalId);
+  const cxWarehouseStore = storagesStore.getById(cxWarehouse?.storeId);
+  const shipStore = storagesStore.getById(ship.idShipStore);
+  const origin = cxWarehouseStore ? serializeStorage(cxWarehouseStore) : undefined;
+  const dest = shipStore ? serializeStorage(shipStore) : undefined;
+
   const pkg: UserData.ActionPackageData = {
     global: { name: pkgName },
     groups: [
@@ -421,6 +436,17 @@ function generateActScript() {
         allowUnfilled: false,
         useCXInv: true,
       },
+      ...(origin !== undefined && dest !== undefined
+        ? [
+            {
+              type: 'MTRA' as const,
+              name: 'ARB Transfer',
+              group: groupName,
+              origin,
+              dest,
+            },
+          ]
+        : []),
     ],
   };
 
@@ -459,12 +485,16 @@ function localizedCategory(o: ArbOpportunity): string {
 
 <template>
   <div :class="$style.page">
-    <div :class="$style.subTitle">
-      市场信息有时效性，倒货需谨慎
-      <span v-if="dataAgeMinutes !== null" :class="$style.age">
-        · FIO 数据 {{ dataAgeMinutes }} 分钟前
+    <div :class="$style.warning">
+      <span>
+        市场信息有时效性，倒货需谨慎
+        <span v-if="dataAgeMinutes !== null" :class="$style.warningAge">
+          · FIO 数据 {{ dataAgeMinutes }} 分钟前
+        </span>
       </span>
     </div>
+
+    <div :class="$style.usage">使用方法：选择路线后点击"更新价格"按钮。</div>
 
     <div :class="$style.controls">
       <input v-model="search" :class="$style.input" type="text" placeholder="搜索 ticker 或名称" />
@@ -484,7 +514,7 @@ function localizedCategory(o: ArbOpportunity): string {
         <span :class="$style.controlLabel">目的地</span>
         <SelectInput v-model="destExchange" :options="exchangeOptions" :width="60" />
       </label>
-      <PrunButton @click="loadLiveOrderBooks">加载实时订单簿</PrunButton>
+      <PrunButton @click="loadLiveOrderBooks">更新价格</PrunButton>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
         <SelectInput v-model="selectedShipId" :options="shipOptions" :width="280" />
@@ -501,8 +531,8 @@ function localizedCategory(o: ArbOpportunity): string {
     <div v-if="selectedSelected" :class="$style.summaryBar">
       <span :class="$style.summaryItem">
         计划装载 ·
-        <strong>{{ fixed0(summary.totalWeight) }}</strong> t ·
-        <strong>{{ fixed0(summary.totalVolume) }}</strong> m³
+        <strong>{{ fixed02(summary.totalWeight) }}</strong> t ·
+        <strong>{{ fixed02(summary.totalVolume) }}</strong> m³
       </span>
       <span :class="$style.summaryItem">
         总花费 ·
@@ -656,6 +686,31 @@ function localizedCategory(o: ArbOpportunity): string {
   gap: 8px;
   align-items: center;
   padding: 2px 0 6px;
+  color: rgb(167, 176, 183);
+  font-size: 12px;
+}
+
+.warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  border: 1px solid rgb(204, 110, 56);
+  border-left-width: 3px;
+  background: rgba(204, 110, 56, 0.1);
+  color: rgb(238, 154, 89);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.warningAge {
+  color: rgb(194, 120, 70);
+  font-weight: normal;
+}
+
+.usage {
+  padding: 0 0 6px;
   color: rgb(167, 176, 183);
   font-size: 12px;
 }
