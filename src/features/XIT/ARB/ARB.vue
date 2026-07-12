@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import SelectInput from '@src/components/forms/SelectInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
@@ -513,24 +512,44 @@ function localizedCategory(o: ArbOpportunity): string {
       <input v-model="search" :class="$style.input" type="text" placeholder="搜索 ticker 或名称" />
       <label :class="$style.control">
         <span :class="$style.controlLabel">类别</span>
-        <SelectInput v-model="categoryFilter" :options="categoryOptions" :width="100" />
+        <select v-model="categoryFilter" :class="$style.select" style="width: 100px">
+          <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">排序</span>
-        <SelectInput v-model="sortKey" :options="sortOptions" :width="80" />
+        <select v-model="sortKey" :class="$style.select" style="width: 80px">
+          <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">出发地</span>
-        <SelectInput v-model="sourceExchange" :options="exchangeOptions" :width="60" />
+        <select v-model="sourceExchange" :class="$style.select" style="width: 60px">
+          <option v-for="opt in exchangeOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">目的地</span>
-        <SelectInput v-model="destExchange" :options="exchangeOptions" :width="60" />
+        <select v-model="destExchange" :class="$style.select" style="width: 60px">
+          <option v-for="opt in exchangeOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
       <PrunButton primary @click="loadLiveOrderBooks">更新价格</PrunButton>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
-        <SelectInput v-model="selectedShipId" :options="shipOptions" :width="280" />
+        <select v-model="selectedShipId" :class="$style.select" style="width: 280px">
+          <option v-for="opt in shipOptions" :key="opt.value" :value="opt.value">
+            {{ opt.label }}
+          </option>
+        </select>
       </label>
       <span v-if="selectedSelected" :class="$style.shipInfo">
         {{ selectedSelected.ship.registration }} · 重量 余
@@ -759,6 +778,22 @@ function localizedCategory(o: ArbOpportunity): string {
 
 .input::placeholder {
   color: rgb(148, 158, 166);
+}
+
+.select {
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+
+.select:focus {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
 }
 
 .control {
