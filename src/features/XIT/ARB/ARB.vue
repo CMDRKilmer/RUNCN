@@ -114,39 +114,27 @@ const selectedSelected = computed(
 // 用户手动勾选的商品 ticker 集合（默认空，用户需主动勾选）。
 const checkedTickers = ref<Set<string>>(new Set());
 
-// 单商品体积（m³/单位），优先用材料定义值。
+// 单商品体积（m³/件）。直接复用 BURN/ACT 的算法：material.volume 缺失时按 0 处理
+// （贪心里 cap 会立刻为 0，避免基于错误回退值导致估算偏小、装出 ACT 实际无法容下的量）。
 function unitVolume(opp: ArbOpportunity): number {
   const material = materialsStore.getByTicker(opp.ticker);
-  if (material !== undefined) {
-    if (material.volume > 0) {
-      return material.volume;
-    }
-    if (material.weight > 0) {
-      return material.weight / 50;
-    }
-  }
-  return 0.02;
+  return material && material.volume > 0 ? material.volume : 0;
 }
 
-// 单商品重量 (kg)。
+// 单商品重量（t/件），与 BURN/ACT 一致。
 function unitWeight(opp: ArbOpportunity): number {
   const material = materialsStore.getByTicker(opp.ticker);
-  if (material !== undefined) {
-    if (material.weight > 0) {
-      return material.weight;
-    }
-    if (material.volume > 0) {
-      return material.volume * 50;
-    }
-  }
-  return 1;
+  return material && material.weight > 0 ? material.weight : 0;
 }
 
 function maxUnitsFor(opp: ArbOpportunity): number {
   if (!selectedSelected.value) return opp.executableVolume;
   const sel = selectedSelected.value;
-  const byVol = sel.freeVolume > 0 ? Math.floor(sel.freeVolume / unitVolume(opp)) : Infinity;
-  const byWeight = sel.freeWeight > 0 ? Math.floor(sel.freeWeight / unitWeight(opp)) : Infinity;
+  const v = unitVolume(opp);
+  const w = unitWeight(opp);
+  if (v <= 0 || w <= 0) return 0;
+  const byVol = sel.freeVolume > 0 ? Math.floor(sel.freeVolume / v) : Infinity;
+  const byWeight = sel.freeWeight > 0 ? Math.floor(sel.freeWeight / w) : Infinity;
   return Math.min(opp.executableVolume, byVol, byWeight);
 }
 
@@ -218,15 +206,16 @@ interface ShipmentItem {
   buyExchange: string;
   buyPrice: number;
   profitPerUnit: number;
+  totalSellQty: number;
   totalCapacity: number;
   v: number;
   w: number;
 }
 
 function buildShipmentItems(): ShipmentItem[] {
-  // 同一买入价位 (ticker, buyExchange, buyPrice) 是唯一货源，总容量受限于该价位
-  // 的买单总量；不能把同价位下多个卖出配对的 executableVolume 加总，否则会超过
-  // 实际可买到的件数（同一个买单无法同时被多个卖单全部拿走）。
+  // 同一买入价位 (ticker, buyExchange, buyPrice) 是唯一货源。
+  // 该价位总可买量 = min( 买单总量, 该价位下所有卖出配对的卖单总量之和 )。
+  // 之前用 buyQuantity 直接封顶会导致 sellQuantity < buyQuantity 时超买。
   const byKey = new Map<string, ShipmentItem>();
   for (const o of filtered.value) {
     if (!checkedTickers.value.has(o.ticker) || o.profitPerUnit <= 0) continue;
@@ -240,12 +229,14 @@ function buildShipmentItems(): ShipmentItem[] {
         buyExchange: o.buyExchange,
         buyPrice: o.buyPrice,
         profitPerUnit: o.profitPerUnit,
-        totalCapacity: o.buyQuantity,
+        totalSellQty: o.sellQuantity,
+        totalCapacity: Math.min(o.buyQuantity, o.sellQuantity),
         v,
         w,
       });
     } else {
-      existing.totalCapacity = Math.min(existing.totalCapacity, o.buyQuantity);
+      existing.totalSellQty += o.sellQuantity;
+      existing.totalCapacity = Math.min(o.buyQuantity, existing.totalSellQty);
     }
   }
   return Array.from(byKey.values());
@@ -287,8 +278,10 @@ const suggestedUnits = (() => {
       return b.profitPerUnit / normB - a.profitPerUnit / normA;
     });
     for (const it of sorted) {
-      const byVol = it.v > 0 ? Math.floor(remVol / it.v) : Infinity;
-      const byWt = it.w > 0 ? Math.floor(remWt / it.w) : Infinity;
+      // 单位缺失时无法估算体积/重量消耗，跳过装载，避免 ACT 实际超出船容。
+      if (it.v <= 0 || it.w <= 0) continue;
+      const byVol = Math.floor(remVol / it.v);
+      const byWt = Math.floor(remWt / it.w);
       const cap = Math.min(it.totalCapacity, byVol, byWt);
       if (cap <= 0) continue;
       remVol -= cap * it.v;
@@ -307,11 +300,19 @@ const suggestedUnits = (() => {
 })();
 
 // 该 ticker 的预期总利润（按 ticker 聚合所有行）。
+// 同 (ticker, buyExchange, buyPrice) 价位下多 sell 配对只计一次，否则同一贪心
+// 分配的 cap 会被 suggestedUnits 缓存重复返回。
 function totalExpectedProfitFor(ticker: string): number {
   let total = 0;
+  const counted = new Set<string>();
   for (const o of filtered.value) {
     if (o.ticker !== ticker) continue;
-    total += suggestedUnits(o) * o.profitPerUnit;
+    const itemKey = `${o.buyExchange}|${o.buyPrice}`;
+    if (counted.has(itemKey)) continue;
+    const units = suggestedUnits(o);
+    if (units <= 0) continue;
+    counted.add(itemKey);
+    total += units * o.profitPerUnit;
   }
   return total;
 }
@@ -319,9 +320,15 @@ function totalExpectedProfitFor(ticker: string): number {
 // 该 ticker 的贪心装载总件数（用于 ACT 一键脚本的 material 用量）。
 function totalSuggestedUnits(ticker: string): number {
   let total = 0;
+  const counted = new Set<string>();
   for (const o of filtered.value) {
     if (o.ticker !== ticker) continue;
-    total += suggestedUnits(o);
+    const itemKey = `${o.buyExchange}|${o.buyPrice}`;
+    if (counted.has(itemKey)) continue;
+    const units = suggestedUnits(o);
+    if (units <= 0) continue;
+    counted.add(itemKey);
+    total += units;
   }
   return total;
 }
@@ -365,15 +372,21 @@ const filtered = computed(() => {
 });
 
 // 总体汇总：总重量、总容积、总花费、总预期利润。
+// 按 (ticker, buyExchange, buyPrice) 去重累加，否则同价位下多个卖出配对会让
+// suggestedUnits 缓存命中并被重复计入会虚增总重量/体积。
 const summary = computed(() => {
   let totalWeight = 0;
   let totalVolume = 0;
   let totalCost = 0;
   let totalProfit = 0;
+  const counted = new Set<string>();
   for (const o of filtered.value) {
     if (!checkedTickers.value.has(o.ticker)) continue;
+    const itemKey = `${o.ticker}|${o.buyExchange}|${o.buyPrice}`;
+    if (counted.has(itemKey)) continue;
     const units = suggestedUnits(o);
     if (units <= 0) continue;
+    counted.add(itemKey);
     totalWeight += unitWeight(o) * units;
     totalVolume += unitVolume(o) * units;
     totalCost += o.buyPrice * units;
@@ -514,7 +527,7 @@ function localizedCategory(o: ArbOpportunity): string {
         <span :class="$style.controlLabel">目的地</span>
         <SelectInput v-model="destExchange" :options="exchangeOptions" :width="60" />
       </label>
-      <PrunButton @click="loadLiveOrderBooks">更新价格</PrunButton>
+      <PrunButton primary @click="loadLiveOrderBooks">更新价格</PrunButton>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
         <SelectInput v-model="selectedShipId" :options="shipOptions" :width="280" />
