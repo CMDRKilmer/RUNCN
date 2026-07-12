@@ -3,6 +3,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
+import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -22,7 +23,6 @@ import {
 
 const search = ref('');
 const categoryFilter = ref('ALL');
-const onlyPositive = ref(true);
 const sortKey = ref('profitPct');
 
 // 路线选择：出发地（买入）/ 目的地（卖出）。
@@ -62,8 +62,6 @@ const opportunities = computed(() =>
 );
 
 const noData = computed(() => !cxStore.fetched);
-
-const positiveCount = computed(() => opportunities.value.filter(o => o.profitPerUnit > 0).length);
 
 // 飞船选择 + 容量优化。
 // 飞船的「载货容量」是其 SHIP_STORE 的 volumeCapacity（减去已装载的 volumeLoad），
@@ -110,14 +108,11 @@ const selectedSelected = computed(
   () => ships.value.find(x => x.ship.id === selectedShipId.value) ?? null,
 );
 
-// 用户手动勾选的商品 ticker 集合。
 // 用户手动勾选的商品 ticker 集合（默认空，用户需主动勾选）。
 const checkedTickers = ref<Set<string>>(new Set());
 
-// 单商品体积（m³/单位），优先用最小成交量换算（≈50kg/m³ 假设）。
-// 实际游戏中材料密度固定，我们使用最小的可成交单位估算单件重量。
+// 单商品体积（m³/单位），优先用材料定义值。
 function unitVolume(opp: ArbOpportunity): number {
-  // 优先用材料定义的真实单件体积 (m³)。缺失时按 weight/50 (50 kg/m³) 估算；都没有则回退 0.02。
   const material = materialsStore.getByTicker(opp.ticker);
   if (material !== undefined) {
     if (material.volume > 0) {
@@ -130,8 +125,8 @@ function unitVolume(opp: ArbOpportunity): number {
   return 0.02;
 }
 
+// 单商品重量 (kg)。
 function unitWeight(opp: ArbOpportunity): number {
-  // 单件重量 (kg)。直接用 material.weight；缺失则按 volume*50 反推；都没有则回退 1。
   const material = materialsStore.getByTicker(opp.ticker);
   if (material !== undefined) {
     if (material.weight > 0) {
@@ -145,17 +140,16 @@ function unitWeight(opp: ArbOpportunity): number {
 }
 
 function maxUnitsFor(opp: ArbOpportunity): number {
-  if (!selectedSelected.value) return opp.executableVolume ?? 0;
+  if (!selectedSelected.value) return opp.executableVolume;
   const sel = selectedSelected.value;
   const byVol = sel.freeVolume > 0 ? Math.floor(sel.freeVolume / unitVolume(opp)) : Infinity;
   const byWeight = sel.freeWeight > 0 ? Math.floor(sel.freeWeight / unitWeight(opp)) : Infinity;
-  return Math.min(opp.executableVolume ?? Infinity, byVol, byWeight);
+  return Math.min(opp.executableVolume, byVol, byWeight);
 }
 
-function shipFitsAll(opp: ArbOpportunity): boolean {
+function shipFitsAny(opp: ArbOpportunity): boolean {
   if (!selectedSelected.value) return true;
-  const units = maxUnitsFor(opp);
-  return units > 0;
+  return maxUnitsFor(opp) > 0;
 }
 
 function toggleChecked(ticker: string, ev: Event) {
@@ -166,35 +160,113 @@ function toggleChecked(ticker: string, ev: Event) {
   checkedTickers.value = next;
 }
 
-// 0/1 背包：在勾选商品中，按"利润密度 = 单价利润 / max(vol, weight/50)"贪心
-// 同时分配剩余体积和重量。剩余体积/重量被独立追踪；每个商品取两者允许的较小上限。
-// 缓存键包含飞船 id + 已勾选商品的拼接指纹，避免 size 相同时碰撞。
+// 表头全选复选框的状态：所有可见且装得下的 ticker 都已勾选时为「勾选」；
+// 部分勾选时为「半选」；否则为「未勾选」。
+const selectAllRef = shallowRef<HTMLInputElement | null>(null);
+const selectAllState = computed(() => {
+  const fit = new Set<string>();
+  for (const o of filtered.value) {
+    if (shipFitsAny(o)) {
+      fit.add(o.ticker);
+    }
+  }
+  if (fit.size === 0) {
+    return { checked: false, indeterminate: false };
+  }
+  let checked = 0;
+  for (const t of fit) {
+    if (checkedTickers.value.has(t)) {
+      checked++;
+    }
+  }
+  if (checked === 0) {
+    return { checked: false, indeterminate: false };
+  }
+  if (checked === fit.size) {
+    return { checked: true, indeterminate: false };
+  }
+  return { checked: false, indeterminate: true };
+});
+watchEffect(() => {
+  if (selectAllRef.value) {
+    selectAllRef.value.indeterminate = selectAllState.value.indeterminate;
+  }
+});
+function toggleSelectAll(ev: Event) {
+  const checked = (ev.target as HTMLInputElement).checked;
+  if (checked) {
+    const next = new Set<string>();
+    for (const o of filtered.value) {
+      if (shipFitsAny(o)) {
+        next.add(o.ticker);
+      }
+    }
+    checkedTickers.value = next;
+  } else {
+    checkedTickers.value = new Set();
+  }
+}
+
+// 同 ticker 现在可能存在多行（每个价格档位 × 每个目的地的组合各占一行）。
+// 装载按 (ticker, 买入交易所, 买入价) 维度聚合：同一买入价位的所有卖出配对
+// 共享同一买入来源，容量取所有卖出配对可成交上限之和（受限于 min(buyQty, Σ sellQty)）。
+interface ShipmentItem {
+  ticker: string;
+  buyExchange: string;
+  buyPrice: number;
+  profitPerUnit: number;
+  totalCapacity: number;
+  v: number;
+  w: number;
+}
+
+function buildShipmentItems(): ShipmentItem[] {
+  const byKey = new Map<string, ShipmentItem>();
+  for (const o of filtered.value) {
+    if (!checkedTickers.value.has(o.ticker) || o.profitPerUnit <= 0) continue;
+    const key = `${o.ticker}|${o.buyExchange}|${o.buyPrice}`;
+    const v = unitVolume(o);
+    const w = unitWeight(o);
+    const existing = byKey.get(key);
+    if (existing === undefined) {
+      byKey.set(key, {
+        ticker: o.ticker,
+        buyExchange: o.buyExchange,
+        buyPrice: o.buyPrice,
+        profitPerUnit: o.profitPerUnit,
+        totalCapacity: o.executableVolume,
+        v,
+        w,
+      });
+    } else {
+      existing.totalCapacity += o.executableVolume;
+    }
+  }
+  return Array.from(byKey.values());
+}
+
 const suggestedUnits = (() => {
   const cache = new Map<string, number>();
   const computeFingerprint = (): string => {
-    const checked = filtered.value
-      .filter(o => checkedTickers.value.has(o.ticker))
-      .map(o => o.ticker)
-      .sort();
+    const checked = Array.from(checkedTickers.value).sort();
     return `${selectedShipId.value}|${checked.join(',')}`;
   };
   return (opp: ArbOpportunity): number => {
     if (!selectedSelected.value) return 0;
     const fingerprint = computeFingerprint();
-    const key = `${fingerprint}|${opp.ticker}`;
-    const cached = cache.get(key);
+    const itemKey = `${opp.ticker}|${opp.buyExchange}|${opp.buyPrice}`;
+    const cacheKey = `${fingerprint}|${itemKey}`;
+    const cached = cache.get(cacheKey);
     if (cached !== undefined) return cached;
 
     if (!checkedTickers.value.has(opp.ticker)) {
-      cache.set(key, 0);
+      cache.set(cacheKey, 0);
       return 0;
     }
 
-    const items = filtered.value.filter(
-      o => checkedTickers.value.has(o.ticker) && o.profitPerUnit > 0 && shipFitsAll(o),
-    );
+    const items = buildShipmentItems();
     if (items.length === 0) {
-      cache.set(key, 0);
+      cache.set(cacheKey, 0);
       return 0;
     }
 
@@ -203,27 +275,50 @@ const suggestedUnits = (() => {
     let remWt = sel.freeWeight;
     let mine = 0;
     // 贪心：按 profitPerUnit / max(vol, weight/50) 降序分配容量。
-    const sorted = items
-      .map(o => {
-        const v = unitVolume(o);
-        const w = unitWeight(o);
-        const norm = Math.max(v, w / 50);
-        return { o, v, w, norm, density: o.profitPerUnit / norm };
-      })
-      .sort((a, b) => b.density - a.density);
+    const sorted = items.slice().sort((a, b) => {
+      const normA = Math.max(a.v, a.w / 50);
+      const normB = Math.max(b.v, b.w / 50);
+      return b.profitPerUnit / normB - a.profitPerUnit / normA;
+    });
     for (const it of sorted) {
       const byVol = it.v > 0 ? Math.floor(remVol / it.v) : Infinity;
       const byWt = it.w > 0 ? Math.floor(remWt / it.w) : Infinity;
-      const cap = Math.min(maxUnitsFor(it.o), byVol, byWt);
+      const cap = Math.min(it.totalCapacity, byVol, byWt);
       if (cap <= 0) continue;
       remVol -= cap * it.v;
       remWt -= cap * it.w;
-      if (it.o.ticker === opp.ticker) mine = cap;
+      if (
+        it.ticker === opp.ticker &&
+        it.buyExchange === opp.buyExchange &&
+        it.buyPrice === opp.buyPrice
+      ) {
+        mine = cap;
+      }
     }
-    cache.set(key, mine);
+    cache.set(cacheKey, mine);
     return mine;
   };
 })();
+
+// 该 ticker 的预期总利润（按 ticker 聚合所有行）。
+function totalExpectedProfitFor(ticker: string): number {
+  let total = 0;
+  for (const o of filtered.value) {
+    if (o.ticker !== ticker) continue;
+    total += suggestedUnits(o) * o.profitPerUnit;
+  }
+  return total;
+}
+
+// 该 ticker 的贪心装载总件数（用于 ACT 一键脚本的 material 用量）。
+function totalSuggestedUnits(ticker: string): number {
+  let total = 0;
+  for (const o of filtered.value) {
+    if (o.ticker !== ticker) continue;
+    total += suggestedUnits(o);
+  }
+  return total;
+}
 
 // Reactive data age (re-evaluates each minute via timestampEachMinute).
 const dataAgeMinutes = computed(() => {
@@ -239,9 +334,9 @@ function sortValue(o: ArbOpportunity): number {
     case 'profitPerUnit':
       return o.profitPerUnit;
     case 'totalProfit':
-      return o.totalProfit ?? -Infinity;
+      return o.totalProfit;
     case 'executableVolume':
-      return o.executableVolume ?? -Infinity;
+      return o.executableVolume;
     case 'profitPct':
     default:
       return o.profitPct;
@@ -249,10 +344,7 @@ function sortValue(o: ArbOpportunity): number {
 }
 
 const filtered = computed(() => {
-  let list = opportunities.value;
-  if (onlyPositive.value) {
-    list = list.filter(o => o.profitPerUnit > 0);
-  }
+  let list = opportunities.value.filter(o => o.profitPerUnit > 0);
   if (categoryFilter.value !== 'ALL') {
     list = list.filter(o => o.category === categoryFilter.value);
   }
@@ -266,14 +358,7 @@ const filtered = computed(() => {
   return list.slice().sort((a, b) => sortValue(b) - sortValue(a));
 });
 
-// 该商品预期装载后的总利润（基于贪心算法分配的件数）。
-function expectedProfitFor(opp: ArbOpportunity): number {
-  return suggestedUnits(opp) * opp.profitPerUnit;
-}
-
-// 总体汇总：总重量、总容积、总花费、总预期利润（基于勾选 + 飞船 + 贪心分配）。
-// 总花费 = Σ 买入价 × 建议装载件数（以出发地交易所币种计价）。
-// 总利润 = Σ 卖出价 × 件数 − 总花费（以目的地币种计价，FX 1:1 假设）。
+// 总体汇总：总重量、总容积、总花费、总预期利润。
 const summary = computed(() => {
   let totalWeight = 0;
   let totalVolume = 0;
@@ -286,7 +371,7 @@ const summary = computed(() => {
     totalWeight += unitWeight(o) * units;
     totalVolume += unitVolume(o) * units;
     totalCost += o.buyPrice * units;
-    totalProfit += expectedProfitFor(o);
+    totalProfit += units * o.profitPerUnit;
   }
   return { totalWeight, totalVolume, totalCost, totalProfit };
 });
@@ -302,11 +387,10 @@ function generateActScript() {
   if (!selectedSelected.value || checkedTickers.value.size === 0) return;
 
   const materials: Record<string, number> = {};
-  for (const o of filtered.value) {
-    if (!checkedTickers.value.has(o.ticker)) continue;
-    const units = suggestedUnits(o);
+  for (const ticker of checkedTickers.value) {
+    const units = totalSuggestedUnits(ticker);
     if (units <= 0) continue;
-    materials[o.ticker] = (materials[o.ticker] ?? 0) + units;
+    materials[ticker] = units;
   }
   if (Object.keys(materials).length === 0) return;
 
@@ -342,6 +426,25 @@ function generateActScript() {
 
   userData.actionPackages.push(pkg);
   showBuffer('XIT ACT_EDIT_' + pkgName.split(' ').join('_'));
+}
+
+// 一次性后台静默加载 filtered 表中实际出现的 (ticker, exchange) 实时订单簿。
+// 服务器推送 COMEX_BROKER_DATA 后自动关闭隐藏缓冲窗。
+async function loadLiveOrderBooks() {
+  const requested = new Set<string>();
+  for (const o of filtered.value) {
+    for (const ex of [o.buyExchange, o.sellExchange]) {
+      const key = `${o.ticker}.${ex}`;
+      if (requested.has(key) || cxobStore.getByTicker(key) !== undefined) {
+        continue;
+      }
+      requested.add(key);
+      showBuffer(`CXOB ${key}`, {
+        autoClose: true,
+        closeWhen: computed(() => cxobStore.getByTicker(key) !== undefined),
+      });
+    }
+  }
 }
 
 function localizedName(o: ArbOpportunity): string {
@@ -381,10 +484,7 @@ function localizedCategory(o: ArbOpportunity): string {
         <span :class="$style.controlLabel">目的地</span>
         <SelectInput v-model="destExchange" :options="exchangeOptions" :width="60" />
       </label>
-      <label :class="$style.checkbox">
-        <input v-model="onlyPositive" type="checkbox" />
-        <span>仅正机会 ({{ positiveCount }})</span>
-      </label>
+      <PrunButton @click="loadLiveOrderBooks">加载实时订单簿</PrunButton>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
         <SelectInput v-model="selectedShipId" :options="shipOptions" :width="280" />
@@ -423,11 +523,17 @@ function localizedCategory(o: ArbOpportunity): string {
       <table :class="$style.table">
         <thead>
           <tr>
-            <th :class="$style.checkCol">选</th>
+            <th :class="$style.checkCol">
+              <input
+                ref="selectAllRef"
+                type="checkbox"
+                :checked="selectAllState.checked"
+                @change="toggleSelectAll" />
+            </th>
             <th :class="$style.materialCol">商品</th>
             <th :class="$style.categoryCol">类别</th>
-            <th :class="$style.marketCol">买入 (最低 ask)</th>
-            <th :class="$style.marketCol">卖出 (最高 bid)</th>
+            <th :class="$style.marketCol">买入</th>
+            <th :class="$style.marketCol">卖出</th>
             <th :class="$style.numCol">单价利润</th>
             <th :class="$style.numCol">利润率</th>
             <th :class="$style.numCol">可成交量</th>
@@ -447,12 +553,12 @@ function localizedCategory(o: ArbOpportunity): string {
           </tr>
         </tbody>
         <tbody v-else>
-          <tr v-for="o in filtered" :key="o.ticker">
+          <tr v-for="o in filtered" :key="o.key">
             <td :class="$style.checkCell">
               <input
                 type="checkbox"
                 :checked="checkedTickers.has(o.ticker)"
-                :disabled="!shipFitsAll(o)"
+                :disabled="!shipFitsAny(o)"
                 @change="toggleChecked(o.ticker, $event)" />
             </td>
             <td :class="$style.materialCell">
@@ -467,6 +573,12 @@ function localizedCategory(o: ArbOpportunity): string {
                 </PrunLink>
                 <span :class="$style.marketPrice"
                   >{{ fixed2(o.buyPrice) }} {{ o.buyCurrency }}</span
+                >
+                <span
+                  :class="$style.marketQty"
+                  data-tooltip="该价位上的订单数量"
+                  data-tooltip-position="top"
+                  >×{{ fixed0(o.buyQuantity) }}</span
                 >
                 <span
                   v-if="o.buyLive"
@@ -485,6 +597,12 @@ function localizedCategory(o: ArbOpportunity): string {
                   >{{ fixed2(o.sellPrice) }} {{ o.sellCurrency }}</span
                 >
                 <span
+                  :class="$style.marketQty"
+                  data-tooltip="该价位上的订单数量"
+                  data-tooltip-position="top"
+                  >×{{ fixed0(o.sellQuantity) }}</span
+                >
+                <span
                   v-if="o.sellLive"
                   :class="$style.liveDot"
                   data-tooltip="实时订单簿"
@@ -498,7 +616,7 @@ function localizedCategory(o: ArbOpportunity): string {
               {{ percent2(o.profitPct) }}
             </td>
             <td :class="$style.numCell">
-              {{ o.executableVolume !== null ? fixed0(o.executableVolume) : '--' }}
+              {{ fixed0(o.executableVolume) }}
             </td>
             <td :class="$style.numCell">
               <span v-if="suggestedUnits(o) > 0" :class="$style.suggestedBadge">
@@ -506,11 +624,19 @@ function localizedCategory(o: ArbOpportunity): string {
               </span>
               <span v-else>--</span>
             </td>
-            <td :class="[$style.numCell, expectedProfitFor(o) > 0 ? $style.pos : $style.neg]">
-              {{ expectedProfitFor(o) > 0 ? fixed0(expectedProfitFor(o)) : '--' }}
+            <td
+              :class="[
+                $style.numCell,
+                totalExpectedProfitFor(o.ticker) > 0 ? $style.pos : $style.neg,
+              ]">
+              {{
+                totalExpectedProfitFor(o.ticker) > 0
+                  ? fixed0(totalExpectedProfitFor(o.ticker))
+                  : '--'
+              }}
             </td>
             <td :class="[$style.numCell, o.profitPerUnit > 0 ? $style.pos : $style.neg]">
-              {{ o.totalProfit !== null ? fixed0(o.totalProfit) : '--' }}
+              {{ fixed0(o.totalProfit) }}
             </td>
           </tr>
         </tbody>
@@ -634,6 +760,11 @@ function localizedCategory(o: ArbOpportunity): string {
   padding: 2px 4px;
 }
 
+.checkCol input {
+  accent-color: rgb(255, 176, 0);
+  cursor: pointer;
+}
+
 .checkCell {
   text-align: center;
   padding: 2px 4px;
@@ -730,6 +861,11 @@ function localizedCategory(o: ArbOpportunity): string {
   font-size: 11px;
 }
 
+.marketQty {
+  color: rgb(148, 158, 166);
+  font-size: 11px;
+}
+
 .marketCellBuy {
   background: rgba(129, 199, 132, 0.08);
   border-left-color: rgb(129, 199, 132);
@@ -762,13 +898,8 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .marketCol {
-  width: 18%;
-  min-width: 180px;
-}
-
-.price {
-  color: rgb(200, 208, 214);
-  font-size: 11px;
+  width: 22%;
+  min-width: 220px;
 }
 
 .liveDot {

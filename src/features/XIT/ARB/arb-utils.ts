@@ -4,23 +4,28 @@ import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getMaterialCategoryName } from '@src/infrastructure/prun-ui/i18n';
+import { isFiniteOrder } from '@src/core/orders';
 
 export interface ArbOpportunity {
+  // Stable row key: ticker + buy side + sell side.
+  key: string;
   ticker: string;
   name: string;
   category: string;
   buyExchange: string;
   buyCurrency: string;
   buyPrice: number;
+  buyQuantity: number;
   buyLive: boolean;
   sellExchange: string;
   sellCurrency: string;
   sellPrice: number;
+  sellQuantity: number;
   sellLive: boolean;
   profitPerUnit: number;
   profitPct: number;
-  executableVolume: number | null;
-  totalProfit: number | null;
+  executableVolume: number;
+  totalProfit: number;
 }
 
 export interface ArbExchange {
@@ -53,32 +58,92 @@ export function resolveCategoryLabel(id: string): string {
   return fallback ?? id;
 }
 
-interface MarketQuote {
-  ask: number | null;
-  bid: number | null;
-  supply: number | null;
-  demand: number | null;
+interface PriceLevel {
+  exchange: string;
+  currency: string;
+  price: number;
+  amount: number;
   live: boolean;
 }
 
-// Best ask/bid for a ticker on one exchange. cxob live order book takes
-// precedence over the 15-minute FIO aggregate when the broker has been opened.
-function readMarket(ticker: string, exchangeCode: string): MarketQuote {
-  const fio = cxStore.prices?.get(exchangeCode)?.get(ticker);
-  const orderBook = cxobStore.getByTicker(`${ticker}.${exchangeCode}`);
-  const ask = orderBook?.ask?.price.amount ?? fio?.Ask ?? null;
-  const bid = orderBook?.bid?.price.amount ?? fio?.Bid ?? null;
-  return {
-    ask,
-    bid,
-    supply: fio?.Supply ?? null,
-    demand: fio?.Demand ?? null,
-    live: orderBook !== undefined,
-  };
+// Aggregate live order book orders into distinct price levels. Stops at the
+// first MM order (no finite amount) and ignores anything beyond it, matching
+// the convention used by the CXOB depth bars feature.
+function levelsFromOrders(exchange: ArbExchange, orders: PrunApi.CXBrokerOrder[]): PriceLevel[] {
+  const totals = new Map<number, number>();
+  for (const order of orders) {
+    if (!isFiniteOrder(order)) {
+      break;
+    }
+    const price = order.limit.amount;
+    totals.set(price, (totals.get(price) ?? 0) + order.amount);
+  }
+  const levels: PriceLevel[] = [];
+  for (const [price, amount] of totals) {
+    levels.push({
+      exchange: exchange.code,
+      currency: exchange.currency,
+      price,
+      amount,
+      live: true,
+    });
+  }
+  return levels;
 }
 
-// For every material, find the cheapest ask (buy target) and the highest bid
-// (sell target) across all CX exchanges, then derive the arbitrage metrics.
+// Buy-side levels (sell orders we can take). Sell-side levels (buy orders we
+// can fill). cxob live order book takes precedence; FIO 15-min aggregate is the
+// fallback when the broker has not been opened.
+function readBuyLevels(ticker: string, exchange: ArbExchange): PriceLevel[] {
+  const orderBook = cxobStore.getByTicker(`${ticker}.${exchange.code}`);
+  if (orderBook !== undefined) {
+    const levels = levelsFromOrders(exchange, orderBook.sellingOrders);
+    if (levels.length > 0) {
+      return levels;
+    }
+  }
+  const fio = cxStore.prices?.get(exchange.code)?.get(ticker);
+  if (fio?.Ask !== undefined && fio.Ask !== null && fio.Ask > 0) {
+    return [
+      {
+        exchange: exchange.code,
+        currency: exchange.currency,
+        price: fio.Ask,
+        amount: fio.Supply ?? 0,
+        live: false,
+      },
+    ];
+  }
+  return [];
+}
+
+function readSellLevels(ticker: string, exchange: ArbExchange): PriceLevel[] {
+  const orderBook = cxobStore.getByTicker(`${ticker}.${exchange.code}`);
+  if (orderBook !== undefined) {
+    const levels = levelsFromOrders(exchange, orderBook.buyingOrders);
+    if (levels.length > 0) {
+      return levels;
+    }
+  }
+  const fio = cxStore.prices?.get(exchange.code)?.get(ticker);
+  if (fio?.Bid !== undefined && fio.Bid !== null && fio.Bid > 0) {
+    return [
+      {
+        exchange: exchange.code,
+        currency: exchange.currency,
+        price: fio.Bid,
+        amount: fio.Demand ?? 0,
+        live: false,
+      },
+    ];
+  }
+  return [];
+}
+
+// For every material, enumerate every profitable (buy level × sell level)
+// combination across the CX exchanges. Each price level carries its own
+// available quantity, so each combination becomes its own row with an
+// executable volume capped by the tighter side.
 // Currency comparison is 1:1 per the feature spec (no FX conversion).
 // `sourceExchange` / `destExchange` 如果指定则只在该交易所寻找买入/卖出机会。
 export function computeOpportunities(
@@ -94,78 +159,66 @@ export function computeOpportunities(
   const opportunities: ArbOpportunity[] = [];
 
   for (const material of materials) {
-    let bestBuy = {
-      exchange: '',
-      currency: '',
-      price: Infinity,
-      supply: 0,
-      live: false,
-    };
-    let bestSell = {
-      exchange: '',
-      currency: '',
-      price: -Infinity,
-      demand: 0,
-      live: false,
-    };
-
+    const buyLevels: PriceLevel[] = [];
     for (const exchange of exchanges) {
-      const quote = readMarket(material.ticker, exchange.code);
-      if (quote.ask !== null && quote.ask > 0 && quote.ask < bestBuy.price) {
-        if (sourceExchange && exchange.code !== sourceExchange) {
-          // 指定了出发地，只在该交易所买入
-        } else {
-          bestBuy = {
-            exchange: exchange.code,
-            currency: exchange.currency,
-            price: quote.ask,
-            supply: quote.supply ?? 0,
-            live: quote.live,
-          };
-        }
+      if (sourceExchange && exchange.code !== sourceExchange) {
+        continue;
       }
-      if (quote.bid !== null && quote.bid > 0 && quote.bid > bestSell.price) {
-        if (destExchange && exchange.code !== destExchange) {
-          // 指定了目的地，只在该交易所卖出
-        } else {
-          bestSell = {
-            exchange: exchange.code,
-            currency: exchange.currency,
-            price: quote.bid,
-            demand: quote.demand ?? 0,
-            live: quote.live,
-          };
+      for (const level of readBuyLevels(material.ticker, exchange)) {
+        if (level.amount > 0) {
+          buyLevels.push(level);
         }
       }
     }
-
-    if (!Number.isFinite(bestBuy.price) || !Number.isFinite(bestSell.price)) {
+    if (buyLevels.length === 0) {
       continue;
     }
 
-    const profitPerUnit = bestSell.price - bestBuy.price;
-    const profitPct = bestBuy.price > 0 ? profitPerUnit / bestBuy.price : 0;
-    const executableVolume =
-      bestBuy.supply > 0 && bestSell.demand > 0 ? Math.min(bestBuy.supply, bestSell.demand) : null;
-    const totalProfit = executableVolume !== null ? profitPerUnit * executableVolume : null;
+    const sellLevels: PriceLevel[] = [];
+    for (const exchange of exchanges) {
+      if (destExchange && exchange.code !== destExchange) {
+        continue;
+      }
+      for (const level of readSellLevels(material.ticker, exchange)) {
+        if (level.amount > 0) {
+          sellLevels.push(level);
+        }
+      }
+    }
+    if (sellLevels.length === 0) {
+      continue;
+    }
 
-    opportunities.push({
-      ticker: material.ticker,
-      name: material.name,
-      category: material.category,
-      buyExchange: bestBuy.exchange,
-      buyCurrency: bestBuy.currency,
-      buyPrice: bestBuy.price,
-      buyLive: bestBuy.live,
-      sellExchange: bestSell.exchange,
-      sellCurrency: bestSell.currency,
-      sellPrice: bestSell.price,
-      sellLive: bestSell.live,
-      profitPerUnit,
-      profitPct,
-      executableVolume,
-      totalProfit,
-    });
+    for (const buy of buyLevels) {
+      for (const sell of sellLevels) {
+        if (sell.price <= buy.price) {
+          continue;
+        }
+        const profitPerUnit = sell.price - buy.price;
+        const profitPct = buy.price > 0 ? profitPerUnit / buy.price : 0;
+        const executableVolume = Math.min(buy.amount, sell.amount);
+        opportunities.push({
+          key: `${material.ticker}|${buy.exchange}|${buy.price}|${sell.exchange}|${sell.price}`,
+          ticker: material.ticker,
+          name: material.name,
+          category: material.category,
+          buyExchange: buy.exchange,
+          buyCurrency: buy.currency,
+          buyPrice: buy.price,
+          buyQuantity: buy.amount,
+          buyLive: buy.live,
+          sellExchange: sell.exchange,
+          sellCurrency: sell.currency,
+          sellPrice: sell.price,
+          sellQuantity: sell.amount,
+          sellLive: sell.live,
+          profitPerUnit,
+          profitPct,
+          executableVolume,
+          totalProfit: profitPerUnit * executableVolume,
+        });
+      }
+    }
   }
 
   return opportunities;
