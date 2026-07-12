@@ -1,7 +1,65 @@
 # 更新日志
 
-**日期**: 2026-06-17  
-**说明**: 同步了官方版本更新内容
+**日期**: 2026-07-11  
+**说明**: 同步了 26.5.18 之后到 26.7.11.1251 之间的版本变更内容
+
+## 26.7.11
+
+> 历史中间版本（26.6.18、26.6.20、26.6.24、26.6.25、26.6.29、26.7.2、26.7.3、26.7.5、26.7.6、26.7.8、26.7.9、26.7.10）已合并到本节。
+
+### ✨ Features
+
+- **倒货助手 (`XIT ARB`)**：新增跨市场套利工具，支持出发地/目的地路由选择、飞船选择、基于 `SHIP_STORE` 真实密度 / 容积 / 重量的贪心分配、买卖过滤、汇总栏（含总花费·出发地币种、预期利润），并可一键生成 `XIT ACT` 脚本。
+- **CX 价格偏离度 (`cx-price-deviation`)**：在 `CX` 系列面板展示 VWAP / 7d VWAP 价格偏离度。
+- **`XIT/CXTS`**：按时间粒度展开默认分组。
+- **`XIT/ACT`**：日志与报价新增涨跌标识与高亮展示。
+- **`flt-hide-cargo-fuel-buttons`**：在 `FLT` 系列面板中隐藏货物 / 燃料按钮。
+- **聊天翻译 (`chat-translation`)**：翻译配置系统重构，新增多家 AI 翻译服务（Anthropic、OpenAI 兼容、DeepL、Microsoft、Google、HuggingFace、Gemini、自定义 HTTP 等）的独立 Provider；新增 AI 翻译模型可用性查询与中文 UI；强化 URL 主机白名单与脚本重挂校验。
+- **特性注册表**：记录并日志输出已加载特性数量与成功状态。
+
+### 🔧 Improvements
+
+- **`XIT ACT/CXPO_BUY`**：总费用计算改用真实价格限制参数，与历史对比算法口径保持一致。
+- **`XIT ACT runner`**：重构重量 / 体积负载叠加路径，容量约束更稳定。
+- **`XIT BURN`**：资源剩余天数计算纳入预留分配量。
+- **`XIT`**：合同模块样式与状态类统一实现；公共样式与工具函数抽离，减少重复代码。
+- **`XIT ARB / CART`**：类别 / 材料支持中文显示。
+- **样式 / 格式化**：应用 Prettier 全量格式化，解决 14 处 `prettier/prettier` 告警。
+
+### 🐛 Bug Fixes
+
+- **`XIT/ACT runner`**：修复重量 / 体积重复叠加错误。
+- **`XIT/ACT/CXPO_BUY`**：修复历史价格对比因变量错误导致的口径偏差。
+- **`XIT BURN`**：修复资源剩余天数计算遗漏预留量。
+- **`XIT/ACT/EditPriceLimits`**：修复直接修改 `props` 导致的响应式状态同步问题。
+- **`price-deviation`**：处理 `vwap7d` 为空的情况，移除冗余非空断言。
+- **`chat-images`**：渲染前校验 URL scheme 与扩展名。
+- **`shell` / `prepare`**：脚本重挂时强制主机白名单；改用 hostname 比较替代子串匹配。
+- **CI / 发布**：移除 GitHub workflow 中不必要的 `models` 读取权限；为 lint workflow 添加显式 `permissions`；更新发布步骤以自动生成发布说明。
+- **依赖安全**：通过 `overrides` 清理 7 条 transitive 漏洞；升级主项目直接依赖修复 Dependabot 高危漏洞；升级 `defu` 6.1.4 → 6.1.7。
+- **`XIT ARB`**：修复表格列宽 / 勾选错位 / 类别列竖排 / 市场列点击 / `undefined` 防御 / `SHIP_STORE` 查找方式 / 包名分隔符（空格，匹配 ACT lookup）等多项问题。
+- **URL 安全**：将 sink URL 路由走规范化 `URL.href`，并补充相关安全模式文档。
+
+### 💥 Breaking Changes
+
+- 无对外不兼容变更。
+
+### 🗑️ Removed
+
+- 无功能移除。
+
+### 🔒 Security
+
+- 翻译功能加固：完整白名单 + 单元测试。
+- 修复 `chat-images`、`shell`、`prepare` 三处与 URL 解析相关的潜在安全风险。
+- 依赖安全升级（详见 Bug Fixes 段）。
+
+## Unreleased
+
+> HEAD 之后尚无 tag，包含：
+
+- **fix(ARB)**：修复套利计算和汇总逻辑的多个问题。
+- **refactor(XIT/ACT/ARB)**：重构套利计算与 UI 展示逻辑。
 
 ## 26.5.18
 
