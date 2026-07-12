@@ -166,9 +166,24 @@ export const MTRA_TRANSFER = act.addActionStep<Data>({
     await clickElement(match);
     suggestionsContainer.style.display = '';
 
-    const sliderNumbers = _$$(tile.anchor, 'rc-slider-mark-text').map(x =>
-      Number(x.textContent ?? 0),
-    );
+    // 数量滑块的刻度（rc-slider-mark-text）在选择材料后异步渲染。clickElement
+    // 只 await sleep(0)，刻度可能尚未挂载，此时 _$$(...) 返回空数组，
+    // Math.max(...[]) = -Infinity，会把 "-Infinity" 写入数量输入框并提交。
+    // 因此带超时重试等待刻度，并过滤掉非有限值（NaN）。
+    let sliderNumbers: number[] = [];
+    for (let attempt = 0; attempt < 15; attempt++) {
+      sliderNumbers = _$$(tile.anchor, 'rc-slider-mark-text')
+        .map(x => Number(x.textContent ?? 0))
+        .filter(n => Number.isFinite(n));
+      if (sliderNumbers.length > 0) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (sliderNumbers.length === 0) {
+      fail(`${ticker} MTRA 数量滑块未加载，无法确定最大可转移量`);
+      return;
+    }
     const maxAmount = Math.max(...sliderNumbers);
     const allInputs = _$$(tile.anchor, 'input');
     const amountInput = allInputs[1];
