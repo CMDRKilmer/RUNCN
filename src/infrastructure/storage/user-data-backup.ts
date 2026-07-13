@@ -72,10 +72,6 @@ function sanitizeForBackup(data: any): any {
       }
     }
   }
-  if (clone) {
-    clone.factionToken = undefined;
-    clone.supabaseAuth = undefined;
-  }
   return clone;
 }
 

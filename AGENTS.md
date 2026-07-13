@@ -10,6 +10,8 @@ Be extremely concise. Sacrifice grammar for the sake of concision.
 NEVER blindly assume how the game works. If you don't 100% know how a feature or UI component works, read the appropriate docs.
 If there is no relevant info in the docs, make an assumption and ask the user if it is correct. Only then you are allowed to follow an assumption.
 
+Before creating new features, prioritize searching for existing reusable modules in the project and consult the native control list to avoid reinventing the wheel.
+
 ## PROJECT
 
 Refined PrUn (rprun) is a browser extension for Prosperous Universe (PrUn) that enhances the game interface.

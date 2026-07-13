@@ -79,7 +79,6 @@ import './nots-material-ticker';
 import './nots-notification-type-label';
 import './nots-ship-arrival-inventory';
 import './other-context-notification-count';
-import './plugin-user-report';
 import './prevent-delete-button-misclicks';
 import './prod-burn-link';
 import './prod-order-eta';

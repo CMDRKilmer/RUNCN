@@ -14,8 +14,6 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { countDays, getSortedTickers } from '@src/features/XIT/BURN/utils';
 import InlineFlex from '@src/components/InlineFlex.vue';
 import { querySites } from '@src/features/XIT/shared/site-query';
-import { isAuthenticated, reportProduction } from '@src/features/XIT/FACTION/use-faction-api';
-import { userData } from '@src/store/user-data';
 
 const parameters = useXitParameters();
 
@@ -180,37 +178,6 @@ function copyBurnTable() {
   }
   return formatBurnTable(planetBurn.value);
 }
-
-let uploadTimer: number | undefined;
-let hasReportedThisRender = false;
-
-watch(
-  planetBurn,
-  newVal => {
-    if (hasReportedThisRender) return;
-    if (!newVal) return;
-    const overall = newVal.find(x => x.planetName === '总览');
-    if (!overall) return;
-    if (!isAuthenticated()) return;
-
-    clearTimeout(uploadTimer);
-    uploadTimer = window.setTimeout(() => {
-      const items = Object.entries(overall.burn).map(([ticker, burnValue]) => ({
-        ticker,
-        quantity: Math.round(burnValue.dailyAmount),
-      }));
-
-      reportProduction(items)
-        .then(() => {
-          hasReportedThisRender = true;
-          const today = new Date().toISOString().slice(0, 10);
-          userData.lastAutoProductionDate = today;
-        })
-        .catch(console.error);
-    }, 3000);
-  },
-  { deep: true },
-);
 </script>
 
 <template>

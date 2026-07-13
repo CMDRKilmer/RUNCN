@@ -50,7 +50,6 @@ export const initialUserData = deepFreeze({
       ['设置', 'XIT SET'],
       ['帮助', 'XIT HELP'],
       ['计划', 'XIT JH'],
-      ['琉璃', 'XIT FACTION'],
       ['\u8d2d\u7269\u8f66', 'XIT CART'],
     ] as [string, string][],
     buffers: [] as [string, number, number][],
@@ -93,14 +92,6 @@ export const initialUserData = deepFreeze({
     locked: [] as string[],
   },
   commandLists: [] as UserData.CommandList[],
-  factionToken: undefined as string | undefined,
-  factionCache: undefined as
-    | { cachedAt: number; members?: unknown[]; balance?: number; bulletins?: unknown[] }
-    | undefined,
-  factionLastSeenBulletinAt: undefined as string | undefined,
-  supabaseAuth: undefined as Record<string, string> | undefined,
-  lastAutoProductionDate: undefined as string | undefined,
-  lastShipReportSnapshot: undefined as string | undefined,
 
   // 在 user-data-migrations.ts 中使用
   migrations: undefined,
