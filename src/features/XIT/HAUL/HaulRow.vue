@@ -72,6 +72,51 @@ const payment = computed(() => {
   return formatAmount(pay.amount.amount, pay.amount.currency);
 });
 
+// 货物重量与体积（用于计算单位费率）
+const cargoMetrics = computed(() => {
+  const types = ['PROVISION_SHIPMENT', 'PICKUP_SHIPMENT', 'DELIVERY_SHIPMENT'] as const;
+  for (const type of types) {
+    const conds = contract.conditions.filter(
+      c => c.type === type && c.weight != null && c.volume != null,
+    );
+    if (conds.length > 0) {
+      let w = 0;
+      let v = 0;
+      for (const c of conds) {
+        w += c.weight!;
+        v += c.volume!;
+      }
+      return { weight: w, volume: v };
+    }
+  }
+  return undefined;
+});
+
+// 单位费率（每吨/每立方米）
+const ratePerT = computed(() => {
+  const pay = contract.conditions.find(c => c.type === 'PAYMENT')?.amount;
+  const cargo = cargoMetrics.value;
+  if (!pay || !cargo || cargo.weight === 0) return undefined;
+  return pay.amount / cargo.weight;
+});
+
+const ratePerM3 = computed(() => {
+  const pay = contract.conditions.find(c => c.type === 'PAYMENT')?.amount;
+  const cargo = cargoMetrics.value;
+  if (!pay || !cargo || cargo.volume === 0) return undefined;
+  return pay.amount / cargo.volume;
+});
+
+const rateText = computed(() => {
+  const t = ratePerT.value;
+  const m = ratePerM3.value;
+  if (t === undefined && m === undefined) return '-';
+  const parts: string[] = [];
+  if (t !== undefined) parts.push(`${t.toFixed(0)}/t`);
+  if (m !== undefined) parts.push(`${m.toFixed(0)}/m³`);
+  return parts.join(' ');
+});
+
 // 条件完成进度
 const progress = computed(() => calculateProgress(contract));
 
@@ -92,6 +137,7 @@ const statusClass = computed(() => getStatusClass(contract.status));
     <td>{{ destination }}</td>
     <td>{{ cargo }}</td>
     <td>{{ payment }}</td>
+    <td>{{ rateText }}</td>
     <td>
       <ProgressBarWithText
         :current="progress.fulfilled"

@@ -77,7 +77,16 @@ function getTransportSummary(contracts: PrunApi.Contract[]) {
     }
   }
 
-  return { totalPayment, currency, totalContracts, completedContracts, totalWeight, totalVolume };
+  return {
+    totalPayment,
+    currency,
+    totalContracts,
+    completedContracts,
+    totalWeight,
+    totalVolume,
+    avgRatePerT: totalWeight > 0 ? totalPayment / totalWeight : 0,
+    avgRatePerM3: totalVolume > 0 ? totalPayment / totalVolume : 0,
+  };
 }
 
 const carryingSummary = computed(() => getTransportSummary(carrying.value));
@@ -94,14 +103,15 @@ const shippingSummary = computed(() => getTransportSummary(shipping.value));
     <table>
       <thead>
         <tr>
-          <th colspan="8" :class="$style.sectionHeader">
+          <th colspan="9" :class="$style.sectionHeader">
             🚀 承运合同
             <span v-if="!isEmpty(carrying)" :class="$style.summary">
               共 {{ carryingSummary.totalContracts }} 单 | 已完成
               {{ carryingSummary.completedContracts }} 单 | 运费合计:
               {{ formatAmount(carryingSummary.totalPayment, carryingSummary.currency) }}
               | {{ carryingSummary.totalWeight.toFixed(2) }}t /
-              {{ carryingSummary.totalVolume.toFixed(2) }}m³
+              {{ carryingSummary.totalVolume.toFixed(2) }}m³ | 均:
+              {{ carryingSummary.avgRatePerT.toFixed(0) }}/t
             </span>
           </th>
         </tr>
@@ -112,13 +122,14 @@ const shippingSummary = computed(() => getTransportSummary(shipping.value));
           <th>终点</th>
           <th>货物</th>
           <th>运费</th>
+          <th>费率</th>
           <th>进度</th>
           <th>状态</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="isEmpty(carrying)">
-          <td colspan="8" :class="$style.empty">暂无承运合同</td>
+          <td colspan="9" :class="$style.empty">暂无承运合同</td>
         </tr>
         <template v-else>
           <HaulRow
@@ -134,14 +145,15 @@ const shippingSummary = computed(() => getTransportSummary(shipping.value));
     <table :class="$style.secondTable">
       <thead>
         <tr>
-          <th colspan="8" :class="$style.sectionHeader">
+          <th colspan="9" :class="$style.sectionHeader">
             📦 委托运输
             <span v-if="!isEmpty(shipping)" :class="$style.summary">
               共 {{ shippingSummary.totalContracts }} 单 | 已完成
               {{ shippingSummary.completedContracts }} 单 | 运费合计:
               {{ formatAmount(shippingSummary.totalPayment, shippingSummary.currency) }}
               | {{ shippingSummary.totalWeight.toFixed(2) }}t /
-              {{ shippingSummary.totalVolume.toFixed(2) }}m³
+              {{ shippingSummary.totalVolume.toFixed(2) }}m³ | 均:
+              {{ shippingSummary.avgRatePerT.toFixed(0) }}/t
             </span>
           </th>
         </tr>
@@ -152,13 +164,14 @@ const shippingSummary = computed(() => getTransportSummary(shipping.value));
           <th>终点</th>
           <th>货物</th>
           <th>运费</th>
+          <th>费率</th>
           <th>进度</th>
           <th>状态</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="isEmpty(shipping)">
-          <td colspan="8" :class="$style.empty">暂无委托运输</td>
+          <td colspan="9" :class="$style.empty">暂无委托运输</td>
         </tr>
         <template v-else>
           <HaulRow
