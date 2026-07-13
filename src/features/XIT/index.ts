@@ -24,6 +24,7 @@ import './HEALTH';
 import './LOAN/LOAN';
 import './HAUL/HAUL';
 import './HELP';
+import './HOLD/HOLD';
 import './HQUC';
 import './MATS';
 import './NOTE/NOTE';

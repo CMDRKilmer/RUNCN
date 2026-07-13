@@ -8,6 +8,7 @@ xit.add({
     { cmd: 'XIT FINBS' },
     { cmd: 'XIT FINPR' },
     { cmd: 'XIT FINCH' },
+    { cmd: 'XIT HOLD' },
     { cmd: 'XIT SET FIN' },
   ],
   component: () => FIN,
