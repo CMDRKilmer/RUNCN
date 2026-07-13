@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import PrunButton from '@src/components/PrunButton.vue';
 import { getPlanetProduction, PlanetProduction } from '@src/core/production';
 import ProdSection from './ProdSection.vue';
-import { useTileState } from './tile-state';
+import { useTileState, SortBy } from './tile-state';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { findWithQuery } from '@src/utils/find-with-query';
 import { createSiteFinder } from '@src/features/XIT/shared/site-query';
-import { matchesProductionFilter } from './utils';
+import { matchesProductionFilter, getPlanetMinEfficiency, getPlanetMinCondition } from './utils';
 import { sumBy } from '@src/utils/sum-by';
 import FakeRow from './FakeRow.vue';
 
@@ -17,12 +18,30 @@ function byTotalCapacityDesc(a: PlanetProduction, b: PlanetProduction) {
   return sumBy(b.production, x => x.capacity) - sumBy(a.production, x => x.capacity);
 }
 
+const sortComparers: Record<SortBy, (a: PlanetProduction, b: PlanetProduction) => number> = {
+  capacity: byTotalCapacityDesc,
+  'efficiency-asc': (a, b) => getPlanetMinEfficiency(a) - getPlanetMinEfficiency(b),
+  'efficiency-desc': (a, b) => getPlanetMinEfficiency(b) - getPlanetMinEfficiency(a),
+  'condition-asc': (a, b) => getPlanetMinCondition(a) - getPlanetMinCondition(b),
+};
+
+const sortLabels: Record<SortBy, string> = {
+  capacity: '产能↓',
+  'efficiency-asc': '效率↑',
+  'efficiency-desc': '效率↓',
+  'condition-asc': '状态↑',
+};
+
+const sortCycle: SortBy[] = ['capacity', 'efficiency-asc', 'efficiency-desc', 'condition-asc'];
+
 const displayProduction = useTileState('production');
 const queue = useTileState('queue');
 const inactive = useTileState('inactive');
 const notQueued = useTileState('notQueued');
 const headers = useTileState('headers');
 const expand = useTileState('expandPlanets');
+const sortBy = useTileState('sortBy');
+const lowEff = useTileState('lowEff');
 
 const findSites = createSiteFinder();
 
@@ -35,7 +54,7 @@ const planetProduction = computed(() => {
   return sites
     .map(getPlanetProduction)
     .filter(x => x !== undefined)
-    .sort(byTotalCapacityDesc)
+    .sort(sortComparers[sortBy.value])
     .filter(x =>
       matchesProductionFilter(x.production, {
         production: displayProduction.value,
@@ -55,15 +74,22 @@ function onExpandAllClick() {
     expand.value = planetProduction.value?.map(x => x.naturalId) ?? [];
   }
 }
+
+function cycleSortBy() {
+  const currentIndex = sortCycle.indexOf(sortBy.value);
+  sortBy.value = sortCycle[(currentIndex + 1) % sortCycle.length];
+}
 </script>
 
 <template>
   <div :class="C.ComExOrdersPanel.filter">
+    <PrunButton dark inline @click="cycleSortBy">{{ sortLabels[sortBy] }}</PrunButton>
     <RadioItem v-model="headers" horizontal>表头</RadioItem>
     <RadioItem v-model="displayProduction" horizontal>生产</RadioItem>
     <RadioItem v-model="inactive" horizontal>未激活</RadioItem>
     <RadioItem v-model="queue" horizontal>队列</RadioItem>
     <RadioItem v-model="notQueued" horizontal>未排队</RadioItem>
+    <RadioItem v-model="lowEff" horizontal>低效</RadioItem>
   </div>
   <table>
     <thead>

@@ -62,6 +62,25 @@ const tooltipLines = computed(() => {
 });
 
 const tooltipText = computed(() => tooltipLines.value.join('\n'));
+
+const mainDrag = computed(() => {
+  if (productionLine.efficiencyFactors.length === 0) {
+    return undefined;
+  }
+  let lowest = productionLine.efficiencyFactors[0];
+  for (const factor of productionLine.efficiencyFactors) {
+    if (factor.effectivity < lowest.effectivity) {
+      lowest = factor;
+    }
+  }
+  if (lowest.effectivity >= 1.0) {
+    return undefined;
+  }
+  return {
+    label: labels[lowest.type] ?? capitalize(lowest.type),
+    value: lowest.effectivity,
+  };
+});
 </script>
 
 <template>
@@ -78,6 +97,9 @@ const tooltipText = computed(() => tooltipLines.value.join('\n'));
       <InlineFlex>
         {{ percent0(efficiency) }}
         <Tooltip position="bottom" :tooltip="tooltipText" :class="$style.multilineTooltip" />
+        <span v-if="mainDrag" :class="$style.dragBadge">
+          {{ mainDrag.label }} {{ percent0(mainDrag.value) }}
+        </span>
       </InlineFlex>
     </td>
     <FracCell :numerator="activeOrders" :denominator="capacity" />
@@ -138,5 +160,12 @@ const tooltipText = computed(() => tooltipLines.value.join('\n'));
 
 .multilineTooltip {
   white-space: pre;
+}
+
+.dragBadge {
+  font-size: 10px;
+  color: #f0ad4e;
+  opacity: 0.85;
+  margin-left: 4px;
 }
 </style>

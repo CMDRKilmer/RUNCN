@@ -1,11 +1,31 @@
 import { castArray } from '@src/utils/cast-array';
-import { PlatformProduction } from '@src/core/production';
+import { PlatformProduction, PlanetProduction } from '@src/core/production';
 
 interface ProductionFilters {
   production: boolean;
   inactive: boolean;
   queue: boolean;
   notQueued: boolean;
+}
+
+const LOW_EFFICIENCY_THRESHOLD = 0.8;
+
+export function getPlanetMinEfficiency(planet: PlanetProduction): number {
+  if (planet.production.length === 0) {
+    return 1;
+  }
+  return Math.min(...planet.production.map(x => x.efficiency));
+}
+
+export function getPlanetMinCondition(planet: PlanetProduction): number {
+  if (planet.production.length === 0) {
+    return 1;
+  }
+  return Math.min(...planet.production.map(x => x.condition));
+}
+
+export function isLowEfficiency(line: PlatformProduction): boolean {
+  return line.efficiency < LOW_EFFICIENCY_THRESHOLD;
 }
 
 export function matchesProductionFilter(
