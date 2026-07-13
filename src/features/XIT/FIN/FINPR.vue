@@ -16,7 +16,8 @@ const entries = computed(() => {
   );
 });
 
-const dailyCost = computed(() => sumBy(entries.value, x => x.cost));
+const dailyWorkforceCost = computed(() => sumBy(entries.value, x => x.workforceCost));
+const dailyMaterialCost = computed(() => sumBy(entries.value, x => x.materialCost));
 const dailyRepairs = computed(() => sumBy(entries.value, x => x.repairs));
 const dailyRevenue = computed(() => sumBy(entries.value, x => x.revenue));
 const dailyProfit = computed(() => sumBy(entries.value, x => x.profit));
@@ -28,7 +29,8 @@ const dailyMargin = computed(() => {
 
 const figures = computed(() => {
   return [
-    { name: '每日成本', value: formatCurrency(dailyCost.value) },
+    { name: '每日劳动力', value: formatCurrency(dailyWorkforceCost.value) },
+    { name: '每日材料', value: formatCurrency(dailyMaterialCost.value) },
     { name: '每日维修', value: formatCurrency(dailyRepairs.value) },
     { name: '每日收入', value: formatCurrency(dailyRevenue.value) },
     { name: '每日利润', value: formatCurrency(dailyProfit.value) },
@@ -53,11 +55,12 @@ function profitClass(value: number) {
     <KeyFigures :figures="figures" />
     <FinHeader>按星球分布</FinHeader>
     <table>
-      <colgroup span="6" style="width: calc(100% / 6)"></colgroup>
+      <colgroup span="7" style="width: calc(100% / 7)"></colgroup>
       <thead>
         <tr>
           <th>名称</th>
-          <th>成本</th>
+          <th>劳动力</th>
+          <th>材料</th>
           <th>维修</th>
           <th>收入</th>
           <th>利润</th>
@@ -67,7 +70,8 @@ function profitClass(value: number) {
       <tbody>
         <tr v-for="entry in entries" :key="entry.name">
           <td>{{ entry.name }}</td>
-          <td>{{ fixed0(entry.cost) }}</td>
+          <td>{{ fixed0(entry.workforceCost) }}</td>
+          <td>{{ fixed0(entry.materialCost) }}</td>
           <td>{{ fixed0(entry.repairs) }}</td>
           <td>{{ fixed0(entry.revenue) }}</td>
           <td>{{ fixed0(entry.profit) }}</td>
