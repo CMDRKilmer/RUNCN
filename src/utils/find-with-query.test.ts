@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { findWithQuery } from './find-with-query';
 
 describe('findWithQuery', () => {
-  const find = (term: string, _parts: string[]) => {
+  const find = (term: string) => {
     const map: Record<string, string> = {
       rat: 'RAT',
       'lom palanka': 'LP',
