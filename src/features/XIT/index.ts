@@ -28,6 +28,7 @@ import './HQUC';
 import './MATS';
 import './NOTE/NOTE';
 import './PLAN/PLAN';
+import './WFOR/WFOR';
 import './PLAN/JH';
 import './PROD/PROD';
 import './REP/REP';
