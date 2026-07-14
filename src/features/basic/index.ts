@@ -23,6 +23,7 @@ import './clickable-apex-logo';
 import './close-all-buffers/close-all-buffers';
 import './cmds-clickable-commands';
 import './co-base-count';
+import './contd-auto-fill';
 import './contd-condition-address-placeholder';
 import './contd-upward-search-results';
 import './contribution-bulk-controls';
