@@ -218,8 +218,7 @@ export class ActionRunner {
   private closeWindow(win: Element) {
     const buttons = win.getElementsByClassName(C.Window.button);
     const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
-      | HTMLElement
-      | undefined;
+      HTMLElement | undefined;
     closeBtn?.click();
   }
 
