@@ -32,6 +32,7 @@ import './PLAN/PLAN';
 import './WFOR/WFOR';
 import './PLAN/JH';
 import './PROD/PROD';
+import './PWARN/PWARN';
 import './REP/REP';
 import './SET/SET';
 import './START';
