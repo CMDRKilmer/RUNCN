@@ -103,7 +103,7 @@ const rows = computed<ExpertRow[] | undefined>(() => {
     }
   }
 
-  return result.sort((a, b) => a.sortKey - b.sortKey);
+  return result.filter(x => x.etaText !== '--').sort((a, b) => a.sortKey - b.sortKey);
 });
 </script>
 

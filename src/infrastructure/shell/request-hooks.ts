@@ -10,10 +10,12 @@ import { shipyardsStore } from '@src/infrastructure/prun-api/data/shipyards';
 import { shipyardProjectsStore } from '@src/infrastructure/prun-api/data/shipyard-projects';
 
 const bs: Set<string> = new Set();
+const expRequested: Set<string> = new Set();
 
 onApiMessage({
   CLIENT_CONNECTION_OPENED() {
     bs.clear();
+    expRequested.clear();
   },
 });
 
@@ -28,6 +30,19 @@ function requestBS(siteId?: string | null) {
   bs.add(site.siteId);
   const naturalId = getEntityNaturalIdFromAddress(site.address);
   singleBufferRequest(`BS ${naturalId}`, () => sitesStore.getById(siteId) !== undefined)();
+}
+
+function requestEXP(siteId?: string | null) {
+  const site = sitesStore.getById(siteId);
+  if (!site) {
+    return;
+  }
+  if (expRequested.has(site.siteId)) {
+    return;
+  }
+  expRequested.add(site.siteId);
+  const naturalId = getEntityNaturalIdFromAddress(site.address);
+  singleBufferRequest(`EXP ${naturalId}`, () => sitesStore.getById(siteId) !== undefined)();
 }
 
 function singleBufferRequest(command: string, closeWhen: () => boolean) {
@@ -56,4 +71,5 @@ implementRequestHooks({
   blueprints: singleBufferRequest('BLU', () => blueprintsStore.fetched.value),
   shipyards: singleBufferRequest('SHY', () => shipyardsStore.fetched.value),
   shipyardProjects: singleBufferRequest('SHYP', () => shipyardProjectsStore.fetched.value),
+  experts: requestEXP,
 });

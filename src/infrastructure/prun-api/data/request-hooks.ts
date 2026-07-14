@@ -12,6 +12,8 @@ interface RequestHooks {
   shipyards(): void;
 
   shipyardProjects(): void;
+
+  experts(siteId?: string | null): void;
 }
 
 let hooks: RequestHooks | undefined = undefined;
@@ -41,6 +43,9 @@ export const request = {
   },
   shipyardProjects(): void {
     getHooks().shipyardProjects();
+  },
+  experts(siteId?: string | null): void {
+    getHooks().experts(siteId);
   },
 };
 

@@ -19,7 +19,13 @@ const orderedExpertiseRows = [
 ];
 
 function onTileReady(tile: PrunTile) {
-  const site = sitesStore.getById(tile.parameter)!;
+  if (!tile.parameter) {
+    return;
+  }
+  const site = sitesStore.getById(tile.parameter);
+  if (!site) {
+    return;
+  }
 
   subscribe($$(tile.anchor, 'tr'), tr => {
     if (_$(tr, 'th')) {
