@@ -10,7 +10,7 @@ import {
   getEntityNaturalIdFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { timestampEachMinute } from '@src/utils/dayjs';
-import { formatEta, percent0, percent2 } from '@src/utils/format';
+import { formatEta, percent2 } from '@src/utils/format';
 import { calculateEta, getTotalExperts, MS_IN_DAY } from '@src/core/experts';
 
 const CATEGORY_LABELS: Record<string, string> = {
