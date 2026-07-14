@@ -14,6 +14,7 @@ import './CONTFF/CONTFF';
 import './CXTS/CXTS';
 import './DEV/DEV';
 import './ELEC/ELEC';
+import './FLEET/FLEET';
 import './FIN/FIN';
 import './FIN/FINPR';
 import './FINBS/FINBS';
