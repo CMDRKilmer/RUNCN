@@ -10,6 +10,8 @@ import { getRecurringOrders } from '@src/core/orders';
 export interface ProfitabilityEntry {
   name: string;
   cost: number;
+  workforceCost: number;
+  materialCost: number;
   repairs: number;
   revenue: number;
   profit: number;
@@ -19,7 +21,8 @@ export interface ProfitabilityEntry {
 export function calculateSiteProfitability(site: PrunApi.Site): ProfitabilityEntry | undefined {
   const production = productionStore.getBySiteId(site.siteId);
   const workforce = workforcesStore.getById(site.siteId);
-  const inputs: PrunApi.MaterialAmount[] = [];
+  const workforceInputs: PrunApi.MaterialAmount[] = [];
+  const productionInputs: PrunApi.MaterialAmount[] = [];
   const outputs: PrunApi.MaterialAmount[] = [];
 
   if (!workforce) {
@@ -27,7 +30,7 @@ export function calculateSiteProfitability(site: PrunApi.Site): ProfitabilityEnt
   }
 
   for (const need of workforce.workforces.flatMap(x => x.needs)) {
-    inputs.push({
+    workforceInputs.push({
       material: need.material,
       amount: need.unitsPerInterval,
     });
@@ -42,7 +45,7 @@ export function calculateSiteProfitability(site: PrunApi.Site): ProfitabilityEnt
 
       for (const order of queuedOrders) {
         for (const mat of order.inputs) {
-          inputs.push({
+          productionInputs.push({
             material: mat.material,
             amount: (mat.amount * line.capacity * msInADay) / totalDuration,
           });
@@ -58,12 +61,15 @@ export function calculateSiteProfitability(site: PrunApi.Site): ProfitabilityEnt
     }
   }
 
-  const cost = sumMaterialAmountPrice(mergeMaterialAmounts(inputs));
+  const workforceCost = sumMaterialAmountPrice(mergeMaterialAmounts(workforceInputs));
+  const materialCost = sumMaterialAmountPrice(mergeMaterialAmounts(productionInputs));
   const revenue = sumMaterialAmountPrice(mergeMaterialAmounts(outputs));
 
-  if (revenue === undefined || cost === undefined) {
+  if (revenue === undefined || workforceCost === undefined || materialCost === undefined) {
     return undefined;
   }
+
+  const cost = workforceCost + materialCost;
 
   let repairs = 0;
   const oneDayDegradation = 1 / 180;
@@ -90,6 +96,8 @@ export function calculateSiteProfitability(site: PrunApi.Site): ProfitabilityEnt
   return {
     name: getEntityNameFromAddress(site.address)!,
     cost,
+    workforceCost,
+    materialCost,
     repairs,
     revenue,
     profit,
