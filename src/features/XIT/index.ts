@@ -30,6 +30,7 @@ import './NOTE/NOTE';
 import './PLAN/PLAN';
 import './PLAN/JH';
 import './PROD/PROD';
+import './PWARN/PWARN';
 import './REP/REP';
 import './SET/SET';
 import './START';
