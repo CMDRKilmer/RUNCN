@@ -170,7 +170,7 @@ function isUrgent(ms: number | undefined): boolean {
         </td>
         <td>
           <button
-            style="font-size: 11px; cursor: pointer"
+            :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
             @click="showBuffer(`PRODQ ${row.lineId}`)">
             PRODQ
           </button>
