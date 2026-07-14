@@ -25,6 +25,7 @@ import './LOAN/LOAN';
 import './HAUL/HAUL';
 import './HELP';
 import './HQUC';
+import './LMA/LMA';
 import './MATS';
 import './NOTE/NOTE';
 import './PLAN/PLAN';
