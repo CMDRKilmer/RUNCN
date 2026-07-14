@@ -32,6 +32,7 @@ import './PLAN/JH';
 import './PROD/PROD';
 import './REP/REP';
 import './SET/SET';
+import './SHPT/SHPT';
 import './START';
 import './TODO/TODO';
 import './WEB/WEB';
