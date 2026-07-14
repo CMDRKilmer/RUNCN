@@ -48,6 +48,9 @@ const rows = computed<WorkforceRow[] | undefined>(() => {
     const naturalId = getEntityNaturalIdFromAddress(site.address) ?? '';
 
     for (const wf of workforce) {
+      if (wf.required === 0) {
+        continue;
+      }
       const unmetNeeds: { ticker: string; satisfaction: number; essential: boolean }[] = [];
       for (const need of wf.needs) {
         if (need.satisfaction < 1) {
