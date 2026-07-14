@@ -222,6 +222,10 @@ The extension does make some background server requests (e.g., `XIT BURN` opens 
 
 Don't modify `CHANGELOG.md` in PRs. The maintainer adds changelog notes right before merging. This avoids merge conflicts.
 
+### Check Open PRs Before Starting Work
+
+Before beginning new feature work, run `gh pr list --state open` (or equivalent) to see what's already in flight. Code search and the working tree reflect only `main` (or the current branch); unmerged feature branches are invisible to the search agent and to file reads. Duplicating an already-developed feature wastes effort and produces conflicting PRs.
+
 ### Import Sorting
 
 Don't enable auto-import-sorting in your editor. It creates merge conflicts when the same file is touched in two branches. Import sorting should be project-wide (via eslint/prettier), not per-editor.

@@ -126,6 +126,11 @@ applyCssRule('.Frame__logo___qu6xPzo', $style.logo);
 applyCssRule(`.${C.Frame.logo}`, $style.logo);
 ```
 
+### Known limitations
+
+- `C.ColoredValue` only exposes `.positive` and `.negative`. There is no `.danger`/`.warning`. For three-tier color coding (red/orange/green), fall back to inline `style` on the element: `style="color: #d9534f"` (red), `style="color: #f0ad4e"` (orange), `style="color: #5cb85c"` (green).
+- `C.Select` does not exist. For `<select>` elements in Vue templates, use a plain `<select>` (no class binding) or define a local `style module` class. `SelectInput.vue` is the reusable option if you need a styled wrapper.
+
 ---
 
 ## DOM Helpers
