@@ -20,7 +20,7 @@ const holdings = computed(() => {
     if (a.primary !== b.primary) {
       return a.primary ? -1 : 1;
     }
-    return (b.bookValue?.amount ?? 0) - (a.bookValue?.amount ?? 0);
+    return b.bookValue.amount - a.bookValue.amount;
   });
 });
 
@@ -31,12 +31,10 @@ const holdingsTotal = computed(() => {
   // 按币种汇总账面价值。
   const byCurrency = new Map<string, number>();
   for (const h of holdings.value) {
-    if (h.bookValue) {
-      byCurrency.set(
-        h.bookValue.currency,
-        (byCurrency.get(h.bookValue.currency) ?? 0) + h.bookValue.amount,
-      );
-    }
+    byCurrency.set(
+      h.bookValue.currency,
+      (byCurrency.get(h.bookValue.currency) ?? 0) + h.bookValue.amount,
+    );
   }
   return byCurrency;
 });
@@ -137,9 +135,7 @@ function formatTotal(byCurrency: Map<string, number> | undefined): string {
           <td>{{ h.corporation.code ?? '--' }}</td>
           <td>{{ h.shares.toLocaleString() }}</td>
           <td :class="$style.receivable">
-            {{
-              h.bookValue ? formatAmount(fixed0(h.bookValue.amount), h.bookValue.currency) : '--'
-            }}
+            {{ formatAmount(fixed0(h.bookValue.amount), h.bookValue.currency) }}
           </td>
           <td>{{ h.primary ? '主持股' : '普通' }}</td>
         </tr>
