@@ -6,6 +6,7 @@ import FEAT from '@src/features/XIT/SET/FEAT.vue';
 import FIN from '@src/features/XIT/SET/FIN.vue';
 import BFR from '@src/features/XIT/SET/BFR.vue';
 import TRANSLATE from '@src/features/XIT/SET/TRANSLATE.vue';
+import DARK from '@src/features/XIT/SET/DARK.vue';
 
 const tabs: Tab[] = [
   {
@@ -32,6 +33,11 @@ const tabs: Tab[] = [
     id: 'TRANSLATE',
     label: '翻译',
     component: TRANSLATE,
+  },
+  {
+    id: 'DARK',
+    label: '反色模式',
+    component: DARK,
   },
 ];
 
