@@ -65,13 +65,15 @@ if (!tile.parameter) {
 
 ## Adding an XIT Command
 
-XIT commands are custom in-game panels opened via the `XIT` buffer. Register in a `.ts` file:
+XIT commands are custom in-game panels opened via the `XIT` buffer. Register in a `.ts` file.
+
+User-facing `name` and `description` strings are written in Chinese (see existing commands in `src/features/XIT/`).
 
 ```ts
 xit.add({
   command: ['CMD', 'CMDALIAS'],  // one or more
-  name: 'Panel Title',            // or (params) => string for dynamic title
-  description: 'What it does.',
+  name: '面板标题',                // or (params) => string for dynamic title
+  description: '面板功能描述。',
   mandatoryParameters: 'PARAM1',  // optional
   optionalParameters: 'PARAM2',   // optional
   component: params => MyVue,     // Vue component factory; params is string[]
@@ -354,6 +356,8 @@ const site = computed(() => sitesStore.getById(siteId));  // reactive
 sitesStore.all.value      // undefined until fetched, then array
 sitesStore.fetched.value  // boolean
 ```
+
+A few stores (e.g. `blueprintsStore`) are wrapped in `createRequestStore` — accessing any property triggers a guarded one-shot fetch, so reading `blueprintsStore.all.value` opens the `BLU` buffer once automatically and manual requesting is unnecessary.
 
 ---
 
