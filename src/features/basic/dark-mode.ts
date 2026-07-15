@@ -17,12 +17,16 @@ function init() {
       `sepia(${dm.sepia / 100})`,
       `grayscale(${dm.grayscale / 100})`,
     ].join(' ');
+    const app = C.App.container;
     style.textContent = `
 html {
   filter: ${filter};
   background-color: ${dm.background} !important;
 }
 body {
+  background-color: ${dm.background} !important;
+}
+.${app} {
   background-color: ${dm.background} !important;
   color: ${dm.text};
 }
