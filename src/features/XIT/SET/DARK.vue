@@ -44,9 +44,11 @@ function reset() {
 </script>
 
 <template>
-  <SectionHeader>暗黑模式</SectionHeader>
+  <SectionHeader>反色模式</SectionHeader>
   <form>
-    <Active label="启用暗黑模式" tooltip="开启后对整个界面应用滤镜与配色覆盖。默认关闭。">
+    <Active
+      label="启用反色模式"
+      tooltip="开启后反色显示整个界面（图片/视频等媒体会自动恢复正常）。默认关闭。">
       <input v-model="settings.enabled" type="checkbox" />
     </Active>
   </form>
@@ -62,21 +64,6 @@ function reset() {
           :class="$style.slider" />
         <span :class="$style.value">{{ settings[s.key] }}</span>
       </div>
-    </Active>
-  </form>
-  <SectionHeader>配色</SectionHeader>
-  <form>
-    <Active label="背景颜色" tooltip="页面背景色。">
-      <input v-model="settings.background" type="color" />
-    </Active>
-    <Active label="文字颜色" tooltip="默认文字颜色。">
-      <input v-model="settings.text" type="color" />
-    </Active>
-    <Active label="选区背景" tooltip="文本选中时的背景色。">
-      <input v-model="settings.selectionBackground" type="color" />
-    </Active>
-    <Active label="选区文字" tooltip="文本选中时的文字颜色。">
-      <input v-model="settings.selectionText" type="color" />
     </Active>
   </form>
   <form>

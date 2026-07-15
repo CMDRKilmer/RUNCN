@@ -188,9 +188,5 @@ declare namespace UserData {
     contrast: number;
     sepia: number;
     grayscale: number;
-    background: string;
-    text: string;
-    selectionBackground: string;
-    selectionText: string;
   }
 }

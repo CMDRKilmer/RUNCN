@@ -36,7 +36,7 @@ const tabs: Tab[] = [
   },
   {
     id: 'DARK',
-    label: '暗黑模式',
+    label: '反色模式',
     component: DARK,
   },
 ];

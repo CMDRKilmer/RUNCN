@@ -17,6 +17,25 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '15.07.2026 Convert dark mode to invert mode',
+    userData => {
+      const dm = userData.settings.darkMode;
+      if (!dm) {
+        return;
+      }
+      // 反色模式不再使用配色覆盖字段。
+      delete dm.background;
+      delete dm.text;
+      delete dm.selectionBackground;
+      delete dm.selectionText;
+      dm.enabled ??= false;
+      dm.brightness ??= 100;
+      dm.contrast ??= 100;
+      dm.sepia ??= 0;
+      dm.grayscale ??= 0;
+    },
+  ],
+  [
     '15.07.2026 Add dark mode settings',
     userData => {
       if (!userData.settings.darkMode) {
@@ -26,10 +45,6 @@ const migrations: MigrationEntry[] = [
           contrast: 100,
           sepia: 0,
           grayscale: 0,
-          background: '#1e1e1e',
-          text: '#e0e0e0',
-          selectionBackground: '#3a6ea5',
-          selectionText: '#ffffff',
         };
       } else {
         userData.settings.darkMode.enabled ??= false;
@@ -37,10 +52,6 @@ const migrations: MigrationEntry[] = [
         userData.settings.darkMode.contrast ??= 100;
         userData.settings.darkMode.sepia ??= 0;
         userData.settings.darkMode.grayscale ??= 0;
-        userData.settings.darkMode.background ??= '#1e1e1e';
-        userData.settings.darkMode.text ??= '#e0e0e0';
-        userData.settings.darkMode.selectionBackground ??= '#3a6ea5';
-        userData.settings.darkMode.selectionText ??= '#ffffff';
       }
     },
   ],
