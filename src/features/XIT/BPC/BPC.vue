@@ -9,6 +9,9 @@ import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { fixed0, fixed2 } from '@src/utils/format';
 import PrunButton from '@src/components/PrunButton.vue';
+import { userData } from '@src/store/user-data';
+import { getWarehouseName } from '@src/features/XIT/CART/cart-utils';
+import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import {
   collectBlueprintNeeds,
   computeComponents,
@@ -33,6 +36,7 @@ const blueprintOptions = computed(() =>
 );
 
 const selectedBlueprintId = ref('');
+const selectedTickers = ref<Set<string>>(new Set());
 watch(
   blueprints,
   list => {
@@ -42,6 +46,9 @@ watch(
   },
   { immediate: true },
 );
+watch(selectedBlueprintId, () => {
+  selectedTickers.value = new Set();
+});
 
 const selectedBlueprint = computed(() =>
   blueprints.value.find(bp => bp.naturalId === selectedBlueprintId.value),
@@ -51,10 +58,132 @@ const exchanges = computed(() => getBpcExchanges());
 
 const needs = computed(() => collectBlueprintNeeds(selectedBlueprint.value));
 const components = computed(() => computeComponents(needs.value, exchanges.value));
-const totals = computed(() => computeTotals(components.value, exchanges.value));
+const totals = computed(() =>
+  computeTotals(components.value, exchanges.value, selectedTickers.value),
+);
 
 const noData = computed(() => !cxStore.fetched);
 const noBlueprints = computed(() => blueprints.value.length === 0);
+
+function toggleTicker(ticker: string) {
+  const next = new Set(selectedTickers.value);
+  if (next.has(ticker)) {
+    next.delete(ticker);
+  } else {
+    next.add(ticker);
+  }
+  selectedTickers.value = next;
+}
+
+function toggleAll() {
+  if (allSelected.value) {
+    selectedTickers.value = new Set();
+  } else {
+    selectedTickers.value = new Set(components.value.map(c => c.ticker));
+  }
+}
+
+const allSelected = computed(
+  () =>
+    components.value.length > 0 && components.value.every(c => selectedTickers.value.has(c.ticker)),
+);
+const partialSelected = computed(
+  () => !allSelected.value && components.value.some(c => selectedTickers.value.has(c.ticker)),
+);
+
+// 已选配件（按 ticker 去重），按全市场最优交易所分组。
+// 返回值：exchangeCode -> { ticker: amount }。
+const selectedByExchange = computed(() => {
+  const groups = new Map<string, Record<string, number>>();
+  for (const c of components.value) {
+    if (!selectedTickers.value.has(c.ticker) || c.bestExchange === undefined) {
+      continue;
+    }
+    const bucket = groups.get(c.bestExchange) ?? {};
+    bucket[c.ticker] = (bucket[c.ticker] ?? 0) + c.amount;
+    groups.set(c.bestExchange, bucket);
+  }
+  return groups;
+});
+
+// ACT 生成选项。
+const singleMarketMode = ref(false);
+const transferToShip = ref(false);
+
+const cheapestSingleExchange = computed(() => totals.value.cheapestSingle?.code);
+
+// 按"单市场"或"混合最优"分组的 selectedByExchange。
+// 单市场模式：所有配件统一从 cheapestSingle.exchange 买。
+// 混合模式（默认）：每个配件按各自最优交易所买。
+const actGroups = computed(() => {
+  if (singleMarketMode.value) {
+    const code = cheapestSingleExchange.value;
+    if (!code) {
+      return new Map<string, Record<string, number>>();
+    }
+    const bucket: Record<string, number> = {};
+    for (const c of components.value) {
+      if (!selectedTickers.value.has(c.ticker)) continue;
+      bucket[c.ticker] = (bucket[c.ticker] ?? 0) + c.amount;
+    }
+    return new Map([[code, bucket]]);
+  }
+  return selectedByExchange.value;
+});
+
+const canGenerateActOptions = computed(() => actGroups.value.size > 0);
+
+function generateAct() {
+  if (actGroups.value.size === 0) {
+    return;
+  }
+  const groups: UserData.MaterialGroupData[] = [];
+  const actions: UserData.ActionData[] = [];
+  for (const [exchangeCode, materials] of actGroups.value) {
+    const groupName = `BPC_${exchangeCode}`;
+    groups.push({ type: 'Manual', name: groupName, materials });
+    actions.push({
+      type: 'CX Buy',
+      name: `Buy_${exchangeCode}`,
+      group: groupName,
+      exchange: exchangeCode,
+      priceLimits: {},
+      buyPartial: false,
+      allowUnfilled: false,
+      useCXInv: true,
+    });
+    if (!transferToShip.value) {
+      // 不勾"转移到飞船"：跳过 MTRA，由玩家手动从仓库转运。
+      continue;
+    }
+    actions.push({
+      type: 'MTRA',
+      name: `Transfer_${exchangeCode}`,
+      group: groupName,
+      origin: getWarehouseName(exchangeCode),
+      dest: configurableValue,
+    });
+  }
+  // 包名用 blueprint.naturalId（必为 ASCII ID 如 BP-DHEZ-4037）做前缀，
+  // 配合 blueprint.name 做完整可读名（如 "BP-DHEZ-4037 HWS Defense Missile Buy"）。
+  // 这样既避开了 PrUn 对非 ASCII 参数解析失败的问题，
+  // 又让 ACT 列表里包名可读。
+  const bp = selectedBlueprint.value;
+  const bpId = bp?.naturalId ?? 'Blueprint';
+  // 仅保留 name 中的可打印 ASCII 部分，避免中文 / 特殊字符干扰 PrUn XIT 参数解析。
+  const asciiName = (bp?.name ?? '').replace(/[^\x20-\x7E]/g, '').trim();
+  const name = asciiName ? `${bpId} ${asciiName} Buy` : `${bpId} Buy`;
+  const pkg: UserData.ActionPackageData = { global: { name }, groups, actions };
+  // 与 CART.generateAct 一致：若同名包已存在则覆盖，避免重复建包。
+  const existing = userData.actionPackages.findIndex(p => p.global.name === name);
+  if (existing >= 0) {
+    userData.actionPackages[existing] = pkg;
+  } else {
+    userData.actionPackages.push(pkg);
+  }
+  const commandName = name.replace(/\s+/g, '_');
+  showBuffer(`XIT ACT_${commandName}`);
+}
 
 // 与 ARB 一致：对当前可见的所有 (ticker, 交易所) 打开 CXOB 缓冲窗，
 // 拉取实时订单簿（cxobStore 收到数据后 bp-utils.ts 会自动切换到 live 价格）。
@@ -119,6 +248,17 @@ function isBest(component: { bestExchange?: string }, code: string) {
         type="text"
         placeholder="搜索配件 ticker 或名称" />
       <PrunButton primary @click="refreshPrices">更新价格</PrunButton>
+      <label :class="$style.control">
+        <input v-model="singleMarketMode" type="checkbox" :disabled="!cheapestSingleExchange" />
+        <span :class="$style.controlLabel">单市场购买</span>
+      </label>
+      <label :class="$style.control">
+        <input v-model="transferToShip" type="checkbox" />
+        <span :class="$style.controlLabel">转移到飞船</span>
+      </label>
+      <PrunButton primary :disabled="!canGenerateActOptions" @click="generateAct"
+        >生成 ACT</PrunButton
+      >
     </div>
 
     <div v-if="noBlueprints" :class="$style.empty">尚未加载到任何蓝图（请先打开 BLU 命令）。</div>
@@ -128,6 +268,9 @@ function isBest(component: { bestExchange?: string }, code: string) {
         <span :class="$style.summaryItem">
           配件 ·
           <strong>{{ components.length }}</strong> 种
+          <span v-if="selectedTickers.size > 0" :class="$style.summaryProfit">
+            · 已选 <strong>{{ selectedTickers.size }}</strong> 种</span
+          >
           <span v-if="totals.mixedMissing > 0" :class="$style.summaryWarn">
             · {{ totals.mixedMissing }} 种无报价</span
           >
@@ -152,9 +295,16 @@ function isBest(component: { bestExchange?: string }, code: string) {
         <div
           :class="$style.table"
           :style="{
-            gridTemplateColumns: `56px 70px repeat(${exchanges.length}, 100px) 100px 110px`,
+            gridTemplateColumns: `32px 56px 70px repeat(${exchanges.length}, 100px) 100px 130px`,
           }">
           <div :class="$style.head">
+            <div :class="[$style.cell, $style.checkCol]">
+              <input
+                type="checkbox"
+                :checked="allSelected"
+                :indeterminate.prop="partialSelected"
+                @change="toggleAll" />
+            </div>
             <div :class="[$style.cell, $style.materialCell]">配件</div>
             <div :class="[$style.cell, $style.numCol]">需求</div>
             <div
@@ -173,6 +323,12 @@ function isBest(component: { bestExchange?: string }, code: string) {
           </div>
           <div v-else :class="$style.body">
             <div v-for="c in filtered" :key="c.ticker" :class="$style.row">
+              <div :class="[$style.cell, $style.checkCol]">
+                <input
+                  type="checkbox"
+                  :checked="selectedTickers.has(c.ticker)"
+                  @change="toggleTicker(c.ticker)" />
+              </div>
               <div :class="[$style.cell, $style.materialCell]">
                 <MaterialIcon :ticker="c.ticker" size="medium" />
               </div>
@@ -344,11 +500,14 @@ function isBest(component: { bestExchange?: string }, code: string) {
 .tableWrap {
   min-width: 0;
   overflow-x: auto;
+  overflow-y: visible;
 }
 
 .table {
   display: grid;
   width: 100%;
+  position: relative;
+  z-index: 0;
 }
 
 .head,
@@ -357,6 +516,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
   grid-template-columns: subgrid;
   grid-column: 1 / -1;
   align-items: center;
+  position: relative;
+}
+
+.row:hover {
+  z-index: 1;
 }
 
 .body {
@@ -369,8 +533,6 @@ function isBest(component: { bestExchange?: string }, code: string) {
   vertical-align: middle;
   white-space: nowrap;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .head .cell {
@@ -389,6 +551,17 @@ function isBest(component: { bestExchange?: string }, code: string) {
 
 .materialCell {
   text-align: center;
+}
+
+.checkCol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+.checkCol input {
+  cursor: pointer;
 }
 
 .numCol,

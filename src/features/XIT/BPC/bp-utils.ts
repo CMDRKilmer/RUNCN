@@ -64,10 +64,14 @@ export interface BpcTotals {
   mixedMissing: number;
 }
 
-// 六个 CX 交易所，按代码排序，各带本币种。
+// 屏蔽列表：玩家不想在 BPC 中看的交易所（CI2/NC2 是 AI 主导、流动性差）。
+const BPC_EXCLUDED_EXCHANGES = new Set(['CI2', 'NC2']);
+
+// 六个 CX 交易所（去除屏蔽列表），按代码排序，各带本币种。
 export function getBpcExchanges(): BpcExchange[] {
   return (exchangesStore.all.value ?? [])
     .slice()
+    .filter(x => !BPC_EXCLUDED_EXCHANGES.has(x.code))
     .sort((a, b) => a.code.localeCompare(b.code))
     .map(x => ({ code: x.code, currency: x.currency.code }));
 }
@@ -181,11 +185,20 @@ export function computeComponents(
 }
 
 // 计算各交易所总价、最便宜单交易所、最优混合总价。
-export function computeTotals(components: BpcComponent[], exchanges: BpcExchange[]): BpcTotals {
+// 若传入 selectedTickers，只计算被选中配件的合计。
+export function computeTotals(
+  components: BpcComponent[],
+  exchanges: BpcExchange[],
+  selectedTickers?: Set<string>,
+): BpcTotals {
+  const selected = selectedTickers
+    ? components.filter(c => selectedTickers.has(c.ticker))
+    : components;
+
   const exchangeTotals: BpcExchangeTotal[] = exchanges.map(exchange => {
     let total = 0;
     let missing = 0;
-    for (const component of components) {
+    for (const component of selected) {
       const point = component.prices.get(exchange.code);
       if (!point) {
         missing++;
@@ -214,7 +227,7 @@ export function computeTotals(components: BpcComponent[], exchanges: BpcExchange
 
   let mixedTotal = 0;
   let mixedMissing = 0;
-  for (const component of components) {
+  for (const component of selected) {
     if (component.bestPrice === undefined) {
       mixedMissing++;
       continue;
