@@ -41,6 +41,7 @@ import './cxpo-auto-price';
 import './cxpo-bigger-buttons';
 
 import './cxpo-order-book/cxpo-order-book';
+import './dark-mode';
 import './exp-expert-eta';
 import './expand-sidebar-contract-list';
 import './finla-more-columns';

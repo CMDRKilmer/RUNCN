@@ -181,4 +181,16 @@ declare namespace UserData {
     translatedColor: string;
     showOriginal: boolean;
   }
+
+  interface DarkModeSettings {
+    enabled: boolean;
+    brightness: number;
+    contrast: number;
+    sepia: number;
+    grayscale: number;
+    background: string;
+    text: string;
+    selectionBackground: string;
+    selectionText: string;
+  }
 }

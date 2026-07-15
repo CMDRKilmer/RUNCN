@@ -17,6 +17,34 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '15.07.2026 Add dark mode settings',
+    userData => {
+      if (!userData.settings.darkMode) {
+        userData.settings.darkMode = {
+          enabled: false,
+          brightness: 100,
+          contrast: 100,
+          sepia: 0,
+          grayscale: 0,
+          background: '#1e1e1e',
+          text: '#e0e0e0',
+          selectionBackground: '#3a6ea5',
+          selectionText: '#ffffff',
+        };
+      } else {
+        userData.settings.darkMode.enabled ??= false;
+        userData.settings.darkMode.brightness ??= 100;
+        userData.settings.darkMode.contrast ??= 100;
+        userData.settings.darkMode.sepia ??= 0;
+        userData.settings.darkMode.grayscale ??= 0;
+        userData.settings.darkMode.background ??= '#1e1e1e';
+        userData.settings.darkMode.text ??= '#e0e0e0';
+        userData.settings.darkMode.selectionBackground ??= '#3a6ea5';
+        userData.settings.darkMode.selectionText ??= '#ffffff';
+      }
+    },
+  ],
+  [
     '08.07.2026 Migrate to per-provider API configs',
     userData => {
       const translation = userData.settings.translation;

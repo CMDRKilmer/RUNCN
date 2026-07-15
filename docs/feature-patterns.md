@@ -534,6 +534,29 @@ Use `:has` to implement conditional styling in pure CSS, avoiding unnecessary JS
 applyCssRule(`.${C.InputsOutputsView.input}:has(.${C.InputsOutputsView.amountMissing})`, $style.input);
 ```
 
+### Dynamic & Global Styles (outside `applyCssRule`)
+
+`applyCssRule` wraps every rule in `.refined-prun { … }` (the class sits on `<html>`). That makes it unsuitable for rules that target `:root`/`html`/`::selection` directly, or whose values are computed at runtime (e.g. a user-configurable color or CSS filter).
+
+For those cases, own a `<style>` element and rewrite it from a `watchEffect` that reads `userData` (auto-synced, so no manual save needed):
+
+```ts
+import { userData } from '@src/store/user-data';
+
+function init() {
+  const style = document.createElement('style');
+  document.head.appendChild(style);
+  watchEffect(() => {
+    const s = userData.settings.someSetting;
+    style.textContent = s.enabled ? `html { filter: ...; }` : '';
+  });
+}
+
+features.add(import.meta.url, init, '...');
+```
+
+See `src/features/basic/dark-mode.ts` for a working example.
+
 ---
 
 ## Formatting Dates and Numbers

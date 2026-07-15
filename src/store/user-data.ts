@@ -69,6 +69,17 @@ export const initialUserData = deepFreeze({
       translatedColor: '#28a745',
       showOriginal: false,
     } as UserData.TranslationSettings,
+    darkMode: {
+      enabled: false,
+      brightness: 100,
+      contrast: 100,
+      sepia: 0,
+      grayscale: 0,
+      background: '#1e1e1e',
+      text: '#e0e0e0',
+      selectionBackground: '#3a6ea5',
+      selectionText: '#ffffff',
+    } as UserData.DarkModeSettings,
   },
   sorting: {} as Record<string, UserData.StoreSortingData>,
   balanceHistory: {
