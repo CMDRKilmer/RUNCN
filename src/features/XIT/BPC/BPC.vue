@@ -63,20 +63,6 @@ const exchanges: BpcExchange[] = [
   { code: 'NC1', currency: 'NCC' },
 ];
 
-// <col width="X"> HTML 属性 + inline style 共同保证列宽。
-// table-layout: fixed 下浏览器严格遵守第一行 th 上的 width。
-// table-layout: auto 模式下，列宽由内容 + CSS min-width 决定。
-// min-width 设在 .checkCol/.materialCol/.numCol/.priceCol/.bestPriceCol/.sourceCol。
-// 此 const 保留供未来需要固定列宽时使用（当前未引用）。
-const colWidth = {
-  check: '32px',
-  material: '54px',
-  num: '70px',
-  price: '110px',
-  bestPrice: '110px',
-  source: '120px',
-};
-
 const needs = computed(() => collectBlueprintNeeds(selectedBlueprint.value));
 const components = computed(() => computeComponents(needs.value, exchanges));
 const totals = computed(() => computeTotals(components.value, exchanges, selectedTickers.value));
