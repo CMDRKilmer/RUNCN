@@ -16,7 +16,7 @@ import {
   collectBlueprintNeeds,
   computeComponents,
   computeTotals,
-  getBpcExchanges,
+  type BpcExchange,
 } from './bp-utils';
 
 const search = ref('');
@@ -54,13 +54,32 @@ const selectedBlueprint = computed(() =>
   blueprints.value.find(bp => bp.naturalId === selectedBlueprintId.value),
 );
 
-const exchanges = computed(() => getBpcExchanges());
+// 硬编码 4 个玩家 CX 交易所（与 ARB 一致）。硬编码避免运行时依赖 exchangesStore
+// 在不同游戏版本/账户状态下返回不同交易所列表（导致列数变化、列对齐错位）。
+const exchanges: BpcExchange[] = [
+  { code: 'AI1', currency: 'AIC' },
+  { code: 'CI1', currency: 'CIS' },
+  { code: 'IC1', currency: 'ICA' },
+  { code: 'NC1', currency: 'NCC' },
+];
+
+// <col width="X"> HTML 属性 + inline style 共同保证列宽。
+// table-layout: fixed 下浏览器严格遵守第一行 th 上的 width。
+// table-layout: auto 模式下，列宽由内容 + CSS min-width 决定。
+// min-width 设在 .checkCol/.materialCol/.numCol/.priceCol/.bestPriceCol/.sourceCol。
+// 此 const 保留供未来需要固定列宽时使用（当前未引用）。
+const colWidth = {
+  check: '32px',
+  material: '54px',
+  num: '70px',
+  price: '110px',
+  bestPrice: '110px',
+  source: '120px',
+};
 
 const needs = computed(() => collectBlueprintNeeds(selectedBlueprint.value));
-const components = computed(() => computeComponents(needs.value, exchanges.value));
-const totals = computed(() =>
-  computeTotals(components.value, exchanges.value, selectedTickers.value),
-);
+const components = computed(() => computeComponents(needs.value, exchanges));
+const totals = computed(() => computeTotals(components.value, exchanges, selectedTickers.value));
 
 const noData = computed(() => !cxStore.fetched);
 const noBlueprints = computed(() => blueprints.value.length === 0);
@@ -190,7 +209,7 @@ function generateAct() {
 function refreshPrices() {
   const requested = new Set<string>();
   for (const component of components.value) {
-    for (const exchange of exchanges.value) {
+    for (const exchange of exchanges) {
       const key = `${component.ticker}.${exchange.code}`;
       if (requested.has(key) || cxobStore.getByTicker(key) !== undefined) {
         continue;
@@ -224,6 +243,10 @@ function priceOf(
   code: string,
 ) {
   return component.prices.get(code);
+}
+
+function currencyOf(code: string): string {
+  return exchanges.find(x => x.code === code)?.currency ?? '';
 }
 
 function isBest(component: { bestExchange?: string }, code: string) {
@@ -292,64 +315,81 @@ function isBest(component: { bestExchange?: string }, code: string) {
       </div>
 
       <div :class="$style.tableWrap">
-        <div
-          :class="$style.table"
-          :style="{
-            gridTemplateColumns: `32px 56px 70px repeat(${exchanges.length}, 100px) 100px 130px`,
-          }">
-          <div :class="$style.head">
-            <div :class="[$style.cell, $style.checkCol]">
-              <input
-                type="checkbox"
-                :checked="allSelected"
-                :indeterminate.prop="partialSelected"
-                @change="toggleAll" />
-            </div>
-            <div :class="[$style.cell, $style.materialCell]">配件</div>
-            <div :class="[$style.cell, $style.numCol]">需求</div>
-            <div
-              v-for="ex in exchanges"
-              :key="ex.code"
-              :class="[$style.cell, $style.priceCol]"
-              :data-tooltip="`${ex.code} · ${ex.currency}`"
-              data-tooltip-position="bottom">
-              {{ ex.code }}
-            </div>
-            <div :class="[$style.cell, $style.bestPriceCol]">最优价</div>
-            <div :class="[$style.cell, $style.sourceCol]">最优来源</div>
-          </div>
-          <div v-if="filtered.length === 0" :class="$style.empty">
-            {{ components.length === 0 ? '该蓝图暂无物料清单。' : '没有匹配的配件。' }}
-          </div>
-          <div v-else :class="$style.body">
-            <div v-for="c in filtered" :key="c.ticker" :class="$style.row">
-              <div :class="[$style.cell, $style.checkCol]">
+        <table :class="$style.table">
+          <thead>
+            <tr>
+              <th :class="$style.checkCol">
+                <input
+                  type="checkbox"
+                  :checked="allSelected"
+                  :indeterminate.prop="partialSelected"
+                  @change="toggleAll" />
+              </th>
+              <th :class="$style.materialCol">配件</th>
+              <th :class="$style.numCol">需求</th>
+              <th :class="$style.priceCol" title="AI1 · ICA">AI1</th>
+              <th :class="$style.priceCol" title="CI1 · ICA">CI1</th>
+              <th :class="$style.priceCol" title="IC1 · ICA">IC1</th>
+              <th :class="$style.priceCol" title="NC1 · NCA">NC1</th>
+              <th :class="$style.bestPriceCol">最优价</th>
+              <th :class="$style.sourceCol">最优来源</th>
+            </tr>
+          </thead>
+          <tbody v-if="filtered.length === 0">
+            <tr>
+              <td colspan="100" :class="$style.empty">
+                {{ components.length === 0 ? '该蓝图暂无物料清单。' : '没有匹配的配件。' }}
+              </td>
+            </tr>
+          </tbody>
+          <tbody v-else>
+            <tr v-for="c in filtered" :key="c.ticker">
+              <td :class="$style.checkCell">
                 <input
                   type="checkbox"
                   :checked="selectedTickers.has(c.ticker)"
                   @change="toggleTicker(c.ticker)" />
-              </div>
-              <div :class="[$style.cell, $style.materialCell]">
+              </td>
+              <td :class="$style.materialCell">
                 <MaterialIcon :ticker="c.ticker" size="medium" />
-              </div>
-              <div :class="[$style.cell, $style.numCell]">{{ fixed0(c.amount) }}</div>
-              <div
-                v-for="ex in exchanges"
-                :key="ex.code"
-                :class="[$style.cell, $style.priceCell, isBest(c, ex.code) ? $style.best : '']">
-                <PrunLink
-                  v-if="priceOf(c, ex.code)"
-                  inline
-                  :command="`CXPO ${c.ticker}.${ex.code}`">
-                  {{ fixed2(priceOf(c, ex.code)!.price) }}
+              </td>
+              <td :class="$style.numCell">{{ fixed0(c.amount) }}</td>
+              <td :class="[$style.priceCell, isBest(c, 'AI1') ? $style.best : '']">
+                <PrunLink v-if="priceOf(c, 'AI1')" inline :command="`CXPO ${c.ticker}.AI1`">
+                  {{ fixed2(priceOf(c, 'AI1')!.price) }}
+                  <span :class="$style.currencyTag">{{ currencyOf('AI1') }}</span>
                 </PrunLink>
                 <span v-else :class="$style.muted">--</span>
-              </div>
-              <div :class="[$style.cell, $style.numCell, $style.bestPrice]">
-                <span v-if="c.bestPrice !== undefined">{{ fixed2(c.bestPrice) }}</span>
+              </td>
+              <td :class="[$style.priceCell, isBest(c, 'CI1') ? $style.best : '']">
+                <PrunLink v-if="priceOf(c, 'CI1')" inline :command="`CXPO ${c.ticker}.CI1`">
+                  {{ fixed2(priceOf(c, 'CI1')!.price) }}
+                  <span :class="$style.currencyTag">{{ currencyOf('CI1') }}</span>
+                </PrunLink>
                 <span v-else :class="$style.muted">--</span>
-              </div>
-              <div :class="[$style.cell, $style.sourceCell]">
+              </td>
+              <td :class="[$style.priceCell, isBest(c, 'IC1') ? $style.best : '']">
+                <PrunLink v-if="priceOf(c, 'IC1')" inline :command="`CXPO ${c.ticker}.IC1`">
+                  {{ fixed2(priceOf(c, 'IC1')!.price) }}
+                  <span :class="$style.currencyTag">{{ currencyOf('IC1') }}</span>
+                </PrunLink>
+                <span v-else :class="$style.muted">--</span>
+              </td>
+              <td :class="[$style.priceCell, isBest(c, 'NC1') ? $style.best : '']">
+                <PrunLink v-if="priceOf(c, 'NC1')" inline :command="`CXPO ${c.ticker}.NC1`">
+                  {{ fixed2(priceOf(c, 'NC1')!.price) }}
+                  <span :class="$style.currencyTag">{{ currencyOf('NC1') }}</span>
+                </PrunLink>
+                <span v-else :class="$style.muted">--</span>
+              </td>
+              <td :class="[$style.numCell, $style.bestPrice]">
+                <span v-if="c.bestPrice !== undefined">
+                  {{ fixed2(c.bestPrice) }}
+                  <span :class="$style.currencyTag">{{ currencyOf(c.bestExchange!) }}</span>
+                </span>
+                <span v-else :class="$style.muted">--</span>
+              </td>
+              <td :class="$style.sourceCell">
                 <template v-if="c.bestExchange">
                   <PrunLink inline :command="`CXPO ${c.ticker}.${c.bestExchange}`">
                     <span :class="$style.sourceBadge">{{ c.bestExchange }}</span>
@@ -368,10 +408,10 @@ function isBest(component: { bestExchange?: string }, code: string) {
                     data-tooltip-position="top"></span>
                 </template>
                 <span v-else :class="$style.muted">--</span>
-              </div>
-            </div>
-          </div>
-        </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div :class="$style.exchangeTotals">
@@ -500,116 +540,119 @@ function isBest(component: { bestExchange?: string }, code: string) {
 .tableWrap {
   min-width: 0;
   overflow-x: auto;
-  overflow-y: visible;
 }
 
 .table {
-  display: grid;
   width: 100%;
-  position: relative;
-  z-index: 0;
+  border-collapse: collapse;
+  /* auto：列宽按内容+min-width 自动分配；表格自动占满父容器宽度。 */
+  table-layout: auto;
 }
 
-.head,
-.row {
-  display: grid;
-  grid-template-columns: subgrid;
-  grid-column: 1 / -1;
-  align-items: center;
-  position: relative;
-}
-
-.row:hover {
-  z-index: 1;
-}
-
-.body {
-  display: contents;
-}
-
-.cell {
+.table th,
+.table td {
   padding: 4px 8px;
-  text-align: left;
   vertical-align: middle;
-  white-space: nowrap;
-  min-width: 0;
 }
 
-.head .cell {
+.table td {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table th {
   color: rgb(200, 208, 214);
   font-weight: normal;
   border-bottom: 1px solid rgb(61, 74, 84);
+  white-space: nowrap;
 }
 
-.row .cell {
-  border-bottom: 1px solid transparent;
-}
-
-.row:hover {
+.table tbody tr:hover {
   background: rgb(40, 49, 56);
 }
 
-.materialCell {
-  text-align: center;
-}
-
 .checkCol {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
+  text-align: center;
+  padding: 2px 4px;
 }
 
 .checkCol input {
   cursor: pointer;
+  accent-color: rgb(255, 176, 0);
 }
 
-.numCol,
-.numCell,
-.priceCol,
-.priceCell,
-.bestPriceCol,
-.bestPrice {
-  text-align: right;
-}
-
-.empty {
-  grid-column: 1 / -1;
-  padding: 16px;
+.checkCell {
   text-align: center;
-  color: rgb(148, 158, 166);
+  padding: 2px 4px;
+  border-bottom: 1px solid rgb(36, 44, 52);
+}
+
+.checkCell input {
+  cursor: pointer;
+  accent-color: rgb(255, 176, 0);
+}
+
+.materialCol {
+  text-align: center;
+  min-width: 60px;
+}
+
+.materialCell {
+  text-align: center;
+  border-bottom: 1px solid rgb(36, 44, 52);
+}
+
+.numCol {
+  text-align: center;
+  min-width: 60px;
+}
+
+.numCell {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid rgb(36, 44, 52);
+}
+
+.priceCol {
+  text-align: center;
+  min-width: 100px;
 }
 
 .priceCell {
-  text-align: right;
+  text-align: center;
   font-variant-numeric: tabular-nums;
-  border-left: 2px solid transparent;
+  border-bottom: 1px solid rgb(36, 44, 52);
 }
 
 .priceCell.best {
   background: rgba(129, 199, 132, 0.14);
-  border-left-color: rgb(129, 199, 132);
+  border-left: 2px solid rgb(129, 199, 132);
   color: rgb(129, 199, 132);
   font-weight: 600;
 }
 
-.numCell {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.bestPriceCol {
+  text-align: center;
+  min-width: 110px;
 }
 
 .bestPrice {
   color: rgb(126, 217, 87);
   font-weight: 600;
+  text-align: center;
 }
 
 .sourceCol {
-  width: 110px;
+  text-align: center;
   min-width: 110px;
 }
 
 .sourceCell {
   white-space: nowrap;
+  border-bottom: 1px solid rgb(36, 44, 52);
+  text-align: center;
 }
 
 .sourceBadge {
@@ -642,6 +685,13 @@ function isBest(component: { bestExchange?: string }, code: string) {
 
 .muted {
   color: rgb(120, 130, 138);
+}
+
+.currencyTag {
+  color: rgb(148, 158, 166);
+  font-size: 10px;
+  margin-left: 3px;
+  font-weight: normal;
 }
 
 .empty {
