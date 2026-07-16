@@ -492,6 +492,17 @@ function isBest(component: { bestExchange?: string }, code: string) {
   background: rgb(30, 38, 44);
 }
 
+.control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.controlLabel {
+  color: rgb(200, 208, 214);
+  white-space: nowrap;
+}
+
 .summaryBar {
   display: flex;
   flex-wrap: wrap;
