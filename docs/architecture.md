@@ -38,6 +38,10 @@ Important: the extension only uses the lightweight context scripts at the startu
 
 Check **`src/main.ts`** for runtime startup orchestration.
 
+### Passing payloads to the injected page script
+
+`refined-prun-startup.ts` injects the main module via a page-level `<script type="module" src="…">` and needs to hand it a runtime config (`userData`, `version`, `url.*`). **Do not put both `src` and `textContent` on the same `<script>` element.** Per the HTML spec a `<script>` with `src` ignores inline content, and in practice some browsers clear the `textContent` property once the module starts executing — `getElementById(id).textContent` then returns `""` and `JSON.parse` throws `Unexpected end of JSON input`. Instead, write the payload into a sibling `<script type="application/json" id="…">` and have the page module read it from there. See `src/infrastructure/shell/config.ts` and the `configScript` block in `src/refined-prun-startup.ts`.
+
 ---
 
 ## Source Layout

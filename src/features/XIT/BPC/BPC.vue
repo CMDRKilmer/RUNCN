@@ -245,24 +245,40 @@ function isBest(component: { bestExchange?: string }, code: string) {
     <div :class="$style.controls">
       <label :class="$style.control">
         <span :class="$style.controlLabel">蓝图</span>
-        <select v-model="selectedBlueprintId" :class="$style.select" style="width: 260px">
+        <select
+          id="bpc-blueprint"
+          v-model="selectedBlueprintId"
+          name="bpc-blueprint"
+          :class="$style.select"
+          style="width: 260px">
           <option v-for="opt in blueprintOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
         </select>
       </label>
       <input
+        id="bpc-search"
         v-model="search"
+        name="bpc-search"
         :class="$style.input"
         type="text"
         placeholder="搜索配件 ticker 或名称" />
       <PrunButton primary @click="refreshPrices">更新价格</PrunButton>
       <label :class="$style.control">
-        <input v-model="singleMarketMode" type="checkbox" :disabled="!cheapestSingleExchange" />
+        <input
+          id="bpc-single-market"
+          v-model="singleMarketMode"
+          name="bpc-single-market"
+          type="checkbox"
+          :disabled="!cheapestSingleExchange" />
         <span :class="$style.controlLabel">单市场购买</span>
       </label>
       <label :class="$style.control">
-        <input v-model="transferToShip" type="checkbox" />
+        <input
+          id="bpc-transfer-ship"
+          v-model="transferToShip"
+          name="bpc-transfer-ship"
+          type="checkbox" />
         <span :class="$style.controlLabel">转移到飞船</span>
       </label>
       <PrunButton primary :disabled="!canGenerateActOptions" @click="generateAct"

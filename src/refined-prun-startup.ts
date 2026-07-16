@@ -69,10 +69,6 @@ async function startup() {
     rules[(rule as CSSStyleRule).selectorText] = rule.cssText;
   }
   css.textContent = JSON.stringify(rules);
-  const script = document.createElement('script');
-  script.src = chrome.runtime.getURL('refined-prun.js') + '?' + now;
-  script.type = 'module';
-  script.id = 'refined-prun-js';
   const config: RefinedPrunConfig = {
     userData,
     version: chrome.runtime.getManifest().version,
@@ -81,7 +77,20 @@ async function startup() {
       allplanets: chrome.runtime.getURL('json/fallback-fio-responses/allplanets.json'),
     },
   };
-  script.textContent = JSON.stringify(config);
+  // Keep the module script and the config payload in separate <script>
+  // elements. Combining `src` and inline `textContent` on the same script
+  // is unreliable across browsers (some clear the inline content once the
+  // module starts executing), which made config.json parse fail and the
+  // page go blank.
+  const configScript = document.createElement('script');
+  configScript.type = 'application/json';
+  configScript.id = 'refined-prun-config';
+  configScript.textContent = JSON.stringify(config);
+  container.appendChild(configScript);
+  const script = document.createElement('script');
+  script.src = chrome.runtime.getURL('refined-prun.js') + '?' + now;
+  script.type = 'module';
+  script.id = 'refined-prun-js';
   container.appendChild(script);
 }
 

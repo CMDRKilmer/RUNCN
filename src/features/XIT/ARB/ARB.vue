@@ -533,10 +533,21 @@ function localizedCategory(o: ArbOpportunity): string {
     <div :class="$style.usage">使用方法：选择路线后点击"更新价格"按钮。</div>
 
     <div :class="$style.controls">
-      <input v-model="search" :class="$style.input" type="text" placeholder="搜索 ticker 或名称" />
+      <input
+        id="arb-search"
+        v-model="search"
+        name="arb-search"
+        :class="$style.input"
+        type="text"
+        placeholder="搜索 ticker 或名称" />
       <label :class="$style.control">
         <span :class="$style.controlLabel">类别</span>
-        <select v-model="categoryFilter" :class="$style.select" style="width: 100px">
+        <select
+          id="arb-category"
+          v-model="categoryFilter"
+          name="arb-category"
+          :class="$style.select"
+          style="width: 100px">
           <option v-for="opt in categoryOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -544,7 +555,12 @@ function localizedCategory(o: ArbOpportunity): string {
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">排序</span>
-        <select v-model="sortKey" :class="$style.select" style="width: 80px">
+        <select
+          id="arb-sort"
+          v-model="sortKey"
+          name="arb-sort"
+          :class="$style.select"
+          style="width: 80px">
           <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -552,7 +568,12 @@ function localizedCategory(o: ArbOpportunity): string {
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">出发地</span>
-        <select v-model="sourceExchange" :class="$style.select" style="width: 60px">
+        <select
+          id="arb-source"
+          v-model="sourceExchange"
+          name="arb-source"
+          :class="$style.select"
+          style="width: 60px">
           <option v-for="opt in exchangeOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -560,7 +581,12 @@ function localizedCategory(o: ArbOpportunity): string {
       </label>
       <label :class="$style.control">
         <span :class="$style.controlLabel">目的地</span>
-        <select v-model="destExchange" :class="$style.select" style="width: 60px">
+        <select
+          id="arb-dest"
+          v-model="destExchange"
+          name="arb-dest"
+          :class="$style.select"
+          style="width: 60px">
           <option v-for="opt in exchangeOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -569,7 +595,12 @@ function localizedCategory(o: ArbOpportunity): string {
       <PrunButton primary @click="loadLiveOrderBooks">更新价格</PrunButton>
       <label :class="$style.control">
         <span :class="$style.controlLabel">飞船</span>
-        <select v-model="selectedShipId" :class="$style.select" style="width: 280px">
+        <select
+          id="arb-ship"
+          v-model="selectedShipId"
+          name="arb-ship"
+          :class="$style.select"
+          style="width: 280px">
           <option v-for="opt in shipOptions" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
@@ -611,6 +642,7 @@ function localizedCategory(o: ArbOpportunity): string {
           <tr>
             <th :class="$style.checkCol">
               <input
+                id="arb-select-all"
                 ref="selectAllRef"
                 type="checkbox"
                 :checked="selectAllState.checked"
