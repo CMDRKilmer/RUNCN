@@ -1,7 +1,13 @@
 # 更新日志
 
 **日期**: 2026-07-16  
-**说明**: 同步 c129df16 (tag 26.7.16) 之后的 1 条提交内容
+**说明**: 同步 c129df16 (tag 26.7.16) 之后的提交内容
+
+## 26.7.17
+
+### 🐛 Bug Fixes
+
+- **`extension-update`**：修复扩展更新检查在 `chrome.runtime.id` 不可用时导致的控制台刷屏。当 `config.url.manifest` 解析为 `chrome-extension://invalid/...` 时跳过整个轮询；连续 3 次 fetch 失败后 `clearInterval` 熔断，避免每秒一次的 `net::ERR_FAILED` 噪音。
 
 ## 26.7.16
 
