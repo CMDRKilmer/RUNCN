@@ -1,43 +1,39 @@
-.panel {
-  margin-top: 10px;
-  padding: 6px;
-  border: 1px solid rgba(128, 128, 128, 0.4);
-  border-radius: 4px;
-  background-color: rgba(128, 128, 128, 0.08);
+.input {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .textarea {
   width: 100%;
-  height: 90px;
+  min-height: 60px;
+  max-height: 200px;
   padding: 4px 6px;
-  border: 1px solid rgba(128, 128, 128, 0.5);
-  border-radius: 4px;
-  background-color: rgba(0, 0, 0, 0.2);
-  color: inherit;
-  font-family: monospace;
-  font-size: 12px;
   box-sizing: border-box;
   resize: vertical;
+  font-family: monospace;
+  font-size: 11px;
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(128, 128, 128, 0.4);
+  border-radius: 3px;
 }
 
 .controls {
   display: flex;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 8px;
   align-items: center;
 }
 
-.example {
-  margin-top: 6px;
+.button {
   font-size: 11px;
-  color: rgba(200, 200, 200, 0.6);
-  word-break: break-all;
+}
+
+.status {
+  font-size: 11px;
+  color: rgba(200, 200, 200, 0.7);
 }
 
 .error {
   color: rgb(217, 83, 79);
-}
-
-.button {
-  cursor: pointer;
 }
