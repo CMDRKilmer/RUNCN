@@ -506,22 +506,6 @@ async function waitForListboxItems(
     await sleep(50);
   }
   if (listbox === null || listbox.children.length === 0) {
-    // Diagnostic: surface the state at timeout. We want to see whether
-    // the listbox simply never mounted (combobox not connected),
-    // mounted empty (server search hasn't returned), or got torn
-    // down. The input's value is also logged so we can see if our
-    // typed text actually got committed before the listbox query.
-    const liveAtTimeout = queryListbox();
-    console.warn(
-      '[contd-auto-fill] waitForListboxItems: timeout — listbox',
-      liveAtTimeout === null
-        ? 'NOT MOUNTED'
-        : `mounted with ${liveAtTimeout.children.length} children`,
-      'input.value=',
-      `"${input.value}"`,
-      'controlsId=',
-      controlsId,
-    );
     throw new Error(`Listbox opened but no items appeared within ${timeoutMs}ms`);
   }
   // Wait for at least one leaf item to render. Items can be either
@@ -584,16 +568,6 @@ async function selectListboxItem(input: HTMLInputElement, expectedText: string) 
 // first match for partial prefixes.
 async function selectAddressListboxItem(input: HTMLInputElement, naturalId: string): Promise<void> {
   const needle = naturalId.trim().toUpperCase();
-  // Diagnostic: log the input value before we touch it. PrUn may have
-  // pre-filled the field, or the player may have typed earlier. This
-  // helps the next round of debugging see whether we actually need
-  // to drive the listbox at all.
-  console.warn(
-    '[contd-auto-fill] selectAddressListboxItem: needle=',
-    needle,
-    'current input.value=',
-    `"${input.value}"`,
-  );
   // Wait for the listbox to mount, then keep polling until either
   // (a) the naturalId appears in the listbox or (b) the overall
   // timeout elapses. PrUn's AddressSelector debounces typing
@@ -767,6 +741,60 @@ async function findConditionsForm(tile: PrunTile): Promise<HTMLElement> {
 }
 
 async function applyConfig(tile: PrunTile, config: DraftConfig) {
+  // 0. Optional header fields (合同名称, 截止时间, etc.). We only
+  //    touch name/deadline here; the template modal handles its own
+  //    per-template form fields further down. Both header inputs
+  //    live in the first Draft__form, identified by their wrapping
+  //    FormComponent__label.
+  if (config.name !== undefined) {
+    const nameLabel = getI18nValue('Contract.name', 'Contract Name');
+    const nameInput = findLabeledInput(tile.anchor as HTMLElement, nameLabel);
+    if (nameInput === null) {
+      // PrUn's CONTD header doesn't expose a contract-name input —
+      // the draft's `name` field mirrors `naturalId` (e.g.
+      // "CD-QASS-5072") and isn't editable in the UI. We silently
+      // skip "name" so users can still fill template/currency/items
+      // /etc. without the optional name field.
+    } else {
+      focusElement(nameInput);
+      await sleep(50);
+      // Reset React's value tracker so the upcoming value change is
+      // considered "new" by React's onChange compare (otherwise React
+      // suppresses the event and the input snaps back). Same trick
+      // as the template-select handler below.
+      const trackerKey = Object.keys(nameInput).find(
+        k => k.startsWith('_valueTracker') || k === '__value',
+      );
+      if (trackerKey !== undefined) {
+        const tracker = (nameInput as unknown as Record<string, { stop?: () => void }>)[trackerKey];
+        tracker?.stop?.();
+      }
+      changeInputValue(nameInput, config.name);
+      await sleep(50);
+      // The header form has its own 保存 button (separate from the
+      // conditions-form 保存 we click later). Clicking it forces a
+      // PATCH on the contract-draft row, which is the only path we
+      // know works to persist the name — the per-field onBlur autosave
+      // is debounced and unreliable when the next PATCH (the
+      // conditions save) lands within a second or two. We click the
+      // button and wait for the next save to round-trip before
+      // opening the template modal, so the name lands first and the
+      // modal's PATCH can't overwrite it with a stale value.
+      const headerForm = nameInput.closest('form') as HTMLFormElement | null;
+      const headerSaveButton = _$$(headerForm ?? (tile.anchor as HTMLElement), 'button').find(b =>
+        /^save$|^保存$/i.test(b.textContent ?? ''),
+      );
+      if (headerSaveButton !== undefined) {
+        await clickElement(headerSaveButton);
+        await sleep(300);
+      } else {
+        // Fallback to blur if the header has no visible save button.
+        nameInput.dispatchEvent(new Event('blur', { bubbles: true }));
+        await sleep(300);
+      }
+    }
+  }
+
   // Click "选择模板" inside the conditions form if the template modal
   // isn't already open.
   if (_$(tile.anchor, C.TemplateSelection.container) === undefined) {
@@ -1128,6 +1156,46 @@ function isContractNotesLabel(label: Element): boolean {
   return text === '合同注解' || text === getI18nValue('Contract.notes', 'Contract Notes');
 }
 
+// Walks every FormComponent label inside `root`, returns the first
+// input/textarea in the same FormComponent row whose label text
+// matches `labelText` (exact match, after trim). Used for header
+// fields like the contract name input that don't carry a stable
+// `name` attribute. Labels inside the auto-fill panel itself are
+// skipped so we never accidentally match our own injected "JSON
+// 配置" row. Returns null when the label or its input isn't found.
+//
+// Both containerPassive (e.g. status / naturalId) and containerActive
+// (e.g. editable inputs like name / notes) are accepted — the input
+// can live in either, so we just look for the nearest FormComponent
+// ancestor and search inside it.
+function findLabeledInput(root: HTMLElement, labelText: string): HTMLInputElement | null {
+  const matcher = (l: Element) => (l.textContent ?? '').trim() === labelText;
+  // PrUn's labels inside Draft__form are sometimes plain `<label>`
+  // with no FormComponent__label class (the rendered HTML is
+  // `<label><span>名称</span></label>`). Accept both classful and
+  // bare labels so we can find the contract-name row either way.
+  const labelSelector = [`.${C.FormComponent.label}`, 'label'].join(', ');
+  for (const label of Array.from(root.querySelectorAll(labelSelector))) {
+    // Skip our own panel — its label is "JSON 配置".
+    if (label.closest(`[${MARKER}]`) !== null) {
+      continue;
+    }
+    if (matcher(label)) {
+      const row =
+        label.closest(`.${C.FormComponent.containerPassive}`) ??
+        label.closest(`.${C.FormComponent.containerActive}`);
+      if (row === null) {
+        continue;
+      }
+      const input = row.querySelector('input');
+      if (input !== null) {
+        return input as HTMLInputElement;
+      }
+    }
+  }
+  return null;
+}
+
 function findNotesRow(headerForm: HTMLElement): HTMLElement | undefined {
   for (const label of _$$(headerForm, C.FormComponent.label)) {
     if (!isContractNotesLabel(label)) {
@@ -1245,6 +1313,17 @@ function buildPanel(tile: PrunTile) {
       }
       if (typeof cfg.destination !== 'string' || cfg.destination.trim().length === 0) {
         throw new Error('"destination" is required for SHIP contracts');
+      }
+      // SHIP is a transport contract between two distinct locations —
+      // PrUn will reject origin === destination. Compare after the
+      // alias expansion so e.g. `HRT`/`hrt`/`Hortus Station` (all
+      // expanded to `VH-331a`) collide as expected.
+      const originExpanded = expandLocationAlias(cfg.origin).trim().toUpperCase();
+      const destinationExpanded = expandLocationAlias(cfg.destination).trim().toUpperCase();
+      if (originExpanded === destinationExpanded) {
+        throw new Error(
+          `"origin" and "destination" must be different for SHIP contracts (both resolved to "${originExpanded}")`,
+        );
       }
     } else {
       if (typeof cfg.location !== 'string' || cfg.location.trim().length === 0) {
