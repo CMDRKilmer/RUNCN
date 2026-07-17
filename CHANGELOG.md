@@ -5,8 +5,13 @@
 
 ## 26.7.17
 
+### ✨ Features
+
+- **`CONTD`**：JSON 自动填充新增 `SHIP` 模板支持。需要 `origin` + `destination` + 顶层 `price`（per-row `price` 不再必需），位置必须使用行星/基地 naturalId（不再支持 station 名如 `Hortus Station`，地址选择器仅搜行星）。
+
 ### 🐛 Bug Fixes
 
+- **`CONTD`**：延长 SHIP 地址 listbox 轮询时间到 15s，适配慢网络下 server search 延迟。
 - **`extension-update`**：修复扩展更新检查在 `chrome.runtime.id` 不可用时导致的控制台刷屏。当 `config.url.manifest` 解析为 `chrome-extension://invalid/...` 时跳过整个轮询；连续 3 次 fetch 失败后 `clearInterval` 熔断，避免每秒一次的 `net::ERR_FAILED` 噪音。
 
 ## 26.7.16

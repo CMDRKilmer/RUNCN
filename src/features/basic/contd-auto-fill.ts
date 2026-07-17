@@ -17,23 +17,39 @@ interface DraftConfig {
   template: string;
   currency: string;
   items: DraftItem[];
-  location: string;
+  // BUY/SELL templates take a single `location` (the delivery point).
+  location?: string;
+  // SHIP templates take origin + destination; the player doing the
+  // shipping is the intermediary. Per PrUn docs, one of these must
+  // be at the shipper's current location. The interface accepts both
+  // shapes; we pick the right pair to feed into the modal based on
+  // the template.
+  origin?: string;
+  destination?: string;
+  // SHIP templates take a single global price for all items (written
+  // to the contract-level `price` input). BUY/SELL prices live per-row
+  // on each DraftItem.price. Required when template === 'SHIP'.
+  price?: number;
   // Optional. Falls back to the template's default (typically 3 days) when
   // omitted.
   deadline?: number;
+  // Optional. When provided, overwrites the 合同名称 field on the draft
+  // header. Otherwise the existing name is left untouched.
+  name?: string;
 }
 
 const MARKER = 'data-rprun-auto-fill';
 
 // Hard-coded location aliases. When the user passes one of these tickers
-// (case-insensitive) we expand them to a more specific naturalId so the
-// game's autocomplete lands on the intended place. Anything else is passed
-// through verbatim.
+// (case-insensitive) we expand them to the primary planet in that system,
+// since PrUn's AddressSelector only searches planet/base naturalIds —
+// station names like "Hortus Station" do not match any search result and
+// the modal times out. Anything else is passed through verbatim.
 const LOCATION_ALIASES: Record<string, string> = {
-  HRT: 'Hortus Station',
-  ANT: 'Antares Station',
-  BEN: 'Benten Station',
-  MOR: 'Moria Station',
+  HRT: 'VH-331a', // Hortus → Promitor (primary planet)
+  ANT: 'ZV-307a', // Antares I → Eos
+  BEN: 'VH-720a', // Benten → primary planet
+  MOR: 'VH-512a', // Moria → primary planet
 };
 
 function expandLocationAlias(input: string): string {
@@ -71,25 +87,36 @@ function levenshtein(a: string, b: string): number {
 // Find the candidate whose leading naturalId token is closest to
 // `needle`. Returns the naturalId (or undefined if no candidate is
 // close enough — distance > 3 is too far for a typo).
-// Pulls the naturalId out of a listbox suggestion's text. Two formats
-// are in use:
-//   "Antares I - Eos (ZV-307a)"      → "ZV-307a"
-//   "Animus a (VH-874a)"             → "VH-874a"
-//   "Antares Station (Antares I)"    → null (no naturalId — it's a base/station)
-//   "ZV-307c"                        → "ZV-307c"
-function extractNaturalId(text: string): string | undefined {
-  // Parenthetical at the end: "...(<id>)"
+// Pulls candidate identifier tokens out of a listbox suggestion's
+// text. Returns an array because the suggestion can have multiple
+// possible matches (e.g. "Hortus Station (Hortus)" — both
+// "Hortus Station" and "Hortus" are valid input, and we want to
+// match whichever the user typed). Returned in priority order:
+//   1. Parenthetical naturalId: "Antares I - Eos (ZV-307a)" → "ZV-307a"
+//   2. Bare naturalId: "ZV-307c"                            → "ZV-307c"
+//   3. Leading display name (catches stations whose naturalId IS
+//      their name, like "Hortus Station (Hortus)"):
+//        "Hortus Station (Hortus)" → "Hortus Station"
+//        "Animus a (VH-874a)"      → "Animus a"
+function extractIdCandidates(text: string): string[] {
+  const out: string[] = [];
   const paren = text.match(/\(([A-Z0-9]{2,}-[A-Za-z0-9]+)\)\s*$/i);
   if (paren !== null) {
-    return paren[1];
+    out.push(paren[1]);
   }
-  // Bare naturalId-only entry (e.g. live-search hit before the game
-  // appends the localized name).
   const bare = text.match(/^([A-Z0-9]{2,}-[A-Za-z0-9]+)\s*$/);
   if (bare !== null) {
-    return bare[1];
+    out.push(bare[1]);
   }
-  return undefined;
+  // Leading display name = text up to " (" or end of string.
+  const leading = text.match(/^([^(]+?)\s*(?:\(|$)/);
+  if (leading !== null) {
+    const name = leading[1].trim();
+    if (name.length > 0 && !out.includes(name)) {
+      out.push(name);
+    }
+  }
+  return out;
 }
 
 // Walks every listbox item, returns the first whose extracted
@@ -102,12 +129,91 @@ function findListboxMatch(listbox: HTMLElement, needle: string): HTMLElement | u
   ) as NodeListOf<HTMLElement>;
   for (const item of Array.from(items)) {
     const text = (item.textContent ?? '').trim();
-    const id = extractNaturalId(text);
-    if (id !== undefined && id.toUpperCase() === needle) {
-      return item;
+    for (const id of extractIdCandidates(text)) {
+      if (id.toUpperCase() === needle) {
+        return item;
+      }
     }
   }
+  // Diagnostic: log why we failed so the next round of debugging
+  // can see exactly which items the listbox had at click-time vs
+  // poll-time. Without this we can only guess at whether polling
+  // exited too early or whether the click target is from a stale
+  // listbox.
+  console.warn(
+    '[contd-auto-fill] findListboxMatch: no match for',
+    needle,
+    'in listbox containing',
+    items.length,
+    'items; sample texts:',
+    Array.from(items)
+      .slice(0, 5)
+      .map(i => `"${(i.textContent ?? '').trim()}"`),
+  );
   return undefined;
+}
+
+// The trade-row label uses different names per template: BUY/SELL
+// use `trades[<i>].*`, SHIP uses `shipments[<i>].*` (PrUn renamed
+// the array when the SHIP template was added). Both are arrays of
+// rows and the rest of the row layout is the same. We accept both
+// prefixes uniformly via this helper so callers don't have to know
+// which template they're in.
+function findRowLabel(
+  form: HTMLElement,
+  rowIndex: number,
+  suffix: string,
+): HTMLLabelElement | null {
+  for (const prefix of ['trades', 'shipments']) {
+    const exact = form.querySelector(`label[for="${prefix}[${rowIndex}].${suffix}"]`);
+    if (exact !== null) {
+      return exact as HTMLLabelElement;
+    }
+  }
+  // Fallback: any row label in either array.
+  const any = Array.from(form.querySelectorAll('label')).find(l => {
+    const forAttr = l.getAttribute('for') ?? '';
+    return (
+      forAttr.startsWith(`trades[${rowIndex}].`) || forAttr.startsWith(`shipments[${rowIndex}].`)
+    );
+  });
+  return (any as HTMLLabelElement | undefined) ?? null;
+}
+
+// Returns the first <input name="<prefix>[<i>].<suffix>"> matching
+// either `trades` or `shipments` prefix. Used for amount, pricePerUnit,
+// and any other per-row field that has a real name attribute.
+function findRowInput(
+  form: HTMLElement,
+  rowIndex: number,
+  suffix: string,
+): HTMLInputElement | null {
+  for (const prefix of ['trades', 'shipments']) {
+    const sel = `input[name="${prefix}[${rowIndex}].${suffix}"]`;
+    const el = form.querySelector(sel);
+    if (el !== null) {
+      return el as HTMLInputElement;
+    }
+  }
+  return null;
+}
+
+// Counts the number of per-row labels in either array. Mirrors
+// findRowLabel's fallback strategy so SHIP and BUY/SELL both report
+// their row count correctly.
+function countRowLabels(form: HTMLElement): number {
+  // Count distinct row indices across both arrays. We don't double-
+  // count if a label exists in both (which never happens in practice
+  // — each template uses one array exclusively).
+  const indices = new Set<number>();
+  for (const label of Array.from(form.querySelectorAll('label'))) {
+    const forAttr = label.getAttribute('for') ?? '';
+    const match = forAttr.match(/^(?:trades|shipments)\[(\d+)\]\./);
+    if (match !== null) {
+      indices.add(Number(match[1]));
+    }
+  }
+  return indices.size;
 }
 
 // Finds the naturalId in `candidates` that's closest to `needle`
@@ -122,13 +228,11 @@ function suggestSimilar(needle: string, candidates: HTMLElement[]): string | und
     if (text.length === 0) {
       continue;
     }
-    const id = extractNaturalId(text);
-    if (id === undefined) {
-      continue;
-    }
-    const distance = levenshtein(upperNeedle, id.toUpperCase());
-    if (best === undefined || distance < best.distance) {
-      best = { token: id, distance };
+    for (const id of extractIdCandidates(text)) {
+      const distance = levenshtein(upperNeedle, id.toUpperCase());
+      if (best === undefined || distance < best.distance) {
+        best = { token: id, distance };
+      }
     }
   }
   if (best === undefined || best.distance > 2) {
@@ -382,22 +486,58 @@ async function waitForListboxItems(
   if (listbox === null) {
     throw new Error('Listbox not found after typing search term');
   }
+  // Re-query the listbox on every iteration. React-Autosuggest replaces
+  // the listbox element on each render, so the captured reference can
+  // become detached mid-loop and `listbox.children` would always read
+  // as 0 — making the wait loop hang until the timeout.
+  const queryListbox = (): HTMLElement | null => {
+    if (controlsId !== null && controlsId !== undefined) {
+      return document.getElementById(controlsId);
+    }
+    return document.querySelector('ul[role="listbox"], div[role="listbox"]');
+  };
   const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline && listbox.children.length === 0) {
+  while (Date.now() < deadline) {
+    const live = queryListbox();
+    if (live !== null && live.children.length > 0) {
+      listbox = live;
+      break;
+    }
     await sleep(50);
   }
-  if (listbox.children.length === 0) {
+  if (listbox === null || listbox.children.length === 0) {
+    // Diagnostic: surface the state at timeout. We want to see whether
+    // the listbox simply never mounted (combobox not connected),
+    // mounted empty (server search hasn't returned), or got torn
+    // down. The input's value is also logged so we can see if our
+    // typed text actually got committed before the listbox query.
+    const liveAtTimeout = queryListbox();
+    console.warn(
+      '[contd-auto-fill] waitForListboxItems: timeout — listbox',
+      liveAtTimeout === null
+        ? 'NOT MOUNTED'
+        : `mounted with ${liveAtTimeout.children.length} children`,
+      'input.value=',
+      `"${input.value}"`,
+      'controlsId=',
+      controlsId,
+    );
     throw new Error(`Listbox opened but no items appeared within ${timeoutMs}ms`);
   }
   // Wait for at least one leaf item to render. Items can be either
   // <li> (MaterialSelector) or <div class="AddressSelector__suggestion">
-  // (AddressSelector).
+  // (AddressSelector). Re-query each iteration for the same detached-
+  // reference reason.
   const leafDeadline = Date.now() + timeoutMs;
-  const hasItem = () =>
-    listbox !== null &&
-    (listbox.querySelector('li') !== null ||
-      listbox.querySelector(`.${C.AddressSelector.suggestion}`) !== null);
-  while (Date.now() < leafDeadline && !hasItem()) {
+  const hasItem = (lb: HTMLElement) =>
+    lb.querySelector('li') !== null ||
+    lb.querySelector(`.${C.AddressSelector.suggestion}`) !== null;
+  while (Date.now() < leafDeadline) {
+    const live = queryListbox() ?? listbox;
+    if (hasItem(live)) {
+      listbox = live;
+      return listbox;
+    }
     await sleep(50);
   }
   return listbox;
@@ -444,31 +584,58 @@ async function selectListboxItem(input: HTMLInputElement, expectedText: string) 
 // first match for partial prefixes.
 async function selectAddressListboxItem(input: HTMLInputElement, naturalId: string): Promise<void> {
   const needle = naturalId.trim().toUpperCase();
+  // Diagnostic: log the input value before we touch it. PrUn may have
+  // pre-filled the field, or the player may have typed earlier. This
+  // helps the next round of debugging see whether we actually need
+  // to drive the listbox at all.
+  console.warn(
+    '[contd-auto-fill] selectAddressListboxItem: needle=',
+    needle,
+    'current input.value=',
+    `"${input.value}"`,
+  );
   // Wait for the listbox to mount, then keep polling until either
-  // (a) the naturalId appears in the live-search section or (b) the
-  // overall timeout elapses. PrUn's AddressSelector debounces typing
+  // (a) the naturalId appears in the listbox or (b) the overall
+  // timeout elapses. PrUn's AddressSelector debounces typing
   // (200-300ms) and the server-side search response can take several
-  // seconds under load, so a single 800ms wait isn't always enough.
+  // seconds under load — observed up to ~10s on slow connections.
   // We re-query the listbox on every poll because React-Autosuggest
-  // replaces the listbox element on each render.
-  const overallDeadline = Date.now() + 6000;
-  let listbox: HTMLElement | null = null;
+  // replaces the listbox element on each render. When the naturalId
+  // is found, click immediately on the same DOM node we just inspected
+  // — by the time we'd come back to click, React may have swapped
+  // the listbox and the original node would be detached.
+  const overallDeadline = Date.now() + 15000;
   while (Date.now() < overallDeadline) {
-    listbox = await waitForListboxItems(input, 4000);
-    if (listbox !== null && findListboxMatch(listbox, needle) !== undefined) {
-      break;
+    const lb = await waitForListboxItems(input, 12000);
+    if (lb !== null) {
+      const match = findListboxMatch(lb, needle);
+      if (match !== undefined) {
+        // Click straight from the polled listbox — no return-trip
+        // through re-querying. If the click doesn't take, the
+        // verify-and-fallback loop still gets a chance.
+        (match as HTMLElement).click();
+        await sleep(150);
+        if (input.value.trim().toUpperCase() === needle) {
+          return;
+        }
+        // Click didn't take (e.g. detached target). Fall through to
+        // the verify-and-fallback logic below by re-querying once.
+        break;
+      }
     }
     await sleep(200);
   }
-  if (listbox === null) {
-    listbox = await waitForListboxItems(input, 4000);
+  // Re-query the live listbox for the verify-and-fallback pass.
+  const liveListbox = await waitForListboxItems(input, 12000);
+  if (liveListbox === null) {
+    throw new Error(`Address listbox disappeared mid-flight (search: "${naturalId}")`);
   }
   // Collect ALL items across every section (live-search "搜索结果",
   // "Infrastructure", "Bases", "Warehouses", "Commodity exchanges").
   // The naturalId may appear in any section depending on whether the
   // debounced server search completed in time.
   const allItems = Array.from(
-    listbox.querySelectorAll(`li, .${C.AddressSelector.suggestion}`),
+    liveListbox.querySelectorAll(`li, .${C.AddressSelector.suggestion}`),
   ) as HTMLElement[];
   if (allItems.length === 0) {
     throw new Error(`Address listbox has no items (search: "${naturalId}")`);
@@ -478,7 +645,7 @@ async function selectAddressListboxItem(input: HTMLInputElement, naturalId: stri
   // it's almost certainly in 搜索结果. But if the debounce hasn't
   // completed yet, the exact match may be in a fallback section.
   let candidates = allItems;
-  for (const section of Array.from(listbox.children) as HTMLElement[]) {
+  for (const section of Array.from(liveListbox.children) as HTMLElement[]) {
     if (/搜索结果|results/i.test(section.textContent ?? '')) {
       const items = Array.from(
         section.querySelectorAll(`li, .${C.AddressSelector.suggestion}`),
@@ -489,15 +656,23 @@ async function selectAddressListboxItem(input: HTMLInputElement, naturalId: stri
       }
     }
   }
-  // Prefer the live-search match (extractNaturalId-aware) over a
-  // leading-text match. The trailing "(<naturalId>)" or bare naturalId
-  // is the canonical form, while a leading-text match is just a
-  // fuzzy shortcut that can false-positive on planet names.
-  const exact = findListboxMatch(listbox, needle);
-  const target = exact ?? candidates[0];
-  target.scrollIntoView();
-  (target as HTMLElement).click();
-  await sleep(150);
+  if (allItems.length === 0) {
+    throw new Error(`Address listbox has no items (search: "${naturalId}")`);
+  }
+  // If the polling loop above did not find a match, fall back to the
+  // first item in the live-search section (or the full list if no
+  // live-search section is present). The verify-and-fallback below
+  // will try to make the click take effect.
+  if (
+    !liveListbox.querySelector(
+      `[aria-selected="true"], .${C.AddressSelector.suggestionHighlighted}`,
+    )
+  ) {
+    const fallbackTarget = candidates[0];
+    fallbackTarget.scrollIntoView();
+    (fallbackTarget as HTMLElement).click();
+    await sleep(150);
+  }
   // Verify the input picked up the new value. AddressSelector writes
   // the naturalId back into the input on selection; if our click
   // didn't register, fall back to keyboard navigation (ArrowDown to
@@ -531,7 +706,7 @@ async function selectAddressListboxItem(input: HTMLInputElement, naturalId: stri
         }),
       );
       await sleep(30);
-      const highlighted = listbox.querySelector(
+      const highlighted = liveListbox.querySelector(
         `.${C.AddressSelector.suggestionHighlighted}, .${C.suggestions.suggestionHighlighted}`,
       );
       if (highlighted !== null) {
@@ -667,20 +842,23 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     templateSelect.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     templateSelect.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
   }
-  // Wait for the per-template <form> to render a trades[0] row. The
-  // material input has no name attribute (the name is only on the
-  // wrapper div), so we locate by label `for="trades[0].material"`.
-  // This is the real readiness signal — both after a template change
-  // AND on initial modal open (the modal can hydrate lazily while
-  // fonts/assets are still loading).
+  // Wait for the per-template <form> to render a row 0. BUY/SELL use
+  // `trades[0].*`, SHIP uses `shipments[0].*` (PrUn renamed the array
+  // for the SHIP template). The material input has no name attribute
+  // (the name is only on the wrapper div), so we locate by any
+  // `trades[0].*` or `shipments[0].*` label.
   await waitFor(
     () => {
       const form = _$(tsContainer, 'form') as HTMLFormElement | null;
-      return (
-        form !== null &&
-        form.querySelector('label[for="trades[0].material"]') !== null &&
-        form.querySelector('input[name="trades[0].amount"]') !== null
-      );
+      if (form === null) {
+        return false;
+      }
+      const hasAmount =
+        findRowInput(form, 0, 'amount') !== null ||
+        form.querySelector('input[name="trades[0].amount"]') !== null;
+      const hasRowLabel =
+        findRowLabel(form, 0, 'material') !== null || findRowLabel(form, 0, 'cargo') !== null;
+      return hasAmount && hasRowLabel;
     },
     'first trade row to render',
     15000,
@@ -693,7 +871,11 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
         form === null
           ? '<no form>'
           : Array.from(form.querySelectorAll('label'))
-              .map(l => l.textContent?.trim() ?? '')
+              .map(l => {
+                const text = (l.textContent ?? '').trim();
+                const forAttr = l.getAttribute('for') ?? '';
+                return forAttr ? `${text}[for=${forAttr}]` : text;
+              })
               .join(' | ');
       const tplSelect = tsContainer.querySelector('select') as HTMLSelectElement | null;
       return (
@@ -712,17 +894,20 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
   );
   selectByValueOrLabel(currency, config.currency);
   // Currency change may trigger a partial re-render — re-establish
-  // that trades[0] is still there before continuing. Without this,
-  // the per-row loop races with React's reconciliation and can stall
-  // indefinitely under slow hydration.
+  // that row 0 is still there before continuing. Without this, the
+  // per-row loop races with React's reconciliation and can stall
+  // indefinitely under slow hydration. Match any row-0 label
+  // (trades[0].* OR shipments[0].*) and amount input either way.
   await waitFor(
     () => {
       const form = _$(tsContainer, 'form') as HTMLFormElement | null;
-      return (
-        form !== null &&
-        form.querySelector('label[for="trades[0].material"]') !== null &&
-        form.querySelector('input[name="trades[0].amount"]') !== null
-      );
+      if (form === null) {
+        return false;
+      }
+      const hasRowLabel =
+        findRowLabel(form, 0, 'material') !== null || findRowLabel(form, 0, 'cargo') !== null;
+      const hasAmount = findRowInput(form, 0, 'amount') !== null;
+      return hasRowLabel && hasAmount;
     },
     'first trade row to re-appear after currency change',
     8000,
@@ -738,22 +923,56 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     if (form === null) {
       return null;
     }
+    // Match a button that adds a new row to the trade/shipments array.
+    // Different templates use different labels: "添加商品" (BUY/SELL),
+    // "添加货物" (SHIP), or English variants. The button is the one
+    // that lives in a FormComponent__containerCommand row (the game's
+    // "指令" container with inline action buttons). Prefer that
+    // structural signal over text matching, since text is localized.
+    const commandContainer = Array.from(form.querySelectorAll('div')).find(d =>
+      Array.from(d.children).some(
+        c => c.tagName === 'LABEL' && (c.textContent ?? '').trim() === '指令',
+      ),
+    );
+    if (commandContainer !== undefined) {
+      const btn = commandContainer.querySelector('button');
+      if (btn !== null) {
+        return btn as HTMLButtonElement;
+      }
+    }
+    // Fallback: any button whose text matches common patterns.
     return (
-      _$$(form, 'button').find(b => /add commodity|添加商品/i.test(b.textContent ?? '')) ?? null
+      _$$(form, 'button').find(b =>
+        /add commodity|添加商品|add cargo|add item|add shipment|添加货物|add package|添加包裹/i.test(
+          b.textContent ?? '',
+        ),
+      ) ?? null
     );
   };
   const rowCount = () => {
     // Material inputs don't carry a name attribute — the name lives on
-    // the surrounding wrapper div. Count material labels instead.
+    // the surrounding wrapper div. Count distinct row indices across
+    // BOTH `trades[i].*` (BUY/SELL) and `shipments[i].*` (SHIP).
     const form = _$(tsContainer, 'form') as HTMLFormElement | null;
-    return form === null
-      ? 0
-      : form.querySelectorAll('label[for^="trades["][for$=".material"]').length;
+    if (form === null) {
+      return 0;
+    }
+    return countRowLabels(form);
   };
-  // trades[0] was already verified to exist before this point, so the
+  // Row 0 was already verified to exist before this point, so the
   // rowCount baseline is >= 1. Skip the redundant first wait.
   for (let i = 1; i < config.items.length; i++) {
-    const addButton = notNullish(findAddButton(), `Add Commodity button not found (iter ${i})`);
+    const addButton = findAddButton();
+    if (addButton === null) {
+      const form = _$(tsContainer, 'form') as HTMLFormElement | null;
+      const buttonTexts =
+        form === null
+          ? '<no form>'
+          : Array.from(form.querySelectorAll('button'))
+              .map(b => `"${(b.textContent ?? '').trim()}"`)
+              .join(', ');
+      throw new Error(`Add row button not found (iter ${i}). Buttons in modal: ${buttonTexts}`);
+    }
     await clickElement(addButton);
     const target = i;
     await waitFor(() => rowCount() > target, `commodity row #${target} to render`);
@@ -768,27 +987,25 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     const item = notNullish(config.items[i], `Item ${i} missing in config`);
 
     await waitFor(
-      () => currentForm()?.querySelector(`input[name="trades[${i}].amount"]`) !== null,
-      `trade row #${i} inputs to render`,
+      () => currentForm() !== null && findRowInput(currentForm()!, i, 'amount') !== null,
+      `row #${i} amount input to render`,
     );
     const formForRow = notNullish(currentForm(), `Modal <form> missing for row ${i}`);
 
     const amountInput = notNullish(
-      formForRow.querySelector(`input[name="trades[${i}].amount"]`) as HTMLInputElement | null,
+      findRowInput(formForRow, i, 'amount'),
       `Amount input for item ${i} not found`,
     );
     changeInputValue(amountInput, String(item.amount));
     await sleep(50);
 
     // The material input has no `name` attribute — the name is on its
-    // parent wrapper div. Locate via the row's
-    // `label[for="trades[i].material"]` and pick the MaterialSelector
-    // input inside the label's container row. `_$()` only supports
-    // a single class name, so we use the class directly and fall back
-    // to a generic <input> query.
+    // parent wrapper div. Locate via the row's `material` or `cargo`
+    // label (BUY/SELL use `.material`, SHIP uses `.cargo`) and pick
+    // the MaterialSelector input inside the label's container row.
     const materialLabel = notNullish(
-      formForRow.querySelector(`label[for="trades[${i}].material"]`),
-      `Material label for item ${i} not found`,
+      findRowLabel(formForRow, i, 'material') ?? findRowLabel(formForRow, i, 'cargo'),
+      `Material/cargo label for item ${i} not found`,
     );
     const materialRow = materialLabel.parentElement!;
     const materialInput = notNullish(
@@ -807,30 +1024,70 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     await selectListboxItem(materialInput, resolved?.name ?? item.commodity);
     await sleep(50);
 
-    const priceInput = notNullish(
-      formForRow.querySelector(
-        `input[name="trades[${i}].pricePerUnit"]`,
-      ) as HTMLInputElement | null,
-      `Price input for item ${i} not found`,
-    );
-    changeInputValue(priceInput, String(item.price));
-    await sleep(50);
+    // Per-row price only exists in BUY/SELL (each row has its own
+    // pricePerUnit). SHIP has a single global `price` field outside
+    // the shipments array — handled separately below for the first
+    // row only.
+    const priceInput = findRowInput(formForRow, i, 'pricePerUnit');
+    if (priceInput !== null) {
+      changeInputValue(priceInput, String(item.price));
+      await sleep(50);
+    } else if (i === 0 && config.template === 'SHIP') {
+      // SHIP template: write the single contract price to the global
+      // `price` input. `config.price` is the top-level price for SHIP;
+      // it is required by validateConfig when template === 'SHIP'.
+      const globalPrice = formForRow.querySelector(
+        'input[name="price"]',
+      ) as HTMLInputElement | null;
+      if (globalPrice !== null) {
+        changeInputValue(globalPrice, String(config.price));
+        await sleep(50);
+      }
+    }
   }
 
-  // 5. Location.
-  const locationInput = notNullish(
-    currentForm()?.querySelector(`input.${C.AddressSelector.input}`) as HTMLInputElement | null,
-    'Location input not found',
-  );
-  focusElement(locationInput);
-  await sleep(50);
-  const expandedLocation = expandLocationAlias(config.location).trim();
-  changeInputValue(locationInput, expandedLocation);
-  // `selectAddressListboxItem` polls internally until the naturalId
-  // appears in the live-search section (up to 6s), so we don't need
-  // a fixed delay here. The picker matches the trailing "(<id>)" or
-  // a bare naturalId entry to avoid matching on planet name prefixes.
-  await selectAddressListboxItem(locationInput, expandedLocation);
+  // 5. Locations. BUY/SELL take a single delivery point (`location`);
+  // SHIP takes origin + destination. We match every AddressSelector
+  // input currently in the modal and pair them in DOM order with the
+  // `origin` / `destination` values from the config — first input gets
+  // origin, second gets destination. This avoids hardcoding which
+  // label the SHIP template uses.
+  const addressInputs = Array.from(
+    currentForm()?.querySelectorAll(`input.${C.AddressSelector.input}`) ?? [],
+  ) as HTMLInputElement[];
+  if (addressInputs.length === 0) {
+    throw new Error('No AddressSelector input found in template form');
+  }
+  const fillAddress = async (input: HTMLInputElement, raw: string) => {
+    focusElement(input);
+    await sleep(50);
+    const expanded = expandLocationAlias(raw).trim();
+    changeInputValue(input, expanded);
+    // `selectAddressListboxItem` polls internally until the naturalId
+    // appears in the live-search section (up to 6s), so we don't need
+    // a fixed delay here. The picker matches the trailing "(<id>)" or
+    // a bare naturalId entry to avoid matching on planet name prefixes.
+    await selectAddressListboxItem(input, expanded);
+  };
+  if (config.template.toUpperCase() === 'SHIP') {
+    if (addressInputs.length < 2) {
+      throw new Error(
+        `SHIP template needs two address inputs (origin + destination) but found ${addressInputs.length}`,
+      );
+    }
+    await fillAddress(notNullish(addressInputs[0], 'origin input missing'), config.origin!);
+    await fillAddress(
+      notNullish(addressInputs[1], 'destination input missing'),
+      config.destination!,
+    );
+  } else {
+    if (addressInputs.length !== 1) {
+      throw new Error(
+        `${config.template} template needs one address input but found ${addressInputs.length}`,
+      );
+    }
+    await fillAddress(notNullish(addressInputs[0], 'location input missing'), config.location!);
+  }
 
   // 5b. Optional deadline (days). Leave the template default if omitted.
   if (config.deadline !== undefined) {
@@ -936,6 +1193,7 @@ function buildPanel(tile: PrunTile) {
     if (typeof cfg.template !== 'string' || cfg.template.length === 0) {
       throw new Error('"template" is required (e.g. "BUY", "SELL", "SHIP")');
     }
+    const template = cfg.template.toUpperCase();
     if (typeof cfg.currency !== 'string' || cfg.currency.length === 0) {
       throw new Error('"currency" is required (e.g. "NCC", "ICA", "CIS", "AIC")');
     }
@@ -953,18 +1211,54 @@ function buildPanel(tile: PrunTile) {
       if (typeof item.commodity !== 'string' || item.commodity.trim().length === 0) {
         throw new Error(`items[${i}].commodity is required`);
       }
-      if (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0) {
-        throw new Error(`items[${i}].price must be a non-negative number`);
+      // For BUY/SELL, each row needs a per-row price. For SHIP, the price
+      // lives at the top level (single `price` field shared by all rows)
+      // so per-row `price` is optional.
+      if (template !== 'SHIP') {
+        if (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0) {
+          throw new Error(`items[${i}].price must be a non-negative number`);
+        }
+      } else if (
+        item.price !== undefined &&
+        (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0)
+      ) {
+        throw new Error(`items[${i}].price must be a non-negative number if provided`);
       }
     }
-    if (typeof cfg.location !== 'string' || cfg.location.trim().length === 0) {
-      throw new Error('"location" is required');
+    if (template === 'SHIP') {
+      if (
+        cfg.price === undefined ||
+        typeof cfg.price !== 'number' ||
+        !isFinite(cfg.price) ||
+        cfg.price < 0
+      ) {
+        throw new Error('"price" is required for SHIP contracts (single price for all items)');
+      }
+    }
+    // Location requirements differ by template:
+    //   BUY/SELL — single delivery point (`location`)
+    //   SHIP     — origin + destination (the shipper is the intermediary;
+    //              one of these must match the shipper's current location)
+    if (template === 'SHIP') {
+      if (typeof cfg.origin !== 'string' || cfg.origin.trim().length === 0) {
+        throw new Error('"origin" is required for SHIP contracts');
+      }
+      if (typeof cfg.destination !== 'string' || cfg.destination.trim().length === 0) {
+        throw new Error('"destination" is required for SHIP contracts');
+      }
+    } else {
+      if (typeof cfg.location !== 'string' || cfg.location.trim().length === 0) {
+        throw new Error('"location" is required (use "origin" + "destination" for SHIP)');
+      }
     }
     if (
       cfg.deadline !== undefined &&
       (typeof cfg.deadline !== 'number' || !isFinite(cfg.deadline))
     ) {
       throw new Error('"deadline" must be a number when provided');
+    }
+    if (cfg.name !== undefined && (typeof cfg.name !== 'string' || cfg.name.length === 0)) {
+      throw new Error('"name" must be a non-empty string when provided');
     }
     return cfg as unknown as DraftConfig;
   }
