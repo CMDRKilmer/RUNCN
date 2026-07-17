@@ -21,6 +21,9 @@ interface DraftConfig {
   // Optional. Falls back to the template's default (typically 3 days) when
   // omitted.
   deadline?: number;
+  // Optional. When provided, overwrites the 合同名称 field on the draft
+  // header. Otherwise the existing name is left untouched.
+  name?: string;
 }
 
 const MARKER = 'data-rprun-auto-fill';
@@ -591,7 +594,56 @@ async function findConditionsForm(tile: PrunTile): Promise<HTMLElement> {
   return await $(tile.anchor, C.Draft.form).then(() => all[1] ?? all[0]);
 }
 
+// Locates the first <input> whose sibling <label> contains the given
+// text. Some draft fields (e.g. 名称) lack a `for=` attribute on their
+// label AND have no `name` attribute on the input — we have to match
+// by label text and grab the input inside the same FormComponent row.
+function findLabeledInput(root: HTMLElement, labelText: string): HTMLInputElement | null {
+  for (const label of Array.from(root.querySelectorAll('label'))) {
+    const text = (label.textContent ?? '').trim();
+    if (text !== labelText && text !== getI18nValue(labelText, labelText)) {
+      continue;
+    }
+    const row = label.parentElement;
+    if (row === null) {
+      continue;
+    }
+    const input = row.querySelector('input');
+    if (input !== null) {
+      return input as HTMLInputElement;
+    }
+  }
+  return null;
+}
+
 async function applyConfig(tile: PrunTile, config: DraftConfig) {
+  // 0. Header form: optionally overwrite the draft's 合同名称 (Name)
+  // field. The header form has its own 保存 button, and name/notes
+  // changes don't propagate to the conditions form's save — so we
+  // always commit the header form (with or without a name override)
+  // before opening the template modal. The save is a no-op when no
+  // header fields changed, but it ensures any pending edits are
+  // flushed in one place rather than scattered across two saves.
+  const headerForm = notNullish(_$$(tile.anchor, C.Draft.form)[0], 'Draft header form not found');
+  if (config.name !== undefined) {
+    // The label has no `for=` attribute and the input has no `name`
+    // attribute — locate by label text via `findLabeledInput`.
+    const nameInput = notNullish(
+      findLabeledInput(headerForm, 'Contract.name'),
+      '合同名称 input not found in draft header',
+    );
+    focusElement(nameInput);
+    await sleep(50);
+    changeInputValue(nameInput, config.name);
+    await sleep(100);
+  }
+  const headerSaveButton = notNullish(
+    _$$(headerForm, 'button').find(b => /^save$|^保存$/i.test(b.textContent ?? '')),
+    'Draft header 保存 button not found',
+  );
+  await clickElement(headerSaveButton);
+  await sleep(300);
+
   // Click "选择模板" inside the conditions form if the template modal
   // isn't already open.
   if (_$(tile.anchor, C.TemplateSelection.container) === undefined) {
@@ -855,15 +907,47 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     'Apply Template button not found',
   );
   await clickElement(applyButton);
-  await sleep(300);
+  // After applying the template, React re-renders the conditions
+  // table from scratch and the "保存" button stays in the Button__disabled
+  // state until the new conditions are committed server-side. Poll
+  // for an enabled 保存 button (rather than a fixed sleep) so we
+  // don't click while it's still grey.
+  await waitFor(
+    () => {
+      const form = findConditionsFormSync(tile);
+      if (form === null) {
+        return false;
+      }
+      const btn = _$$(form, 'button').find(b => /^save$|^保存$/i.test(b.textContent ?? ''));
+      if (btn === undefined) {
+        return false;
+      }
+      return !btn.hasAttribute('disabled') && !btn.classList.contains(C.Button.disabled);
+    },
+    'conditions 保存 button to become enabled',
+    8000,
+  );
 
   // 7. The conditions form now has a "保存" button. Click it.
-  const conditionsForm = await findConditionsForm(tile);
+  const conditionsForm = notNullish(findConditionsFormSync(tile), 'conditions form missing');
   const saveButton = notNullish(
     _$$(conditionsForm, 'button').find(b => /^save$|^保存$/i.test(b.textContent ?? '')),
     'Save button not found in conditions form',
   );
   await clickElement(saveButton);
+}
+
+// Synchronous helper: returns the conditions form (the Draft.form that
+// has an ActionBar inside). Used after the template modal closes so
+// we don't depend on async subscription plumbing for a one-shot lookup.
+function findConditionsFormSync(tile: PrunTile): HTMLElement | null {
+  for (const candidate of _$$(tile.anchor, C.Draft.form)) {
+    if (_$(candidate, C.ActionBar.container) !== undefined) {
+      return candidate;
+    }
+  }
+  const all = _$$(tile.anchor, C.Draft.form);
+  return all[1] ?? all[0] ?? null;
 }
 
 function isContractNotesLabel(label: Element): boolean {
@@ -965,6 +1049,9 @@ function buildPanel(tile: PrunTile) {
       (typeof cfg.deadline !== 'number' || !isFinite(cfg.deadline))
     ) {
       throw new Error('"deadline" must be a number when provided');
+    }
+    if (cfg.name !== undefined && (typeof cfg.name !== 'string' || cfg.name.length === 0)) {
+      throw new Error('"name" must be a non-empty string when provided');
     }
     return cfg as unknown as DraftConfig;
   }
