@@ -98,7 +98,10 @@ const output = computed<ContractJson>(() => {
         commodity: it.ticker.trim().toUpperCase(),
         amount: it.amount,
       };
-      if (isBuyOrSell.value && it.price !== undefined && it.price >= 0) {
+      // Per-row price only included when the user actually set it.
+      // For BUY/SELL with no per-row price set, validateConfig in
+      // contd-auto-fill will fall back to the top-level `price`.
+      if (isBuyOrSell.value && it.price !== undefined && it.price > 0) {
         row.price = it.price;
       }
       return row;
@@ -122,14 +125,20 @@ const output = computed<ContractJson>(() => {
     if (destination.value.trim().length > 0) {
       result.destination = destination.value.trim().toUpperCase();
     }
-    if (
-      price.value !== undefined &&
-      price.value !== null &&
-      price.value !== '' &&
-      price.value >= 0
-    ) {
-      result.price = Number(price.value);
-    }
+  }
+  // Top-level `price` is shared: SHIP (single global price for all
+  // rows) and BUY/SELL when every item should use the same price.
+  // For BUY/SELL with mixed prices, leave per-row `price` only.
+  const allRowsHaveExplicitPrice =
+    cleanedItems.length > 0 && cleanedItems.every(it => typeof it.price === 'number');
+  if (
+    price.value !== undefined &&
+    price.value !== null &&
+    price.value !== '' &&
+    price.value >= 0 &&
+    (isShip.value || !allRowsHaveExplicitPrice)
+  ) {
+    result.price = Number(price.value);
   }
   if (
     deadline.value !== undefined &&
@@ -155,8 +164,12 @@ const validationErrors = computed<string[]>(() => {
     errs.push('至少需要 1 个物品');
   }
   if (isBuyOrSell.value) {
-    if (output.value.items.some(it => it.price === undefined)) {
-      errs.push('BUY/SELL 每行物品必须填写单价');
+    // For BUY/SELL, each row needs an explicit per-row price OR a
+    // shared top-level `price`. validateConfig in contd-auto-fill
+    // mirrors this rule.
+    const anyRowMissingPrice = output.value.items.some(it => it.price === undefined);
+    if (anyRowMissingPrice && output.value.price === undefined) {
+      errs.push('BUY/SELL 每行物品必须填写单价，或在顶部填写统一单价');
     }
     if (!output.value.location) {
       errs.push('BUY/SELL 必须填写目的地');

@@ -40,16 +40,19 @@ interface DraftConfig {
 
 const MARKER = 'data-rprun-auto-fill';
 
-// Hard-coded location aliases. When the user passes one of these tickers
-// (case-insensitive) we expand them to the primary planet in that system,
-// since PrUn's AddressSelector only searches planet/base naturalIds —
-// station names like "Hortus Station" do not match any search result and
-// the modal times out. Anything else is passed through verbatim.
+// Hard-coded location aliases. PrUn's AddressSelector searches by
+// naturalId and by station name. Tickers like `HRT` are CX-exchange
+// codes derived from the station naturalId — but PrUn's search index
+// may not include them. We expand them to the display name so the
+// listbox has something to match. If the search still fails, the
+// caller should fall back to the exact planet naturalId (e.g.
+// "VH-331c") instead of the CX exchange ticker. Anything not in this
+// table is passed through verbatim.
 const LOCATION_ALIASES: Record<string, string> = {
-  HRT: 'VH-331a', // Hortus → Promitor (primary planet)
-  ANT: 'ZV-307a', // Antares I → Eos
-  BEN: 'VH-720a', // Benten → primary planet
-  MOR: 'VH-512a', // Moria → primary planet
+  HRT: 'Hortus Station',
+  ANT: 'Antares Station',
+  BEN: 'Benten Station',
+  MOR: 'Moria Station',
 };
 
 function expandLocationAlias(input: string): string {
@@ -127,10 +130,30 @@ function findListboxMatch(listbox: HTMLElement, needle: string): HTMLElement | u
   const items = listbox.querySelectorAll(
     `li, .${C.AddressSelector.suggestion}`,
   ) as NodeListOf<HTMLElement>;
+  // Pass 1: exact naturalId match (existing behaviour).
   for (const item of Array.from(items)) {
     const text = (item.textContent ?? '').trim();
-    for (const id of extractIdCandidates(text)) {
+    const ids = extractIdCandidates(text);
+    for (const id of ids) {
       if (id.toUpperCase() === needle) {
+        return item;
+      }
+    }
+  }
+  // Pass 2: stations whose naturalId IS their display name (e.g.
+  // "Hortus Station" → "(Hortus)" paren would not extract but the
+  // leading name "Hortus Station" matches the user's typed text).
+  // Match when the candidate's leading display name equals needle
+  // (case-insensitive, exact).
+  for (const item of Array.from(items)) {
+    const text = (item.textContent ?? '').trim();
+    if (text.length === 0) {
+      continue;
+    }
+    const leading = text.match(/^([^(]+?)\s*\(/);
+    if (leading !== null) {
+      const displayName = leading[1].trim();
+      if (displayName.toUpperCase() === needle) {
         return item;
       }
     }
@@ -146,9 +169,16 @@ function findListboxMatch(listbox: HTMLElement, needle: string): HTMLElement | u
     'in listbox containing',
     items.length,
     'items; sample texts:',
-    Array.from(items)
-      .slice(0, 5)
-      .map(i => `"${(i.textContent ?? '').trim()}"`),
+    JSON.stringify(
+      Array.from(items)
+        .slice(0, 8)
+        .map(i => {
+          const text = (i.textContent ?? '').trim();
+          return { text, candidates: extractIdCandidates(text) };
+        }),
+      null,
+      2,
+    ),
   );
   return undefined;
 }
@@ -464,80 +494,115 @@ function findListboxItem(
 
 async function waitForListboxItems(
   input: HTMLInputElement,
-  timeoutMs = 4000,
+  timeoutMs = 8000,
 ): Promise<HTMLElement> {
   // The listbox lives in a React-Autosuggest / Autowhatever portal under
   // document.body, not inside the input's row. Find it by the
   // aria-controls attribute on the combobox wrapper.
   const combobox = input.closest('[role="combobox"]') as HTMLElement | null;
   const controlsId = combobox?.getAttribute('aria-controls') ?? input.getAttribute('aria-controls');
-  let listbox: HTMLElement | null = null;
-  if (controlsId !== null && controlsId !== undefined) {
-    listbox = document.getElementById(controlsId) as HTMLElement | null;
-  }
-  if (listbox === null) {
-    // Some selectors don't pin a listbox id; fall back to the most
-    // recently mounted listbox (MaterialSelector uses <ul>,
-    // AddressSelector uses <div>).
-    listbox = document.querySelector(
-      'ul[role="listbox"], div[role="listbox"]',
-    ) as HTMLElement | null;
-  }
-  if (listbox === null) {
-    throw new Error('Listbox not found after typing search term');
-  }
   // Re-query the listbox on every iteration. React-Autosuggest replaces
   // the listbox element on each render, so the captured reference can
   // become detached mid-loop and `listbox.children` would always read
   // as 0 — making the wait loop hang until the timeout.
+  // We MUST scope to this input's controlsId: a page may have several
+  // AddressSelector inputs (e.g. origin + destination on SHIP) and the
+  // first listbox to mount may not belong to us.
   const queryListbox = (): HTMLElement | null => {
     if (controlsId !== null && controlsId !== undefined) {
       return document.getElementById(controlsId);
     }
+    // Fallback: any listbox that isn't already paired to another input.
     return document.querySelector('ul[role="listbox"], div[role="listbox"]');
   };
+  const listbox = queryListbox();
+  if (listbox === null) {
+    throw new Error('Listbox not found after typing search term');
+  }
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const live = queryListbox();
     if (live !== null && live.children.length > 0) {
-      listbox = live;
-      break;
+      return live;
     }
     await sleep(50);
   }
-  if (listbox === null || listbox.children.length === 0) {
-    throw new Error(`Listbox opened but no items appeared within ${timeoutMs}ms`);
-  }
-  // Wait for at least one leaf item to render. Items can be either
-  // <li> (MaterialSelector) or <div class="AddressSelector__suggestion">
-  // (AddressSelector). Re-query each iteration for the same detached-
-  // reference reason.
-  const leafDeadline = Date.now() + timeoutMs;
-  const hasItem = (lb: HTMLElement) =>
-    lb.querySelector('li') !== null ||
-    lb.querySelector(`.${C.AddressSelector.suggestion}`) !== null;
-  while (Date.now() < leafDeadline) {
-    const live = queryListbox() ?? listbox;
-    if (hasItem(live)) {
-      listbox = live;
-      return listbox;
-    }
-    await sleep(50);
-  }
-  return listbox;
+  const liveAtTimeout = queryListbox();
+  console.warn(
+    '[contd-auto-fill] waitForListboxItems timeout: listbox=',
+    liveAtTimeout === null
+      ? 'NOT MOUNTED'
+      : `mounted with ${liveAtTimeout.children.length} children`,
+    'input.value=',
+    `"${input.value}"`,
+  );
+  throw new Error(`Listbox opened but no items appeared within ${timeoutMs}ms`);
 }
 
 async function selectListboxItem(input: HTMLInputElement, expectedText: string) {
-  const listbox = await waitForListboxItems(input);
-  const resolved = resolveMaterial(expectedText);
-  const target = findListboxItem(listbox, resolved, expectedText);
+  // The listbox lives in a React-Autosuggest / Autowhatever portal under
+  // document.body, not inside the input's row. Find it by the
+  // aria-controls attribute on the combobox wrapper.
+  const combobox = input.closest('[role="combobox"]') as HTMLElement | null;
+  const controlsId = combobox?.getAttribute('aria-controls') ?? input.getAttribute('aria-controls');
+  let listbox: HTMLElement | null = null;
+  if (controlsId) {
+    listbox = document.getElementById(controlsId) as HTMLElement | null;
+  }
+  if (!listbox) {
+    listbox = document.querySelector('ul[role="listbox"]') as HTMLElement | null;
+  }
+  if (!listbox) {
+    throw new Error('Listbox not found after typing search term');
+  }
+  // Wait for at least one list item to populate.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && listbox.children.length === 0) {
+    await sleep(50);
+  }
+  // The listbox may be flat (MaterialSelector) or nested in grouped sections
+  // (AddressSelector: "搜索结果" / "Infrastructure" / "Bases" / "Warehouses"
+  //  / "Commodity exchanges"). Use querySelectorAll to find leaf <li>s.
+  const allLi = Array.from(listbox.querySelectorAll('li')) as HTMLElement[];
+  if (allLi.length === 0) {
+    throw new Error(`No <li> found in listbox for "${expectedText}"`);
+  }
+  const needle = expectedText.trim().toUpperCase();
+  // Prefer items under a section titled "搜索结果" (the live search hits).
+  const sections = Array.from(listbox.children) as HTMLElement[];
+  let candidates = allLi;
+  for (const section of sections) {
+    if (/搜索结果/i.test(section.textContent ?? '')) {
+      const sectionItems = Array.from(section.querySelectorAll('li')) as HTMLElement[];
+      if (sectionItems.length > 0) {
+        candidates = sectionItems;
+        break;
+      }
+    }
+  }
+  // For AddressSelector items that aren't <li>s but use the
+  // AddressSelector.suggestion class, gather those too. Prefer
+  // candidates that start with our needle (case-insensitive exact).
+  const addrSuggestionItems = Array.from(
+    listbox.querySelectorAll(`.${C.AddressSelector.suggestion}`),
+  ) as HTMLElement[];
+  let target = candidates.find(li => (li.textContent ?? '').toUpperCase().includes(needle));
+  if (target === undefined) {
+    target = addrSuggestionItems.find(li => (li.textContent ?? '').toUpperCase().includes(needle));
+  }
+  if (target === undefined) {
+    target = candidates[0] ?? addrSuggestionItems[0];
+  }
+  if (target === undefined) {
+    throw new Error(`No list item matched "${expectedText}"`);
+  }
   target.scrollIntoView();
-  // 1. Native HTMLElement.click() — synthesizes a trusted click that
-  //    react-autosuggest's onClick handler picks up reliably.
+  // Native HTMLElement.click() — synthesizes a click that
+  // react-autosuggest's onClick handler picks up reliably.
   (target as HTMLElement).click();
   await sleep(150);
-  // 2. Fallback: drive selection via keyboard on the input. Re-focus first
-  //    because clicking the <li> may have blurred the input.
+  // Fallback: drive selection via keyboard on the input. Re-focus
+  // first because clicking the <li> may have blurred the input.
   input.focus();
   await sleep(50);
   input.dispatchEvent(
@@ -559,170 +624,6 @@ async function selectListboxItem(input: HTMLInputElement, expectedText: string) 
     }),
   );
   await sleep(150);
-}
-
-// Selects an item from the AddressSelector listbox. Unlike MaterialSelector,
-// the items here carry both a naturalId (e.g. "ZV-307c") and a localized
-// planet/base name (e.g. "Antares I"). We must match the naturalId
-// specifically — substring-matching on the planet name would pick the
-// first match for partial prefixes.
-async function selectAddressListboxItem(input: HTMLInputElement, naturalId: string): Promise<void> {
-  const needle = naturalId.trim().toUpperCase();
-  // Wait for the listbox to mount, then keep polling until either
-  // (a) the naturalId appears in the listbox or (b) the overall
-  // timeout elapses. PrUn's AddressSelector debounces typing
-  // (200-300ms) and the server-side search response can take several
-  // seconds under load — observed up to ~10s on slow connections.
-  // We re-query the listbox on every poll because React-Autosuggest
-  // replaces the listbox element on each render. When the naturalId
-  // is found, click immediately on the same DOM node we just inspected
-  // — by the time we'd come back to click, React may have swapped
-  // the listbox and the original node would be detached.
-  const overallDeadline = Date.now() + 15000;
-  while (Date.now() < overallDeadline) {
-    const lb = await waitForListboxItems(input, 12000);
-    if (lb !== null) {
-      const match = findListboxMatch(lb, needle);
-      if (match !== undefined) {
-        // Click straight from the polled listbox — no return-trip
-        // through re-querying. If the click doesn't take, the
-        // verify-and-fallback loop still gets a chance.
-        (match as HTMLElement).click();
-        await sleep(150);
-        if (input.value.trim().toUpperCase() === needle) {
-          return;
-        }
-        // Click didn't take (e.g. detached target). Fall through to
-        // the verify-and-fallback logic below by re-querying once.
-        break;
-      }
-    }
-    await sleep(200);
-  }
-  // Re-query the live listbox for the verify-and-fallback pass.
-  const liveListbox = await waitForListboxItems(input, 12000);
-  if (liveListbox === null) {
-    throw new Error(`Address listbox disappeared mid-flight (search: "${naturalId}")`);
-  }
-  // Collect ALL items across every section (live-search "搜索结果",
-  // "Infrastructure", "Bases", "Warehouses", "Commodity exchanges").
-  // The naturalId may appear in any section depending on whether the
-  // debounced server search completed in time.
-  const allItems = Array.from(
-    liveListbox.querySelectorAll(`li, .${C.AddressSelector.suggestion}`),
-  ) as HTMLElement[];
-  if (allItems.length === 0) {
-    throw new Error(`Address listbox has no items (search: "${naturalId}")`);
-  }
-  // Prefer items from the live-search section, then fall back to the
-  // full list — if the server search returned an exact naturalId match,
-  // it's almost certainly in 搜索结果. But if the debounce hasn't
-  // completed yet, the exact match may be in a fallback section.
-  let candidates = allItems;
-  for (const section of Array.from(liveListbox.children) as HTMLElement[]) {
-    if (/搜索结果|results/i.test(section.textContent ?? '')) {
-      const items = Array.from(
-        section.querySelectorAll(`li, .${C.AddressSelector.suggestion}`),
-      ) as HTMLElement[];
-      if (items.length > 0) {
-        candidates = items;
-        break;
-      }
-    }
-  }
-  if (allItems.length === 0) {
-    throw new Error(`Address listbox has no items (search: "${naturalId}")`);
-  }
-  // If the polling loop above did not find a match, fall back to the
-  // first item in the live-search section (or the full list if no
-  // live-search section is present). The verify-and-fallback below
-  // will try to make the click take effect.
-  if (
-    !liveListbox.querySelector(
-      `[aria-selected="true"], .${C.AddressSelector.suggestionHighlighted}`,
-    )
-  ) {
-    const fallbackTarget = candidates[0];
-    fallbackTarget.scrollIntoView();
-    (fallbackTarget as HTMLElement).click();
-    await sleep(150);
-  }
-  // Verify the input picked up the new value. AddressSelector writes
-  // the naturalId back into the input on selection; if our click
-  // didn't register, fall back to keyboard navigation (ArrowDown to
-  // highlight, Enter to commit). We re-issue ArrowDown N times until
-  // the highlighted item's text starts with the naturalId.
-  const verifyAndFallback = async () => {
-    if (input.value.trim().toUpperCase() === needle) {
-      return;
-    }
-    input.focus();
-    await sleep(50);
-    // Reset highlight by sending Escape first.
-    input.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    // Walk down the list until the highlighted item matches.
-    for (let i = 0; i < candidates.length + 1; i++) {
-      input.dispatchEvent(
-        new KeyboardEvent('keydown', {
-          key: 'ArrowDown',
-          code: 'ArrowDown',
-          keyCode: 40,
-          bubbles: true,
-          cancelable: true,
-        }),
-      );
-      await sleep(30);
-      const highlighted = liveListbox.querySelector(
-        `.${C.AddressSelector.suggestionHighlighted}, .${C.suggestions.suggestionHighlighted}`,
-      );
-      if (highlighted !== null) {
-        const text = (highlighted.textContent ?? '').trim().toUpperCase();
-        if (text === needle || text.startsWith(`${needle} `)) {
-          break;
-        }
-      }
-    }
-    input.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        code: 'Enter',
-        keyCode: 13,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    await sleep(150);
-  };
-  await verifyAndFallback();
-  if (input.value.trim().toUpperCase() !== needle) {
-    // Last resort: dump every candidate so we can see if the naturalId
-    // was simply missing from this listbox render, plus a "did you mean"
-    // hint powered by Levenshtein distance over the naturalId in each
-    // candidate (extracted from the trailing "(<id>)" or a bare
-    // naturalId-only entry).
-    const dump = allItems.map(c => `"${(c.textContent ?? '').trim().slice(0, 60)}"`).join(', ');
-    const suggestion = suggestSimilar(needle, allItems);
-    const hint = suggestion === undefined ? '' : ` Did you mean "${suggestion}"?`;
-    // If even the closest candidate is more than 2 edits away, the
-    // naturalId is genuinely missing from PrUn's database (or the
-    // player doesn't have visibility on it). Say so explicitly rather
-    // than just dumping candidates.
-    const closeEnough = suggestion !== undefined;
-    const diagnosis = closeEnough
-      ? ''
-      : ` The naturalId doesn't match any nearby candidate, so it likely doesn't exist in PrUn's database (or your corporation has no visibility on it).`;
-    throw new Error(
-      `Address "${naturalId}" not found in listbox.${diagnosis}${hint} Candidates: ${dump}`,
-    );
-  }
 }
 
 async function findConditionsForm(tile: PrunTile): Promise<HTMLElement> {
@@ -1056,9 +957,13 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     // pricePerUnit). SHIP has a single global `price` field outside
     // the shipments array — handled separately below for the first
     // row only.
+    // Per-row price falls back to top-level `config.price` when the
+    // item itself omits it — validateConfig guarantees one of the
+    // two is present for BUY/SELL.
+    const rowPrice = item.price ?? config.price;
     const priceInput = findRowInput(formForRow, i, 'pricePerUnit');
-    if (priceInput !== null) {
-      changeInputValue(priceInput, String(item.price));
+    if (priceInput !== null && rowPrice !== undefined) {
+      changeInputValue(priceInput, String(rowPrice));
       await sleep(50);
     } else if (i === 0 && config.template === 'SHIP') {
       // SHIP template: write the single contract price to the global
@@ -1087,15 +992,19 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     throw new Error('No AddressSelector input found in template form');
   }
   const fillAddress = async (input: HTMLInputElement, raw: string) => {
-    focusElement(input);
+    // The template's "位置" / "location" field is an AddressSelector
+    // backed by PrUn's server search. We just focus, set the value,
+    // wait briefly for PrUn's debounce + server round-trip to
+    // populate the listbox, then let selectAddressListboxItem pick
+    // the matching item. The 500ms wait was the key bit that the
+    // bb9720ce working version used; removing it caused the
+    // subsequent fillAddress experiments to fail.
+    input.focus();
     await sleep(50);
     const expanded = expandLocationAlias(raw).trim();
     changeInputValue(input, expanded);
-    // `selectAddressListboxItem` polls internally until the naturalId
-    // appears in the live-search section (up to 6s), so we don't need
-    // a fixed delay here. The picker matches the trailing "(<id>)" or
-    // a bare naturalId entry to avoid matching on planet name prefixes.
-    await selectAddressListboxItem(input, expanded);
+    await sleep(500);
+    await selectListboxItem(input, expanded);
   };
   if (config.template.toUpperCase() === 'SHIP') {
     if (addressInputs.length < 2) {
@@ -1135,12 +1044,26 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     _$(tsContainer, 'form') as HTMLFormElement | null,
     'Modal <form> missing when looking for Apply button',
   );
+  // Diagnostic: log the address input values right before Apply
+  // so we can confirm the address is still set when Apply is clicked.
+  const addressInputsBeforeApply = Array.from(
+    applyForm.querySelectorAll(`input.${C.AddressSelector.input}`),
+  ).map(i => `"${(i as HTMLInputElement).value}"`);
+  console.info(
+    '[contd-auto-fill] before Apply: address inputs =',
+    addressInputsBeforeApply.join(', ') || '<none>',
+  );
   const applyButton = notNullish(
     _$$(applyForm, 'button').find(b => /apply template|应用模板/i.test(b.textContent ?? '')),
     'Apply Template button not found',
   );
   await clickElement(applyButton);
-  await sleep(300);
+  await sleep(500);
+  // Diagnostic: log the conditions form text after Apply to confirm
+  // whether the address carried over.
+  const conditionsFormForDump = await findConditionsForm(tile);
+  const conditionsText = (conditionsFormForDump.textContent ?? '').replace(/\s+/g, ' ').trim();
+  console.info('[contd-auto-fill] after Apply: conditions text =', conditionsText);
 
   // 7. The conditions form now has a "保存" button. Click it.
   const conditionsForm = await findConditionsForm(tile);
@@ -1279,12 +1202,15 @@ function buildPanel(tile: PrunTile) {
       if (typeof item.commodity !== 'string' || item.commodity.trim().length === 0) {
         throw new Error(`items[${i}].commodity is required`);
       }
-      // For BUY/SELL, each row needs a per-row price. For SHIP, the price
-      // lives at the top level (single `price` field shared by all rows)
-      // so per-row `price` is optional.
+      // For BUY/SELL, each row needs a per-row price — unless a top-
+      // level `price` is set, in which case it defaults every row's
+      // price. Per-row `price` overrides the top-level value when
+      // present (so heterogeneous prices work too). For SHIP, the
+      // top-level `price` is required and shared across all rows.
       if (template !== 'SHIP') {
-        if (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0) {
-          throw new Error(`items[${i}].price must be a non-negative number`);
+        const rowPrice = item.price ?? cfg.price;
+        if (typeof rowPrice !== 'number' || !isFinite(rowPrice) || rowPrice < 0) {
+          throw new Error(`items[${i}].price (or top-level "price") must be a non-negative number`);
         }
       } else if (
         item.price !== undefined &&
