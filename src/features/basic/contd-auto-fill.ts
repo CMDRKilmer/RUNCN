@@ -163,23 +163,23 @@ function findListboxMatch(listbox: HTMLElement, needle: string): HTMLElement | u
   // poll-time. Without this we can only guess at whether polling
   // exited too early or whether the click target is from a stale
   // listbox.
-  console.warn(
-    '[contd-auto-fill] findListboxMatch: no match for',
-    needle,
-    'in listbox containing',
-    items.length,
-    'items; sample texts:',
-    JSON.stringify(
-      Array.from(items)
-        .slice(0, 8)
-        .map(i => {
-          const text = (i.textContent ?? '').trim();
-          return { text, candidates: extractIdCandidates(text) };
-        }),
-      null,
-      2,
-    ),
-  );
+  // console.warn(
+  //   '[contd-auto-fill] findListboxMatch: no match for',
+  //   needle,
+  //   'in listbox containing',
+  //   items.length,
+  //   'items; sample texts:',
+  //   JSON.stringify(
+  //     Array.from(items)
+  //       .slice(0, 8)
+  //       .map(i => {
+  //         const text = (i.textContent ?? '').trim();
+  //         return { text, candidates: extractIdCandidates(text) };
+  //       }),
+  //     null,
+  //     2,
+  //   ),
+  // );
   return undefined;
 }
 
@@ -528,14 +528,14 @@ async function waitForListboxItems(
     await sleep(50);
   }
   const liveAtTimeout = queryListbox();
-  console.warn(
-    '[contd-auto-fill] waitForListboxItems timeout: listbox=',
-    liveAtTimeout === null
-      ? 'NOT MOUNTED'
-      : `mounted with ${liveAtTimeout.children.length} children`,
-    'input.value=',
-    `"${input.value}"`,
-  );
+  // console.warn(
+  //   '[contd-auto-fill] waitForListboxItems timeout: listbox=',
+  //   liveAtTimeout === null
+  //     ? 'NOT MOUNTED'
+  //     : `mounted with ${liveAtTimeout.children.length} children`,
+  //   'input.value=',
+  //   `"${input.value}"`,
+  // );
   throw new Error(`Listbox opened but no items appeared within ${timeoutMs}ms`);
 }
 
@@ -1049,10 +1049,10 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
   const addressInputsBeforeApply = Array.from(
     applyForm.querySelectorAll(`input.${C.AddressSelector.input}`),
   ).map(i => `"${(i as HTMLInputElement).value}"`);
-  console.info(
-    '[contd-auto-fill] before Apply: address inputs =',
-    addressInputsBeforeApply.join(', ') || '<none>',
-  );
+  // console.info(
+  //   '[contd-auto-fill] before Apply: address inputs =',
+  //   addressInputsBeforeApply.join(', ') || '<none>',
+  // );
   const applyButton = notNullish(
     _$$(applyForm, 'button').find(b => /apply template|应用模板/i.test(b.textContent ?? '')),
     'Apply Template button not found',
@@ -1063,7 +1063,7 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
   // whether the address carried over.
   const conditionsFormForDump = await findConditionsForm(tile);
   const conditionsText = (conditionsFormForDump.textContent ?? '').replace(/\s+/g, ' ').trim();
-  console.info('[contd-auto-fill] after Apply: conditions text =', conditionsText);
+  // console.info('[contd-auto-fill] after Apply: conditions text =', conditionsText);
 
   // 7. The conditions form now has a "保存" button. Click it.
   const conditionsForm = await findConditionsForm(tile);
@@ -1282,7 +1282,7 @@ function buildPanel(tile: PrunTile) {
       setStatus('Done');
     } catch (e) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`, true);
-      console.warn('Auto-fill failed', e);
+      // console.warn('Auto-fill failed', e);
     } finally {
       button.removeAttribute('disabled');
     }
