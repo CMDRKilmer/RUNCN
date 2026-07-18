@@ -1,7 +1,16 @@
 # 更新日志
 
-**日期**: 2026-07-16  
-**说明**: 同步 c129df16 (tag 26.7.16) 之后的提交内容
+**日期**: 2026-07-18  
+**说明**: 修复 CONTD 地址自动填充在 CONTGEN 引入后的回归
+
+## 26.7.17 (后续)
+
+### 🐛 Bug Fixes
+
+- **`CONTD`**：地址自动填充回归。CONTGEN 引入期间对 `selectListboxItem` / `selectAddressListboxItem` 的拆分与 `clickElement` 改造破坏了模板位置栏的 React-Autowhatever `onSuggestionSelected`。恢复成 bb9720ce 版本的统一 `selectListboxItem`（同时处理 MaterialSelector 与 AddressSelector 的嵌套 sections）+ 原生 `.click()` 事件。
+- **`CONTD`**：`changeInputValue` 加 `beforeinput` 事件反而抑制了 AddressSelector 的 server search。回退到原始版本（仅 `input` + `change`）。
+- **`CONTD`**：BUY/SELL per-row `price` 在缺失时回退到顶层 `price`，避免每行重复填写。
+- **`XIT CONTGEN`**：BUY/SELL 顶部 `price` 作为每行单价默认值，与 `validateConfig` 校验规则保持一致；per-row `price: 0` 不再写入 JSON（让校验回退到顶层）。
 
 ## 26.7.17
 
