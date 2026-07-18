@@ -307,7 +307,7 @@ async function copyJson() {
 
       <Commands label="操作">
         <PrunButton :disabled="!canSubmit" primary @click="sendToContd">发送到 CONTD</PrunButton>
-        <PrunButton :disabled="!canSubmit" @click="copyJson">复制 JSON</PrunButton>
+        <PrunButton :disabled="!canSubmit" primary @click="copyJson">复制 JSON</PrunButton>
       </Commands>
 
       <div v-if="!canSubmit" :class="$style.errors">
