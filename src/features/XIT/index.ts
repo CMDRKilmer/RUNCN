@@ -12,6 +12,7 @@ import './CONTC/CONTC';
 import './CONTS/CONTS';
 import './CONTSS/CONTSS';
 import './CONTFF/CONTFF';
+import './CONTGEN/CONTGEN';
 import './CXTS/CXTS';
 import './DEV/DEV';
 import './ELEC/ELEC';

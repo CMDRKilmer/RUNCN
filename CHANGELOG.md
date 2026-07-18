@@ -9,6 +9,7 @@
 
 - **`CONTD`**：JSON 自动填充新增 `SHIP` 模板支持。需要 `origin` + `destination` + 顶层 `price`（per-row `price` 不再必需），位置必须使用行星/基地 naturalId（不再支持 station 名如 `Hortus Station`，地址选择器仅搜行星）。
 - **`CONTD`**：JSON 自动填充新增 `name` 字段，可在合同头部写入合同名称（与 conditions 表分开保存：先写名 + 点 header 保存按钮 PATCH，再开 template modal 填条件）。
+- **`XIT CONTGEN`**：新增合同 JSON 生成器面板（`XIT CONTGEN` / `XIT CGEN`）。通过表单填写合同条件（合同类型 / 币种 / 名称 / 目的地 / 出发地 / 运费 / 物品清单）实时生成 JSON，可一键复制或直接发送到 CONTD 自动填充面板。物品 ticker 支持模糊搜索（ticker + i18n 名称），行星地址支持 fuzzy prefix 搜索。
 
 ### 🐛 Bug Fixes
 
