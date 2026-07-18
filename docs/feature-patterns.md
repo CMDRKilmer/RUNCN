@@ -135,6 +135,57 @@ applyCssRule(`.${C.Frame.logo}`, $style.logo);
 
 ---
 
+## Automating PrUn Inputs (React Controlled Components)
+
+PrUn ships a React bundle from its CDN. Its React-Autowhatever wrappers (AddressSelector, MaterialSelector) and most form `<input>`/`<select>` elements are **React controlled**. To set their values from an extension:
+
+### Value-setting recipe
+
+```ts
+import { changeInputValue } from '@src/util';
+
+// 1. Focus first so React-Autowhatever opens the listbox.
+input.focus();
+await sleep(50);
+// 2. Set value through the native prototype setter (bypasses React's
+//    per-instance override) and dispatch the same events React's
+//    onChange listens for. Do NOT add `beforeinput` — it suppresses
+//    AddressSelector's server search.
+changeInputValue(input, value);
+// 3. Wait briefly for PrUn's debounced server search (AddressSelector)
+//    or local filter (MaterialSelector) to populate the listbox.
+await sleep(500);
+// 4. Click the listbox item using the NATIVE .click() (not a full
+//    pointer/mouse event sequence). React-Autowhatever's
+//    onSuggestionSelected listens for the trusted click that
+//    HTMLElement.click() synthesizes. Synthetic dispatchEvent
+//    sequences are filtered out.
+await selectListboxItem(input, value);
+```
+
+### Click recipe
+
+```ts
+// Good — triggers React-Autowhatever onSuggestionSelected reliably.
+target.click();
+
+// Bad — dispatches full pointer/mouse sequence. Often results in the
+// listbox item being hovered/highlighted but never selected, so
+// onSuggestionSelected never fires and PrUn's modal-close drops the
+// value silently.
+await clickElement(target);
+```
+
+### Why this matters
+
+PrUn's modal dialogs (template selection, contract conditions) read their state from PrUn's React state tree at the moment their `应用` / `保存` button is clicked. If `onSuggestionSelected` never fired, the value visible in `input.value` is just a DOM mirror — the React state stays empty, and the modal-close drops the value. The `_valueTracker` reset + native setter + clickElement chain we tried first did populate `input.value` but never reached React state.
+
+### Selecting from listbox
+
+See `selectListboxItem` in `src/features/basic/contd-auto-fill.ts` for a working universal selector that handles both flat MaterialSelector lists and nested AddressSelector sections.
+
+---
+
 ## DOM Helpers
 
 Four auto-imported functions for finding elements by CSS class name (`C.X.y`) or HTML tag name.
