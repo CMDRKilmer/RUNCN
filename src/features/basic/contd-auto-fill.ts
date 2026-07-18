@@ -5,6 +5,7 @@ import { changeInputValue, changeSelectIndex, clickElement, focusElement } from 
 import { sleep } from '@src/utils/sleep';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
+import { getTileState } from '@src/store/user-data-tiles';
 import $style from './contd-auto-fill.module.css';
 
 interface DraftItem {
@@ -828,6 +829,16 @@ function buildPanel(tile: PrunTile) {
   textarea.placeholder = 'Enter contract configuration as JSON';
   textarea.spellcheck = false;
   inputWrap.appendChild(textarea);
+
+  // Consume pending CONTGEN output. CONTGEN's "Send to CONTD" button
+  // writes the generated JSON to this workspace key; we read it once
+  // on panel mount and pre-fill the textarea, then clear the key so
+  // a stale value doesn't refill on every re-mount.
+  const pendingContgen = getTileState<{ json?: string }>('contgen-output');
+  if (typeof pendingContgen.json === 'string' && pendingContgen.json.length > 0) {
+    textarea.value = pendingContgen.json;
+    delete pendingContgen.json;
+  }
 
   const controls = document.createElement('div');
   controls.className = $style.controls;

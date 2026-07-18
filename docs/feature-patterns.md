@@ -97,6 +97,8 @@ To pass data between XIT commands (e.g., a list view opening an editor), use a n
 
 The receiver's `useTileState` reads from its own tile ID (injected by the plugin), **not** from the named key. You must explicitly consume and clear the workspace.
 
+Non-Vue basic features (e.g., a feature that builds a DOM panel via `tiles.observe`) can't use `useTileState`. They read the workspace directly via `getTileState('my-workspace')` on panel mount, copy the value into the panel's local DOM (textarea, input, etc.), then `delete` the workspace key — same consume-and-clear contract, just without the Vue composable.
+
 ---
 
 ## Auto-Imports (no explicit import needed)
