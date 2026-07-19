@@ -15,14 +15,6 @@ import {
 // with a real key.
 const ENCRYPTED_API_KEY_PREFIX = '__rpenc__:';
 
-const CNONCE_PATTERN = /^[A-Za-z0-9+/=]{22,24}$/;
-const REPLAY_WINDOW_MS = 30_000;
-const seenCnonces = new Set<string>();
-
-function isValidCnonce(value: unknown): value is string {
-  return typeof value === 'string' && CNONCE_PATTERN.test(value);
-}
-
 function isExtensionContext(): boolean {
   return (
     typeof chrome !== 'undefined' &&
@@ -118,6 +110,10 @@ async function loadUserData() {
       return;
     }
     if (e.data.type === 'rp-save-secret-keys') {
+      if (e.ports.length === 0) {
+        return;
+      }
+      const port = e.ports[0];
       const { secretKeys } = e.data as { secretKeys: Record<string, string> };
       const sanitized: Record<string, string> = {};
       if (typeof secretKeys === 'object' && secretKeys !== null) {
@@ -134,23 +130,21 @@ async function loadUserData() {
       } catch {
         console.warn('refined-prun: Failed to save secret keys to storage');
       }
-      window.postMessage({ type: 'rp-secret-keys-saved' }, location.origin);
+      // Reply on the transferred port so the ack is delivered only to
+      // the page-side postSaveSecretKeys() caller, never broadcast on
+      // window.
+      port.postMessage({ type: 'rp-secret-keys-saved' });
       return;
     }
     if (e.data.type === 'rp-decrypt-api-key') {
-      const { cnonce, wrapped } = e.data as { cnonce: string; wrapped: string };
+      if (e.ports.length === 0) {
+        return;
+      }
+      const port = e.ports[0];
+      const { wrapped } = e.data as { wrapped: string };
       let plaintext: string | null = null;
       try {
-        if (
-          typeof wrapped === 'string' &&
-          wrapped.startsWith(ENCRYPTED_API_KEY_PREFIX) &&
-          isValidCnonce(cnonce)
-        ) {
-          if (seenCnonces.has(cnonce)) {
-            return;
-          }
-          seenCnonces.add(cnonce);
-          setTimeout(() => seenCnonces.delete(cnonce), REPLAY_WINDOW_MS);
+        if (typeof wrapped === 'string' && wrapped.startsWith(ENCRYPTED_API_KEY_PREFIX)) {
           const payload = JSON.parse(wrapped.slice(ENCRYPTED_API_KEY_PREFIX.length)) as unknown;
           if (payload && typeof payload === 'object' && 'v' in payload) {
             plaintext = await decryptWithSessionKey(
@@ -161,7 +155,9 @@ async function loadUserData() {
       } catch {
         plaintext = null;
       }
-      window.postMessage({ type: 'rp-decrypt-api-key-result', cnonce, plaintext }, location.origin);
+      // Reply on the transferred port so plaintext is delivered only to
+      // the page-side resolveApiKey() caller, never broadcast on window.
+      port.postMessage({ plaintext });
       return;
     }
   });
