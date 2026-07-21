@@ -121,7 +121,7 @@ function resetForm() {
 </script>
 
 <template>
-  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.container]">
+  <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.container]">
     <div v-if="publishedTaskId" :class="$style.success">
       已发布，任务 ID：{{ publishedTaskId }}
       <PrunButton primary inline @click="resetForm">再发布一个</PrunButton>

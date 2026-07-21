@@ -176,7 +176,7 @@ function onNotesChanged() {
     整体走 PrUn panel 风格：背景/边框/标题用 C.Panel 类，标题用 SectionHeader，
     按钮全部 PrunButton，输入框走 forms/Active。
   -->
-  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.detail]">
+  <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.detail]">
     <div :class="$style.header">
       <PrunButton dark inline @click="emit('close')">← 返回</PrunButton>
       <span :class="$style.status">{{ localTask.status }}</span>

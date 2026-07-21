@@ -55,7 +55,7 @@ async function onSubmit() {
 
 <template>
   <div :class="$style.overlay">
-    <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]">
+    <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.card]">
       <SectionHeader>上报合同 ID</SectionHeader>
       <div :class="$style.form">
         <Active label="合同 ID">

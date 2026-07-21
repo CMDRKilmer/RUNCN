@@ -84,7 +84,9 @@ const statusColor = computed(() => {
     用 PrUn 官方 panel / panelHeader 类做卡片质感。
     cursor:pointer 让整张卡可点击，hover 改用 PrUn 的交互色。
   -->
-  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]" @click="emit('click', task)">
+  <div
+    :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.card]"
+    @click="emit('click', task)">
     <div :class="$style.header">
       <span :class="[$style.type, C.type.typeSmall]">{{ typeLabel }}</span>
       <span :class="$style.status" :style="{ color: statusColor }">{{ task.status }}</span>

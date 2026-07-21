@@ -98,7 +98,7 @@ async function onSubmit() {
       用 PrUn 官方 panel + Header + forms/Active + PrunButton。
       tab 切换走 PrUn 自带 Tabs 样式（带 toggleIndicator）。
     -->
-    <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]">
+    <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.card]">
       <Header>组织管理面板</Header>
 
       <div :class="C.Tabs.tabs">

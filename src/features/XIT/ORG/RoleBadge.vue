@@ -13,12 +13,17 @@ const label = computed(() => {
 </script>
 
 <template>
+  <!--
+    PrUn 没有官方 C.Chip.* 类（项目里唯一 chip 风格的地方是 StatusFilter 的 statusChip，但语义不同），
+    所以这里只走项目自身的 CSS module：双层渐变模拟 PrUn 金属/合金质感。
+    BOARD 用暖金色 chip；COLLABORATOR 用冷灰 chip。
+  -->
   <span
     v-if="user"
     :class="[
-      C.Chip.chip,
       C.fonts.fontRegular,
       C.type.typeSmall,
+      $style.chip,
       user.role === 'BOARD' ? $style.board : $style.collaborator,
     ]">
     {{ label }}
@@ -26,13 +31,20 @@ const label = computed(() => {
 </template>
 
 <style module>
-/* PrUn 风格 chip：双层渐变模拟 PrUn 金属/合金质感。BOARD 用暖金色，COLLABORATOR 用冷灰。 */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.4);
+  font-weight: 600;
+  text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.5);
+}
 .board {
-  background: linear-gradient(180deg, #a36d1e, #6e4a17);
-  color: #f6e5b6;
+  background: linear-gradient(180deg, #c8893a 0%, #8a5a1d 50%, #6e4717 100%);
+  color: #fff3d4;
 }
 .collaborator {
-  background: linear-gradient(180deg, #2c333d, #1d2229);
-  color: #b3b3b3;
+  background: linear-gradient(180deg, #424d5a 0%, #2c333d 50%, #1d2229 100%);
+  color: #c8c8c8;
 }
 </style>
