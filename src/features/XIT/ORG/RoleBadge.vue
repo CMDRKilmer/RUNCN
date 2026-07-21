@@ -15,25 +15,24 @@ const label = computed(() => {
 <template>
   <span
     v-if="user"
-    :class="[$style.badge, user.role === 'BOARD' ? $style.board : $style.collaborator]">
+    :class="[
+      C.Chip.chip,
+      C.fonts.fontRegular,
+      C.type.typeSmall,
+      user.role === 'BOARD' ? $style.board : $style.collaborator,
+    ]">
     {{ label }}
   </span>
 </template>
 
 <style module>
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  font-size: 11px;
-  border-radius: 2px;
-  border: 1px solid var(--panel-border);
-}
+/* PrUn 风格 chip：双层渐变模拟 PrUn 金属/合金质感。BOARD 用暖金色，COLLABORATOR 用冷灰。 */
 .board {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-color: var(--accent);
+  background: linear-gradient(180deg, #a36d1e, #6e4a17);
+  color: #f6e5b6;
 }
 .collaborator {
-  color: var(--text-muted);
+  background: linear-gradient(180deg, #2c333d, #1d2229);
+  color: #b3b3b3;
 }
 </style>

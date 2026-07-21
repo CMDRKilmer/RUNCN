@@ -4,6 +4,12 @@ import type { ContractCreator, OrgTask, OrgUser } from '@src/infrastructure/org-
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
+import SectionHeader from '@src/components/SectionHeader.vue';
+import ActionBar from '@src/components/ActionBar.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import Active from '@src/components/forms/Active.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser }>();
 const emit = defineEmits<{
@@ -49,30 +55,27 @@ async function onSubmit() {
 
 <template>
   <div :class="$style.overlay">
-    <div :class="$style.card">
-      <h3>上报合同 ID</h3>
+    <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]">
+      <SectionHeader>上报合同 ID</SectionHeader>
       <div :class="$style.form">
-        <label>
-          合同 ID
-          <input v-model="contractId" placeholder="如 KS8F2H..." list="candidate-contracts" />
-          <datalist id="candidate-contracts">
-            <option v-for="c in candidateContracts" :key="c.id" :value="c.id" />
-          </datalist>
-        </label>
-        <label>
-          合同创建方
-          <select v-model="creator">
-            <option value="publisher">发布者创建</option>
-            <option value="claimer">接取者创建</option>
-          </select>
-        </label>
+        <Active label="合同 ID">
+          <TextInput v-model="contractId" />
+        </Active>
+        <Active label="合同创建方">
+          <SelectInput
+            v-model="creator"
+            :options="[
+              { value: 'publisher', label: '发布者创建' },
+              { value: 'claimer', label: '接取者创建' },
+            ]" />
+        </Active>
         <div v-if="error" :class="$style.error">{{ error }}</div>
-        <div :class="$style.actions">
-          <button :disabled="!canSubmit" @click="onSubmit">
+        <ActionBar>
+          <PrunButton primary :disabled="!canSubmit" @click="onSubmit">
             {{ loading ? '提交中...' : '上报' }}
-          </button>
-          <button @click="emit('cancel')">取消</button>
-        </div>
+          </PrunButton>
+          <PrunButton neutral @click="emit('cancel')">取消</PrunButton>
+        </ActionBar>
       </div>
     </div>
   </div>
@@ -92,53 +95,18 @@ async function onSubmit() {
   z-index: 1000;
 }
 .card {
-  background: var(--panel-background);
-  border: 1px solid var(--panel-border);
-  padding: 16px;
-  width: 360px;
+  padding: 12px 16px 16px;
+  width: 380px;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
-}
-.form label {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-  gap: 4px;
-}
-.form input,
-.form select {
-  padding: 6px 8px;
-  border: 1px solid var(--panel-border);
-  background: var(--input-background);
-  color: var(--text);
-}
-.actions {
-  display: flex;
   gap: 8px;
-  justify-content: flex-end;
-}
-.actions button {
-  padding: 6px 12px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-background-alt);
-  color: var(--text);
-  cursor: pointer;
-}
-.actions button:first-child {
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border-color: var(--accent);
-}
-.actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  margin-top: 4px;
 }
 .error {
   color: var(--text-negative);
   font-size: 12px;
+  padding: 2px 0;
 }
 </style>

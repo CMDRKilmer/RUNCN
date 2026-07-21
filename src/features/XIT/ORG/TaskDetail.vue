@@ -15,6 +15,11 @@ import {
 } from '@src/infrastructure/org-api/contract-link';
 import { sendTaskToContd, formatAmountWithCurrency, formatNumber } from './utils';
 import NoteEditor from './NoteEditor.vue';
+import SectionHeader from '@src/components/SectionHeader.vue';
+import ActionBar from '@src/components/ActionBar.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import Active from '@src/components/forms/Active.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser }>();
 const emit = defineEmits<{
@@ -167,194 +172,179 @@ function onNotesChanged() {
 </script>
 
 <template>
-  <div :class="$style.detail">
-    <header :class="$style.header">
-      <button :class="$style.back" @click="emit('close')">← 返回</button>
+  <!--
+    整体走 PrUn panel 风格：背景/边框/标题用 C.Panel 类，标题用 SectionHeader，
+    按钮全部 PrunButton，输入框走 forms/Active。
+  -->
+  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.detail]">
+    <div :class="$style.header">
+      <PrunButton dark inline @click="emit('close')">← 返回</PrunButton>
       <span :class="$style.status">{{ localTask.status }}</span>
-    </header>
+    </div>
 
-    <section :class="$style.section">
-      <h3>基本信息</h3>
-      <div>类型：{{ localTask.type }}</div>
-      <div>名称：{{ localTask.contractJson.name || '—' }}</div>
-      <div>货币：{{ localTask.contractJson.currency }}</div>
-      <div v-if="localTask.contractJson.location">位置：{{ localTask.contractJson.location }}</div>
+    <SectionHeader>基本信息</SectionHeader>
+    <div :class="$style.kv">
+      <div><span :class="$style.key">类型</span>{{ localTask.type }}</div>
+      <div><span :class="$style.key">名称</span>{{ localTask.contractJson.name || '—' }}</div>
+      <div><span :class="$style.key">货币</span>{{ localTask.contractJson.currency }}</div>
+      <div v-if="localTask.contractJson.location">
+        <span :class="$style.key">位置</span>{{ localTask.contractJson.location }}
+      </div>
       <div v-if="localTask.contractJson.origin || localTask.contractJson.destination">
-        路径：{{ localTask.contractJson.origin }} → {{ localTask.contractJson.destination }}
+        <span :class="$style.key">路径</span>{{ localTask.contractJson.origin }} →
+        {{ localTask.contractJson.destination }}
       </div>
       <div v-if="localTask.contractJson.price !== undefined">
-        总价：{{
+        <span :class="$style.key">总价</span>
+        {{
           formatAmountWithCurrency(localTask.contractJson.price, localTask.contractJson.currency)
         }}
       </div>
       <div v-if="localTask.contractJson.deadline !== undefined">
-        期限：{{ formatNumber(localTask.contractJson.deadline) }} 天
+        <span :class="$style.key">期限</span>
+        {{ formatNumber(localTask.contractJson.deadline) }} 天
       </div>
-      <div>发布者：{{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})</div>
+      <div>
+        <span :class="$style.key">发布者</span>
+        {{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})
+      </div>
       <div v-if="localTask.claimerUsername">
-        接取者：{{ localTask.claimerUsername }} ({{ localTask.claimerCompanyCode }})
+        <span :class="$style.key">接取者</span>
+        {{ localTask.claimerUsername }} ({{ localTask.claimerCompanyCode }})
       </div>
-      <div v-if="localTask.contractId">关联合同：{{ localTask.contractId }}</div>
-      <div v-if="localTask.expiresAt"
-        >有效期：{{ new Date(localTask.expiresAt).toLocaleString() }}</div
-      >
-    </section>
+      <div v-if="localTask.contractId">
+        <span :class="$style.key">关联合同</span>{{ localTask.contractId }}
+      </div>
+      <div v-if="localTask.expiresAt">
+        <span :class="$style.key">有效期</span>
+        {{ new Date(localTask.expiresAt).toLocaleString() }}
+      </div>
+    </div>
 
-    <section :class="$style.section">
-      <h3>物品清单</h3>
-      <ul>
-        <li v-for="(item, i) in localTask.contractJson.items" :key="i">
-          {{ formatNumber(item.amount) }}× {{ item.commodity }}
-          <span v-if="item.price !== undefined">
-            @ {{ formatAmountWithCurrency(item.price, localTask.contractJson.currency)
-            }}<span v-if="item.amount > 1">
-              （共
-              {{
-                formatAmountWithCurrency(item.price * item.amount, localTask.contractJson.currency)
-              }}）</span
-            >
-          </span>
-        </li>
-      </ul>
-    </section>
+    <SectionHeader>物品清单</SectionHeader>
+    <ul :class="$style.items">
+      <li v-for="(item, i) in localTask.contractJson.items" :key="i">
+        {{ formatNumber(item.amount) }}× {{ item.commodity }}
+        <span v-if="item.price !== undefined">
+          @ {{ formatAmountWithCurrency(item.price, localTask.contractJson.currency)
+          }}<span v-if="item.amount > 1">
+            （共
+            {{
+              formatAmountWithCurrency(item.price * item.amount, localTask.contractJson.currency)
+            }}）</span
+          >
+        </span>
+      </li>
+    </ul>
 
     <section v-if="error" :class="$style.error">{{ error }}</section>
 
-    <section :class="$style.actions">
-      <button v-if="canClaim" :disabled="loading" @click="onClaim">接取任务</button>
-      <button v-if="canRelease" :disabled="loading" @click="onRelease">释放任务</button>
-      <button v-if="canCreateContract" @click="onCreateContract"
-        >创建合同（CONTGEN → CONTD）</button
+    <!-- ActionBar 自带容器间距与分隔；PrunButton 自动套上主题。 -->
+    <ActionBar>
+      <PrunButton v-if="canClaim" primary :disabled="loading" @click="onClaim">接取任务</PrunButton>
+      <PrunButton v-if="canRelease" primary :disabled="loading" @click="onRelease"
+        >释放任务</PrunButton
       >
-      <button v-if="canCreateContract" @click="emit('link-contract')">上报合同 ID</button>
-      <!--
-        "取消任务" 仅在非 terminal 状态显示（CANCELLED/COMPLETED 用删除替代）
-      -->
-      <button v-if="canShowCancelButton" :disabled="loading" @click="onCancel"> 取消任务 </button>
-      <button
+      <PrunButton v-if="canCreateContract" dark @click="onCreateContract"
+        >创建合同（CONTGEN → CONTD）</PrunButton
+      >
+      <PrunButton v-if="canCreateContract" dark @click="emit('link-contract')"
+        >上报合同 ID</PrunButton
+      >
+      <PrunButton v-if="canShowCancelButton" neutral :disabled="loading" @click="onCancel">
+        取消任务
+      </PrunButton>
+      <PrunButton
         v-if="showBoardCancelButton && !showBoardCancel && canShowCancelButton"
+        dark
         :disabled="loading"
         @click="showBoardCancel = true">
         董事会取消此任务
-      </button>
-      <template v-if="showBoardCancel">
-        <input v-model="boardCancelReason" placeholder="取消原因（必填）" />
-        <button :disabled="loading" @click="onCancel">确认取消</button>
-        <button @click="showBoardCancel = false">放弃</button>
-      </template>
-      <!--
-        "删除任务" 仅发布者自己可见。CANCELLED/COMPLETED 状态清理冗余
-        任务用。二次确认输入 "DELETE" 才生效。
-      -->
-      <button
+      </PrunButton>
+      <PrunButton
         v-if="canDelete && !showDeleteConfirm"
+        danger
         :disabled="loading"
-        :class="$style.danger"
         @click="showDeleteConfirm = true">
         删除任务
-      </button>
-      <template v-if="showDeleteConfirm">
-        <input
-          v-model="deleteConfirmText"
-          placeholder="输入 DELETE 以确认"
-          :class="$style.dangerInput" />
-        <button
-          :disabled="loading || deleteConfirmText !== 'DELETE'"
-          :class="$style.danger"
-          @click="onDelete">
+      </PrunButton>
+    </ActionBar>
+
+    <template v-if="showBoardCancel">
+      <Active label="董事会取消原因（必填）">
+        <TextInput v-model="boardCancelReason" />
+      </Active>
+      <ActionBar>
+        <PrunButton danger :disabled="loading || !boardCancelReason" @click="onCancel"
+          >确认取消</PrunButton
+        >
+        <PrunButton neutral @click="showBoardCancel = false">放弃</PrunButton>
+      </ActionBar>
+    </template>
+
+    <template v-if="showDeleteConfirm">
+      <Active label="删除二次确认（输入 DELETE）">
+        <TextInput v-model="deleteConfirmText" />
+      </Active>
+      <ActionBar>
+        <PrunButton danger :disabled="loading || deleteConfirmText !== 'DELETE'" @click="onDelete">
           确认删除
-        </button>
-        <button
+        </PrunButton>
+        <PrunButton
+          neutral
           @click="
             showDeleteConfirm = false;
             deleteConfirmText = '';
           ">
           放弃
-        </button>
-      </template>
-    </section>
+        </PrunButton>
+      </ActionBar>
+    </template>
 
-    <section :class="$style.section">
-      <h3>备注</h3>
-      <NoteEditor :task-id="localTask.id" :notes="notes" @changed="onNotesChanged" />
-    </section>
+    <SectionHeader>备注</SectionHeader>
+    <NoteEditor :task-id="localTask.id" :notes="notes" @changed="onNotesChanged" />
   </div>
 </template>
 
 <style module>
 .detail {
-  padding: 12px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-background);
+  padding: 8px 12px 12px;
 }
 .header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 12px;
-}
-.back {
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  color: var(--text-muted);
-  padding: 4px 8px;
-  cursor: pointer;
+  align-items: center;
+  margin-bottom: 8px;
 }
 .status {
   font-size: 12px;
   color: var(--text-muted);
 }
-.section {
-  margin-bottom: 16px;
-  font-size: 13px;
-}
-.section h3 {
-  font-size: 13px;
-  margin: 0 0 6px;
-  color: var(--text);
-}
-.actions {
+/* KV 行：左对齐 key + value，模拟 PrUn 面板里的 key-value 列表样式 */
+.kv > div {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 12px 0;
-  border-top: 1px solid var(--panel-border);
-  border-bottom: 1px solid var(--panel-border);
+  gap: 12px;
+  padding: 2px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
 }
-.actions button {
-  padding: 6px 12px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-background-alt);
-  color: var(--text);
-  cursor: pointer;
+.key {
+  flex: 0 0 80px;
+  color: var(--text-muted);
+  text-align: right;
 }
-.actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.items {
+  margin: 4px 0 12px;
+  padding-left: 18px;
+  font-size: 13px;
 }
-.actions input {
-  flex: 1;
-  min-width: 200px;
-  padding: 6px 8px;
-  border: 1px solid var(--panel-border);
-  background: var(--input-background);
-  color: var(--text);
-}
-/* 删除相关危险样式：红色边框 + 悬停加深。disabled 灰禁。 */
-.danger {
-  border-color: var(--text-negative, #d9534f) !important;
-  color: var(--text-negative, #d9534f);
-}
-.danger:hover:not(:disabled) {
-  background: var(--text-negative, #d9534f) !important;
-  color: var(--text-on-accent, #fff);
-}
-.dangerInput {
-  border-color: var(--text-negative, #d9534f) !important;
+.items li {
+  margin-bottom: 2px;
 }
 .error {
   padding: 8px;
   color: var(--text-negative);
   background: var(--panel-background-alt);
-  margin-bottom: 12px;
+  margin: 8px 0;
 }
 </style>

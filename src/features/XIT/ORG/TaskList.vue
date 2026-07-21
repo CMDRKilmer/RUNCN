@@ -1,11 +1,25 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { OrgTask, OrgUser, PollScope } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import TaskCard from './TaskCard.vue';
 import TaskDetail from './TaskDetail.vue';
 import LinkContract from './LinkContract.vue';
 import EmptyState from './EmptyState.vue';
+import SectionHeader from '@src/components/SectionHeader.vue';
+
+const scopeLabel = computed(() => {
+  switch (props.scope) {
+    case 'board':
+      return '任务板';
+    case 'published':
+      return '我的发布';
+    case 'claimed':
+      return '我的接取';
+    default:
+      return '任务列表';
+  }
+});
 
 const props = defineProps<{
   scope: PollScope;
@@ -99,6 +113,9 @@ onBeforeUnmount(() => {
 
 <template>
   <div :class="$style.list">
+    <!-- 用 PrUn 风格小节标题（SectionHeader 已是 PrUn 官方样式） -->
+    <SectionHeader>{{ scopeLabel }}</SectionHeader>
+
     <div v-if="loading" :class="$style.info">加载中...</div>
     <div v-else-if="error" :class="$style.error">{{ error }}</div>
     <template v-else-if="tasks.length === 0">

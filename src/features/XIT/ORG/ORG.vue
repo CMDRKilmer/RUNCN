@@ -17,6 +17,9 @@ import RoleBadge from './RoleBadge.vue';
 import TaskList from './TaskList.vue';
 import PublishTask from './PublishTask.vue';
 import BoardPanel from './board/BoardPanel.vue';
+import Header from '@src/components/Header.vue';
+import ActionBar from '@src/components/ActionBar.vue';
+import PrunButton from '@src/components/PrunButton.vue';
 
 const session = ref<AuthSession | null>(getStoredSession());
 const currentUser = computed<OrgUser | null>(() => session.value?.user ?? null);
@@ -103,20 +106,41 @@ const tabs = computed(() => {
   <div :class="$style.container">
     <AuthOverlay v-if="showAuth" @authenticated="onAuthenticated" />
     <template v-else-if="session">
-      <header :class="$style.header">
-        <span :class="$style.user">{{ session.user.displayName }}</span>
+      <!--
+        顶部条：PrUn 官方 Header（大字体）+ RoleBadge chip + 登出按钮。
+        ActionBar 让按钮自动带上容器间距。整体观感与 XIT 其它面板一致。
+      -->
+      <div :class="$style.topBar">
+        <Header>{{ session.user.displayName }}</Header>
         <RoleBadge :user="session.user" />
-        <button :class="$style.logout" @click="onLogout">登出</button>
-      </header>
-      <nav :class="$style.tabs">
-        <button
-          v-for="t in tabs"
-          :key="t.key"
-          :class="[$style.tab, tab === t.key && $style.active]"
-          @click="tab = t.key">
-          {{ t.label }}
-        </button>
-      </nav>
+        <ActionBar>
+          <PrunButton dark inline @click="onLogout">登出</PrunButton>
+        </ActionBar>
+      </div>
+
+      <!--
+        Tabs 用 PrUn 自带 .toggleIndicator 阴影样式，避免再写一份手工 tab。
+      -->
+      <div :class="C.Tabs.tabs">
+        <div v-for="t in tabs" :key="t.key" :class="C.Tabs.header" @click="tab = t.key">
+          <template v-if="tab === t.key">
+            <a :class="[C.Tabs.tabActive, C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]">
+              {{ t.label }}
+            </a>
+            <div
+              :class="[
+                C.Tabs.toggleIndicator,
+                C.Tabs.toggleIndicatorActive,
+                C.effects.shadowPrimary,
+              ]" />
+          </template>
+          <template v-else>
+            <a :class="[C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]">{{ t.label }}</a>
+            <div :class="[C.Tabs.toggleIndicator]" />
+          </template>
+        </div>
+      </div>
+
       <main :class="$style.content">
         <TaskList
           v-if="tab === 'board' || tab === 'published' || tab === 'claimed'"
@@ -136,41 +160,11 @@ const tabs = computed(() => {
   height: 100%;
   padding: 12px;
 }
-.header {
+.topBar {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--panel-border);
-}
-.user {
-  font-weight: 600;
-}
-.logout {
-  margin-left: auto;
-  padding: 4px 8px;
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--panel-border);
-}
-.tab {
-  padding: 4px 12px;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.tab.active {
-  color: var(--text);
-  border-color: var(--panel-border);
-  background: var(--panel-background-alt);
+  padding-bottom: 6px;
 }
 .content {
   flex: 1;

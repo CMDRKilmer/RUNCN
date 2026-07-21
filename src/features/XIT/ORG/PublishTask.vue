@@ -3,6 +3,13 @@ import { computed, ref } from 'vue';
 import type { TaskContractJson, TaskType } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import { HttpError } from '@src/infrastructure/org-api/client';
+import SectionHeader from '@src/components/SectionHeader.vue';
+import ActionBar from '@src/components/ActionBar.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import Active from '@src/components/forms/Active.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
+import NumberInput from '@src/components/forms/NumberInput.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
 
 type ItemType = { ticker: string; amount: number; price?: number };
 
@@ -114,160 +121,144 @@ function resetForm() {
 </script>
 
 <template>
-  <div :class="$style.container">
+  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.container]">
     <div v-if="publishedTaskId" :class="$style.success">
       已发布，任务 ID：{{ publishedTaskId }}
-      <button @click="resetForm">再发布一个</button>
+      <PrunButton primary inline @click="resetForm">再发布一个</PrunButton>
     </div>
 
     <form v-else :class="$style.form" @submit.prevent="onPublish">
+      <SectionHeader>基本信息</SectionHeader>
       <div :class="$style.row">
-        <label>
-          类型
-          <select v-model="type">
-            <option value="BUY">采购 BUY</option>
-            <option value="SELL">出售 SELL</option>
-            <option value="SHIP">运输 SHIP</option>
-          </select>
-        </label>
-        <label>
-          货币
-          <select v-model="currency">
-            <option>ICA</option>
-            <option>NCC</option>
-            <option>AIC</option>
-            <option>CIS</option>
-          </select>
-        </label>
-        <label>
-          合同名称
-          <input v-model="contractName" placeholder="可选" />
-        </label>
+        <Active label="类型">
+          <SelectInput
+            v-model="type"
+            :options="[
+              { value: 'BUY', label: '采购 BUY' },
+              { value: 'SELL', label: '出售 SELL' },
+              { value: 'SHIP', label: '运输 SHIP' },
+            ]" />
+        </Active>
+        <Active label="货币">
+          <SelectInput
+            v-model="currency"
+            :options="[
+              { value: 'ICA', label: 'ICA' },
+              { value: 'NCC', label: 'NCC' },
+              { value: 'AIC', label: 'AIC' },
+              { value: 'CIS', label: 'CIS' },
+            ]" />
+        </Active>
+        <Active label="合同名称（可选）">
+          <TextInput v-model="contractName" />
+        </Active>
       </div>
 
       <div :class="$style.row">
-        <label v-if="!isShip">
-          位置
-          <input v-model="location" placeholder="如 ZV-307a" />
-        </label>
+        <Active v-if="!isShip" label="位置">
+          <TextInput v-model="location" placeholder="如 ZV-307a" />
+        </Active>
         <template v-else>
-          <label>
-            起点
-            <input v-model="origin" />
-          </label>
-          <label>
-            终点
-            <input v-model="destination" />
-          </label>
+          <Active label="起点">
+            <TextInput v-model="origin" />
+          </Active>
+          <Active label="终点">
+            <TextInput v-model="destination" />
+          </Active>
         </template>
       </div>
 
       <div :class="$style.row">
-        <label>
-          顶层总价（可选，BUY/SELL 无行价时必填）
-          <input v-model.number="price" type="number" min="0" />
-        </label>
-        <label>
-          期限（天，可选）
-          <input v-model.number="deadline" type="number" min="1" />
-        </label>
-        <label>
-          有效期（小时）
-          <input v-model.number="expiresAfterHours" type="number" min="1" />
-        </label>
+        <Active label="顶层总价（BUY/SELL 无行价时必填）">
+          <NumberInput v-model="price" :min="0" />
+        </Active>
+        <Active label="期限（天）">
+          <NumberInput v-model="deadline" :min="1" />
+        </Active>
+        <Active label="有效期（小时）">
+          <NumberInput v-model="expiresAfterHours" :min="1" />
+        </Active>
       </div>
 
+      <SectionHeader>物品清单</SectionHeader>
       <div :class="$style.items">
-        <div>物品清单</div>
         <div v-for="(item, i) in items" :key="i" :class="$style.itemRow">
-          <input v-model="item.ticker" placeholder="物料代码" />
-          <input v-model.number="item.amount" type="number" min="1" placeholder="数量" />
-          <input
-            v-model.number="item.price"
-            type="number"
-            min="0"
-            placeholder="单价（SHIP 不用）" />
-          <button type="button" @click="removeItem(i)">删除</button>
+          <Active label="物料">
+            <TextInput v-model="item.ticker" />
+          </Active>
+          <Active label="数量">
+            <NumberInput v-model="item.amount" :min="1" />
+          </Active>
+          <Active label="单价">
+            <NumberInput v-model="item.price" :min="0" />
+          </Active>
+          <PrunButton danger inline @click="removeItem(i)">删除</PrunButton>
         </div>
-        <button type="button" @click="addItem">添加物品</button>
+        <ActionBar>
+          <PrunButton dark inline type="button" @click="addItem">添加物品</PrunButton>
+        </ActionBar>
       </div>
 
       <div v-if="error" :class="$style.error">{{ error }}</div>
 
-      <button type="submit" :disabled="!canSubmit" :class="$style.submit">
-        {{ loading ? '发布中...' : '发布任务' }}
-      </button>
+      <ActionBar>
+        <PrunButton primary type="submit" :disabled="!canSubmit">
+          {{ loading ? '发布中...' : '发布任务' }}
+        </PrunButton>
+      </ActionBar>
     </form>
   </div>
 </template>
 
 <style module>
 .container {
-  padding: 12px;
+  padding: 8px 12px 12px;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
 }
 .row {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
 }
-.row label {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
+.row > * {
   flex: 1;
-  min-width: 120px;
-}
-.row input,
-.row select {
-  padding: 6px 8px;
-  border: 1px solid var(--panel-border);
-  background: var(--input-background);
-  color: var(--text);
+  min-width: 140px;
 }
 .items {
   border: 1px solid var(--panel-border);
   padding: 8px;
+  background: var(--panel-background-alt);
 }
 .itemRow {
   display: flex;
   gap: 6px;
   margin-bottom: 6px;
+  align-items: flex-end;
 }
-.itemRow input {
+.itemRow > :first-child {
   flex: 1;
-  padding: 4px 6px;
-  border: 1px solid var(--panel-border);
-  background: var(--input-background);
-  color: var(--text);
 }
-.itemRow button {
-  padding: 4px 8px;
+.itemRow > :nth-child(2) {
+  flex: 0 0 100px;
+}
+.itemRow > :nth-child(3) {
+  flex: 0 0 110px;
 }
 .error {
   color: var(--text-negative);
   padding: 8px;
   background: var(--panel-background-alt);
 }
-.submit {
-  padding: 8px 16px;
-  background: var(--accent);
-  color: var(--text-on-accent);
-  border: 1px solid var(--accent);
-  cursor: pointer;
-}
-.submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 .success {
   padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   background: var(--panel-background-alt);
   color: var(--text-positive, #5cb85c);
-  text-align: center;
 }
 </style>

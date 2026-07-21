@@ -3,14 +3,15 @@ defineProps<{ message: string }>();
 </script>
 
 <template>
-  <div :class="$style.empty">{{ message }}</div>
+  <div :class="[C.fonts.fontRegular, C.type.typeRegular, $style.empty]">{{ message }}</div>
 </template>
 
 <style module>
 .empty {
-  padding: 32px;
+  padding: 24px 32px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 13px;
+  border: 1px dashed var(--panel-border);
+  background: var(--panel-background-alt);
 }
 </style>

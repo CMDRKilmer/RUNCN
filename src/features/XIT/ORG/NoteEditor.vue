@@ -3,6 +3,7 @@ import { ref } from 'vue';
 import type { TaskNote } from '@src/infrastructure/org-api/types';
 import * as notesApi from '@src/infrastructure/org-api/notes';
 import { HttpError } from '@src/infrastructure/org-api/client';
+import PrunButton from '@src/components/PrunButton.vue';
 
 const props = defineProps<{ taskId: string; notes: TaskNote[] }>();
 const emit = defineEmits<{ (e: 'changed'): void }>();
@@ -30,7 +31,7 @@ async function onAdd() {
 </script>
 
 <template>
-  <div :class="$style.container">
+  <div :class="[C.fonts.fontRegular, $style.container]">
     <ul :class="$style.notes">
       <li v-for="note in notes" :key="note.id" :class="$style.note">
         <div :class="$style.meta">
@@ -44,9 +45,9 @@ async function onAdd() {
 
     <div :class="$style.add">
       <textarea v-model="newContent" placeholder="添加备注（仅任务参与方可见）" rows="3" />
-      <button :disabled="!newContent.trim() || loading" @click="onAdd">
+      <PrunButton primary inline :disabled="!newContent.trim() || loading" @click="onAdd">
         {{ loading ? '提交中...' : '添加' }}
-      </button>
+      </PrunButton>
     </div>
     <div v-if="error" :class="$style.error">{{ error }}</div>
   </div>
@@ -99,18 +100,6 @@ async function onAdd() {
   color: var(--text);
   resize: vertical;
   font-family: inherit;
-}
-.add button {
-  align-self: flex-start;
-  padding: 4px 12px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-background-alt);
-  color: var(--text);
-  cursor: pointer;
-}
-.add button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 .error {
   color: var(--text-negative);

@@ -5,6 +5,10 @@ import * as authApi from '@src/infrastructure/org-api/auth';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { companyStore } from '@src/infrastructure/prun-api/data/company';
 import { usersStore } from '@src/infrastructure/prun-api/data/users';
+import Header from '@src/components/Header.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import Active from '@src/components/forms/Active.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
 
 type Mode = 'login' | 'register';
 
@@ -90,33 +94,61 @@ async function onSubmit() {
 
 <template>
   <div :class="$style.overlay">
-    <div :class="$style.card">
-      <h2 :class="$style.title">组织管理面板</h2>
-      <div :class="$style.tabs">
-        <button :class="[$style.tab, mode === 'login' && $style.active]" @click="mode = 'login'">
-          登录
-        </button>
-        <button
-          :class="[$style.tab, mode === 'register' && $style.active]"
-          @click="mode = 'register'">
-          注册（需邀请码）
-        </button>
+    <!--
+      用 PrUn 官方 panel + Header + forms/Active + PrunButton。
+      tab 切换走 PrUn 自带 Tabs 样式（带 toggleIndicator）。
+    -->
+    <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]">
+      <Header>组织管理面板</Header>
+
+      <div :class="C.Tabs.tabs">
+        <div :class="C.Tabs.header" @click="mode = 'login'">
+          <template v-if="mode === 'login'">
+            <a :class="[C.Tabs.tabActive, C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]"
+              >登录</a
+            >
+            <div
+              :class="[
+                C.Tabs.toggleIndicator,
+                C.Tabs.toggleIndicatorActive,
+                C.effects.shadowPrimary,
+              ]" />
+          </template>
+          <template v-else>
+            <a :class="[C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]">登录</a>
+            <div :class="[C.Tabs.toggleIndicator]" />
+          </template>
+        </div>
+        <div :class="C.Tabs.header" @click="mode = 'register'">
+          <template v-if="mode === 'register'">
+            <a :class="[C.Tabs.tabActive, C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]"
+              >注册（需邀请码）</a
+            >
+            <div
+              :class="[
+                C.Tabs.toggleIndicator,
+                C.Tabs.toggleIndicatorActive,
+                C.effects.shadowPrimary,
+              ]" />
+          </template>
+          <template v-else>
+            <a :class="[C.Tabs.tab, C.fonts.fontRegular, C.type.typeRegular]">注册（需邀请码）</a>
+            <div :class="[C.Tabs.toggleIndicator]" />
+          </template>
+        </div>
       </div>
 
       <form :class="$style.form" @submit.prevent="onSubmit">
-        <label :class="$style.field">
-          <span>邮箱</span>
-          <input v-model="email" type="email" required autocomplete="email" />
-        </label>
-        <label :class="$style.field">
-          <span>密码</span>
-          <input v-model="password" type="password" required autocomplete="current-password" />
-        </label>
+        <Active label="邮箱">
+          <TextInput v-model="email" type="email" />
+        </Active>
+        <Active label="密码">
+          <TextInput v-model="password" type="password" />
+        </Active>
         <template v-if="mode === 'register'">
-          <label :class="$style.field">
-            <span>邀请码</span>
-            <input v-model="inviteCode" required placeholder="10 字符" />
-          </label>
+          <Active label="邀请码">
+            <TextInput v-model="inviteCode" />
+          </Active>
           <div :class="$style.identity">
             将绑定 PrUn 身份：
             <strong>{{ prunUsername || '未读取到' }}</strong>
@@ -126,9 +158,11 @@ async function onSubmit() {
 
         <div v-if="errorMessage" :class="$style.error">{{ errorMessage }}</div>
 
-        <button type="submit" :disabled="!canSubmit" :class="$style.submit">
-          {{ loading ? '处理中...' : mode === 'login' ? '登录' : '注册' }}
-        </button>
+        <div :class="$style.submitRow">
+          <PrunButton primary type="submit" :disabled="!canSubmit">
+            {{ loading ? '处理中...' : mode === 'login' ? '登录' : '注册' }}
+          </PrunButton>
+        </div>
       </form>
     </div>
   </div>
@@ -143,69 +177,28 @@ async function onSubmit() {
 }
 .card {
   width: 100%;
-  max-width: 420px;
-  background: var(--panel-background);
-  border: 1px solid var(--panel-border);
-  padding: 24px;
-}
-.title {
-  margin: 0 0 16px;
-  font-size: 18px;
-}
-.tabs {
-  display: flex;
-  margin-bottom: 16px;
-  border-bottom: 1px solid var(--panel-border);
-}
-.tab {
-  flex: 1;
-  padding: 8px;
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.tab.active {
-  color: var(--text);
-  border-bottom: 2px solid var(--accent);
+  max-width: 460px;
+  padding: 16px 20px 20px;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 13px;
-}
-.field input {
-  padding: 6px 8px;
-  border: 1px solid var(--panel-border);
-  background: var(--input-background);
-  color: var(--text);
+  gap: 8px;
+  margin-top: 8px;
 }
 .identity {
   font-size: 12px;
   color: var(--text-muted);
   padding: 8px;
   background: var(--panel-background-alt);
+  border: 1px solid var(--panel-border);
 }
 .error {
   color: var(--text-negative);
   font-size: 12px;
+  padding: 4px 0;
 }
-.submit {
-  margin-top: 8px;
-  padding: 8px 16px;
-  border: 1px solid var(--panel-border);
-  background: var(--accent);
-  color: var(--text-on-accent);
-  cursor: pointer;
-}
-.submit:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.submitRow {
+  margin-top: 6px;
 }
 </style>

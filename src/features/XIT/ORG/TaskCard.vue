@@ -80,9 +80,13 @@ const statusColor = computed(() => {
 </script>
 
 <template>
-  <div :class="$style.card" @click="emit('click', task)">
+  <!--
+    用 PrUn 官方 panel / panelHeader 类做卡片质感。
+    cursor:pointer 让整张卡可点击，hover 改用 PrUn 的交互色。
+  -->
+  <div :class="[C.Panel.panel, C.fonts.fontRegular, $style.card]" @click="emit('click', task)">
     <div :class="$style.header">
-      <span :class="$style.type">{{ typeLabel }}</span>
+      <span :class="[$style.type, C.type.typeSmall]">{{ typeLabel }}</span>
       <span :class="$style.status" :style="{ color: statusColor }">{{ task.status }}</span>
     </div>
     <div :class="$style.title">{{ task.contractJson.name || task.type }}</div>
@@ -100,19 +104,17 @@ const statusColor = computed(() => {
 
 <style module>
 .card {
-  padding: 12px;
-  border: 1px solid var(--panel-border);
-  background: var(--panel-background);
+  padding: 8px 12px;
   cursor: pointer;
+  margin-bottom: 4px;
 }
 .card:hover {
-  background: var(--panel-background-alt);
+  background: rgba(255, 255, 255, 0.04);
 }
 .header {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 .type {
   color: var(--accent);
@@ -121,18 +123,18 @@ const statusColor = computed(() => {
 .title {
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .row {
   display: flex;
   justify-content: space-between;
   font-size: 12px;
   color: var(--text-muted);
-  margin-bottom: 2px;
+  margin-bottom: 1px;
 }
 .expires {
   font-size: 11px;
   color: var(--text-warning, #f0ad4e);
-  margin-top: 4px;
+  margin-top: 2px;
 }
 </style>
