@@ -30,6 +30,7 @@ import './HELP';
 import './HQUC';
 import './MATS';
 import './NOTE/NOTE';
+import './ORG/ORG';
 import './PLAN/PLAN';
 import './WFOR/WFOR';
 import './PLAN/JH';

@@ -17,7 +17,8 @@
     "storage"
   ],
   "host_permissions": [
-    "https://apex.prosperousuniverse.com/"
+    "https://apex.prosperousuniverse.com/",
+    "https://rprun-org-api.782444686.workers.dev/"
   ],
   "action": {
     "default_icon": {
