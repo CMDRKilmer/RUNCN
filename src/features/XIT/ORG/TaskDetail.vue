@@ -9,18 +9,20 @@ import {
   watchContractStatus,
   clearReportedStatus,
 } from '@src/infrastructure/org-api/contract-link';
-import { sendTaskToContd } from './utils';
-import LinkContract from './LinkContract.vue';
+import { sendTaskToContd, formatAmountWithCurrency, formatNumber } from './utils';
 import NoteEditor from './NoteEditor.vue';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser }>();
-const emit = defineEmits<{ (e: 'close'): void; (e: 'updated', task: OrgTask): void }>();
+const emit = defineEmits<{
+  (e: 'close'): void;
+  (e: 'updated', task: OrgTask): void;
+  (e: 'link-contract'): void;
+}>();
 
 const localTask = ref<OrgTask>(props.task);
 const notes = ref<TaskNote[]>([]);
 const loading = ref(false);
 const error = ref('');
-const showLinkContract = ref(false);
 const boardCancelReason = ref('');
 const showBoardCancel = ref(false);
 
@@ -119,16 +121,6 @@ function onCreateContract() {
   sendTaskToContd(localTask.value.contractJson, localTask.value.type, creatorIsPublisher);
 }
 
-function onLinkContractClicked() {
-  showLinkContract.value = true;
-}
-
-async function onContractLinked(updated: OrgTask) {
-  localTask.value = updated;
-  showLinkContract.value = false;
-  emit('updated', updated);
-}
-
 function onNotesChanged() {
   void loadNotes();
 }
@@ -151,10 +143,12 @@ function onNotesChanged() {
         路径：{{ localTask.contractJson.origin }} → {{ localTask.contractJson.destination }}
       </div>
       <div v-if="localTask.contractJson.price !== undefined">
-        总价：{{ localTask.contractJson.price }} {{ localTask.contractJson.currency }}
+        总价：{{
+          formatAmountWithCurrency(localTask.contractJson.price, localTask.contractJson.currency)
+        }}
       </div>
       <div v-if="localTask.contractJson.deadline !== undefined">
-        期限：{{ localTask.contractJson.deadline }} 天
+        期限：{{ formatNumber(localTask.contractJson.deadline) }} 天
       </div>
       <div>发布者：{{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})</div>
       <div v-if="localTask.claimerUsername">
@@ -170,8 +164,16 @@ function onNotesChanged() {
       <h3>物品清单</h3>
       <ul>
         <li v-for="(item, i) in localTask.contractJson.items" :key="i">
-          {{ item.amount }}× {{ item.commodity }}
-          <span v-if="item.price !== undefined"> @ {{ item.price }} </span>
+          {{ formatNumber(item.amount) }}× {{ item.commodity }}
+          <span v-if="item.price !== undefined">
+            @ {{ formatAmountWithCurrency(item.price, localTask.contractJson.currency)
+            }}<span v-if="item.amount > 1">
+              （共
+              {{
+                formatAmountWithCurrency(item.price * item.amount, localTask.contractJson.currency)
+              }}）</span
+            >
+          </span>
         </li>
       </ul>
     </section>
@@ -184,7 +186,7 @@ function onNotesChanged() {
       <button v-if="canCreateContract" @click="onCreateContract"
         >创建合同（CONTGEN → CONTD）</button
       >
-      <button v-if="canCreateContract" @click="onLinkContractClicked">上报合同 ID</button>
+      <button v-if="canCreateContract" @click="emit('link-contract')">上报合同 ID</button>
       <button v-if="canCancel && !showBoardCancelButton" :disabled="loading" @click="onCancel">
         取消任务
       </button>
@@ -205,13 +207,6 @@ function onNotesChanged() {
       <h3>备注</h3>
       <NoteEditor :task-id="localTask.id" :notes="notes" @changed="onNotesChanged" />
     </section>
-
-    <LinkContract
-      v-if="showLinkContract"
-      :task="localTask"
-      :current-user="currentUser"
-      @linked="onContractLinked"
-      @cancel="showLinkContract = false" />
   </div>
 </template>
 

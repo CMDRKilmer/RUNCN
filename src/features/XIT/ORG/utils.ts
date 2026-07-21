@@ -40,6 +40,23 @@ export function sendTaskToContd(
   void showBuffer('CONTD', { force: true });
 }
 
+// 数字千分位格式化（不附加货币单位）。
+// 复用 INT 4 位小数 + 去尾零，避免 0.1+0.2=0.30000000000000004 露馅。
+export function formatNumber(value: number | undefined): string {
+  if (value === undefined || value === null || Number.isNaN(value)) return '—';
+  const fixed = Number(Math.round(Number(value + 'e4')) + 'e-4');
+  const [intPart, decPart] = fixed.toString().split('.');
+  const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return decPart ? `${withThousands}.${decPart}` : withThousands;
+}
+
+// "数字 + 货币" 拼接（"1,234 AIC"）。
+// 注意：不复用 CONTS/utils.ts.formatAmount，因为那里把 amount === 0 映射成 '-'，
+// 在任务价/单价场景里 0 是合法值（例如发布者尚未定价）。
+export function formatAmountWithCurrency(value: number | undefined, currency: string): string {
+  return currency ? `${formatNumber(value)} ${currency}` : formatNumber(value);
+}
+
 // 状态颜色 helper（与 TaskCard.vue statusColor 一致，供其他视图复用）
 export function statusColor(status: string): string {
   switch (status) {

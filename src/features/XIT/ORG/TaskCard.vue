@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { OrgTask, OrgUser } from '@src/infrastructure/org-api/types';
 import { computed } from 'vue';
+import { formatAmountWithCurrency, formatNumber } from './utils';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser | null }>();
 
@@ -12,10 +13,15 @@ const itemSummary = computed(() => {
   if (items.length === 0) {
     return '无物品';
   }
+  const head = `${formatNumber(items[0].amount)}× ${items[0].commodity}`;
+  const headPrice =
+    items[0].price !== undefined
+      ? ` @ ${formatAmountWithCurrency(items[0].price, props.task.contractJson.currency)}`
+      : '';
   if (items.length === 1) {
-    return `${items[0].amount}× ${items[0].commodity}`;
+    return `${head}${headPrice}`;
   }
-  return `${items[0].amount}× ${items[0].commodity} 等 ${items.length} 项`;
+  return `${head}${headPrice} 等 ${items.length} 项`;
 });
 
 const locationText = computed(() => {
@@ -29,10 +35,10 @@ const locationText = computed(() => {
 const priceText = computed(() => {
   const c = props.task.contractJson;
   if (c.price !== undefined) {
-    return `${c.price} ${c.currency}`;
+    return formatAmountWithCurrency(c.price, c.currency);
   }
   const itemsTotal = (c.items ?? []).reduce((sum, i) => sum + (i.price ?? 0) * i.amount, 0);
-  return itemsTotal > 0 ? `${itemsTotal} ${c.currency}` : '—';
+  return itemsTotal > 0 ? formatAmountWithCurrency(itemsTotal, c.currency) : '—';
 });
 
 const expiresText = computed(() => {
