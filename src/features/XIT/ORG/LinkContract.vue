@@ -3,7 +3,6 @@ import { computed, ref } from 'vue';
 import type { ContractCreator, OrgTask, OrgUser } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import { HttpError } from '@src/infrastructure/org-api/client';
-import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import ActionBar from '@src/components/ActionBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
@@ -23,13 +22,6 @@ const creator = ref<ContractCreator>(
 );
 const error = ref('');
 const loading = ref(false);
-
-// 候选合同：从 contractsStore 中拉取最近的合同供用户选择
-const candidateContracts = computed(() => {
-  const all = contractsStore.all.value ?? [];
-  // 显示最近 20 个，按 id 倒序
-  return [...all].slice(0, 20);
-});
 
 const canSubmit = computed(() => contractId.value.length > 0 && !loading.value);
 
