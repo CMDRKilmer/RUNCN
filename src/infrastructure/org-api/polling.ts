@@ -55,9 +55,8 @@ async function pollOnce(callbacks: PollCallbacks): Promise<void> {
         callbacks.onTaskStatusChanged(task, oldStatus, task.status);
       }
     }
-    if (tasks.length > 0) {
-      lastPollAt = tasks[tasks.length - 1].updatedAt;
-    }
+    // 推进游标：空结果回退为当前时间，避免下次重复拉取相同区间。
+    lastPollAt = tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : new Date().toISOString();
   } catch (err) {
     callbacks.onError(err);
   }

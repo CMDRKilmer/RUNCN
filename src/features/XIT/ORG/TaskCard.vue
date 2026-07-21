@@ -52,6 +52,8 @@ const typeLabel = computed(() => {
       return '运输';
     case 'LOAN':
       return '借贷';
+    default:
+      return props.task.type;
   }
 });
 

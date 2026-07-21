@@ -70,7 +70,6 @@ onBeforeUnmount(() => {
 function onAuthenticated(newSession: AuthSession) {
   session.value = newSession;
   showAuth.value = false;
-  setCurrentUser(newSession.user);
   resetPollingState();
   setCurrentUser(newSession.user);
   startPolling(pollCallbacks);
