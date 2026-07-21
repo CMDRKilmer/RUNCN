@@ -1,7 +1,12 @@
 # 更新日志
 
-**日期**: 2026-07-18  
-**说明**: 修复 CONTD 地址自动填充在 CONTGEN 引入后的回归
+**日期**: 2026-07-19  
+**说明**: 修复 BPC / CART ACT 包名在蓝图或购物车名称包含括号 / 引号等符号时的解析失败
+
+### 🐛 Bug Fixes
+
+- **`XIT/BPC`**：`generateAct` 的包名净化只剥离非 ASCII（`/[\x20-\x7E]/`），却保留 `( ) ' " & ! ?` 等可打印 ASCII 符号，导致 `XIT ACT_${name}` 命令在 PrUn 端解析失败。改为保留 `A-Za-z0-9-`，其余符号与空白折叠为单个空格。例如 `"HWS Defense (Missile)"` → `"BP-DHEZ-4037 HWS Defense Missile Buy"`。
+- **`XIT/CART`**：`generateAct` 同样问题。购物车名称若含括号 / 引号 / `&` 等符号，会写进 `pkg.global.name` 并参与 `XIT ACT_${name}` 命令，PrUn 端解析失败。改为生成前先调用新增的 `sanitizeActName` 净化（与 BPC 同款规则），保证存储名与命令名一致、ACT 列表回查可命中。
 
 ## 26.7.17 (后续)
 

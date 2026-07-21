@@ -255,8 +255,18 @@ function applyImportedCart(json: unknown) {
   }
 }
 
+// 包名净化：与 BPC.generateAct 同款约束。仅保留 ASCII 字母 / 数字 / hyphen，
+// 折叠其他符号 / 空白为单个空格。PrUn XIT 解析对 `(` `)` `'` `"` `&` 等符号会失败。
+function sanitizeActName(name: string): string {
+  return name
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function generateAct() {
-  cart.value.name = normalizeCartName(cart.value.name);
+  cart.value.name = sanitizeActName(normalizeCartName(cart.value.name));
   replaceCartItems(normalizeCartItems(cart.value.items));
 
   const pkg = buildActionPackage(cart.value);

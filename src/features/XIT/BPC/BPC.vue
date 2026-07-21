@@ -175,8 +175,14 @@ function generateAct() {
   // 又让 ACT 列表里包名可读。
   const bp = selectedBlueprint.value;
   const bpId = bp?.naturalId ?? 'Blueprint';
-  // 仅保留 name 中的可打印 ASCII 部分，避免中文 / 特殊字符干扰 PrUn XIT 参数解析。
-  const asciiName = (bp?.name ?? '').replace(/[^\x20-\x7E]/g, '').trim();
+  // 包名仅保留 ASCII 字母 / 数字 / hyphen（兼容 BP-DHEZ-4037 这类 naturalId）。
+  // 中文 / 括号 / 引号 / & 等符号都会被 strip 掉，避免 PrUn XIT 参数解析失败。
+  // 连续符号 / 空白折叠为单个空格，给后续命令名拼接留可读结构。
+  const asciiName = (bp?.name ?? '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   const name = asciiName ? `${bpId} ${asciiName} Buy` : `${bpId} Buy`;
   const pkg: UserData.ActionPackageData = { global: { name }, groups, actions };
   // 与 CART.generateAct 一致：若同名包已存在则覆盖，避免重复建包。
