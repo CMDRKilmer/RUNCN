@@ -1,6 +1,6 @@
 // src/infrastructure/org-api/tasks.ts
 import type { ListTasksResult, OrgTask, PollScope, TaskContractJson, TaskType } from './types';
-import { request } from './client';
+import { HttpError, request } from './client';
 
 export interface ListTasksParams {
   scope: PollScope;
@@ -72,10 +72,32 @@ export async function cancelTask(taskId: string, reason?: string): Promise<OrgTa
 
 // 物理删除任务。仅发布者可删除自己发布的任务（后端 service 校验）。
 // 返回删除前的快照，便于前端展示"已删除 ... 任务"之类的 toast。
+//
+// 错误兜底：DELETE 端点若未在 Worker 上部署（Hono root notFound 返回 404），
+// 与"任务已被物理删除/不存在"同样表现为 404。前端统一抛 friendlyMessage，
+// 避免 UI 上只看到冷冰冰的英文 "Not found"。
 export async function deleteTask(taskId: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}`, {
-    method: 'DELETE',
-  });
+  try {
+    return await request<OrgTask>(`/tasks/${taskId}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    if (err instanceof HttpError && err.status === 404) {
+      // 区分任务不存在 / 已删 与端点未部署：
+      //  - Hono root notFound 的 message 是 "Not found"（root 兜底路由）
+      //  - service 抛的 notFound('Task not found') message 是 "Task not found"
+      // 端点未部署时,request 收到的 err.message 通常就是 "Not found"。
+      const friendly = err.message.toLowerCase().includes('task')
+        ? '任务不存在或已被删除'
+        : 'Worker 尚未部署删除接口，请确认 wrangler deploy 已运行到含 DELETE 路由的 commit';
+      throw new HttpError(
+        404,
+        err.message.toLowerCase().includes('task') ? 'TASK_NOT_FOUND' : 'DELETE_ENDPOINT_MISSING',
+        friendly,
+      );
+    }
+    throw err;
+  }
 }
 
 export interface LinkContractParams {
