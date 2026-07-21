@@ -195,7 +195,11 @@ function onNotesChanged() {
         {{ localTask.contractJson.destination }}
       </div>
       <div v-if="localTask.contractJson.price !== undefined">
-        <span :class="$style.key">总价</span>
+        <!--
+          字段语义对齐 PrUn CONTGEN：SHIP 下 contractJson.price 即"运费"，
+          BUY/SELL 下 contractJson.price 是顶层"总价"（每行无单价时的 fallback）。
+        -->
+        <span :class="$style.key">{{ localTask.type === 'SHIP' ? '运费' : '总价' }}</span>
         {{
           formatAmountWithCurrency(localTask.contractJson.price, localTask.contractJson.currency)
         }}

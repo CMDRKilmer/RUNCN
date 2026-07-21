@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { TaskContractJson, TaskType } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import { HttpError } from '@src/infrastructure/org-api/client';
@@ -19,9 +19,14 @@ const contractName = ref('');
 const location = ref('');
 const origin = ref('');
 const destination = ref('');
+// `price` 在不同类型下语义不同：
+//   - SHIP: 作为"运费"（对齐 CONTGEN 字段命名）
+//   - BUY/SELL: 该字段从表单隐藏（运费的 PrUn 概念仅在 SHIP 下存在）
+//              每行 `item.price` 必填
+// 保留 ref 是为了让 SHIP 路径写入 contractJson.price 不需要分支。
 const price = ref<number | undefined>(undefined);
 const deadline = ref<number | undefined>(undefined);
-const items = ref<ItemType[]>([{ ticker: '', amount: 0 }]);
+const items = ref<ItemType[]>([{ ticker: '', amount: 0, price: 0 }]);
 // 有效期：发布后多少小时自动取消（架构 §12.21 任务有效期）
 const expiresAfterHours = ref<number>(72);
 
@@ -51,21 +56,35 @@ const canSubmit = computed(() => {
       return false;
     }
   } else {
+    // BUY / SELL：必须有 location + 每行物品单价必填 > 0（CONTGEN 语义）
     if (!location.value) {
       return false;
     }
-    // 价格校验：每行有 price 或顶层有 price
-    const hasTopPrice = price.value !== undefined && price.value > 0;
-    const hasRowPrice = items.value.every(i => i.price !== undefined && i.price > 0);
-    if (!hasTopPrice && !hasRowPrice) {
+    const allRowsHavePrice = items.value.every(
+      i => i.price !== undefined && i.price !== null && Number(i.price) > 0,
+    );
+    if (!allRowsHavePrice) {
       return false;
     }
   }
   return true;
 });
 
+// 类型变化时重置仅 SHIP 适用的字段，避免 BUY/SELL 留下幽灵 price。
+watch(type, (next, prev) => {
+  if (next !== 'SHIP' && prev === 'SHIP') {
+    price.value = undefined;
+  }
+  // SHIP 不需要每行 price；BUY/SELL 反之亦然。切换时归零以免影响 canSubmit。
+  items.value.forEach(it => {
+    if (next === 'SHIP') {
+      it.price = 0;
+    }
+  });
+});
+
 function addItem() {
-  items.value.push({ ticker: '', amount: 0 });
+  items.value.push({ ticker: '', amount: 0, price: isShip.value ? 0 : 0 });
 }
 
 function removeItem(i: number) {
@@ -115,7 +134,7 @@ function resetForm() {
   destination.value = '';
   price.value = undefined;
   deadline.value = undefined;
-  items.value = [{ ticker: '', amount: 0 }];
+  items.value = [{ ticker: '', amount: 0, price: 0 }];
   expiresAfterHours.value = 72;
 }
 </script>
@@ -169,7 +188,11 @@ function resetForm() {
       </div>
 
       <div :class="$style.row">
-        <Active label="运费（BUY/SELL 无行价时必填）">
+        <!--
+          仅 SHIP 任务才有"运费"概念（对齐 PrUn CONTGEN 字段语义）。
+          BUY/SELL 任务的价格分布在每行 item.price，不再保留顶层 fallback。
+        -->
+        <Active v-if="isShip" label="运费">
           <NumberInput v-model="price" :min="0" />
         </Active>
         <Active label="期限（天）">
@@ -189,7 +212,8 @@ function resetForm() {
           <Active label="数量">
             <NumberInput v-model="item.amount" :min="1" />
           </Active>
-          <Active label="单价">
+          <!-- SHIP 任务下没有"单价"，所有物品共享顶层"运费" -->
+          <Active v-if="!isShip" label="单价">
             <NumberInput v-model="item.price" :min="0" />
           </Active>
           <PrunButton danger inline @click="removeItem(i)">删除</PrunButton>

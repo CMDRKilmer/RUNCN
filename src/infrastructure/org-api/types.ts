@@ -40,6 +40,8 @@ export interface TaskContractJson {
   origin?: string;
   destination?: string;
   price?: number;
+  // 运费：与 price 平级，独立于"货物总价"。
+  shipping?: number;
   deadline?: number;
   items: TaskContractItem[];
 }

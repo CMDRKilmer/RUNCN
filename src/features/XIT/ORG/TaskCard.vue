@@ -37,9 +37,14 @@ const priceText = computed(() => {
   if (c.price !== undefined) {
     return formatAmountWithCurrency(c.price, c.currency);
   }
+  // 无顶层 price：BUY/SELL 任务按每行价格合计显示；SHIP 任务此时无金额信息。
   const itemsTotal = (c.items ?? []).reduce((sum, i) => sum + (i.price ?? 0) * i.amount, 0);
   return itemsTotal > 0 ? formatAmountWithCurrency(itemsTotal, c.currency) : '—';
 });
+
+// 与发布表单对齐：SHIP 任务的 contractJson.price 在卡片上叫"运费"，
+// BUY/SELL 任务下叫"总价"。
+const priceLabel = computed(() => (props.task.type === 'SHIP' ? '运费' : '总价'));
 
 const expiresText = computed(() => {
   if (!props.task.expiresAt) {
@@ -94,7 +99,7 @@ const statusColor = computed(() => {
     <div :class="$style.title">{{ task.contractJson.name || task.type }}</div>
     <div :class="$style.row">
       <span>物品：{{ itemSummary }}</span>
-      <span>价格：{{ priceText }}</span>
+      <span>{{ priceLabel }}：{{ priceText }}</span>
     </div>
     <div :class="$style.row">
       <span>位置：{{ locationText }}</span>
