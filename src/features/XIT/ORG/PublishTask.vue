@@ -169,7 +169,7 @@ function resetForm() {
       </div>
 
       <div :class="$style.row">
-        <Active label="顶层总价（BUY/SELL 无行价时必填）">
+        <Active label="运费（BUY/SELL 无行价时必填）">
           <NumberInput v-model="price" :min="0" />
         </Active>
         <Active label="期限（天）">
