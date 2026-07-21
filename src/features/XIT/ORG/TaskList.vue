@@ -79,6 +79,18 @@ async function onContractLinked(updated: OrgTask) {
   void refresh();
 }
 
+// 任务被发布者物理删除后（已 CANCELLED/COMPLETED），从本地列表移除并 refresh。
+// 这里的快照是删除前的 task，后端目前 GET 404，无需保留。
+function onTaskDeleted(snapshot: OrgTask) {
+  selectedTask.value = null;
+  showLinkContract.value = false;
+  const idx = tasks.value.findIndex(t => t.id === snapshot.id);
+  if (idx >= 0) {
+    tasks.value.splice(idx, 1);
+  }
+  void refresh();
+}
+
 onBeforeUnmount(() => {
   selectedTask.value = null;
   showLinkContract.value = false;
@@ -108,7 +120,8 @@ onBeforeUnmount(() => {
       :current-user="currentUser"
       @close="onDetailClosed"
       @updated="onTaskUpdated"
-      @link-contract="onRequestLinkContract" />
+      @link-contract="onRequestLinkContract"
+      @deleted="onTaskDeleted" />
     <LinkContract
       v-if="showLinkContract && selectedTask"
       :task="selectedTask"

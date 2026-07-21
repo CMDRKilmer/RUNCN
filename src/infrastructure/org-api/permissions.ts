@@ -33,3 +33,9 @@ export function canPromoteDemote(user: OrgUser | null | undefined, targetUserId:
 export function shouldShowBoardCancel(user: OrgUser | null | undefined, task: OrgTask): boolean {
   return isBoard(user) && task.publisherId !== user?.id;
 }
+
+// 是否显示"删除任务"按钮：仅任务发布者本人，且后端权限模型一致（不允许 BOARD 代删）
+// 已完成 / 已取消的任务都可物理删除（清理冗余）。
+export function canDeleteTask(user: OrgUser | null | undefined, task: OrgTask): boolean {
+  return !!user && task.publisherId === user.id;
+}

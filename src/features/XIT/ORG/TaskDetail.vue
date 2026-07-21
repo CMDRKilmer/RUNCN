@@ -4,7 +4,11 @@ import type { OrgTask, OrgUser, TaskNote } from '@src/infrastructure/org-api/typ
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import * as notesApi from '@src/infrastructure/org-api/notes';
 import { HttpError } from '@src/infrastructure/org-api/client';
-import { canCancelTask, shouldShowBoardCancel } from '@src/infrastructure/org-api/permissions';
+import {
+  canCancelTask,
+  canDeleteTask,
+  shouldShowBoardCancel,
+} from '@src/infrastructure/org-api/permissions';
 import {
   watchContractStatus,
   clearReportedStatus,
@@ -17,6 +21,7 @@ const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'updated', task: OrgTask): void;
   (e: 'link-contract'): void;
+  (e: 'deleted', task: OrgTask): void;
 }>();
 
 const localTask = ref<OrgTask>(props.task);
@@ -25,6 +30,9 @@ const loading = ref(false);
 const error = ref('');
 const boardCancelReason = ref('');
 const showBoardCancel = ref(false);
+// 删除二次确认：输入 "DELETE" 才允许点击"确认删除"，避免误点。
+const showDeleteConfirm = ref(false);
+const deleteConfirmText = ref('');
 
 watch(
   () => props.task,
@@ -68,6 +76,16 @@ const canRelease = computed(
   () => localTask.value.status === 'AWAITING_CONTRACT' && isClaimer.value,
 );
 const canCancel = computed(() => canCancelTask(props.currentUser, localTask.value));
+// 仅在 status 不是 terminal（CANCELLED / COMPLETED）时显示"取消任务"按钮：
+// terminal 状态下取消语义不明，改用"删除任务"。
+const canShowCancelButton = computed(
+  () =>
+    canCancel.value &&
+    localTask.value.status !== 'CANCELLED' &&
+    localTask.value.status !== 'COMPLETED',
+);
+// CANCELLED / COMPLETED 状态下：仅发布者可物理删除。后端拒错由 store/error 提示。
+const canDelete = computed(() => canDeleteTask(props.currentUser, localTask.value));
 const canCreateContract = computed(
   () =>
     localTask.value.status === 'AWAITING_CONTRACT' &&
@@ -112,6 +130,28 @@ async function onCancel() {
     ),
   );
   showBoardCancel.value = false;
+}
+
+// 删除任务：必须输入 "DELETE" 二次确认。删除后 emit 'deleted'（含快照）
+// 由 TaskList 负责从本地 tasks[] 移除并 refresh。
+async function onDelete() {
+  if (deleteConfirmText.value !== 'DELETE') {
+    error.value = '请输入 DELETE 以确认删除';
+    return;
+  }
+  loading.value = true;
+  error.value = '';
+  try {
+    const snapshot = await tasksApi.deleteTask(localTask.value.id);
+    emit('deleted', snapshot);
+    emit('close');
+  } catch (err) {
+    error.value = err instanceof HttpError ? err.message : String(err);
+  } finally {
+    loading.value = false;
+    showDeleteConfirm.value = false;
+    deleteConfirmText.value = '';
+  }
 }
 
 function onCreateContract() {
@@ -187,11 +227,12 @@ function onNotesChanged() {
         >创建合同（CONTGEN → CONTD）</button
       >
       <button v-if="canCreateContract" @click="emit('link-contract')">上报合同 ID</button>
-      <button v-if="canCancel && !showBoardCancelButton" :disabled="loading" @click="onCancel">
-        取消任务
-      </button>
+      <!--
+        "取消任务" 仅在非 terminal 状态显示（CANCELLED/COMPLETED 用删除替代）
+      -->
+      <button v-if="canShowCancelButton" :disabled="loading" @click="onCancel"> 取消任务 </button>
       <button
-        v-if="showBoardCancelButton && !showBoardCancel"
+        v-if="showBoardCancelButton && !showBoardCancel && canShowCancelButton"
         :disabled="loading"
         @click="showBoardCancel = true">
         董事会取消此任务
@@ -200,6 +241,36 @@ function onNotesChanged() {
         <input v-model="boardCancelReason" placeholder="取消原因（必填）" />
         <button :disabled="loading" @click="onCancel">确认取消</button>
         <button @click="showBoardCancel = false">放弃</button>
+      </template>
+      <!--
+        "删除任务" 仅发布者自己可见。CANCELLED/COMPLETED 状态清理冗余
+        任务用。二次确认输入 "DELETE" 才生效。
+      -->
+      <button
+        v-if="canDelete && !showDeleteConfirm"
+        :disabled="loading"
+        :class="$style.danger"
+        @click="showDeleteConfirm = true">
+        删除任务
+      </button>
+      <template v-if="showDeleteConfirm">
+        <input
+          v-model="deleteConfirmText"
+          placeholder="输入 DELETE 以确认"
+          :class="$style.dangerInput" />
+        <button
+          :disabled="loading || deleteConfirmText !== 'DELETE'"
+          :class="$style.danger"
+          @click="onDelete">
+          确认删除
+        </button>
+        <button
+          @click="
+            showDeleteConfirm = false;
+            deleteConfirmText = '';
+          ">
+          放弃
+        </button>
       </template>
     </section>
 
@@ -267,6 +338,18 @@ function onNotesChanged() {
   border: 1px solid var(--panel-border);
   background: var(--input-background);
   color: var(--text);
+}
+/* 删除相关危险样式：红色边框 + 悬停加深。disabled 灰禁。 */
+.danger {
+  border-color: var(--text-negative, #d9534f) !important;
+  color: var(--text-negative, #d9534f);
+}
+.danger:hover:not(:disabled) {
+  background: var(--text-negative, #d9534f) !important;
+  color: var(--text-on-accent, #fff);
+}
+.dangerInput {
+  border-color: var(--text-negative, #d9534f) !important;
 }
 .error {
   padding: 8px;

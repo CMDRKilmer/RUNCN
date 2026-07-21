@@ -70,6 +70,14 @@ export async function cancelTask(taskId: string, reason?: string): Promise<OrgTa
   });
 }
 
+// 物理删除任务。仅发布者可删除自己发布的任务（后端 service 校验）。
+// 返回删除前的快照，便于前端展示"已删除 ... 任务"之类的 toast。
+export async function deleteTask(taskId: string): Promise<OrgTask> {
+  return request<OrgTask>(`/tasks/${taskId}`, {
+    method: 'DELETE',
+  });
+}
+
 export interface LinkContractParams {
   contractId: string;
   contractCreator: 'publisher' | 'claimer';
