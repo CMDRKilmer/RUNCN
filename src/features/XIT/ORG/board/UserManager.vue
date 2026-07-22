@@ -55,7 +55,7 @@ function getRoleLabel(role: string): string {
     case 'COLLABORATOR':
       return '合作者';
     case 'NON_ORG':
-      return '非组织用户';
+      return '在线非组织用户';
     default:
       return role;
   }

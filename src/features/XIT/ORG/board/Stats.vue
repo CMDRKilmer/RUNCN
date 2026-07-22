@@ -21,9 +21,10 @@ onMounted(load);
     <div v-if="error" :class="$style.error">{{ error }}</div>
     <div v-else-if="stats">
       <div
-        >用户总数：{{ stats.userCount }}（董事会 {{ stats.boardCount }} / 合作者
-        {{ stats.collaboratorCount }} / 非组织用户 {{ stats.nonOrgUserCount }})</div
+        >组织成员：{{ stats.userCount - stats.nonOrgUserCount }}（董事会 {{ stats.boardCount }} /
+        合作者 {{ stats.collaboratorCount }}）</div
       >
+      <div>在线非组织用户：{{ stats.nonOrgUserCount }}</div>
       <div>任务总数：{{ stats.taskCount }}</div>
       <h4>按状态分布</h4>
       <ul>
