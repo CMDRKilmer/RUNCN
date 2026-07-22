@@ -131,21 +131,34 @@ ORG 当前任务生命周期的"接取 → 合同关联"环节仍依赖用户手
 - [x] 新建 `auto-link.ts` 暴露 `startAutoLink(task)` / `stopAutoLink(taskId)` / `isAutoLinkRunning(taskId)`，30s 轮询 + dismissedContractIds 去重
 - [x] TaskDetail.vue 增加"开启/关闭自动关联"按钮 + 5s 倒计时确认弹窗（contractId + fingerprintSummary 展示）+ onBeforeUnmount 自动清理
 - [x] 关联成功/失败的 toast 提示（成功走 `emit('updated', updated)` 由父级统一 toast；失败走 `error.value` 内嵌面板 + onError 回调）
-- [ ] 后端可选：增加 `POST /tasks/:id/match-contract` 端点，让前端上报合同 JSON、后端做权威匹配（避免不同客户端的指纹规则不一致）
+- [x] 后端可选：增加 `POST /tasks/:id/match-contract` 端点，让前端上报合同 JSON、后端做权威匹配（避免不同客户端的指纹规则不一致）
 
-### 已落地清单（2026-01 实现）
+### 已落地清单
+
+**前端（2026-01）**
 
 | 文件 | 内容 |
 |---|---|
 | `infrastructure/org-api/contract-link.ts` | `ContractFingerprint` 投影、`contractToFingerprint`、`taskJsonToFingerprint`、`conditionsToTemplate`/`conditionsToItems`/`addressToLocation`、`priceEquals`、`itemsEqual`、`matchContractJson` |
-| `infrastructure/org-api/auto-link.ts` (新) | `startAutoLink`/`stopAutoLink`/`isAutoLinkRunning`，单 task 单会话，30s 轮询，命中返回 `Promise<boolean>` 等待 UI 确认 |
+| `infrastructure/org-api/auto-link.ts` (新) | `startAutoLink`/`stopAutoLink`/`isAutoLinkRunning`，单 task 单会话，30s 轮询，命中返回 `Promise<boolean>` 等待 UI 确认。命中前先调后端 `matchContract` 端点做权威比对，失败直接 dismiss 不弹窗。 |
+| `infrastructure/org-api/tasks.ts` | 新增 `matchContract(taskId, { contractId, fingerprint, autoLink? })` API 客户端。 |
 | `features/XIT/ORG/TaskDetail.vue` | "🤖 开启/关闭自动关联"按钮、5s 倒计时 overlay 确认弹窗、`onBeforeUnmount` 自动 stopAutoLink |
+
+**后端（2026-07 commit `23c6ca8`）**
+
+| 文件 | 内容 |
+|---|---|
+| `rprun-org-worker/src/utils/contract-match.ts` (新) | `matchContractFingerprint`/`effectiveTemplate`，与前端 ContractFingerprint 形状等价，独立实现 |
+| `rprun-org-worker/src/utils/validation.ts` | 新增 `matchContractSchema` |
+| `rprun-org-worker/src/services/match-contract-service.ts` (新) | `matchContract` 服务层；按 `autoLink` 选择直接调 `linkContract` 或仅返回比对结果；写审计日志 |
+| `rprun-org-worker/src/routes/tasks.ts` | 新增 `POST /tasks/:id/match-contract` 路由 |
+| `rprun-org-worker/tests/contract-match.test.ts` (新) | 21 个单测覆盖反转规则 / 价格容差 / items 集合等 / 缺字段 / SHIP 例外 |
 
 ### 已知简化点
 
-* 价格容差硬编码 0.5% (`PRICE_TOLERANCE`)，后续可抽取到常量配置文件允许覆盖。
-* `effectiveTaskTemplate` 反转规则在 UI 侧做，依赖 `task.contractCreator`；后端权威匹配端点落地后应改回后端做反转，避免多客户端不一致。
-* 未做 `matchContractJson` 单测（项目尚无任何 test 文件），代码改动覆盖了 SHIP/BUY/SELL 三种 template + items 集合等 + price 容差 + 缺字段兜底 5 个分支，建议补 vitest。
+* 价格容差硬编码 0.5% (`PRICE_TOLERANCE`)，前后端两端硬编码，未来可抽取到常量配置允许覆盖。
+* 前端 `contractToFingerprint` 与后端 `taskJsonToFingerprint` 实现独立，规则变更必须同步两端（已在两处文件头注释注明）。
+* 项目前置 `tests/integration.test.ts` 套件因 vitest-pool-workers v0.13+ D1 exec 行为变化整体失败（与本次改动无关，单独 PR 修复）。
 
 ---
 
