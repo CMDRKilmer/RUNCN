@@ -27,8 +27,8 @@ const destination = ref('');
 const price = ref<number | undefined>(undefined);
 const deadline = ref<number | undefined>(undefined);
 const items = ref<ItemType[]>([{ ticker: '', amount: 0, price: 0 }]);
-// 有效期：发布后多少小时自动取消（架构 §12.21 任务有效期）
-const expiresAfterHours = ref<number>(72);
+// 有效期：发布后多少天自动取消（架构 §12.21 任务有效期），内部换算成小时传给 API
+const expiresAfterDays = ref<number>(3);
 
 const error = ref('');
 const loading = ref(false);
@@ -114,7 +114,7 @@ async function onPublish() {
         price: i.price,
       })),
     };
-    const expiresAt = new Date(Date.now() + expiresAfterHours.value * 3600_000).toISOString();
+    const expiresAt = new Date(Date.now() + expiresAfterDays.value * 86400_000).toISOString();
     const task = await tasksApi.createTask({ type: type.value, contractJson, expiresAt });
     publishedTaskId.value = task.id;
   } catch (err) {
@@ -135,7 +135,7 @@ function resetForm() {
   price.value = undefined;
   deadline.value = undefined;
   items.value = [{ ticker: '', amount: 0, price: 0 }];
-  expiresAfterHours.value = 72;
+  expiresAfterDays.value = 3;
 }
 </script>
 
@@ -198,8 +198,8 @@ function resetForm() {
         <Active label="期限（天）">
           <NumberInput v-model="deadline" :min="1" />
         </Active>
-        <Active label="有效期（小时）">
-          <NumberInput v-model="expiresAfterHours" :min="1" />
+        <Active label="有效期（天）">
+          <NumberInput v-model="expiresAfterDays" :min="1" />
         </Active>
       </div>
 
@@ -237,40 +237,36 @@ function resetForm() {
 <style module>
 .container {
   padding: 8px 12px 12px;
+  width: 460px;
+  max-width: 100%;
 }
 .form {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+}
+.form :global(.SectionHeader) + .row {
+  margin-top: 4px;
 }
 .row {
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 2px;
 }
-.row > * {
-  flex: 1;
-  min-width: 140px;
+.row > :global(*) {
+  margin: 0;
+  max-width: 100%;
 }
 .items {
   border: 1px solid var(--panel-border);
-  padding: 8px;
+  padding: 6px;
   background: var(--panel-background-alt);
 }
 .itemRow {
   display: flex;
-  gap: 6px;
-  margin-bottom: 6px;
-  align-items: flex-end;
-}
-.itemRow > :first-child {
-  flex: 1;
-}
-.itemRow > :nth-child(2) {
-  flex: 0 0 100px;
-}
-.itemRow > :nth-child(3) {
-  flex: 0 0 110px;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 4px;
 }
 .error {
   color: var(--text-negative);

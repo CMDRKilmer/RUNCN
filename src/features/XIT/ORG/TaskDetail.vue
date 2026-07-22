@@ -161,8 +161,7 @@ async function onDelete() {
 
 function onCreateContract() {
   // contractCreator 决定反转规则：publisher 视角不反转，claimer 视角反转
-  const creatorIsPublisher =
-    localTask.value.contractCreator === 'publisher' ? isPublisher.value : !isPublisher.value;
+  const creatorIsPublisher = localTask.value.contractCreator === 'publisher';
   sendTaskToContd(localTask.value.contractJson, localTask.value.type, creatorIsPublisher);
 }
 

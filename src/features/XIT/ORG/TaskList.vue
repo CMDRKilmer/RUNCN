@@ -128,17 +128,17 @@ onBeforeUnmount(() => {
           :task="task"
           :current-user="currentUser"
           @click="selectedTask = task" />
+        <TaskDetail
+          v-if="task && selectedTask?.id === task.id"
+          :task="selectedTask"
+          :current-user="currentUser"
+          @close="onDetailClosed"
+          @updated="onTaskUpdated"
+          @link-contract="onRequestLinkContract"
+          @deleted="onTaskDeleted" />
       </template>
     </template>
 
-    <TaskDetail
-      v-if="selectedTask"
-      :task="selectedTask"
-      :current-user="currentUser"
-      @close="onDetailClosed"
-      @updated="onTaskUpdated"
-      @link-contract="onRequestLinkContract"
-      @deleted="onTaskDeleted" />
     <LinkContract
       v-if="showLinkContract && selectedTask"
       :task="selectedTask"
