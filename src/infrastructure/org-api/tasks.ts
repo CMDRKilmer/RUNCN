@@ -70,6 +70,12 @@ export async function cancelTask(taskId: string, reason?: string): Promise<OrgTa
   });
 }
 
+// 重新发布：CANCELLED → PUBLISHED。仅 publisher 可重新发布自己取消的任务。
+// 返回更新后的任务，状态回到 PUBLISHED。
+export async function republishTask(taskId: string): Promise<OrgTask> {
+  return request<OrgTask>(`/tasks/${taskId}/republish`, { method: 'POST' });
+}
+
 // 物理删除任务。仅发布者可删除自己发布的任务（后端 service 校验）。
 // 返回删除前的快照，便于前端展示"已删除 ... 任务"之类的 toast。
 //

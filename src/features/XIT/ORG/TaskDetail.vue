@@ -89,6 +89,8 @@ const canShowCancelButton = computed(
     localTask.value.status !== 'CANCELLED' &&
     localTask.value.status !== 'COMPLETED',
 );
+// 重新发布：仅 publisher 自己可把 CANCELLED 状态的任务转回 PUBLISHED。
+const canRepublish = computed(() => localTask.value.status === 'CANCELLED' && isPublisher.value);
 // CANCELLED / COMPLETED 状态下：仅发布者可物理删除。后端拒错由 store/error 提示。
 const canDelete = computed(() => canDeleteTask(props.currentUser, localTask.value));
 const canCreateContract = computed(
@@ -135,6 +137,13 @@ async function onCancel() {
     ),
   );
   showBoardCancel.value = false;
+}
+
+async function onRepublish() {
+  if (!confirm('确认重新发布此任务？将清空接取信息，合同关联也会被释放。')) {
+    return;
+  }
+  await updateTask(() => tasksApi.republishTask(localTask.value.id));
 }
 
 // 删除任务：必须输入 "DELETE" 二次确认。删除后 emit 'deleted'（含快照）
@@ -256,6 +265,9 @@ function onNotesChanged() {
       >
       <PrunButton v-if="canShowCancelButton" neutral :disabled="loading" @click="onCancel">
         取消任务
+      </PrunButton>
+      <PrunButton v-if="canRepublish" primary :disabled="loading" @click="onRepublish">
+        重新发布
       </PrunButton>
       <PrunButton
         v-if="showBoardCancelButton && !showBoardCancel && canShowCancelButton"

@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { OrgTask, OrgUser, PollScope } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
-import TaskCard from './TaskCard.vue';
 import TaskDetail from './TaskDetail.vue';
 import LinkContract from './LinkContract.vue';
 import EmptyState from './EmptyState.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
+import { formatAmountWithCurrency, formatNumber } from './utils';
 
 const scopeLabel = computed(() => {
   switch (props.scope) {
@@ -109,6 +109,72 @@ onBeforeUnmount(() => {
   selectedTask.value = null;
   showLinkContract.value = false;
 });
+
+// 表格单元格格式化函数
+function getItemSummary(task: OrgTask): string {
+  const items = task.contractJson.items ?? [];
+  if (items.length === 0) {
+    return '无物品';
+  }
+  const head = `${formatNumber(items[0].amount)}× ${items[0].commodity}`;
+  if (items.length === 1) {
+    return head;
+  }
+  return `${head} 等 ${items.length} 项`;
+}
+
+function getLocationText(task: OrgTask): string {
+  const c = task.contractJson;
+  if (task.type === 'SHIP') {
+    return `${c.origin ?? '?'} → ${c.destination ?? '?'}`;
+  }
+  return c.location ?? '—';
+}
+
+function getPriceText(task: OrgTask): string {
+  const c = task.contractJson;
+  if (c.price !== undefined) {
+    return formatAmountWithCurrency(c.price, c.currency);
+  }
+  const itemsTotal = (c.items ?? []).reduce((sum, i) => sum + (i.price ?? 0) * i.amount, 0);
+  return itemsTotal > 0 ? formatAmountWithCurrency(itemsTotal, c.currency) : '—';
+}
+
+function getTypeLabel(type: OrgTask['type']): string {
+  switch (type) {
+    case 'BUY':
+      return '采购';
+    case 'SELL':
+      return '出售';
+    case 'SHIP':
+      return '运输';
+    case 'LOAN':
+      return '借贷';
+    default:
+      return type;
+  }
+}
+
+function getStatusColor(status: OrgTask['status']): string {
+  switch (status) {
+    case 'PUBLISHED':
+      return 'var(--text-muted)';
+    case 'AWAITING_CONTRACT':
+      return 'var(--text-warning, #f0ad4e)';
+    case 'IN_PROGRESS':
+      return 'var(--accent)';
+    case 'COMPLETED':
+      return 'var(--text-positive, #5cb85c)';
+    case 'CANCELLED':
+      return 'var(--text-negative, #d9534f)';
+    default:
+      return 'inherit';
+  }
+}
+
+function selectTask(task: OrgTask) {
+  selectedTask.value = task;
+}
 </script>
 
 <template>
@@ -122,21 +188,45 @@ onBeforeUnmount(() => {
       <EmptyState message="暂无任务" />
     </template>
     <template v-else>
-      <template v-for="task in tasks" :key="task?.id">
-        <TaskCard
-          v-if="task"
-          :task="task"
-          :current-user="currentUser"
-          @click="selectedTask = task" />
-        <TaskDetail
-          v-if="task && selectedTask?.id === task.id"
-          :task="selectedTask"
-          :current-user="currentUser"
-          @close="onDetailClosed"
-          @updated="onTaskUpdated"
-          @link-contract="onRequestLinkContract"
-          @deleted="onTaskDeleted" />
-      </template>
+      <table :class="$style.table">
+        <thead>
+          <tr>
+            <th>类型</th>
+            <th>标题</th>
+            <th>物品</th>
+            <th>{{ scope === 'board' ? '位置' : '位置/路线' }}</th>
+            <th>{{ scope === 'board' ? '发布者' : '状态' }}</th>
+            <th>价格</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template v-for="task in tasks" :key="task.id">
+            <tr
+              :class="[$style.row, selectedTask?.id === task.id ? $style.selected : '']"
+              @click="selectTask(task)">
+              <td :class="$style.type">{{ getTypeLabel(task.type) }}</td>
+              <td>{{ task.contractJson.name || task.type }}</td>
+              <td>{{ getItemSummary(task) }}</td>
+              <td>{{ getLocationText(task) }}</td>
+              <td>{{ task.publisherUsername }}</td>
+              <td>{{ getPriceText(task) }}</td>
+              <td :style="{ color: getStatusColor(task.status) }">{{ task.status }}</td>
+            </tr>
+            <tr v-if="selectedTask?.id === task.id" :class="$style.detailRow">
+              <td colspan="7">
+                <TaskDetail
+                  :task="selectedTask"
+                  :current-user="currentUser"
+                  @close="onDetailClosed"
+                  @updated="onTaskUpdated"
+                  @link-contract="onRequestLinkContract"
+                  @deleted="onTaskDeleted" />
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
     </template>
 
     <LinkContract
@@ -164,5 +254,37 @@ onBeforeUnmount(() => {
   padding: 16px;
   color: var(--text-negative);
   text-align: center;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.table th,
+.table td {
+  border: 1px solid var(--panel-border);
+  padding: 4px 8px;
+  text-align: left;
+}
+.table th {
+  background: var(--panel-background-alt);
+  font-weight: 600;
+}
+.row {
+  cursor: pointer;
+}
+.row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.selected {
+  background: rgba(255, 255, 255, 0.08);
+}
+.detailRow > td {
+  padding: 8px;
+  background: var(--panel-background-alt);
+}
+.type {
+  color: var(--accent);
+  font-weight: 600;
 }
 </style>
