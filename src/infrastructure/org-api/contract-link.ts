@@ -14,7 +14,9 @@ const reportedStatuses = new Map<string, Set<string>>();
 // ------------------------------------------------------------
 
 // 投影后的合同摘要形态（与 TaskContractJson 对齐）
-interface ContractFingerprint {
+// 形状与后端 utils/contract-match.ts 的 ContractFingerprint 完全等价——
+// 后端做权威比对时复用此 schema。修改任一处必须同步另一处。
+export interface ContractFingerprint {
   template: TaskContractJson['template'];
   currency: string;
   items: Array<{ commodity: string; amount: number; price?: number }>;
@@ -22,6 +24,11 @@ interface ContractFingerprint {
   origin?: string;
   destination?: string;
   price?: number;
+}
+
+export interface ContractMatchResult {
+  matched: boolean;
+  reason?: string;
 }
 
 // PrUn 条件类型 → contractJson template 的映射
@@ -79,7 +86,10 @@ function addressToLocation(address: PrunApi.Address | undefined): string | undef
 }
 
 // 把 PrUnApi.Contract 投影为指纹
-function contractToFingerprint(contract: PrunApi.Contract): ContractFingerprint {
+// 导出供前端调用以联调后端 match-contract 端点：
+// auto-link 在确认弹窗前先把 contract 转 fingerprint 上报，
+// 后端以 task.contractJson 为权威源严格比对，避免不同客户端分叉。
+export function contractToFingerprint(contract: PrunApi.Contract): ContractFingerprint {
   const fp: ContractFingerprint = {
     template: conditionsToTemplate(contract.conditions),
     currency: contract.partner.currency?.code ?? '',
@@ -160,7 +170,7 @@ function itemsEqual(a: ContractFingerprint['items'], b: ContractFingerprint['ite
 export function matchContractJson(
   taskJson: TaskContractJson,
   contract: PrunApi.Contract,
-): { matched: boolean; reason?: string } {
+): ContractMatchResult {
   const task = taskJsonToFingerprint(taskJson);
   const con = contractToFingerprint(contract);
 

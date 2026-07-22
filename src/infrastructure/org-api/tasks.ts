@@ -1,5 +1,6 @@
 // src/infrastructure/org-api/tasks.ts
 import type { ListTasksResult, OrgTask, PollScope, TaskContractJson, TaskType } from './types';
+import type { ContractFingerprint, ContractMatchResult } from './contract-link';
 import { HttpError, request } from './client';
 
 export interface ListTasksParams {
@@ -113,6 +114,28 @@ export interface LinkContractParams {
 
 export async function linkContract(taskId: string, params: LinkContractParams): Promise<OrgTask> {
   return request<OrgTask>(`/tasks/${taskId}/link-contract`, {
+    method: 'POST',
+    body: params,
+  });
+}
+
+export interface MatchContractParams {
+  contractId: string;
+  fingerprint: ContractFingerprint;
+  // true → 后端在匹配成功后直接调 link-contract；false → 仅返回比对结果
+  autoLink?: boolean;
+}
+
+// 自动关联合同权威匹配端点。前端轮询 PrUn contractsStore 命中指纹后，
+// 调用本端点由后端以 task.contractJson 为 source of truth 二次确认。
+// 始终返回 200 + ContractMatchResult（matched + 可选 reason/task）。
+// 业务错误（NOT_TASK_PARTY / INVALID_TRANSITION / CONTRACT_ALREADY_LINKED
+// 等）由后端 errorHandler 翻译为 4xx，由前端 request 抛 HttpError。
+export async function matchContract(
+  taskId: string,
+  params: MatchContractParams,
+): Promise<ContractMatchResult & { task?: OrgTask }> {
+  return request<ContractMatchResult & { task?: OrgTask }>(`/tasks/${taskId}/match-contract`, {
     method: 'POST',
     body: params,
   });

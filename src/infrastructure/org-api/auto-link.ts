@@ -10,7 +10,7 @@
 //   5. 任务关闭或用户停止 → stopAutoLink(taskId) 清理 interval。
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import type { OrgTask, TaskContractJson } from './types';
-import { matchContractJson } from './contract-link';
+import { contractToFingerprint, matchContractJson } from './contract-link';
 
 const POLL_INTERVAL_MS = 30_000;
 const CONFIRM_COUNTDOWN_MS = 5_000;
@@ -119,10 +119,28 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
       // 找到候选 → 暂停 interval，等待用户确认（避免扫到多个候选时反复弹窗）
       clearInterval(session.interval);
       session.interval = null!;
+      // 后端权威比对：把投影 fingerprint 上报 /tasks/:id/match-contract，
+      // 后端以 task.contractJson 为 source of truth 二次确认。命中 → 显示
+      // 确认弹窗；未命中 → 记录该合同 ID 已见过，下轮跳过（前端指纹规则
+      // 与后端不一致时也能拒绝误关联，AUTO_LINK_CONTRACT.md §"误关联兜底"）。
+      const tasksApi = await import('./tasks');
+      const verifyResult = await tasksApi.matchContract(task.id, {
+        contractId: match.contractId,
+        fingerprint: contractToFingerprint(match.contract),
+        autoLink: false,
+      });
+      if (!verifyResult.matched) {
+        session.dismissedContractIds.add(match.contractId);
+        const stillRunningAfterVerify = sessions.has(task.id);
+        const hasIntervalAfterVerify = session.interval != null;
+        if (stillRunningAfterVerify && !hasIntervalAfterVerify) {
+          session.interval = setInterval(tick, POLL_INTERVAL_MS);
+        }
+        return;
+      }
       const confirmed = await callbacks.onMatch(match);
       if (confirmed) {
         // 通过 linkContract 关联（动态 import 避免循环）
-        const tasksApi = await import('./tasks');
         const updated = await tasksApi.linkContract(task.id, {
           contractId: match.contractId,
           contractCreator: task.contractCreator ?? 'claimer',
