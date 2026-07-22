@@ -95,7 +95,7 @@ const statusColor = computed(() => {
     <div :class="$style.header">
       <span :class="[$style.type, C.type.typeSmall]">{{ typeLabel }}</span>
       <span :class="$style.status" :style="{ color: statusColor }">{{
-        statusLabel(task.status)
+        statusLabel(task.status, task.contractId)
       }}</span>
     </div>
     <div :class="$style.title">{{ task.contractJson.name || task.type }}</div>

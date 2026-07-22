@@ -77,17 +77,18 @@ export function statusColor(status: string): string {
 
 // 状态中文标签：把后端 enum 转成用户友好的中文。
 // 状态机语义（架构 §3）：
-//   PUBLISHED         → 待接取（已发布，等待其他人接取）
-//   AWAITING_CONTRACT → 待关联合同（已接取，待创建并关联 PrUn 合同）
-//   IN_PROGRESS       → 进行中（合同已关联，正在执行）
-//   COMPLETED         → 已完成
-//   CANCELLED         → 已取消
-export function statusLabel(status: string): string {
+//   PUBLISHED                          → 待接取（已发布，等待其他人接取）
+//   AWAITING_CONTRACT + 无 contractId   → 待关联合同（已接取，待创建并关联 PrUn 合同）
+//   AWAITING_CONTRACT + 有 contractId   → 待对方接签（合同已关联，等待对方 accept 触发 CLOSED）
+//   IN_PROGRESS                        → 进行中（合同已关联，正在执行）
+//   COMPLETED                          → 已完成
+//   CANCELLED                          → 已取消
+export function statusLabel(status: string, contractId?: string | null): string {
   switch (status) {
     case 'PUBLISHED':
       return '待接取';
     case 'AWAITING_CONTRACT':
-      return '待关联合同';
+      return contractId ? '待对方接签' : '待关联合同';
     case 'IN_PROGRESS':
       return '进行中';
     case 'COMPLETED':

@@ -212,7 +212,7 @@ function selectTask(task: OrgTask) {
               <td>{{ task.publisherUsername }}</td>
               <td>{{ getPriceText(task) }}</td>
               <td :style="{ color: getStatusColor(task.status) }">{{
-                statusLabel(task.status)
+                statusLabel(task.status, task.contractId)
               }}</td>
             </tr>
             <tr v-if="selectedTask?.id === task.id" :class="$style.detailRow">

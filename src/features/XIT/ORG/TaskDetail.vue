@@ -187,7 +187,7 @@ function onNotesChanged() {
   <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.detail]">
     <div :class="$style.header">
       <PrunButton dark inline @click="emit('close')">← 返回</PrunButton>
-      <span :class="$style.status">{{ statusLabel(localTask.status) }}</span>
+      <span :class="$style.status">{{ statusLabel(localTask.status, localTask.contractId) }}</span>
     </div>
 
     <SectionHeader>基本信息</SectionHeader>
