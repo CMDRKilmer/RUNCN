@@ -127,11 +127,25 @@ ORG 当前任务生命周期的"接取 → 合同关联"环节仍依赖用户手
 
 > 实际编码时再拆分。
 
-- [ ] 前端 `contract-link.ts` 增加 `startAutoLink(task)` / `stopAutoLink(taskId)` 函数
-- [ ] 封装指纹匹配函数 `matchContractJson(contractJson, taskContractJson)`
-- [ ] TaskDetail.vue 增加"开启自动关联"按钮 + 状态展示
-- [ ] 关联成功/失败的 toast 提示
+- [x] 前端 `contract-link.ts` 增加 `matchContractJson(contractJson, taskContractJson)` 指纹比对函数
+- [x] 新建 `auto-link.ts` 暴露 `startAutoLink(task)` / `stopAutoLink(taskId)` / `isAutoLinkRunning(taskId)`，30s 轮询 + dismissedContractIds 去重
+- [x] TaskDetail.vue 增加"开启/关闭自动关联"按钮 + 5s 倒计时确认弹窗（contractId + fingerprintSummary 展示）+ onBeforeUnmount 自动清理
+- [x] 关联成功/失败的 toast 提示（成功走 `emit('updated', updated)` 由父级统一 toast；失败走 `error.value` 内嵌面板 + onError 回调）
 - [ ] 后端可选：增加 `POST /tasks/:id/match-contract` 端点，让前端上报合同 JSON、后端做权威匹配（避免不同客户端的指纹规则不一致）
+
+### 已落地清单（2026-01 实现）
+
+| 文件 | 内容 |
+|---|---|
+| `infrastructure/org-api/contract-link.ts` | `ContractFingerprint` 投影、`contractToFingerprint`、`taskJsonToFingerprint`、`conditionsToTemplate`/`conditionsToItems`/`addressToLocation`、`priceEquals`、`itemsEqual`、`matchContractJson` |
+| `infrastructure/org-api/auto-link.ts` (新) | `startAutoLink`/`stopAutoLink`/`isAutoLinkRunning`，单 task 单会话，30s 轮询，命中返回 `Promise<boolean>` 等待 UI 确认 |
+| `features/XIT/ORG/TaskDetail.vue` | "🤖 开启/关闭自动关联"按钮、5s 倒计时 overlay 确认弹窗、`onBeforeUnmount` 自动 stopAutoLink |
+
+### 已知简化点
+
+* 价格容差硬编码 0.5% (`PRICE_TOLERANCE`)，后续可抽取到常量配置文件允许覆盖。
+* `effectiveTaskTemplate` 反转规则在 UI 侧做，依赖 `task.contractCreator`；后端权威匹配端点落地后应改回后端做反转，避免多客户端不一致。
+* 未做 `matchContractJson` 单测（项目尚无任何 test 文件），代码改动覆盖了 SHIP/BUY/SELL 三种 template + items 集合等 + price 容差 + 缺字段兜底 5 个分支，建议补 vitest。
 
 ---
 
