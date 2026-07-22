@@ -101,7 +101,9 @@ async function reportExtensionUser() {
       companyCode,
       displayName: prunUsername,
     });
-  } catch {}
+  } catch (err) {
+    console.warn('[ORG] Failed to report extension user:', err);
+  }
 }
 
 const tabs = computed(() => {

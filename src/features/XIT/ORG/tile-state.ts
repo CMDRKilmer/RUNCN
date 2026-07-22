@@ -2,5 +2,5 @@
 import { createTileStateHook } from '@src/store/user-data-tiles';
 
 export const useOrgTileState = createTileStateHook({
-  tab: 'board' as 'board' | 'published' | 'claimed',
+  tab: 'board' as 'board' | 'published' | 'claimed' | 'publish' | 'board-admin',
 });
