@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { OrgTask, OrgUser } from '@src/infrastructure/org-api/types';
 import { computed } from 'vue';
-import { formatAmountWithCurrency, formatNumber } from './utils';
+import { formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser | null }>();
 
@@ -94,7 +94,9 @@ const statusColor = computed(() => {
     @click="emit('click', task)">
     <div :class="$style.header">
       <span :class="[$style.type, C.type.typeSmall]">{{ typeLabel }}</span>
-      <span :class="$style.status" :style="{ color: statusColor }">{{ task.status }}</span>
+      <span :class="$style.status" :style="{ color: statusColor }">{{
+        statusLabel(task.status)
+      }}</span>
     </div>
     <div :class="$style.title">{{ task.contractJson.name || task.type }}</div>
     <div :class="$style.row">

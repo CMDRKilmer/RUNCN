@@ -6,7 +6,7 @@ import TaskDetail from './TaskDetail.vue';
 import LinkContract from './LinkContract.vue';
 import EmptyState from './EmptyState.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
-import { formatAmountWithCurrency, formatNumber } from './utils';
+import { formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 
 const scopeLabel = computed(() => {
   switch (props.scope) {
@@ -211,7 +211,9 @@ function selectTask(task: OrgTask) {
               <td>{{ getLocationText(task) }}</td>
               <td>{{ task.publisherUsername }}</td>
               <td>{{ getPriceText(task) }}</td>
-              <td :style="{ color: getStatusColor(task.status) }">{{ task.status }}</td>
+              <td :style="{ color: getStatusColor(task.status) }">{{
+                statusLabel(task.status)
+              }}</td>
             </tr>
             <tr v-if="selectedTask?.id === task.id" :class="$style.detailRow">
               <td colspan="7">

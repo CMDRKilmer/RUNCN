@@ -13,7 +13,7 @@ import {
   watchContractStatus,
   clearReportedStatus,
 } from '@src/infrastructure/org-api/contract-link';
-import { sendTaskToContd, formatAmountWithCurrency, formatNumber } from './utils';
+import { sendTaskToContd, formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 import NoteEditor from './NoteEditor.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import ActionBar from '@src/components/ActionBar.vue';
@@ -187,7 +187,7 @@ function onNotesChanged() {
   <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.detail]">
     <div :class="$style.header">
       <PrunButton dark inline @click="emit('close')">← 返回</PrunButton>
-      <span :class="$style.status">{{ localTask.status }}</span>
+      <span :class="$style.status">{{ statusLabel(localTask.status) }}</span>
     </div>
 
     <SectionHeader>基本信息</SectionHeader>
