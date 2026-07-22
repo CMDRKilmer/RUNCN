@@ -22,7 +22,7 @@ onMounted(load);
     <div v-else-if="stats">
       <div
         >用户总数：{{ stats.userCount }}（董事会 {{ stats.boardCount }} / 合作者
-        {{ stats.collaboratorCount }}）</div
+        {{ stats.collaboratorCount }} / 非组织用户 {{ stats.nonOrgUserCount }})</div
       >
       <div>任务总数：{{ stats.taskCount }}</div>
       <h4>按状态分布</h4>

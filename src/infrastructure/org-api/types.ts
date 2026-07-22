@@ -1,7 +1,7 @@
 // src/infrastructure/org-api/types.ts
 
 // 用户角色（架构 §12.21）
-export type UserRole = 'BOARD' | 'COLLABORATOR';
+export type UserRole = 'BOARD' | 'COLLABORATOR' | 'NON_ORG';
 
 // 任务类型（架构 §4.1）
 export type TaskType = 'BUY' | 'SELL' | 'SHIP' | 'LOAN';

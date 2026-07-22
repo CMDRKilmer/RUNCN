@@ -28,6 +28,20 @@ export async function listUsers(): Promise<OrgUser[]> {
   return request<OrgUser[]>('/board/users');
 }
 
+export interface ReportUserParams {
+  prunUsername: string;
+  companyCode: string;
+  displayName?: string;
+}
+
+export async function reportUser(params: ReportUserParams): Promise<void> {
+  return request<void>('/board/users/report', {
+    method: 'POST',
+    body: params,
+    skipAuth: true,
+  });
+}
+
 export async function promoteUser(userId: string): Promise<OrgUser> {
   return request<OrgUser>(`/board/users/${userId}/promote`, { method: 'POST' });
 }
@@ -41,6 +55,7 @@ export interface OrgStats {
   taskCount: number;
   boardCount: number;
   collaboratorCount: number;
+  nonOrgUserCount: number;
   tasksByStatus: Record<string, number>;
 }
 
