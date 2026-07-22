@@ -11,9 +11,6 @@ import {
   type PollCallbacks,
 } from '@src/infrastructure/org-api/polling';
 import { canSeeBoardPanel } from '@src/infrastructure/org-api/permissions';
-import * as boardApi from '@src/infrastructure/org-api/board';
-import { usersStore } from '@src/infrastructure/prun-api/data/users';
-import { companyStore } from '@src/infrastructure/prun-api/data/company';
 import { useOrgTileState } from './tile-state';
 import AuthOverlay from './AuthOverlay.vue';
 import RoleBadge from './RoleBadge.vue';
@@ -61,7 +58,8 @@ const pollCallbacks: PollCallbacks = {
 };
 
 onMounted(() => {
-  void reportExtensionUser();
+  // 用户在线上报已迁移到 main.ts 的扩展启动阶段（reportExtensionUserOnStartup），
+  // 这里只负责会话/轮询初始化。
   if (session.value) {
     setCurrentUser(session.value.user);
     startPolling(pollCallbacks);
@@ -87,23 +85,6 @@ async function onLogout() {
   session.value = null;
   showAuth.value = true;
   resetPollingState();
-}
-
-async function reportExtensionUser() {
-  const prunUsername = usersStore.all.value?.[0]?.username;
-  const companyCode = companyStore.value?.code;
-  if (!prunUsername || !companyCode) {
-    return;
-  }
-  try {
-    await boardApi.reportUser({
-      prunUsername,
-      companyCode,
-      displayName: prunUsername,
-    });
-  } catch (err) {
-    console.warn('[ORG] Failed to report extension user:', err);
-  }
 }
 
 const tabs = computed(() => {
