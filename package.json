@@ -21,7 +21,6 @@
   },
   "type": "module",
   "dependencies": {
-    "@supabase/supabase-js": "^2.99.2",
     "@types/js-cookie": "^3.0.6",
     "chart.js": "^4.5.0",
     "chartjs-plugin-datalabels": "^2.2.0",

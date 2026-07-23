@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import StatusFilter from '@src/components/StatusFilter.vue';
 import ProgressBarWithText from '@src/components/ProgressBarWithText.vue';
-import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
+import { contractsStore, isFactionContract } from '@src/infrastructure/prun-api/data/contracts';
 import ContractLink from '@src/features/XIT/CONTS/ContractLink.vue';
 import PartnerLink from '@src/features/XIT/CONTS/PartnerLink.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
@@ -11,7 +11,6 @@ import ShipmentIcon from '@src/components/ShipmentIcon.vue';
 import { isEmpty } from 'ts-extras';
 import {
   canAcceptContract,
-  isFactionContract,
   calculateContractTotals,
   calculateContractReceivable,
   getContractIcons,

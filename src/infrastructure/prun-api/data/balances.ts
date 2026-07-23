@@ -27,10 +27,7 @@ onApiMessage({
   },
 });
 
-const currencies = computed(() => state.all.value?.map(x => x.currency));
-
 export const balancesStore = {
   ...state,
   ownCurrency,
-  currencies,
 };

@@ -51,13 +51,6 @@ export const hhmm = dateTimeFormat(() => ({
   hour12: hour12.value,
 }));
 
-export const hhmmss = dateTimeFormat(() => ({
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: hour12.value,
-}));
-
 export const ddmm = dateTimeFormat({
   month: '2-digit',
   day: '2-digit',

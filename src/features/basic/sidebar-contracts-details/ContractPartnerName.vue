@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
+import { contractsStore, isFactionContract } from '@src/infrastructure/prun-api/data/contracts';
 import PrunLink from '@src/components/PrunLink.vue';
-import { isFactionContract } from '@src/features/XIT/CONTS/utils';
 
 const { contractLocalId } = defineProps<{ contractLocalId: string | null }>();
 

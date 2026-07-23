@@ -13,7 +13,6 @@ import type { OrgTask, TaskContractJson } from './types';
 import { contractToFingerprint, matchContractJson } from './contract-link';
 
 const POLL_INTERVAL_MS = 30_000;
-const CONFIRM_COUNTDOWN_MS = 5_000;
 
 export interface AutoLinkMatch {
   contractId: string;
@@ -178,9 +177,3 @@ export function stopAutoLink(taskId: string): void {
 export function isAutoLinkRunning(taskId: string): boolean {
   return sessions.has(taskId);
 }
-
-// 暴露给测试/调试
-export const __test = {
-  POLL_INTERVAL_MS,
-  CONFIRM_COUNTDOWN_MS,
-};

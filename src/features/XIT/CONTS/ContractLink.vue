@@ -1,10 +1,7 @@
 <script setup lang="ts">
 import PrunLink from '@src/components/PrunLink.vue';
-import {
-  canAcceptContract,
-  canPartnerAcceptContract,
-  isFactionContract,
-} from '@src/features/XIT/CONTS/utils';
+import { canAcceptContract, canPartnerAcceptContract } from '@src/features/XIT/CONTS/utils';
+import { isFactionContract } from '@src/infrastructure/prun-api/data/contracts';
 import fa from '@src/utils/font-awesome.module.css';
 import coloredValue from '@src/infrastructure/prun-ui/css/colored-value.module.css';
 

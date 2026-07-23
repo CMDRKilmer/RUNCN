@@ -31,6 +31,5 @@ const find = (naturalIdOrName?: string | null) =>
 export const planetsStore = {
   ...state,
   getByNaturalId,
-  getByName,
   find,
 };
