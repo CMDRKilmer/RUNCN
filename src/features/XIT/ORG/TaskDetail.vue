@@ -25,8 +25,10 @@ import NoteEditor from './NoteEditor.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import ActionBar from '@src/components/ActionBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
+import PrunLink from '@src/components/PrunLink.vue';
 import Active from '@src/components/forms/Active.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
+import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 
 const props = defineProps<{ task: OrgTask; currentUser: OrgUser }>();
 const emit = defineEmits<{
@@ -91,6 +93,61 @@ watch(
 watchEffect(() => {
   watchContractStatus(localTask.value);
 });
+
+// 已 link 合同的 PrUn 完整对象：用于「打开合同」链接（用 localId 触发 CONT 命令）。
+// task.contractId 来自后端存的是 PrUn 客户端的「合同 ID」（即 Contract.localId 短码，
+// 玩家在 PrUn 客户端里看见的"U787KK6"格式）。PrUn 内部 Contract.id 是 FQID（base32 ulid），
+// 与 shortId 不同；entity store 的 getById 用 Contract.id 做 key，找不到 shortId。
+//
+// 改用 contractsStore.all 直接遍历，按 localId 等值匹配，最稳。
+// contractsStore.fetched 必须为 true 否则 all 是 undefined（CONTRACTS_CONTRACTS
+// 消息还没收到）。computed 依赖 .value 是响应式的，fetched 变 true 后会重算。
+const linkedContract = computed(() => {
+  const id = localTask.value.contractId;
+  if (!id) return null;
+  if (!contractsStore.fetched.value) return null;
+  const all = contractsStore.all.value;
+  if (!all) return null;
+  return all.find(c => c.localId === id) ?? all.find(c => c.id === id) ?? null;
+});
+
+// 主动拉取：task 有 contractId 但 contractsStore 找不到时，触发 PrUn 客户端去
+// CONTC 拉取该合同缓存窗口（autoClose=true 不让窗口堆积）。拉取成功后 server 推
+// CONTRACTS_CONTRACT 消息，contractsStore 就会自动包含它。
+//
+// 注意：仅在用户**已经看到这条任务**时拉一次，避免一打开 Org 就发几十个 CONTC。
+// 用 watch + 一个 flag 实现 once 语义。
+let linkedContractFetchAttempted = false;
+console.log(
+  '[TaskDetail] mount, task.contractId=',
+  localTask.value.contractId,
+  'store.fetched=',
+  contractsStore.fetched.value,
+  'store.all?.length=',
+  contractsStore.all.value?.length ?? 'n/a',
+);
+watch(
+  linkedContract,
+  contract => {
+    const id = localTask.value.contractId;
+    if (!id) return;
+    if (linkedContractFetchAttempted) return;
+    // 等 contractsStore fetch 完成 + 找不到该合同 → 拉一次
+    if (!contractsStore.fetched.value) return;
+    if (contract) return; // 已经找到，无需拉
+    linkedContractFetchAttempted = true;
+    console.debug(
+      '[TaskDetail] linkedContract not in store, fetching:',
+      id,
+      'all.count:',
+      contractsStore.all.value?.length ?? 0,
+    );
+    void import('@src/infrastructure/prun-ui/buffers').then(m =>
+      m.showBuffer(`CONTC ${id}`, { autoSubmit: true, autoClose: true }),
+    );
+  },
+  { immediate: true },
+);
 
 onBeforeUnmount(() => {
   clearReportedStatus(localTask.value.id);
@@ -408,7 +465,19 @@ function onNotesChanged() {
         {{ localTask.claimerUsername }} ({{ localTask.claimerCompanyCode }})
       </div>
       <div v-if="localTask.contractId">
-        <span :class="$style.key">关联合同</span>{{ localTask.contractId }}
+        <span :class="$style.key">关联合同</span>
+        <!--
+          关联后可在 PrUn 客户端直接打开合同：
+            1) 优先用 contractsStore 里的合同对象展示名字（绿色 link 体验最好）
+            2) fallback：纯文本 + 同样可点击，点击会触发 CONT 命令拉取该合同缓存窗口
+               （这一招能把 contractsStore 还没缓存的合同拉进来）
+        -->
+        <PrunLink v-if="linkedContract" inline :command="`CONT ${linkedContract.localId}`">
+          {{ linkedContract.name || linkedContract.localId }}
+        </PrunLink>
+        <PrunLink v-else inline :command="`CONT ${localTask.contractId}`">
+          {{ localTask.contractId }}
+        </PrunLink>
       </div>
       <div v-if="localTask.expiresAt">
         <span :class="$style.key">有效期</span>

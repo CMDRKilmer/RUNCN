@@ -1,6 +1,6 @@
 // src/infrastructure/org-api/contract-link.ts
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
-import type { OrgTask, PrunContractStatus, TaskContractJson } from './types';
+import type { OrgTask, PrunContractStatus, TaskContractJson, TaskContractItem } from './types';
 import { syncContractStatus } from './tasks';
 
 // 已上报过的状态记录，避免重复上报（同一状态多次触发只发一次）
@@ -32,13 +32,26 @@ export interface ContractMatchResult {
 }
 
 // PrUn 条件类型 → contractJson template 的映射
+//
+// 核心原则：通过 conditions 中每个条件的 party 来判断方向，而非仅依赖 contract.party。
+// contract.party 是 PrUn 在合同层面对我方角色的概括，但 CONTD（合同草稿）自动创建的
+// 合同可能出现 contract.party=PROVIDER 但实际我方是买方的情况。
+//
+// 判断规则（按条件级别，不按合同级别）：
+//   - PAYMENT 条件：condition.party 是付款方
+//   - PROVISION/DELIVERY/PICKUP 条件：condition.party 是交货方
+//   - 我方付款 + 对方交货 → BUY（我方是买方）
+//   - 对方付款 + 我方交货 → SELL（我方是卖方）
+//
+// 同时保留 contract.party 作为高优先级信号，仅当 conditions 分析结果与 party 不一致时才
+// 信任 conditions（因为 conditions 更细粒度、直接反映合同实际内容）。
 function conditionsToTemplate(
   conditions: PrunApi.ContractCondition[],
+  contractParty?: PrunApi.ContractParty,
 ): TaskContractJson['template'] {
-  // SHIP 模板特征：存在 DELIVERY 或 DELIVERY_SHIPMENT + PROVISION_SHIPMENT
+  // SHIP 模板特征：存在 SHIPMENT 系列条件
   const hasShip = conditions.some(
     c =>
-      c.type === 'DELIVERY' ||
       c.type === 'DELIVERY_SHIPMENT' ||
       c.type === 'PROVISION_SHIPMENT' ||
       c.type === 'PICKUP_SHIPMENT' ||
@@ -46,58 +59,135 @@ function conditionsToTemplate(
       c.type === 'START_FLIGHT',
   );
   if (hasShip) return 'SHIP';
-  // BUY 模板特征：CUSTOMER 收到 PICKUP（= 买方） / SELL 模板特征：PROVIDER 收到 PAYMENT + CUSTOMER 给 PROVISION（= 卖方）
-  // 简化判定：若存在 PICKUP（无 SHIPMENT 后缀）→ BUY；否则 SELL
+
+  // 按条件 party 分析：谁付款？谁交货？
+  // 找出 PAYMENT 条件和 PROVISION/DELIVERY/PICKUP 条件
+  const paymentCond = conditions.find(c => c.type === 'PAYMENT' && c.party);
+  const deliveryCond = conditions.find(
+    c =>
+      (c.type === 'PROVISION' ||
+        c.type === 'DELIVERY' ||
+        c.type === 'PICKUP' ||
+        c.type === 'COMEX_PURCHASE_PICKUP') &&
+      c.party,
+  );
+
+  // 有 contract.party 时用它做参照系（"我方"的 party 值）
+  const myParty = contractParty;
+
+  if (paymentCond && deliveryCond && myParty) {
+    // 付款方是我方 → BUY；付款方是对方 → SELL
+    const iPay = paymentCond.party === myParty;
+    return iPay ? 'BUY' : 'SELL';
+  }
+
+  // 只有 contract.party，没有可分析的 conditions → 用 party 推断
+  if (myParty === 'CUSTOMER') return 'BUY';
+  if (myParty === 'PROVIDER') return 'SELL';
+
+  // 没传 party：无法确定"我方"角色，用 PICKUP 条件兜底
   const hasPickup = conditions.some(c => c.type === 'PICKUP' || c.type === 'COMEX_PURCHASE_PICKUP');
   if (hasPickup) return 'BUY';
-  // LOAN 暂不支持，留待后期（架构 §4.1）
   return 'SELL';
 }
 
 // 从 conditions 抽取物料清单（commodity ticker, amount, unit price）
+// 两遍扫描：先收集 quantity items，再从 PAYMENT 条件获取总价并分配到各 item。
+// CONTD 合同的 PAYMENT 和 DELIVERY 是独立条件，金额不在 quantity 条件上。
 function conditionsToItems(conditions: PrunApi.ContractCondition[]): ContractFingerprint['items'] {
   const result: ContractFingerprint['items'] = [];
+  // 第一遍：收集所有带 quantity 的物料
   for (const c of conditions) {
-    // PROVISION / PICKUP / PROVISION_SHIPMENT / PICKUP_SHIPMENT 带 quantity（含 material.ticker / amount）
     const mat = c.quantity?.material;
     if (mat && c.quantity?.amount !== undefined) {
       const item: { commodity: string; amount: number; price?: number } = {
         commodity: mat.ticker,
         amount: c.quantity.amount,
       };
-      // 单价：BUY/SELL 时 PAYMENT 条件 amount / quantity.amount
+      // 如果当前 condition 自身就带 amount（罕见），直接计算单价
       if (c.amount?.amount !== undefined && c.quantity.amount > 0) {
         item.price = c.amount.amount / c.quantity.amount;
       }
       result.push(item);
     }
   }
+  // 第二遍：如果 items 还没单价，从 PAYMENT 条件分摊总价
+  const hasPrice = result.some(i => i.price !== undefined);
+  if (!hasPrice && result.length > 0) {
+    const paymentCond = conditions.find(
+      c => c.type === 'PAYMENT' && c.amount?.amount !== undefined,
+    );
+    if (paymentCond?.amount) {
+      const totalAmount = result.reduce((sum, i) => sum + i.amount, 0);
+      if (totalAmount > 0) {
+        const unitPrice = paymentCond.amount.amount / totalAmount;
+        for (const item of result) {
+          item.price = unitPrice;
+        }
+      }
+    }
+  }
   return result;
 }
 
-// 从 Address 抽取 location 字符串：拼接前两行 entity.name
-// 例如 [{ entity: { name: 'Moria' } }, { entity: { name: 'Benten' } }] → "Moria, Benten"
+// 从 Address 抽取 location 字符串：取最后一行 entity.naturalId（站点/星系代码）。
+// 任务发布时 location 是用户手填的 naturalId（如 "HRT"），合同侧用 name（"Hortus Station"）
+// 会导致指纹 mismtach。统一用 naturalId 对齐。
+// 例如 [{ entity: { naturalId: 'VH-331', name: 'Hortus' } }, { entity: { naturalId: 'HRT', name: 'Hortus Station' } }] → "HRT"
 function addressToLocation(address: PrunApi.Address | undefined): string | undefined {
   if (!address || address.lines.length === 0) return undefined;
-  const names = address.lines
-    .map(line => ('entity' in line ? line.entity?.name : undefined))
-    .filter((n): n is string => Boolean(n));
-  return names.length > 0 ? names.join(', ') : undefined;
+  // 取最后一行（通常是站点）的 naturalId；如果不存在则取倒数第二行（星系）
+  for (let i = address.lines.length - 1; i >= 0; i--) {
+    const line = address.lines[i];
+    if ('entity' in line && line.entity?.naturalId) {
+      return line.entity.naturalId;
+    }
+  }
+  return undefined;
 }
+
+// PrUn wire 实际 contractType 枚举（远超 BUY/SELL/SHIP）。
+// 玩家间普通合同：'BUY' | 'SELL' | 'SHIP' | 'LOAN'
+// 派系/AI/政府合同：'MATERIALS' | 'INFRASTRUCTURE' | '...'
+// 我们只关心玩家间普通合同（task 只能匹配这些）。
+const PLAYER_CONTRACT_TYPES = new Set(['BUY', 'SELL', 'SHIP', 'LOAN']);
 
 // 把 PrUnApi.Contract 投影为指纹
 // 导出供前端调用以联调后端 match-contract 端点：
 // auto-link 在确认弹窗前先把 contract 转 fingerprint 上报，
 // 后端以 task.contractJson 为权威源严格比对，避免不同客户端分叉。
 export function contractToFingerprint(contract: PrunApi.Contract): ContractFingerprint {
+  // 1) contractType 解析优先级：
+  //    a) wire 字段是玩家合同（'BUY' | 'SELL' | 'SHIP' | 'LOAN'）→ 用 wire
+  //    b) 派系合同（'MATERIALS' / 'INFRASTRUCTURE' 等）+ wire=null：用 conditions 级别
+  //       分析（谁付款、谁交货）反推 BUY/SELL，不再盲信 contract.party。
+  //    c) 都缺时：fallback 到 conditions 推断
+  const wireType = contract.contractType as string | null | undefined;
+  const tmpl: TaskContractJson['template'] =
+    wireType && PLAYER_CONTRACT_TYPES.has(wireType)
+      ? (wireType as TaskContractJson['template'])
+      : conditionsToTemplate(contract.conditions, contract.party);
+
+  // 2) currency 兜底链：
+  //    - partner.currency?.code（玩家对方有 currency 字段时最准）
+  //    - conditions[PAYMENT].amount.currency（对方是派系无 partner.currency，
+  //      货币信息在 conditions 里。amount.currency 是 string 直接是货币 code）
+  //    - 空字符串：稍后 matchContractJson 会拒（与 task.currency 比对失败）
+  const currency =
+    contract.partner.currency?.code ||
+    contract.conditions.find(c => c.amount?.currency)?.amount?.currency ||
+    '';
+
   const fp: ContractFingerprint = {
-    template: conditionsToTemplate(contract.conditions),
-    currency: contract.partner.currency?.code ?? '',
+    template: tmpl,
+    currency,
     items: conditionsToItems(contract.conditions),
   };
   // location / origin / destination
-  if (contract.conditions[0]?.address) {
-    fp.location = addressToLocation(contract.conditions[0].address);
+  // 取第一个有 address 的 condition（PAYMENT 可能排在第一位且无 address）
+  const addrCond = contract.conditions.find(c => c.address);
+  if (addrCond?.address) {
+    fp.location = addressToLocation(addrCond.address);
   }
   const delivery = contract.conditions.find(
     c => c.type === 'DELIVERY' || c.type === 'DELIVERY_SHIPMENT',
@@ -133,8 +223,17 @@ function taskJsonToFingerprint(json: TaskContractJson): ContractFingerprint {
     location: json.location,
     origin: json.origin,
     destination: json.destination,
-    price: json.price,
+    // 顶层 price 为 undefined 时，从 items 反算总价（BUY/SELL 任务价格在 item 级别）。
+    // 合同侧 price 来自 PAYMENT 条件总金额，两侧需要可比。
+    price: json.price ?? totalPriceFromItems(json.items),
   };
+}
+
+// 从 items 计算总价（sum of price × amount）
+function totalPriceFromItems(items: TaskContractItem[]): number | undefined {
+  const priced = items.filter(i => i.price !== undefined && i.price > 0);
+  if (priced.length === 0) return undefined;
+  return priced.reduce((sum, i) => sum + i.price! * i.amount, 0);
 }
 
 const PRICE_TOLERANCE = 0.005; // ±0.5%
