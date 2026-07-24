@@ -6,8 +6,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import MaterialPicker from '@src/features/XIT/CONTGEN/MaterialPicker.vue';
 import AddressPicker from '@src/features/XIT/CONTGEN/AddressPicker.vue';
-import { useTileState, getTileState } from '@src/store/user-data-tiles';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { useTileState } from '@src/store/user-data-tiles';
 import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import { useClipboard } from '@src/hooks/use-clipboard';
 
@@ -234,19 +233,6 @@ async function handleNewDraftAndFill() {
   }
 }
 
-// Transfer the generated JSON to the CONTD auto-fill panel via the
-// shared workspace key. The CONTD panel consumes it on next mount.
-function sendToContd() {
-  if (!canSubmit.value) {
-    return;
-  }
-  // We persist the raw JSON string (not the structured object) so the
-  // consumer side doesn't have to redo the cleanup pass.
-  const workspace = getTileState<{ json: string }>('contgen-output');
-  workspace.json = outputJson.value;
-  void showBuffer('CONTD', { force: true });
-}
-
 const { copy } = useClipboard();
 async function copyJson() {
   await copy(outputJson.value);
@@ -346,9 +332,6 @@ async function copyJson() {
         <PrunButton :disabled="!canSubmit || isNewing" primary @click="handleNewDraftAndFill">
           {{ isNewing ? newDraftStatus : '新建合同并填充' }}
         </PrunButton>
-        <PrunButton :disabled="!canSubmit || isNewing" primary @click="sendToContd"
-          >发送到 CONTD</PrunButton
-        >
         <PrunButton :disabled="!canSubmit || isNewing" primary @click="copyJson"
           >复制 JSON</PrunButton
         >
