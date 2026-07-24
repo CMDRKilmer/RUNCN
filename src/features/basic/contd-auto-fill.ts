@@ -835,9 +835,18 @@ function buildPanel(tile: PrunTile) {
   // on panel mount and pre-fill the textarea, then clear the key so
   // a stale value doesn't refill on every re-mount.
   const pendingContgen = getTileState<{ json?: string }>('contgen-output');
+  let autoFilledFromContgen = false;
   if (typeof pendingContgen.json === 'string' && pendingContgen.json.length > 0) {
     textarea.value = pendingContgen.json;
     delete pendingContgen.json;
+    // CONTGEN-driven mounts should not require the user to press the
+    // "填写" button manually. The user just hit "新建合同并填充" /
+    // "发送到 CONTD" in CONTGEN — the next thing they expect to see
+    // is the form auto-filling. Defer the click past the current
+    // task so React/PrUn have a chance to settle the DOM around
+    // the panel before applyConfig walks it; the button reference
+    // is captured here so we don't depend on a later querySelector.
+    autoFilledFromContgen = true;
   }
 
   const controls = document.createElement('div');
@@ -986,6 +995,29 @@ function buildPanel(tile: PrunTile) {
     headerForm.appendChild(row);
   } else {
     tile.frame.prepend(row);
+  }
+
+  // Auto-click "填写" when CONTGEN wrote the JSON for us. We capture
+  // the button reference now (it's mounted and reachable via the
+  // listener) and dispatch the click asynchronously so React's
+  // hydration / panel layout has time to settle before applyConfig
+  // starts walking the form. The click is also routed through
+  // clickElement so it fires pointerdown+mousedown first — same as
+  // the real user press, which PrUn's React handlers expect.
+  //
+  // If the panel was rebuilt between scheduling and the click landing
+  // (e.g. React re-rendered the header), `button.isConnected` will be
+  // false and we silently bail — the new buildPanel instance owns the
+  // JSON now and will run its own auto-click (or fall through to
+  // manual, depending on whether contgen-output was repopulated).
+  if (autoFilledFromContgen) {
+    setStatus('Auto-filling…');
+    void sleep(100).then(() => {
+      if (!button.isConnected) {
+        return;
+      }
+      clickElement(button);
+    });
   }
 }
 
