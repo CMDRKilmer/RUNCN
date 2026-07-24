@@ -13,10 +13,24 @@ import TextInput from '@src/components/forms/TextInput.vue';
 
 type ItemType = { ticker: string; amount: number; price?: number };
 
-const type = ref<Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>>('BUY');
-const currency = ref('ICA');
-const contractName = ref('');
-const location = ref('');
+// MarketView 通过此 prop 预填表单（点 "去 PublishTask 发布" 时使用）。
+// 不传则按默认空白 + BUY 类型启动。
+const props = defineProps<{
+  initialData?: {
+    type?: Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>;
+    ticker?: string;
+    amount?: number;
+    price?: number;
+    currency?: string;
+    location?: string;
+    contractName?: string;
+  };
+}>();
+
+const type = ref<Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>>(props.initialData?.type ?? 'BUY');
+const currency = ref(props.initialData?.currency ?? 'ICA');
+const contractName = ref(props.initialData?.contractName ?? '');
+const location = ref(props.initialData?.location ?? '');
 const origin = ref('');
 const destination = ref('');
 // `price` 在不同类型下语义不同：
@@ -26,7 +40,14 @@ const destination = ref('');
 // 保留 ref 是为了让 SHIP 路径写入 contractJson.price 不需要分支。
 const price = ref<number | undefined>(undefined);
 const deadline = ref<number | undefined>(undefined);
-const items = ref<ItemType[]>([{ ticker: '', amount: 0, price: 0 }]);
+// 商品行：MarketView 预填时用 initialData，否则从空白开始。
+const items = ref<ItemType[]>([
+  {
+    ticker: props.initialData?.ticker ?? '',
+    amount: props.initialData?.amount ?? 0,
+    price: props.initialData?.price ?? 0,
+  },
+]);
 // 有效期：发布后多少天自动取消（架构 §12.21 任务有效期），内部换算成小时传给 API
 const expiresAfterDays = ref<number>(3);
 

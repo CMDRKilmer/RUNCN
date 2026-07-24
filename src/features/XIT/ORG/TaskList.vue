@@ -8,10 +8,14 @@ import EmptyState from './EmptyState.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import { formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 
+// UI Tab 键：'shipping' 仅展示 SHIP 任务；'published' / 'claimed' 直接透传给 API。
+// 后端 /tasks scope 枚举是 'board' | 'published' | 'claimed'，不接受 'shipping'。
+type UiScope = 'shipping' | 'published' | 'claimed';
+
 const scopeLabel = computed(() => {
   switch (props.scope) {
-    case 'board':
-      return '任务板';
+    case 'shipping':
+      return '运输';
     case 'published':
       return '我的发布';
     case 'claimed':
@@ -22,7 +26,7 @@ const scopeLabel = computed(() => {
 });
 
 const props = defineProps<{
-  scope: PollScope;
+  scope: UiScope;
   currentUser: OrgUser;
 }>();
 
@@ -38,7 +42,15 @@ async function refresh() {
   loading.value = true;
   error.value = '';
   try {
-    const result = await tasksApi.listTasks({ scope: props.scope, limit: 100 });
+    // UI scope → API scope 翻译：
+    //   'shipping' → 'board' + type=SHIP（运输 Tab 只看 SHIP）
+    //   'published' / 'claimed' → 原样透传
+    const apiScope: PollScope = props.scope === 'shipping' ? 'board' : props.scope;
+    const result = await tasksApi.listTasks({
+      scope: apiScope,
+      type: props.scope === 'shipping' ? 'SHIP' : undefined,
+      limit: 100,
+    });
     tasks.value = result.items;
   } catch (err) {
     error.value = String(err);
@@ -48,7 +60,7 @@ async function refresh() {
 }
 
 onMounted(refresh);
-// scope 切换时（同 ORG pane 内 board/published/claimed 互切）清除详情与子弹窗，
+// scope 切换时（同 ORG pane 内 shipping/published/claimed 互切）清除详情与子弹窗，
 // 防止旧 scope 的 TaskDetail 留在新列表下方。
 // 注意：LinkContract 内嵌在 TaskList 模板里，selectedTask=null 之后它的 v-if 已会收起。
 watch(
@@ -194,8 +206,8 @@ function selectTask(task: OrgTask) {
             <th>类型</th>
             <th>标题</th>
             <th>物品</th>
-            <th>{{ scope === 'board' ? '位置' : '位置/路线' }}</th>
-            <th>{{ scope === 'board' ? '发布者' : '状态' }}</th>
+            <th>{{ scope === 'shipping' ? '路线' : '位置/路线' }}</th>
+            <th>{{ scope === 'shipping' ? '发布者' : '状态' }}</th>
             <th>价格</th>
             <th>状态</th>
           </tr>

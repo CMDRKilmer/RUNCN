@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AuthSession, OrgUser } from '@src/infrastructure/org-api/types';
+import { computed, onBeforeUnmount, onMounted, provide, readonly, ref } from 'vue';
+import type { AuthSession, OrgUser, TaskType } from '@src/infrastructure/org-api/types';
 import { getStoredSession, setOnUnauthorizedCallback } from '@src/infrastructure/org-api/client';
 import * as authApi from '@src/infrastructure/org-api/auth';
 import {
@@ -15,6 +15,7 @@ import { useOrgTileState } from './tile-state';
 import AuthOverlay from './AuthOverlay.vue';
 import RoleBadge from './RoleBadge.vue';
 import TaskList from './TaskList.vue';
+import MarketView from './MarketView.vue';
 import PublishTask from './PublishTask.vue';
 import BoardPanel from './board/BoardPanel.vue';
 import Header from '@src/components/Header.vue';
@@ -31,6 +32,24 @@ setOnUnauthorizedCallback(() => {
   session.value = null;
   showAuth.value = true;
   resetPollingState();
+});
+
+// MarketView → PublishTask 的预填桥接：MarketView 把数据写入下面这个 ref，
+// PublishTask 通过 inject('orgMarketPrefill') 拿到同一 ref 并消费一次后清空。
+// provide 默认是 readonly 的，这里通过 readonly 包裹避免子组件误写。
+const pendingPublishPrefill = ref<{
+  type: Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>;
+  ticker?: string;
+  amount?: number;
+  price?: number;
+  currency?: string;
+  location?: string;
+  contractName?: string;
+} | null>(null);
+// 提供两个 key：ref 本身（只读）+ 写入回调（受控）。MarketView 用回调写，PublishTask 用 ref 读。
+provide('orgMarketPrefill', readonly(pendingPublishPrefill));
+provide('orgMarketPrefillSet', (data: typeof pendingPublishPrefill.value) => {
+  pendingPublishPrefill.value = data;
 });
 
 // 任务状态变化通知（架构 §12.11）
@@ -89,10 +108,11 @@ async function onLogout() {
 
 const tabs = computed(() => {
   const list: Array<{
-    key: 'board' | 'published' | 'claimed' | 'publish' | 'board-admin';
+    key: 'market' | 'shipping' | 'published' | 'claimed' | 'publish' | 'board-admin';
     label: string;
   }> = [
-    { key: 'board', label: '任务板' },
+    { key: 'market', label: '市场' },
+    { key: 'shipping', label: '运输' },
     { key: 'published', label: '我的发布' },
     { key: 'claimed', label: '我的接取' },
     { key: 'publish', label: '发布任务' },
@@ -144,11 +164,15 @@ const tabs = computed(() => {
       </div>
 
       <main :class="$style.content">
+        <MarketView v-if="tab === 'market'" />
         <TaskList
-          v-if="tab === 'board' || tab === 'published' || tab === 'claimed'"
+          v-else-if="tab === 'shipping' || tab === 'published' || tab === 'claimed'"
           :scope="tab"
           :current-user="session.user" />
-        <PublishTask v-else-if="tab === 'publish'" />
+        <PublishTask
+          v-else-if="tab === 'publish'"
+          :initial-data="pendingPublishPrefill ?? undefined"
+          @consumed="() => (pendingPublishPrefill = null)" />
         <BoardPanel v-else-if="tab === 'board-admin'" :current-user="session.user" />
       </main>
     </template>

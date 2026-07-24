@@ -60,6 +60,9 @@ export interface OrgTask {
   claimerCompanyCode?: string;
   contractId?: string;
   contractCreator?: ContractCreator;
+  // 部分接取（partial claim）：子任务的 parentTaskId 指回原任务。
+  // 原任务的 parentTaskId 始终为 undefined。
+  parentTaskId?: string;
   expiresAt?: string;
   createdAt: string;
   publishedAt?: string;
@@ -68,6 +71,23 @@ export interface OrgTask {
   completedAt?: string;
   cancelledAt?: string;
   updatedAt: string;
+}
+
+// claim 端点返回结构：
+//   完整接取 → { task }
+//   裁剪接取（partial） → { task: parent, childTask: reverseTask }
+export interface ClaimTaskResult {
+  task: OrgTask;
+  childTask?: OrgTask;
+}
+
+// release 端点返回结构：
+//   完整接取任务 release → { task: 原任务 }
+//   部分接取子任务 release → { task: 父任务（amount 已加回）, parentTaskId, restoredAmount }
+export interface ReleaseTaskResult {
+  task: OrgTask;
+  parentTaskId?: string;
+  restoredAmount?: number;
 }
 
 // 任务备注（架构 §4.1）
@@ -124,7 +144,9 @@ export interface ListTasksResult {
   nextCursor: string | null;
 }
 
-// 轮询游标
+// 轮询游标（必须与后端 /tasks scope 枚举一致：board | published | claimed）
+// UI Tab 键（如 'shipping' / 'market'）与 API scope 解耦，
+// TaskList 内把 'shipping' 翻译成 { scope: 'board', type: 'SHIP' }。
 export type PollScope = 'board' | 'published' | 'claimed';
 
 // PrUn 合同状态枚举（与 src/infrastructure/prun-api/data/contracts.types.d.ts 对齐）

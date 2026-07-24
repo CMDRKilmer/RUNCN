@@ -1,5 +1,13 @@
 // src/infrastructure/org-api/tasks.ts
-import type { ListTasksResult, OrgTask, PollScope, TaskContractJson, TaskType } from './types';
+import type {
+  ClaimTaskResult,
+  ListTasksResult,
+  OrgTask,
+  PollScope,
+  ReleaseTaskResult,
+  TaskContractJson,
+  TaskType,
+} from './types';
 import type { ContractFingerprint, ContractMatchResult } from './contract-link';
 import { HttpError, request } from './client';
 
@@ -56,12 +64,20 @@ export async function patchTask(taskId: string, params: PatchTaskParams): Promis
   });
 }
 
-export async function claimTask(taskId: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}/claim`, { method: 'POST' });
+export async function claimTask(taskId: string, amount?: number): Promise<ClaimTaskResult> {
+  // MarketView 接取面板允许裁剪接取量（≤ 原任务 amount）。
+  // - 完整接取或 amount 等于剩余：返回 { task: task }
+  // - 部分接取：返回 { task: parent, childTask: reverseTask }
+  return request<ClaimTaskResult>(`/tasks/${taskId}/claim`, {
+    method: 'POST',
+    body: amount !== undefined ? { amount } : undefined,
+  });
 }
 
-export async function releaseTask(taskId: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}/release`, { method: 'POST' });
+export async function releaseTask(taskId: string): Promise<ReleaseTaskResult> {
+  // 完整接取 → { task }
+  // 部分接取子任务 → { task: 父任务, parentTaskId, restoredAmount }
+  return request<ReleaseTaskResult>(`/tasks/${taskId}/release`, { method: 'POST' });
 }
 
 export async function cancelTask(taskId: string, reason?: string): Promise<OrgTask> {

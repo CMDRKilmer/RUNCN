@@ -184,11 +184,17 @@ const showBoardCancelButton = computed(() =>
   shouldShowBoardCancel(props.currentUser, localTask.value),
 );
 
-async function updateTask(op: () => Promise<OrgTask>) {
+// updateTask 接收任意带 .task 的返回值结构：
+//   - OrgTask（旧 API：patchTask / cancelTask / republishTask 等直接返 task）
+//   - ReleaseTaskResult（releaseTask 新版：{ task, parentTaskId?, restoredAmount? }）
+//   - ClaimTaskResult（claimTask：{ task, childTask? }）
+// 我们统一从结果里抽 .task 字段更新本地视图。
+async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
   loading.value = true;
   error.value = '';
   try {
-    const updated = await op();
+    const result = await op();
+    const updated: OrgTask = 'task' in result ? result.task : result;
     localTask.value = updated;
     emit('updated', updated);
   } catch (err) {
@@ -199,11 +205,23 @@ async function updateTask(op: () => Promise<OrgTask>) {
 }
 
 async function onClaim() {
-  await updateTask(() => tasksApi.claimTask(localTask.value.id));
+  const result = await tasksApi.claimTask(localTask.value.id);
+  // 完整接取：localTask = 原任务（已经 claimer_id 变化）
+  // 部分接取：localTask = parent（用户视角下他操作的就是原任务）
+  localTask.value = result.task;
+  emit('updated', result.task);
+  if (result.childTask) {
+    // 部分接取：通知上层可以切到子任务查看 AWAITING_CONTRACT 详情
+    emit('updated', result.task);
+  }
 }
 
 async function onRelease() {
-  await updateTask(() => tasksApi.releaseTask(localTask.value.id));
+  const result = await tasksApi.releaseTask(localTask.value.id);
+  // 完整接取：localTask 已是原任务（AWAITING_CONTRACT → PUBLISHED）
+  // 部分接取子任务 release：result.task 是父任务（amount 已加回）
+  localTask.value = result.task;
+  emit('updated', result.task);
 }
 
 async function onCancel() {
