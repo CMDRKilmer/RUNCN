@@ -347,8 +347,8 @@ async function onDelete() {
 }
 
 async function onCreateContract() {
-  // contractCreator 决定反转规则：publisher 视角不反转，claimer 视角反转
-  const creatorIsPublisher = localTask.value.contractCreator === 'publisher';
+  // 谁在操作谁就是 creator：当前用户是发布者则不反转，是接取者则反转
+  const creatorIsPublisher = localTask.value.publisherId === props.currentUser.id;
   // Mirror the try/catch shape of the other handlers above so a
   // failure in the auto-fill helper (e.g. timed-out store update)
   // surfaces in the same error banner as the rest of the panel.

@@ -25,6 +25,8 @@ export interface AutoLinkMatch {
   contract: PrunApi.Contract;
   // 给 UI 展示的指纹摘要
   fingerprintSummary: string;
+  // 匹配时使用的模板：等于 task 原始模板说明发布者视角（不反转），否则为接取者视角
+  matchedTemplate: TaskContractJson['template'];
 }
 
 export interface AutoLinkCallbacks {
@@ -79,25 +81,42 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
   if (!all) {
     return null;
   }
-  // 用反转后的 template 做匹配（合同侧投影时已按 PrUn 实际类型判定）
-  const taskJsonForMatch: TaskContractJson = {
-    ...session.task.contractJson,
-    template: effectiveTaskTemplate(session.task),
-  };
+  // 发布者发送的合同不反转：优先用原始模板匹配，失败再尝试反转模板
+  const invertedTemplate = effectiveTaskTemplate(session.task);
+  const originalTemplate = session.task.contractJson.template;
+  const templatesToTry =
+    invertedTemplate !== originalTemplate
+      ? [originalTemplate, invertedTemplate]
+      : [originalTemplate];
+
   for (const contract of all) {
     if (session.dismissedContractIds.has(contract.id)) continue;
     // 只搜索「对方还没接受」（status=OPEN）的合同。这是 KAMISAMA223 用 CONTD 创建反向
     // 合同后的状态——买方还没接受（实际是我方创建，对方未接受即 OPEN）。
     // 关联后由后端 sync-status 在合同被接受/履行后把任务推到 IN_PROGRESS/COMPLETED。
     if (contract.status !== 'OPEN') continue;
-    const result = matchContractJson(taskJsonForMatch, contract);
-    if (!result.matched) continue;
-    console.log('[auto-link] matched task=', session.task.id, 'contract=', contract.id);
-    return {
-      contractId: contract.id,
-      contract,
-      fingerprintSummary: fingerprintSummary(session.task.contractJson),
-    };
+    for (const tmpl of templatesToTry) {
+      const taskJsonForMatch: TaskContractJson = {
+        ...session.task.contractJson,
+        template: tmpl,
+      };
+      const result = matchContractJson(taskJsonForMatch, contract);
+      if (!result.matched) continue;
+      console.log(
+        '[auto-link] matched task=',
+        session.task.id,
+        'contract=',
+        contract.id,
+        'template=',
+        tmpl,
+      );
+      return {
+        contractId: contract.id,
+        contract,
+        fingerprintSummary: fingerprintSummary(session.task.contractJson),
+        matchedTemplate: tmpl,
+      };
+    }
   }
   return null;
 }
@@ -148,10 +167,12 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
       }
       const confirmed = await callbacks.onMatch(match);
       if (confirmed) {
-        // 通过 linkContract 关联（动态 import 避免循环）
+        // 根据匹配模板推断合同创建方：原始模板=发布者视角，反转模板=接取者视角
+        const matchedCreator: 'publisher' | 'claimer' =
+          match.matchedTemplate === session.task.contractJson.template ? 'publisher' : 'claimer';
         const updated = await tasksApi.linkContract(task.id, {
           contractId: match.contractId,
-          contractCreator: task.contractCreator ?? 'claimer',
+          contractCreator: matchedCreator,
         });
         callbacks.onLinked(updated);
         stopAutoLink(task.id);
