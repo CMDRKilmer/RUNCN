@@ -288,8 +288,14 @@ export function matchContractJson(
   if (!itemsEqual(task.items, con.items)) {
     return { matched: false, reason: 'items mismatch' };
   }
-  if (!priceEquals(task.price, con.price)) {
-    return { matched: false, reason: `price mismatch: task=${task.price} contract=${con.price}` };
+  // 顶层 price 比对：BUY/SELL 任务价格在 item 级别，task.contractJson.price
+  // 可能是 undefined；合同侧 fingerprint.price 来自 PAYMENT 总金额。
+  // 当一方缺失时，从各自 items 反算总价使两侧可比。
+  // 与后端 utils/contract-match.ts matchContractFingerprint 保持一致。
+  const taskPrice = task.price ?? totalPriceFromItems(task.items);
+  const conPrice = con.price ?? totalPriceFromItems(con.items);
+  if (!priceEquals(taskPrice, conPrice)) {
+    return { matched: false, reason: `price mismatch: task=${taskPrice} contract=${conPrice}` };
   }
   // location / origin+destination 严格相等（双方都缺失或相等才算匹配）
   const locA = task.location ?? '';

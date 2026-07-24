@@ -245,12 +245,9 @@ function onStartAutoLink() {
     onStateChange: state => {
       autoLinkRunning.value = state === 'running';
     },
-    onMatch: match => {
-      pendingMatch.value = match;
-      startConfirmCountdown();
-      return new Promise<boolean>(resolve => {
-        pendingResolve = resolve;
-      });
+    onMatch: () => {
+      // 自动关联，不弹确认窗
+      return Promise.resolve(true);
     },
     onLinked: updated => {
       localTask.value = updated;

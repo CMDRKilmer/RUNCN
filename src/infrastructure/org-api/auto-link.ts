@@ -18,7 +18,7 @@ import type { OrgTask, TaskContractJson } from './types';
 import { contractToFingerprint, matchContractJson } from './contract-link';
 import { listTasks } from './tasks';
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 5_000;
 
 export interface AutoLinkMatch {
   contractId: string;
