@@ -45,7 +45,8 @@ const showBoardCancel = ref(false);
 const showDeleteConfirm = ref(false);
 const deleteConfirmText = ref('');
 
-// 自动关联合同状态
+// 自动关联合同状态（ORG 任务接取后默认开启自动关联）。
+// canAutoLink=true → 自动调 startAutoLink；用户可手动关闭（停止轮询）。
 const autoLinkRunning = ref(isAutoLinkRunning(props.task.id));
 const pendingMatch = ref<AutoLinkMatch | null>(null);
 const confirmCountdown = ref(0);
@@ -58,6 +59,19 @@ watch(
   t => {
     localTask.value = t;
   },
+);
+
+// 自动关联默认开启：canAutoLink 首次为 true 且尚未运行时启动一次。
+// 任务切到 IN_PROGRESS/COMPLETED/CANCELLED 后由 auto-link 内部停止，
+// 这里只补一次手动 onCreateContract 后未点自动关联按钮的入口。
+watch(
+  canAutoLink,
+  ok => {
+    if (!ok) return;
+    if (isAutoLinkRunning(localTask.value.id)) return;
+    onStartAutoLink();
+  },
+  { immediate: true },
 );
 
 // 监听合同状态变化（架构 §7.3）
@@ -373,13 +387,6 @@ function onNotesChanged() {
       <PrunButton v-if="canCreateContract" dark @click="emit('link-contract')"
         >上报合同 ID</PrunButton
       >
-      <PrunButton
-        v-if="canAutoLink && !autoLinkRunning"
-        neutral
-        :disabled="loading"
-        @click="onStartAutoLink">
-        🤖 开启自动关联
-      </PrunButton>
       <PrunButton v-if="autoLinkRunning" dark :disabled="loading" @click="onStopAutoLink">
         🤖 关闭自动关联
       </PrunButton>

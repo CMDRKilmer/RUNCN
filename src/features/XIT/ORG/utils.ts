@@ -39,9 +39,15 @@ export async function sendTaskToContd(
   // for future use (LOAN contracts, etc.); for the current BUY/
   // SELL/SHIP set, contractJson.template is authoritative.
   void taskType;
+  // ORG 任务接取后创建的合同名默认加 ORG 前缀，便于在 CONTD/CONTS 里区分
+  // 组织任务产生的合同。原 name 缺失时直接使用 "ORG-"。name 不参与
+  // 自动关联指纹比对（前端 fingerprint 不含 name），不影响 link-contract。
+  const baseName = contractJson.name?.trim();
+  const prefixedName = baseName ? `ORG-${baseName}` : 'ORG-';
   const inverted: TaskContractJson = {
     ...contractJson,
     template: invertTemplate(contractJson.template, creatorIsPublisher),
+    name: prefixedName,
   };
   return await newContractDraftAndFill(JSON.stringify(inverted, null, 2));
 }
