@@ -61,18 +61,8 @@ watch(
   },
 );
 
-// 自动关联默认开启：canAutoLink 首次为 true 且尚未运行时启动一次。
-// 任务切到 IN_PROGRESS/COMPLETED/CANCELLED 后由 auto-link 内部停止，
-// 这里只补一次手动 onCreateContract 后未点自动关联按钮的入口。
-watch(
-  canAutoLink,
-  ok => {
-    if (!ok) return;
-    if (isAutoLinkRunning(localTask.value.id)) return;
-    onStartAutoLink();
-  },
-  { immediate: true },
-);
+// 自动关联 watch 块：必须在 canAutoLink 声明之后才注册（避免 TDZ），
+// 见下方 canAutoLink 声明后的同段代码。
 
 // 监听合同状态变化（架构 §7.3）
 watchEffect(() => {
@@ -107,22 +97,37 @@ const isClaimer = computed(() => localTask.value.claimerId === props.currentUser
 const isParticipant = computed(() => isPublisher.value || isClaimer.value);
 
 const canClaim = computed(() => localTask.value.status === 'PUBLISHED' && !isPublisher.value);
+// 释放按钮可见条件：
+//   - 完整接取任务：状态 AWAITING_CONTRACT 且我是 claimer
+//   - 部分接取子任务：状态 AWAITING_CONTRACT 且我是 publisher（接取者持有反向合同）
+//   - 都不能在已签反向合同后（IN_PROGRESS / COMPLETED）释放
 const canRelease = computed(
-  () => localTask.value.status === 'AWAITING_CONTRACT' && isClaimer.value,
+  () =>
+    localTask.value.status === 'AWAITING_CONTRACT' &&
+    (isClaimer.value ||
+      (localTask.value.publisherId === props.currentUser.id &&
+        localTask.value.parentTaskId !== undefined)),
 );
 const canCancel = computed(() => canCancelTask(props.currentUser, localTask.value));
 // 仅在 status 不是 terminal（CANCELLED / COMPLETED）时显示"取消任务"按钮：
 // terminal 状态下取消语义不明，改用"删除任务"。
+// partial claim 子任务不能取消（后端 CANNOT_CANCEL_CHILD_TASK）；
+// 这里用 parentTaskId 提前隐藏，避免发起无效请求。
 const canShowCancelButton = computed(
   () =>
     canCancel.value &&
     localTask.value.status !== 'CANCELLED' &&
-    localTask.value.status !== 'COMPLETED',
+    localTask.value.status !== 'COMPLETED' &&
+    localTask.value.parentTaskId === undefined,
 );
 // 重新发布：仅 publisher 自己可把 CANCELLED 状态的任务转回 PUBLISHED。
 const canRepublish = computed(() => localTask.value.status === 'CANCELLED' && isPublisher.value);
 // CANCELLED / COMPLETED 状态下：仅发布者可物理删除。后端拒错由 store/error 提示。
-const canDelete = computed(() => canDeleteTask(props.currentUser, localTask.value));
+// partial claim 子任务不能删除（后端 CANNOT_DELETE_CHILD_TASK）；同样隐藏按钮。
+const canDelete = computed(
+  () =>
+    canDeleteTask(props.currentUser, localTask.value) && localTask.value.parentTaskId === undefined,
+);
 const canCreateContract = computed(
   () =>
     localTask.value.status === 'AWAITING_CONTRACT' &&
@@ -173,6 +178,22 @@ function onStartAutoLink() {
     },
   });
 }
+
+// 自动关联默认开启：canAutoLink 首次为 true 且尚未运行时启动一次。
+// 任务切到 IN_PROGRESS/COMPLETED/CANCELLED 后由 auto-link 内部停止，
+// 这里只补一次手动 onCreateContract 后未点自动关联按钮的入口。
+// 注册顺序：必须在 canAutoLink 声明之后 + onStartAutoLink 函数声明之后，
+// 否则 setup 阶段 immediate=true 会触发 TDZ（参见历史上 "Cannot access
+// 'canAutoLink' before initialization" 错误）。
+watch(
+  canAutoLink,
+  ok => {
+    if (!ok) return;
+    if (isAutoLinkRunning(localTask.value.id)) return;
+    onStartAutoLink();
+  },
+  { immediate: true },
+);
 
 function onStopAutoLink() {
   stopAutoLink(localTask.value.id);
