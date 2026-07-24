@@ -1,5 +1,109 @@
 # 更新日志
 
+**日期**: 2026-07-24
+**说明**: ORG 任务面板持续打磨：UI 与 PrUn 整体风格统一、新增自动关联合同（前端指纹 + 后端权威匹配）、市场面板与接取裁剪、CONTGEN 一键新建并填充、权限 / 状态 / 错误处理与多项修复
+
+### ✨ Features
+
+- **`XIT/ORG`**：发布表单对齐 PrUn `CONTGEN` 语义：运费字段仅 `SHIP` 显示，`BUY`/`SELL` 每行单价必填；表单顶部"顶层总价"改名为"运费"。
+- **`XIT/ORG`**：任务状态由统一的 `statusLabel` 工具展示替代原始状态文本；新增 `contractId` 参数适配，状态标签逻辑更完善。
+- **`XIT/ORG`**：发布者可"物理删除"自己发布的任务（CANCELLED / COMPLETED 等终态显示删除按钮，需输入 `DELETE` 二次确认）；`TaskDetail` 新增 `deleted` 事件，`TaskList` 本地 splice + refresh 同步移除。终端态取消按钮与删除按钮互斥。
+- **`XIT/ORG`**：价格统一千分位显示；切 tab 后任务详情残留修复。
+- **`XIT/ORG`**：组织任务管理面板（市场 / 运输 / 我的发布 / 我的接取 / 发布任务 / 管理）正式上线，支持非组织用户角色识别与统计、上报（登入用户、组织成员、在线非组织用户分类明确）。
+- **`XIT/ORG`**：新增市场面板，支持浏览公开市场任务并接取；接取任务支持裁剪（修改金额 / 价格 / 地点）。
+- **`XIT/ORG`**：自动关联合同 —— 任务面板持前端指纹生成 + 30s 轮询 + 5s 倒计时确认；关联对接后端权威匹配，前端仅做拉取与展示；自动关联在 ORG tile 全局开启，登出/关闭面板时清理所有 session。
+- **`XIT/ORG`**：发布人展示优化：`TaskDetail` 自动关联 watch 时机修复（避免 TDZ），全局 auto-link 启动器与发布人展示分离。
+- **`XIT/CONTGEN`**：抽离合同创建流程为复用模块；新增"一键新建并填充合同草稿"功能，自动定位 PrUn 合同草稿面板并填写 JSON。
+- **`XIT/CONTGEN`**：移除冗余 `sendToContd` 函数及对应按钮（被一键新建并填充流程替代）。
+- **`BPC`**：`bpc-utils` 价格来源简化并修复 `CXOB` 处理。
+
+### 🔧 Improvements
+
+- **`XIT/ORG`**：UI 与 PrUn 整体风格统一 —— 全面切换 `PrunButton` / `Header` / `SectionHeader` / `Active` / `PrunLink` / `ActionBar` 等共享组件；按钮改为 `neutral/primary/danger/dark` 语义；表单控件走 `forms/Active`；Tabs 切换为 `C.Tabs.*` + `toggleIndicator` 阴影；容器统一 `C.Panel.panel`；`RoleBadge` 用 `C.Chip.chip` 渐变金属色。
+- **`XIT/ORG`**：LinkContract 移除未使用的 `candidateContracts` 与 `contractsStore` 导入。
+- **`XIT/ORG`**：任务统计（Stats）按生命周期进度固定展示顺序。
+- **`XIT/ORG`**：非组织用户在线上报从 ORG tile 迁移到扩展启动阶段，关闭面板不再影响上报。
+- **`XIT/ORG`**：错误处理补齐合法 `tab` 枚举值；`deleteTask` 区分"任务不存在"与"端点未部署"，输出中文友好提示；移除未使用的导入。
+- **`ORG`**：开发与生产 API 接口地址统一替换为新域 `prun.kilmer.cn`。
+- **依赖清理**：清理冗余依赖、废弃工具函数与无用代码；重新生成 `pnpm-lock.yaml`。
+
+### 🐛 Bug Fixes
+
+- **`XIT/ORG`**：修复运行时 `TypeError` —— PrUn 并没有 `C.Panel` / `C.Chip` 命名空间（之前误用了猜测的类名），统一改回真正的 PrUn CSS module 路径，避免 `RoleBadge` / `TaskCard` / `TaskDetail` / `PublishTask` / `AuthOverlay` / `LinkContract` 启动崩溃。
+- **`XIT/ORG`**：修复任务卡片类型显示与轮询逻辑问题。
+
+### 📝 Docs
+
+- **`ORG`**：新增自动关联合同方案设计文档 `AUTO_LINK_CONTRACT.md`，标注 B+C 已落地并列出已知简化点。
+
+---
+
+## 26.7.23
+
+### 🔧 Improvements
+
+- **`ORG`**：更新开发和生产环境的 API 接口地址。
+
+## 26.7.22.1555
+
+### 📝 Docs
+
+- **`ORG`**：`AUTO_LINK_CONTRACT.md` —— 标记后端权威匹配已落地。
+
+### 🔧 Improvements
+
+- **`XIT/ORG`**：自动关联接入后端权威匹配，前端指纹作为辅助提示。
+
+## 26.7.22.933
+
+### 🐛 Bug Fixes
+
+- **`XIT/ORG`**：完善任务状态标签逻辑，新增 `contractId` 参数适配。
+
+## 26.7.22.616
+
+### 🐛 Bug Fixes
+
+- **`ORG`**：修复错误处理并补充合法的 `tab` 枚举值。
+
+## 26.7.22
+
+### 🔧 Improvements
+
+- **`XIT/ORG`**：优化任务相关代码逻辑（`org-api`、`task-detail`、`task-list` 拆出重发任务与表格视图）。
+
+## 26.7.21.1627
+
+### 🐛 Bug Fixes
+
+- **`XIT/ORG`**：`deleteTask` 区分任务不存在与端点未部署，输出中文友好提示。
+
+## 26.7.21.1327
+
+### ✨ Features
+
+- **`XIT/ORG`**：任务价格统一千分位显示，修复切换 tab 后任务详情残留。
+
+## 26.7.21
+
+### 🐛 Bug Fixes
+
+- **`XIT/ORG`**：修复任务卡片类型显示与轮询逻辑问题。
+
+> 26.7.21 同日合并 `feat(ORG): 新增组织任务管理面板功能` 主体实现，作为 26.7.21 的功能基线。
+
+## 26.7.19 (后续)
+
+### ✨ Features
+
+- **`XIT/ORG`**：与 PrUn 整体风格统一（`PrunButton` / `Header` / `SectionHeader` / `Active` / `PrunLink` / `ActionBar` / `C.Panel` / `C.Tabs` / `C.Chip`）。
+
+### 🐛 Bug Fixes
+
+- **`XIT/ORG`**：发布者可物理删除自己发布的任务（终态显示，输入 `DELETE` 二次确认）。
+
+---
+
 **日期**: 2026-07-19  
 **说明**: 修复 BPC / CART ACT 包名在蓝图或购物车名称包含括号 / 引号等符号时的解析失败
 
