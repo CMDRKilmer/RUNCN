@@ -31,6 +31,7 @@
 
 - **`XIT/ORG`**：修复运行时 `TypeError` —— PrUn 并没有 `C.Panel` / `C.Chip` 命名空间（之前误用了猜测的类名），统一改回真正的 PrUn CSS module 路径，避免 `RoleBadge` / `TaskCard` / `TaskDetail` / `PublishTask` / `AuthOverlay` / `LinkContract` 启动崩溃。
 - **`XIT/ORG`**：修复任务卡片类型显示与轮询逻辑问题。
+- **`XIT/ORG`**：修复发布者创建合同时模板反转错误 —— `onCreateContract` 改用当前操作者身份（`publisherId === currentUser.id`）判断是否反转，替代硬编码的 `contractCreator`；自动匹配优先尝试原始模板（发布者视角不反转），反转模板作为 fallback；`linkContract` 根据实际匹配模板推断正确的 `contractCreator`。
 
 ### 📝 Docs
 
