@@ -8,12 +8,7 @@ import MaterialPicker from '@src/features/XIT/CONTGEN/MaterialPicker.vue';
 import AddressPicker from '@src/features/XIT/CONTGEN/AddressPicker.vue';
 import { useTileState, getTileState } from '@src/store/user-data-tiles';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import tiles from '@src/infrastructure/prun-ui/tiles';
-import { UI_TILES_CHANGE_COMMAND } from '@src/infrastructure/prun-api/client-messages';
-import { dispatchClientPrunMessage } from '@src/infrastructure/prun-api/prun-api-listener';
-import { contractDraftsStore } from '@src/infrastructure/prun-api/data/contract-drafts';
-import { clickElement } from '@src/util';
-import { sleep } from '@src/utils/sleep';
+import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import { useClipboard } from '@src/hooks/use-clipboard';
 
 type Template = 'BUY' | 'SELL' | 'SHIP';
@@ -210,64 +205,26 @@ const newDraftStatus = ref<string | null>(null);
 const newDraftError = ref<string | null>(null);
 const isNewing = computed(() => newDraftStatus.value !== null);
 
+// Maps helper milestones to the user-facing status string. Picked
+// at await points so the button text updates as work progresses.
+const NEW_DRAFT_STATUS_LABELS = {
+  starting: '打开 CONTD…',
+  filled: '完成',
+} as const;
+
 async function handleNewDraftAndFill() {
   if (!canSubmit.value || isNewing.value) {
     return;
   }
   newDraftError.value = null;
-  newDraftStatus.value = '打开 CONTD…';
+  newDraftStatus.value = NEW_DRAFT_STATUS_LABELS.starting;
   try {
-    // Snapshot the naturalIds we already know about so we can detect
-    // the freshly-created one when it arrives via CONTRACT_DRAFTS_DRAFT.
-    const knownNaturalIds = new Set<string>(
-      (contractDraftsStore.all.value ?? []).map(d => d.naturalId),
-    );
-    // Make sure a CONTD list panel is open. showBuffer focuses an
-    // existing one or opens a new one.
-    await showBuffer('CONTD');
-    // tiles.find() returns a snapshot of activeTiles. showBuffer
-    // resolves once the Window div appears, but the TileFrame
-    // registration (which populates activeTiles) happens in a
-    // microtask after the DOM mutation. Wait until the list tile
-    // shows up, bounded so we don't hang forever.
-    const listTile = await waitForStore(
-      () => tiles.find('CONTD').find(t => !t.docked),
-      'CONTD 列表面板注册',
-    );
-    // The ActionBar (containing the "新建" button) is rendered by
-    // React after the tile frame is mounted. Wait for it.
-    newDraftStatus.value = '点击「新建」…';
-    const actionBar = await $(listTile.anchor, C.ActionBar.container);
-    const newBtn = await waitForStore(() => findNewDraftButton(actionBar), 'CONTD 「新建」按钮');
-    await clickElement(newBtn);
-    // The server pushes a CONTRACT_DRAFTS_DRAFT message containing
-    // the new draft's naturalId. Watch the store for any naturalId
-    // we haven't seen before.
-    newDraftStatus.value = '等待服务器返回草稿…';
-    const newNaturalId = await waitForStore(() => {
-      const fresh = (contractDraftsStore.all.value ?? []).find(
-        d => !knownNaturalIds.has(d.naturalId),
-      );
-      return fresh?.naturalId ?? null;
-    }, '新合同草稿 naturalId');
-    // Park the JSON in the shared workspace so the existing
-    // contd-auto-fill feature picks it up on the detailed-view mount.
-    // We must write this BEFORE switching the panel, because the JSON
-    // panel is built on SectionHeader mount and reads the workspace
-    // synchronously — writing later would lose the value.
-    newDraftStatus.value = '填充中…';
-    const workspace = getTileState<{ json: string }>('contgen-output');
-    workspace.json = outputJson.value;
-    // Switch the same list panel to the new draft's detailed view.
-    // PrUn re-renders the panel in place, which causes
-    // contd-auto-fill's onTileReady to inject the JSON auto-fill
-    // panel and run the fill.
-    dispatchClientPrunMessage(UI_TILES_CHANGE_COMMAND(listTile.id, `CONTD ${newNaturalId}`));
-    newDraftStatus.value = '完成';
+    await newContractDraftAndFill(outputJson.value);
+    newDraftStatus.value = NEW_DRAFT_STATUS_LABELS.filled;
     // Clear the status after a short delay so the user can see
     // "完成" before the button returns to its default label.
     setTimeout(() => {
-      if (newDraftStatus.value === '完成') {
+      if (newDraftStatus.value === NEW_DRAFT_STATUS_LABELS.filled) {
         newDraftStatus.value = null;
       }
     }, 1500);
@@ -288,59 +245,6 @@ function sendToContd() {
   const workspace = getTileState<{ json: string }>('contgen-output');
   workspace.json = outputJson.value;
   void showBuffer('CONTD', { force: true });
-}
-
-// Localized text of the "New Draft" button on the CONTD list view. The
-// in-game text is localized — only "新建" is the Chinese wording we
-// confirmed in devtools. Other locales (English, German, etc.) use
-// "New Draft" / "Neuer Entwurf" / etc., and the user may switch
-// language at any time, so we keep the list conservative and rely on
-// the ActionBar position rather than text alone. The localization
-// coverage below is best-effort: if a user sees nothing happen, the
-// most likely cause is a missing entry here.
-const NEW_DRAFT_LABELS = [
-  '新建', // zh — confirmed in devtools
-  'New Draft', // en
-  'Neuer Entwurf', // de (likely)
-  'Nouveau brouillon', // fr (likely)
-  'Nuevo borrador', // es (likely)
-];
-
-// Click the first button in the ActionBar whose text matches one of
-// the localized "New Draft" labels. Returns the clicked button or
-// null if none matched. The ActionBar is the structural signal —
-// the per-row "查看 / 复制 / 删除" buttons live in <td>s, not in the
-// ActionBar, so we never collide with them.
-function findNewDraftButton(actionBar: HTMLElement): HTMLButtonElement | null {
-  for (const btn of Array.from(actionBar.querySelectorAll('button'))) {
-    const text = (btn.textContent ?? '').trim();
-    if (NEW_DRAFT_LABELS.includes(text)) {
-      return btn;
-    }
-  }
-  return null;
-}
-
-// Wait until `predicate()` returns a non-null value or the timeout
-// elapses. Used to watch the contract-drafts store for a new
-// naturalId appearing after we click the "新建" button. We resolve
-// the store value inside the predicate so each poll sees fresh data.
-async function waitForStore<T>(
-  produce: () => T | null | undefined,
-  description: string,
-  timeoutMs = 10000,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = produce();
-    if (value !== null && value !== undefined) {
-      return value as T;
-    }
-    if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for ${description}`);
-    }
-    await sleep(50);
-  }
 }
 
 const { copy } = useClipboard();

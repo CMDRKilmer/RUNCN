@@ -1,11 +1,6 @@
 // src/features/XIT/ORG/utils.ts
-import { getTileState } from '@src/store/user-data-tiles';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import type { TaskContractJson, TaskType } from '@src/infrastructure/org-api/types';
-
-// 复用 CONTGEN.vue 第 200-211 行 sendToContd 的转交路径：
-// 写入 'contgen-output' workspace + 调用 showBuffer('CONTD')
-// CONTD 面板在下次挂载时读取 workspace.json 自动填充
 
 // 合同类型反转规则（架构 §3 + §7.2）：
 // BUY 任务由接取者创建 SELL 合同（接取者卖物料给发布者）
@@ -25,19 +20,30 @@ export function invertTemplate(
   return template === 'BUY' ? 'SELL' : 'BUY';
 }
 
-export function sendTaskToContd(
+// Drives CONTGEN's "create a new contract draft and auto-fill it"
+// flow. Same path CONTGEN's "新建合同并填充" button uses: parks
+// the JSON, opens/refreshes a CONTD list panel, clicks PrUn's
+// native "新建" button, waits for the server-pushed naturalId,
+// then switches the panel to the new draft's detailed view. The
+// contd-auto-fill feature consumes the workspace key on mount and
+// auto-clicks the "填写" button — see contd-auto-fill.ts.
+//
+// Throws on failure. Callers (TaskDetail) surface the error to
+// the user; the rest of the UI is unaffected.
+export async function sendTaskToContd(
   contractJson: TaskContractJson,
   taskType: TaskType,
   creatorIsPublisher = false,
-): void {
-  // 应用合同类型反转规则
+): Promise<{ newNaturalId: string }> {
+  // Apply contract-type inversion rules. `taskType` is reserved
+  // for future use (LOAN contracts, etc.); for the current BUY/
+  // SELL/SHIP set, contractJson.template is authoritative.
+  void taskType;
   const inverted: TaskContractJson = {
     ...contractJson,
     template: invertTemplate(contractJson.template, creatorIsPublisher),
   };
-  const workspace = getTileState<{ json: string }>('contgen-output');
-  workspace.json = JSON.stringify(inverted, null, 2);
-  void showBuffer('CONTD', { force: true });
+  return await newContractDraftAndFill(JSON.stringify(inverted, null, 2));
 }
 
 // 数字千分位格式化（不附加货币单位）。

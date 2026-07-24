@@ -249,10 +249,21 @@ async function onDelete() {
   }
 }
 
-function onCreateContract() {
+async function onCreateContract() {
   // contractCreator 决定反转规则：publisher 视角不反转，claimer 视角反转
   const creatorIsPublisher = localTask.value.contractCreator === 'publisher';
-  sendTaskToContd(localTask.value.contractJson, localTask.value.type, creatorIsPublisher);
+  // Mirror the try/catch shape of the other handlers above so a
+  // failure in the auto-fill helper (e.g. timed-out store update)
+  // surfaces in the same error banner as the rest of the panel.
+  loading.value = true;
+  error.value = '';
+  try {
+    await sendTaskToContd(localTask.value.contractJson, localTask.value.type, creatorIsPublisher);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
 }
 
 function onNotesChanged() {
@@ -338,7 +349,7 @@ function onNotesChanged() {
       <PrunButton v-if="canRelease" primary :disabled="loading" @click="onRelease"
         >释放任务</PrunButton
       >
-      <PrunButton v-if="canCreateContract" dark @click="onCreateContract"
+      <PrunButton v-if="canCreateContract" dark :disabled="loading" @click="onCreateContract"
         >创建合同（CONTGEN → CONTD）</PrunButton
       >
       <PrunButton v-if="canCreateContract" dark @click="emit('link-contract')"
