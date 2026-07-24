@@ -209,7 +209,7 @@ export interface GlobalAutoLinkCallbacks {
   onError?: (err: Error) => void;
 }
 
-const GLOBAL_POLL_INTERVAL_MS = 30_000;
+const GLOBAL_POLL_INTERVAL_MS = 5_000;
 
 let globalInterval: ReturnType<typeof setInterval> | null = null;
 let globalCallbacks: GlobalAutoLinkCallbacks = {};
