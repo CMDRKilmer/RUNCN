@@ -14,13 +14,19 @@ export function setOnUnauthorizedCallback(cb: () => void): void {
 
 // 刷新锁：防止并发 401 同时刷新
 let refreshPromise: Promise<AuthSession | null> | null = null;
+// session 已过期标志：防止 refreshSession 被多次调用时重复触发 onUnauthorized / clearSession
+let sessionExpired = false;
 
 async function refreshSession(): Promise<AuthSession | null> {
+  if (sessionExpired) {
+    return null;
+  }
   if (refreshPromise) {
     return refreshPromise;
   }
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
+    sessionExpired = true;
     clearSession();
     onUnauthorized?.();
     return null;
@@ -33,14 +39,17 @@ async function refreshSession(): Promise<AuthSession | null> {
         body: JSON.stringify({ refreshToken }),
       });
       if (!res.ok) {
+        sessionExpired = true;
         clearSession();
         onUnauthorized?.();
         return null;
       }
       const session = (await res.json()) as AuthSession;
       saveSession(session);
+      sessionExpired = false;
       return session;
     } catch {
+      sessionExpired = true;
       clearSession();
       onUnauthorized?.();
       return null;
@@ -150,4 +159,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 // 启动时加载已存会话（用于 ORG.vue 判断是否需要显示 AuthOverlay）
 export function getStoredSession(): AuthSession | null {
   return loadSession();
+}
+
+// 重置 session 过期标志（login/register 成功后调用，确保后续 401 能正常触发刷新）
+export function resetSessionExpiredFlag(): void {
+  sessionExpired = false;
 }

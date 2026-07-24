@@ -33,6 +33,8 @@ setOnUnauthorizedCallback(() => {
   session.value = null;
   showAuth.value = true;
   resetPollingState();
+  // 关键：停止全局 auto-link，避免 session 过期后持续发送 401 请求
+  stopGlobalAutoLink();
 });
 
 // MarketView → PublishTask 的预填桥接：MarketView 把数据写入下面这个 ref，

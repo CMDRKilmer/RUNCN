@@ -17,6 +17,7 @@ import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import type { OrgTask, TaskContractJson } from './types';
 import { contractToFingerprint, matchContractJson } from './contract-link';
 import { listTasks } from './tasks';
+import { HttpError } from './client';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -290,6 +291,13 @@ async function globalTick(): Promise<void> {
       }
     }
   } catch (err) {
+    // 401/403 → session 已失效，停止全局轮询避免持续发送无效请求。
+    // session 清理 + AuthOverlay 显示由 onUnauthorizedCallback（ORG.vue）负责。
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      console.warn('[auto-link] Auth expired, stopping global auto-link');
+      stopGlobalAutoLink();
+      return; // 跳过 globalCallbacks.onError，避免触发冗余错误提示
+    }
     globalCallbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
   } finally {
     globalRunning = false;

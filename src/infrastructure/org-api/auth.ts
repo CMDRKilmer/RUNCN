@@ -1,6 +1,6 @@
 // src/infrastructure/org-api/auth.ts
 import type { AuthSession, OrgUser } from './types';
-import { request } from './client';
+import { request, resetSessionExpiredFlag } from './client';
 import { clearSession, saveSession } from './session';
 
 interface RegisterParams {
@@ -18,6 +18,7 @@ export async function register(params: RegisterParams): Promise<AuthSession> {
     skipAuth: true,
   });
   saveSession(session);
+  resetSessionExpiredFlag();
   return session;
 }
 
@@ -33,6 +34,7 @@ export async function login(params: LoginParams): Promise<AuthSession> {
     skipAuth: true,
   });
   saveSession(session);
+  resetSessionExpiredFlag();
   return session;
 }
 
