@@ -3,14 +3,12 @@
 // 读取玩家蓝图的物料清单（BOM），统计每种配件在各 CX 交易所的买入价，
 // 给出「单交易所总价」「最优混合采购总价」。
 //
-// 价格源（与 ARB 一致的读取约定，ToS 安全，不主动开 CXOB 缓冲窗）：
-//   1. 若玩家已打开过该 (ticker, 交易所) 的实时订单簿（cxobStore），取其
-//      最低卖一价（聚合该价位挂单量，遇到 MM 无限量订单即止）。
-//   2. 否则回退到 FIO 15 分钟聚合价（cxStore.Ask + Supply）。
+// 价格源：仅使用玩家已打开过 CXOB 缓冲窗的实时订单簿（cxobStore），
+// 取其最低卖一价（聚合该价位挂单量，遇到 MM 无限量订单即止）。
+// 无实时盘的交易所直接显示「--」，不读 FIO（避免 15 分钟聚合价误导）。
 //
 // 币种按 1:1 比较，不做汇率换算（同 ARB 的约定）；各交易所总价仍以本币种展示。
 
-import { cxStore } from '@src/infrastructure/fio/cx';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { isFiniteOrder } from '@src/core/orders';
@@ -23,7 +21,7 @@ export interface BpcExchange {
 export interface BpcPricePoint {
   // 单价。
   price: number;
-  // 该价位上的可买量（实时盘为聚合挂单量，FIO 为 Supply）。
+  // 该价位上的可买量（实时盘聚合挂单量）。
   amount: number;
   // 是否来自玩家已打开的实时订单簿。
   live: boolean;
@@ -91,28 +89,33 @@ function aggregateSellLevels(orders: PrunApi.CXBrokerOrder[]): Map<number, numbe
 }
 
 // 读取某 (ticker, 交易所) 的买入价（我们可拿到的最便宜卖单）。
-// 实时盘优先；无实时盘则回退 FIO Ask。无数据返回 undefined。
+// 只看实时盘（玩家已打开的 CXOB）。无实时盘或实时盘全部卖单 amount<=0
+// 时返回 undefined，由上层显示「--」。
+// 注意：PrUn 在订单被全部买空后，可能仍把该订单以 amount=0 留在
+// sellingOrders 里一段时间才清理。如果只看价位不看挂单量，会一直显示
+// 「被买空」的那个价位与 0 数量，不再向上爬到下一档。这里跳过 amount<=0
+// 的价位：实时盘无正挂单就视为无价格。
 function readBuyPrice(ticker: string, exchange: BpcExchange): BpcPricePoint | undefined {
   const orderBook = cxobStore.getByTicker(`${ticker}.${exchange.code}`);
-  if (orderBook !== undefined) {
-    const levels = aggregateSellLevels(orderBook.sellingOrders);
-    if (levels.size > 0) {
-      let bestPrice = Infinity;
-      let bestAmount = 0;
-      for (const [price, amount] of levels) {
-        if (price < bestPrice) {
-          bestPrice = price;
-          bestAmount = amount;
-        }
-      }
-      return { price: bestPrice, amount: bestAmount, live: true };
+  if (orderBook === undefined) {
+    return undefined;
+  }
+  const levels = aggregateSellLevels(orderBook.sellingOrders);
+  let bestPrice = Infinity;
+  let bestAmount = 0;
+  for (const [price, amount] of levels) {
+    if (amount <= 0) {
+      continue;
+    }
+    if (price < bestPrice) {
+      bestPrice = price;
+      bestAmount = amount;
     }
   }
-  const fio = cxStore.prices?.get(exchange.code)?.get(ticker);
-  if (fio?.Ask !== undefined && fio.Ask !== null && fio.Ask > 0) {
-    return { price: fio.Ask, amount: fio.Supply ?? 0, live: false };
+  if (bestPrice === Infinity) {
+    return undefined;
   }
-  return undefined;
+  return { price: bestPrice, amount: bestAmount, live: true };
 }
 
 // 把蓝图 BOM 聚合为按 ticker 合计的需求数（防御性处理同 ticker 多条目）。
