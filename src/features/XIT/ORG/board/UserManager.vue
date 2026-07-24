@@ -12,9 +12,20 @@ const error = ref('');
 const sortedUsers = computed(() => {
   return [...users.value].sort((a, b) => {
     const roleOrder: Record<string, number> = { BOARD: 0, COLLABORATOR: 1, NON_ORG: 2 };
-    return (roleOrder[a.role] ?? 3) - (roleOrder[b.role] ?? 3);
+    const roleDiff = (roleOrder[a.role] ?? 3) - (roleOrder[b.role] ?? 3);
+    if (roleDiff !== 0) {
+      return roleDiff;
+    }
+    // 同角色内按最后活跃时间倒序（最近活跃在前）
+    return (b.lastSeenAt ?? b.createdAt).localeCompare(a.lastSeenAt ?? a.createdAt);
   });
 });
+
+function formatDateTime(s?: string): string {
+  if (!s) return '—';
+  // 后端返回 "YYYY-MM-DD HH:MM:SS"（UTC），直接展示即可
+  return s.replace(' ', ' ');
+}
 
 async function load() {
   try {
@@ -70,7 +81,14 @@ onMounted(load);
     <div v-if="error" :class="$style.error">{{ error }}</div>
     <table :class="$style.table">
       <thead>
-        <tr><th>显示名</th><th>PrUn 用户名</th><th>公司代码</th><th>角色</th><th>操作</th></tr>
+        <tr>
+          <th>显示名</th>
+          <th>PrUn 用户名</th>
+          <th>公司代码</th>
+          <th>角色</th>
+          <th>最后活跃</th>
+          <th>操作</th>
+        </tr>
       </thead>
       <tbody>
         <tr v-for="u in sortedUsers" :key="u.id">
@@ -78,6 +96,7 @@ onMounted(load);
           <td>{{ u.prunUsername }}</td>
           <td>{{ u.companyCode }}</td>
           <td :class="u.role === 'NON_ORG' ? $style.nonOrg : ''">{{ getRoleLabel(u.role) }}</td>
+          <td>{{ formatDateTime(u.lastSeenAt ?? u.lastLoginAt ?? u.createdAt) }}</td>
           <td>
             <template v-if="u.role !== 'NON_ORG' && canPromoteDemote(props.currentUser, u.id)">
               <button v-if="u.role !== 'BOARD'" @click="onPromote(u.id)">提升</button>

@@ -23,6 +23,10 @@ export interface OrgUser {
   role: UserRole;
   createdAt: string;
   lastLoginAt?: string;
+  // 最后活跃时间：
+  //   注册用户 = last_login_at（从未登录过则用 createdAt）
+  //   未注册 = extension_users.last_seen_at
+  lastSeenAt?: string;
 }
 
 // 合同 JSON（与 CONTGEN.vue 第 13-39 行 ContractJson 对齐）
