@@ -18,7 +18,6 @@ import {
   stopAutoLink,
   isAutoLinkRunning,
   dismissAutoLink,
-  type AutoLinkMatch,
 } from '@src/infrastructure/org-api/auto-link';
 import { sendTaskToContd, formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 import NoteEditor from './NoteEditor.vue';
@@ -67,11 +66,6 @@ async function loadParentPublisher(parentTaskId: string) {
 // 自动关联合同状态（ORG 任务接取后默认开启自动关联）。
 // canAutoLink=true → 自动调 startAutoLink；用户可手动关闭（停止轮询）。
 const autoLinkRunning = ref(isAutoLinkRunning(props.task.id));
-const pendingMatch = ref<AutoLinkMatch | null>(null);
-const confirmCountdown = ref(0);
-// onMatch 返回的 Promise resolver：用户点确认/取消时调用
-let pendingResolve: ((v: boolean) => void) | null = null;
-let confirmTimer: ReturnType<typeof setInterval> | null = null;
 
 watch(
   () => props.task,
@@ -152,7 +146,6 @@ watch(
 onBeforeUnmount(() => {
   clearReportedStatus(localTask.value.id);
   stopAutoLink(localTask.value.id);
-  if (confirmTimer) clearInterval(confirmTimer);
 });
 
 async function loadNotes() {
@@ -222,19 +215,6 @@ const canAutoLink = computed(
     isParticipant.value,
 );
 
-function startConfirmCountdown() {
-  confirmCountdown.value = 5;
-  if (confirmTimer) clearInterval(confirmTimer);
-  confirmTimer = setInterval(() => {
-    confirmCountdown.value -= 1;
-    if (confirmCountdown.value <= 0) {
-      if (confirmTimer) clearInterval(confirmTimer);
-      confirmTimer = null;
-      onConfirmAutoLink();
-    }
-  }, 1000);
-}
-
 function onStartAutoLink() {
   // 若 session 已存在（多半是全局 ORG.vue 先注册的"无 UI 弹窗"session），
   // 先 stop 再 start，让本组件的 callbacks（带 UI 弹窗）接管。
@@ -252,8 +232,6 @@ function onStartAutoLink() {
     onLinked: updated => {
       localTask.value = updated;
       emit('updated', updated);
-      pendingMatch.value = null;
-      pendingResolve = null;
     },
     onError: err => {
       error.value = err.message;
@@ -280,22 +258,6 @@ function onStopAutoLink() {
   // dismissAutoLink：同时记录 dismissedTaskIds，全局 tick 不会重启。
   dismissAutoLink(localTask.value.id);
   autoLinkRunning.value = false;
-}
-
-function onConfirmAutoLink() {
-  if (confirmTimer) clearInterval(confirmTimer);
-  confirmTimer = null;
-  pendingMatch.value = null;
-  pendingResolve?.(true);
-  pendingResolve = null;
-}
-
-function onCancelAutoLink() {
-  if (confirmTimer) clearInterval(confirmTimer);
-  confirmTimer = null;
-  pendingMatch.value = null;
-  pendingResolve?.(false);
-  pendingResolve = null;
 }
 const showBoardCancelButton = computed(() =>
   shouldShowBoardCancel(props.currentUser, localTask.value),
@@ -568,30 +530,6 @@ function onNotesChanged() {
       </ActionBar>
     </template>
 
-    <!--
-      自动关联合同确认弹窗（设计文档 §"误关联兜底"）：
-      命中指纹后展示 5 秒倒计时，确认即调 link-contract；点取消则记录 contractId 已见过，
-      本轮 30 秒轮询不再提示同一合同。
-    -->
-    <template v-if="pendingMatch">
-      <div :class="$style.overlay">
-        <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.confirmCard]">
-          <SectionHeader>检测到匹配的合同</SectionHeader>
-          <div :class="$style.confirmBody">
-            <div
-              >合同 ID：<strong>{{ pendingMatch.contractId }}</strong></div
-            >
-            <div>指纹摘要：{{ pendingMatch.fingerprintSummary }}</div>
-            <div :class="$style.countdown">{{ confirmCountdown }} 秒后自动关联</div>
-          </div>
-          <ActionBar>
-            <PrunButton primary :disabled="loading" @click="onConfirmAutoLink">立即关联</PrunButton>
-            <PrunButton neutral @click="onCancelAutoLink">取消</PrunButton>
-          </ActionBar>
-        </div>
-      </div>
-    </template>
-
     <SectionHeader>备注</SectionHeader>
     <NoteEditor :task-id="localTask.id" :notes="notes" @changed="onNotesChanged" />
   </div>
@@ -637,33 +575,5 @@ function onNotesChanged() {
   color: var(--text-negative);
   background: var(--panel-background-alt);
   margin: 8px 0;
-}
-.overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.confirmCard {
-  padding: 12px 16px 16px;
-  width: 380px;
-}
-.confirmBody {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 4px;
-  font-size: 12px;
-}
-.countdown {
-  color: var(--text-warning, #f0ad4e);
-  font-weight: bold;
-  margin-top: 4px;
 }
 </style>
