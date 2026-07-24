@@ -11,6 +11,7 @@ import {
   type PollCallbacks,
 } from '@src/infrastructure/org-api/polling';
 import { canSeeBoardPanel } from '@src/infrastructure/org-api/permissions';
+import { startGlobalAutoLink, stopGlobalAutoLink } from '@src/infrastructure/org-api/auto-link';
 import { useOrgTileState } from './tile-state';
 import AuthOverlay from './AuthOverlay.vue';
 import RoleBadge from './RoleBadge.vue';
@@ -82,6 +83,9 @@ onMounted(() => {
   if (session.value) {
     setCurrentUser(session.value.user);
     startPolling(pollCallbacks);
+    // ORG 任务接取后默认开启自动关联：ORG 面板 mount 时启动全局轮询，
+    // 对当前用户所有 AWAITING_CONTRACT 任务统一注册 auto-link session。
+    startGlobalAutoLink();
   } else {
     showAuth.value = true;
   }
@@ -89,6 +93,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopPolling();
+  // 关闭全局 auto-link 轮询并清理所有 session。
+  stopGlobalAutoLink();
 });
 
 function onAuthenticated(newSession: AuthSession) {
@@ -97,6 +103,8 @@ function onAuthenticated(newSession: AuthSession) {
   resetPollingState();
   setCurrentUser(newSession.user);
   startPolling(pollCallbacks);
+  // 登入后启动全局 auto-link。
+  startGlobalAutoLink();
 }
 
 async function onLogout() {
@@ -104,6 +112,8 @@ async function onLogout() {
   session.value = null;
   showAuth.value = true;
   resetPollingState();
+  // 登出后停止全局 auto-link，避免下一用户登入前残留状态。
+  stopGlobalAutoLink();
 }
 
 const tabs = computed(() => {

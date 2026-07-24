@@ -4,13 +4,19 @@
 //
 // 工作流：
 //   1. TaskDetail.vue 调 startAutoLink(task) → 启动 30 秒间隔轮询。
+//      ORG.vue 调 startGlobalAutoLink() → 对所有 AWAITING_CONTRACT 任务
+//      统一轮询（ORG 任务接取后默认开启：接取者无需打开 TaskDetail 也能
+//      让匹配上的合同自动 link）。
 //   2. 每轮扫描 contractsStore.all，对每个 OPEN/CLOSED 合同跑 matchContractJson。
-//   3. 命中后调 onMatch 回调（TaskDetail 显示 5 秒倒计时确认弹窗）。
+//   3. 命中后调 onMatch 回调：
+//      - TaskDetail 显示 5 秒倒计时确认弹窗，等待用户确认。
+//      - 全局模式直接 5 秒后自动 link（用户没在看 TaskDetail）。
 //   4. 倒计时结束 / 用户确认 → 调 link-contract；取消 → 记录 contractId 已见过，下轮跳过。
 //   5. 任务关闭或用户停止 → stopAutoLink(taskId) 清理 interval。
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import type { OrgTask, TaskContractJson } from './types';
 import { contractToFingerprint, matchContractJson } from './contract-link';
+import { listTasks } from './tasks';
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -43,6 +49,9 @@ interface AutoLinkSession {
 
 // taskId → session
 const sessions = new Map<string, AutoLinkSession>();
+// 用户主动 dismiss 过的任务 id：startAutoLink 时跳过、globalTick 也不重启。
+// 模块级单例，与 sessions 平行。
+const dismissedTaskIds = new Set<string>();
 
 // 应用反转规则（与 utils.invertTemplate 保持一致）：
 //   task BUY + creator=claimer → 合同应是 SELL（接取者卖给发布者）
@@ -176,4 +185,97 @@ export function stopAutoLink(taskId: string): void {
 
 export function isAutoLinkRunning(taskId: string): boolean {
   return sessions.has(taskId);
+}
+
+// ============== 全局 auto-link：ORG.vue 启动 ==============
+// ORG 任务接取后默认开启自动关联：ORG 面板 mount 时启动全局轮询，
+// 对当前用户所有 AWAITING_CONTRACT + 无 contractId 的任务统一注册
+// startAutoLink session。每个任务独立生命周期：
+//  - 命中合同：5 秒后自动 link（无 UI 弹窗；调用方通过 onLinked 收到通知）
+//  - 状态切换：auto-link 内部 self-stop
+//  - ORG 面板 unmount：stopGlobalAutoLink 调 stopAutoLink 清理所有 session。
+//
+// 设计权衡：全局模式无 TaskDetail 弹窗，命中即自动 link。
+// 误关联风险由后端 match-contract 二次确认兜底（callbacks.onMatch 流程
+// 已包含后端权威比对），同 TaskDetail 路径一致。
+//
+// 用户主动关闭：调用 dismissAutoLink(taskId)，后续全局 tick 跳过。
+// 重置（用户重连、登出重登等）：resetAutoLinkDismissed() 清空。
+export interface GlobalAutoLinkCallbacks {
+  onLinked?: (task: OrgTask) => void;
+  onError?: (err: Error) => void;
+}
+
+const GLOBAL_POLL_INTERVAL_MS = 30_000;
+
+let globalInterval: ReturnType<typeof setInterval> | null = null;
+let globalCallbacks: GlobalAutoLinkCallbacks = {};
+let globalRunning = false;
+
+async function globalTick(): Promise<void> {
+  if (globalRunning) return;
+  globalRunning = true;
+  try {
+    const result = await listTasks({ scope: 'claimed', limit: 100 });
+    for (const task of result.items) {
+      if (task.status !== 'AWAITING_CONTRACT' || task.contractId) continue;
+      // 已注册 session（可能 TaskDetail 本地启动，或本轮已加）跳过
+      if (sessions.has(task.id)) continue;
+      // 用户主动关闭过此任务的轮询，跳过
+      if (dismissedTaskIds.has(task.id)) continue;
+      startAutoLink(task, {
+        // 全局模式无 UI 弹窗：onMatch 直接 resolve(true)，
+        // 让 startAutoLink 内部走「倒计时结束 → link-contract」流程。
+        onMatch: () => new Promise<boolean>(resolve => setTimeout(() => resolve(true), 5000)),
+        onLinked: updated => {
+          globalCallbacks.onLinked?.(updated);
+        },
+        onError: err => {
+          globalCallbacks.onError?.(err);
+        },
+        onStateChange: () => {
+          // 全局模式无需对外暴露状态变化（TaskDetail 已通过 isAutoLinkRunning 自己判断）
+        },
+      });
+    }
+  } catch (err) {
+    globalCallbacks.onError?.(err instanceof Error ? err : new Error(String(err)));
+  } finally {
+    globalRunning = false;
+  }
+}
+
+export function startGlobalAutoLink(callbacks: GlobalAutoLinkCallbacks = {}): void {
+  if (globalInterval) return;
+  globalCallbacks = callbacks;
+  // 立即跑一次，再起 interval
+  void globalTick();
+  globalInterval = setInterval(() => {
+    void globalTick();
+  }, GLOBAL_POLL_INTERVAL_MS);
+}
+
+export function stopGlobalAutoLink(): void {
+  if (globalInterval) {
+    clearInterval(globalInterval);
+    globalInterval = null;
+  }
+  // 同时清理所有 sessions（包括全局注册的；TaskDetail 的本地 session
+  // 若用户正在看 TaskDetail，onBeforeUnmount 也会显式 stopAutoLink 兜底）
+  for (const taskId of Array.from(sessions.keys())) {
+    stopAutoLink(taskId);
+  }
+}
+
+// 用户主动关闭某个任务的自动关联（TaskDetail 上的"关闭自动关联"按钮）：
+// stopAutoLink 清理当前 session；dismissedTaskIds 防止全局 tick 重启。
+// 任务状态切到 IN_PROGRESS / 已 link / CANCELLED 后从集合里移除。
+export function dismissAutoLink(taskId: string): void {
+  stopAutoLink(taskId);
+  dismissedTaskIds.add(taskId);
+}
+
+// 用户重连 / 重新登入 / 显式重置时清空 dismissed 集合。
+export function resetAutoLinkDismissed(): void {
+  dismissedTaskIds.clear();
 }

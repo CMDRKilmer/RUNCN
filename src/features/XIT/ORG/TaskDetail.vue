@@ -17,6 +17,7 @@ import {
   startAutoLink,
   stopAutoLink,
   isAutoLinkRunning,
+  dismissAutoLink,
   type AutoLinkMatch,
 } from '@src/infrastructure/org-api/auto-link';
 import { sendTaskToContd, formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
@@ -44,6 +45,22 @@ const showBoardCancel = ref(false);
 // 删除二次确认：输入 "DELETE" 才允许点击"确认删除"，避免误点。
 const showDeleteConfirm = ref(false);
 const deleteConfirmText = ref('');
+// partial claim 子任务时：父任务只取它的 publisher 信息用于"原始任务发布者"展示。
+// 不需要整条父任务详情，避免无谓网络请求。
+const parentPublisher = ref<{ username: string; companyCode: string } | null>(null);
+
+async function loadParentPublisher(parentTaskId: string) {
+  try {
+    const parent = await tasksApi.getTask(parentTaskId);
+    parentPublisher.value = {
+      username: parent.publisherUsername,
+      companyCode: parent.publisherCompanyCode,
+    };
+  } catch (err) {
+    // 父任务可能已被删除（极少发生）；不影响子任务展示。
+    parentPublisher.value = null;
+  }
+}
 
 // 自动关联合同状态（ORG 任务接取后默认开启自动关联）。
 // canAutoLink=true → 自动调 startAutoLink；用户可手动关闭（停止轮询）。
@@ -58,7 +75,13 @@ watch(
   () => props.task,
   t => {
     localTask.value = t;
+    parentPublisher.value = null;
+    // 子任务：加载父任务 publisher 用于"原始任务发布者"展示
+    if (t.parentTaskId) {
+      loadParentPublisher(t.parentTaskId);
+    }
   },
+  { immediate: true },
 );
 
 // 自动关联 watch 块：必须在 canAutoLink 声明之后才注册（避免 TDZ），
@@ -156,6 +179,11 @@ function startConfirmCountdown() {
 }
 
 function onStartAutoLink() {
+  // 若 session 已存在（多半是全局 ORG.vue 先注册的"无 UI 弹窗"session），
+  // 先 stop 再 start，让本组件的 callbacks（带 UI 弹窗）接管。
+  if (isAutoLinkRunning(localTask.value.id)) {
+    stopAutoLink(localTask.value.id);
+  }
   startAutoLink(localTask.value, {
     onStateChange: state => {
       autoLinkRunning.value = state === 'running';
@@ -179,9 +207,9 @@ function onStartAutoLink() {
   });
 }
 
-// 自动关联默认开启：canAutoLink 首次为 true 且尚未运行时启动一次。
-// 任务切到 IN_PROGRESS/COMPLETED/CANCELLED 后由 auto-link 内部停止，
-// 这里只补一次手动 onCreateContract 后未点自动关联按钮的入口。
+// 自动关联默认开启：canAutoLink 首次为 true 时启动一次（onStartAutoLink
+// 内部会处理"已存在 session 则接管"的逻辑）。任务切到 IN_PROGRESS /
+// COMPLETED / CANCELLED 后由 auto-link 内部 self-stop。
 // 注册顺序：必须在 canAutoLink 声明之后 + onStartAutoLink 函数声明之后，
 // 否则 setup 阶段 immediate=true 会触发 TDZ（参见历史上 "Cannot access
 // 'canAutoLink' before initialization" 错误）。
@@ -189,14 +217,14 @@ watch(
   canAutoLink,
   ok => {
     if (!ok) return;
-    if (isAutoLinkRunning(localTask.value.id)) return;
     onStartAutoLink();
   },
   { immediate: true },
 );
 
 function onStopAutoLink() {
-  stopAutoLink(localTask.value.id);
+  // dismissAutoLink：同时记录 dismissedTaskIds，全局 tick 不会重启。
+  dismissAutoLink(localTask.value.id);
   autoLinkRunning.value = false;
 }
 
@@ -362,8 +390,18 @@ function onNotesChanged() {
         {{ formatNumber(localTask.contractJson.deadline) }} 天
       </div>
       <div>
-        <span :class="$style.key">发布者</span>
-        {{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})
+        <span :class="$style.key">
+          {{ localTask.parentTaskId ? '原始任务发布者' : '发布者' }}
+        </span>
+        <template v-if="localTask.parentTaskId && parentPublisher">
+          {{ parentPublisher.username }} ({{ parentPublisher.companyCode }})
+        </template>
+        <template v-else-if="localTask.parentTaskId && !parentPublisher">
+          <span style="color: rgb(148, 158, 166)">加载中...</span>
+        </template>
+        <template v-else>
+          {{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})
+        </template>
       </div>
       <div v-if="localTask.claimerUsername">
         <span :class="$style.key">接取者</span>
