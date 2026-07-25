@@ -12,6 +12,8 @@ import {
 } from '@src/infrastructure/org-api/polling';
 import { canSeeBoardPanel } from '@src/infrastructure/org-api/permissions';
 import { startGlobalAutoLink, stopGlobalAutoLink } from '@src/infrastructure/org-api/auto-link';
+import { listTasks } from '@src/infrastructure/org-api/tasks';
+import { notifyTaskClaimed } from '@src/infrastructure/org-api/task-activity';
 import { useOrgTileState } from './tile-state';
 import AuthOverlay from './AuthOverlay.vue';
 import RoleBadge from './RoleBadge.vue';
@@ -85,9 +87,13 @@ onMounted(() => {
   if (session.value) {
     setCurrentUser(session.value.user);
     startPolling(pollCallbacks);
-    // ORG 任务接取后默认开启自动关联：ORG 面板 mount 时启动全局轮询，
-    // 对当前用户所有 AWAITING_CONTRACT 任务统一注册 auto-link session。
+    // auto-link 现在按需：接取任务（tasksApi.claimTask）成功后才注册到活跃集合，
+    // globalTick interval 才会起来。面板 mount 时不再无脑起。
+    // 这里仍调一次 startGlobalAutoLink 以初始化 callbacks 占位。
     startGlobalAutoLink();
+    // 恢复扫描：把刷新前已在进行中的任务重新拉回活跃集合，
+    // 否则 module-level 单例的 activeLinkedTaskIds 是空的，interval 不会起。
+    void recoverActiveTasks();
   } else {
     showAuth.value = true;
   }
@@ -105,8 +111,10 @@ function onAuthenticated(newSession: AuthSession) {
   resetPollingState();
   setCurrentUser(newSession.user);
   startPolling(pollCallbacks);
-  // 登入后启动全局 auto-link。
+  // 登入后初始化 auto-link callbacks；interval 仍按活跃任务数量按需启停。
   startGlobalAutoLink();
+  // 恢复扫描：与 mount 时相同，登入后把已有进行中的任务注册到活跃集合。
+  void recoverActiveTasks();
 }
 
 async function onLogout() {
@@ -116,6 +124,27 @@ async function onLogout() {
   resetPollingState();
   // 登出后停止全局 auto-link，避免下一用户登入前残留状态。
   stopGlobalAutoLink();
+}
+
+// 恢复扫描：刷新页面 / 重新登录后，活跃任务集合（模块级单例）是空的。
+// 拉一次 claimed + published 列表，把仍在 AWAITING_CONTRACT / IN_PROGRESS
+// 且我作为 claimer 或 publisher 的任务重新注册到活跃集合，让 globalTick
+// 起来继续做合同自动关联 + sync contract status。
+async function recoverActiveTasks(): Promise<void> {
+  try {
+    const [claimed, published] = await Promise.all([
+      listTasks({ scope: 'claimed', limit: 100 }),
+      listTasks({ scope: 'published', limit: 100 }),
+    ]);
+    const seen = new Set<string>();
+    for (const task of [...claimed.items, ...published.items]) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      notifyTaskClaimed(task);
+    }
+  } catch (err) {
+    console.warn('[ORG] recoverActiveTasks failed:', err);
+  }
 }
 
 const tabs = computed(() => {

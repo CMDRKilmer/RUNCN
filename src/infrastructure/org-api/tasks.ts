@@ -10,6 +10,7 @@ import type {
 } from './types';
 import type { ContractFingerprint, ContractMatchResult } from './contract-link';
 import { HttpError, request } from './client';
+import { notifyTaskClaimed, notifyTaskUpdated } from './task-activity';
 
 export interface ListTasksParams {
   scope: PollScope;
@@ -68,23 +69,38 @@ export async function claimTask(taskId: string, amount?: number): Promise<ClaimT
   // MarketView 接取面板允许裁剪接取量（≤ 原任务 amount）。
   // - 完整接取或 amount 等于剩余：返回 { task: task }
   // - 部分接取：返回 { task: parent, childTask: reverseTask }
-  return request<ClaimTaskResult>(`/tasks/${taskId}/claim`, {
+  const result = await request<ClaimTaskResult>(`/tasks/${taskId}/claim`, {
     method: 'POST',
     body: amount !== undefined ? { amount } : undefined,
   });
+  // 接取成功 → 任务进入 AWAITING_CONTRACT（接取者是 claimer）；注册到活跃集合，
+  // globalTick 启动，开始合同自动关联 + sync contract status。
+  // 部分接取的 childTask 也是反向合同的活跃任务（接取者创建反向合同后等 link）。
+  notifyTaskClaimed(result.task);
+  if (result.childTask) {
+    notifyTaskClaimed(result.childTask);
+  }
+  return result;
 }
 
 export async function releaseTask(taskId: string): Promise<ReleaseTaskResult> {
   // 完整接取 → { task }
   // 部分接取子任务 → { task: 父任务, parentTaskId, restoredAmount }
-  return request<ReleaseTaskResult>(`/tasks/${taskId}/release`, { method: 'POST' });
+  const result = await request<ReleaseTaskResult>(`/tasks/${taskId}/release`, { method: 'POST' });
+  // release → 任务回 PUBLISHED（AWAITING_CONTRACT → PUBLISHED），但仍然可能被人接取。
+  // 这里不做 terminal 通知；让 polling 的自然刷新 + 后续接取来管。
+  // 如果 release 是 partial 子任务，result.task 是父任务，状态回 PUBLISHED，更不在活跃集。
+  notifyTaskUpdated(result.task);
+  return result;
 }
 
 export async function cancelTask(taskId: string, reason?: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}/cancel`, {
+  const task = await request<OrgTask>(`/tasks/${taskId}/cancel`, {
     method: 'POST',
     body: reason !== undefined ? { reason } : undefined,
   });
+  notifyTaskUpdated(task);
+  return task;
 }
 
 // 重新发布：CANCELLED → PUBLISHED。仅 publisher 可重新发布自己取消的任务。
@@ -129,10 +145,13 @@ export interface LinkContractParams {
 }
 
 export async function linkContract(taskId: string, params: LinkContractParams): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}/link-contract`, {
+  const task = await request<OrgTask>(`/tasks/${taskId}/link-contract`, {
     method: 'POST',
     body: params,
   });
+  // 关联合同后任务进 IN_PROGRESS：保持活跃（sync contract status 仍需关注）。
+  notifyTaskClaimed(task);
+  return task;
 }
 
 export interface MatchContractParams {
@@ -158,8 +177,11 @@ export async function matchContract(
 }
 
 export async function syncContractStatus(taskId: string, contractStatus: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}/sync-status`, {
+  const task = await request<OrgTask>(`/tasks/${taskId}/sync-status`, {
     method: 'POST',
     body: { contractStatus },
   });
+  // sync 后端会把任务推到 COMPLETED/CANCELLED 等终态；通知模块按 status 决定是否 unregister。
+  notifyTaskUpdated(task);
+  return task;
 }

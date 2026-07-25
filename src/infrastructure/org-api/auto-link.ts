@@ -237,11 +237,41 @@ const GLOBAL_POLL_INTERVAL_MS = 5_000;
 let globalInterval: ReturnType<typeof setInterval> | null = null;
 let globalCallbacks: GlobalAutoLinkCallbacks = {};
 let globalRunning = false;
+// 当前用户作为 publisher 或 claimer 持有的"活跃任务"集合。
+// globalTick interval 仅在非空时跑；空时停止。
+// 与 polling.ts 的 activeTaskIds 是两个独立集合（auto-link 范围更广：
+// 含 publisher 的 IN_PROGRESS，用于 syncLinkedContractStatus 把已 link
+// 合同的 AWAITING/IN_PROGRESS 推到 COMPLETED）。
+const activeLinkedTaskIds = new Set<string>();
+
+// 注册一个"需要 auto-link 关注"的任务。
+// 规则：作为 claimer 持有（用于合同自动关联 + sync）或作为 publisher 持有
+// 且 contractId 非空（用于 sync contract status → COMPLETED）。
+// 接取成功 / 关联合同后调此；任务推完 COMPLETED/CANCELLED 时调 unregisterActiveTask。
+export function registerActiveTask(taskId: string): void {
+  if (activeLinkedTaskIds.has(taskId)) return;
+  activeLinkedTaskIds.add(taskId);
+  ensureGlobalAutoLinkRunning();
+}
+
+export function unregisterActiveTask(taskId: string): void {
+  if (!activeLinkedTaskIds.delete(taskId)) return;
+  if (activeLinkedTaskIds.size === 0) {
+    stopGlobalAutoLink();
+  }
+}
 
 async function globalTick(): Promise<void> {
   if (globalRunning) return;
   globalRunning = true;
   try {
+    // 按需轮询：活跃任务集合为空时不做任何 listTasks 请求。
+    // 注册入口：tasksApi.claimTask / linkContract → notifyTaskClaimed → registerActiveTask。
+    // 移除入口：notifyTaskUpdated 收到终态任务后 unregisterActiveTask；
+    // 当 set 空时 unregister 内部 stopGlobalAutoLink 把 interval 也停了。
+    if (activeLinkedTaskIds.size === 0) {
+      return;
+    }
     // 同时扫两个 scope：
     //   - claimed: 玩家作为接取者持有的任务（含完整接取 + partial claim 子任务 publisher 也是接取者）
     //   - published: 玩家作为发布者持有的任务（partial claim 子任务 publisher = 接取者，
@@ -333,9 +363,16 @@ async function syncLinkedContractStatus(task: OrgTask): Promise<void> {
   }
 }
 
-export function startGlobalAutoLink(callbacks: GlobalAutoLinkCallbacks = {}): void {
+// 仅在有活跃任务时起 interval。
+function ensureGlobalAutoLinkRunning(): void {
+  if (globalInterval || activeLinkedTaskIds.size === 0) return;
+  startInterval();
+}
+
+// 实际创建 interval + 立即跑一次；不检查 activeLinkedTaskIds 大小
+// （由 ensureGlobalAutoLinkRunning 守门）。
+function startInterval(): void {
   if (globalInterval) return;
-  globalCallbacks = callbacks;
   // 启动时如果 contractsStore 还没 fetched，主动触发一次 CONTS 缓存窗口拉取
   // （autoClose=true 不让窗口停留）。PrUn server 收到 CONTS 命令后会推
   // CONTRACTS_CONTRACTS 消息，把所有合同加入 contractsStore.all，
@@ -352,6 +389,13 @@ export function startGlobalAutoLink(callbacks: GlobalAutoLinkCallbacks = {}): vo
   }, GLOBAL_POLL_INTERVAL_MS);
 }
 
+// startGlobalAutoLink 保留以兼容旧调用方（ORG.vue mount）。
+// 但 interval 现在仅在有活跃任务时才真正起。
+export function startGlobalAutoLink(callbacks: GlobalAutoLinkCallbacks = {}): void {
+  globalCallbacks = callbacks;
+  ensureGlobalAutoLinkRunning();
+}
+
 export function stopGlobalAutoLink(): void {
   if (globalInterval) {
     clearInterval(globalInterval);
@@ -362,6 +406,9 @@ export function stopGlobalAutoLink(): void {
   for (const taskId of Array.from(sessions.keys())) {
     stopAutoLink(taskId);
   }
+  // 清空活跃任务集合：登出 / 强制停止时不要让 set 残留，
+  // 避免下次重新注册前"看似有活跃任务但 interval 已停"的脏状态。
+  activeLinkedTaskIds.clear();
 }
 
 // 用户主动关闭某个任务的自动关联（TaskDetail 上的"关闭自动关联"按钮）：
@@ -375,4 +422,10 @@ export function dismissAutoLink(taskId: string): void {
 // 用户重连 / 重新登入 / 显式重置时清空 dismissed 集合。
 export function resetAutoLinkDismissed(): void {
   dismissedTaskIds.clear();
+}
+
+// 重置所有 active 任务注册（登出/切换用户时调用）。
+// 与 resetPollingState 配套；interval 已被 stopGlobalAutoLink 清掉。
+export function resetActiveTasks(): void {
+  activeLinkedTaskIds.clear();
 }
