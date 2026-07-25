@@ -92,10 +92,11 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
 
   for (const contract of all) {
     if (session.dismissedContractIds.has(contract.id)) continue;
-    // 只搜索「对方还没接受」（status=OPEN）的合同。这是 KAMISAMA223 用 CONTD 创建反向
-    // 合同后的状态——买方还没接受（实际是我方创建，对方未接受即 OPEN）。
-    // 关联后由后端 sync-status 在合同被接受/履行后把任务推到 IN_PROGRESS/COMPLETED。
-    if (contract.status !== 'OPEN') continue;
+    // 接受任意合同状态。场景：ORG 接取后创建反向合同（status=OPEN），
+    // 对方可能在我方 sync-status 到达前抢先接受 → status 转 CLOSED。
+    // 若按 OPEN 过滤，错过这一窗口后就永远关联不上。
+    // 终态合同（CANCELLED / FULFILLED / TERMINATED 等）被 link 后由后端
+    // sync-status 立即把任务推到对应终态，行为可接受。
     for (const tmpl of templatesToTry) {
       const taskJsonForMatch: TaskContractJson = {
         ...session.task.contractJson,

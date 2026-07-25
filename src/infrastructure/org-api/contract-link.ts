@@ -11,6 +11,9 @@ const reportedStatuses = new Map<string, Set<string>>();
 // 目标：把 PrUn 运行时合同（PrunApi.Contract）投影成与 TaskContractJson 等价的"摘要形态"，
 // 然后与 task.contractJson 做严格匹配（price 允许 ±0.5% 误差，其余严格相等）。
 // 任一字段不匹配 → 不关联（宁缺毋滥）。
+//
+// 范围：只处理玩家间合同（contractType ∈ BUY/SELL/SHIP/LOAN）。派系/AI 合同
+// （MATERIALS / INFRASTRUCTURE / ...）不在自动关联范围内——本系统只匹配玩家合同。
 // ------------------------------------------------------------
 
 // 投影后的合同摘要形态（与 TaskContractJson 对齐）
@@ -29,66 +32,6 @@ export interface ContractFingerprint {
 export interface ContractMatchResult {
   matched: boolean;
   reason?: string;
-}
-
-// PrUn 条件类型 → contractJson template 的映射
-//
-// 核心原则：通过 conditions 中每个条件的 party 来判断方向，而非仅依赖 contract.party。
-// contract.party 是 PrUn 在合同层面对我方角色的概括，但 CONTD（合同草稿）自动创建的
-// 合同可能出现 contract.party=PROVIDER 但实际我方是买方的情况。
-//
-// 判断规则（按条件级别，不按合同级别）：
-//   - PAYMENT 条件：condition.party 是付款方
-//   - PROVISION/DELIVERY/PICKUP 条件：condition.party 是交货方
-//   - 我方付款 + 对方交货 → BUY（我方是买方）
-//   - 对方付款 + 我方交货 → SELL（我方是卖方）
-//
-// 同时保留 contract.party 作为高优先级信号，仅当 conditions 分析结果与 party 不一致时才
-// 信任 conditions（因为 conditions 更细粒度、直接反映合同实际内容）。
-function conditionsToTemplate(
-  conditions: PrunApi.ContractCondition[],
-  contractParty?: PrunApi.ContractParty,
-): TaskContractJson['template'] {
-  // SHIP 模板特征：存在 SHIPMENT 系列条件
-  const hasShip = conditions.some(
-    c =>
-      c.type === 'DELIVERY_SHIPMENT' ||
-      c.type === 'PROVISION_SHIPMENT' ||
-      c.type === 'PICKUP_SHIPMENT' ||
-      c.type === 'FINISH_FLIGHT' ||
-      c.type === 'START_FLIGHT',
-  );
-  if (hasShip) return 'SHIP';
-
-  // 按条件 party 分析：谁付款？谁交货？
-  // 找出 PAYMENT 条件和 PROVISION/DELIVERY/PICKUP 条件
-  const paymentCond = conditions.find(c => c.type === 'PAYMENT' && c.party);
-  const deliveryCond = conditions.find(
-    c =>
-      (c.type === 'PROVISION' ||
-        c.type === 'DELIVERY' ||
-        c.type === 'PICKUP' ||
-        c.type === 'COMEX_PURCHASE_PICKUP') &&
-      c.party,
-  );
-
-  // 有 contract.party 时用它做参照系（"我方"的 party 值）
-  const myParty = contractParty;
-
-  if (paymentCond && deliveryCond && myParty) {
-    // 付款方是我方 → BUY；付款方是对方 → SELL
-    const iPay = paymentCond.party === myParty;
-    return iPay ? 'BUY' : 'SELL';
-  }
-
-  // 只有 contract.party，没有可分析的 conditions → 用 party 推断
-  if (myParty === 'CUSTOMER') return 'BUY';
-  if (myParty === 'PROVIDER') return 'SELL';
-
-  // 没传 party：无法确定"我方"角色，用 PICKUP 条件兜底
-  const hasPickup = conditions.some(c => c.type === 'PICKUP' || c.type === 'COMEX_PURCHASE_PICKUP');
-  if (hasPickup) return 'BUY';
-  return 'SELL';
 }
 
 // 从 conditions 抽取物料清单（commodity ticker, amount, unit price）
@@ -146,10 +89,9 @@ function addressToLocation(address: PrunApi.Address | undefined): string | undef
   return undefined;
 }
 
-// PrUn wire 实际 contractType 枚举（远超 BUY/SELL/SHIP）。
-// 玩家间普通合同：'BUY' | 'SELL' | 'SHIP' | 'LOAN'
-// 派系/AI/政府合同：'MATERIALS' | 'INFRASTRUCTURE' | '...'
-// 我们只关心玩家间普通合同（task 只能匹配这些）。
+// PrUn wire contractType 取值（玩家间合同枚举）：
+//   'BUY' | 'SELL' | 'SHIP' | 'LOAN'
+// 派系合同（'MATERIALS' / 'INFRASTRUCTURE' / ...）不在本系统自动关联范围内。
 const PLAYER_CONTRACT_TYPES = new Set(['BUY', 'SELL', 'SHIP', 'LOAN']);
 
 // 把 PrUnApi.Contract 投影为指纹
@@ -157,26 +99,17 @@ const PLAYER_CONTRACT_TYPES = new Set(['BUY', 'SELL', 'SHIP', 'LOAN']);
 // auto-link 在确认弹窗前先把 contract 转 fingerprint 上报，
 // 后端以 task.contractJson 为权威源严格比对，避免不同客户端分叉。
 export function contractToFingerprint(contract: PrunApi.Contract): ContractFingerprint {
-  // 1) contractType 解析优先级：
-  //    a) wire 字段是玩家合同（'BUY' | 'SELL' | 'SHIP' | 'LOAN'）→ 用 wire
-  //    b) 派系合同（'MATERIALS' / 'INFRASTRUCTURE' 等）+ wire=null：用 conditions 级别
-  //       分析（谁付款、谁交货）反推 BUY/SELL，不再盲信 contract.party。
-  //    c) 都缺时：fallback 到 conditions 推断
+  // contractType：直接用 wire 字段。仅当 wire ∈ 玩家合同枚举时接受；
+  // 派系合同/未知类型 → template=空串，matchContractJson 会拒（template mismatch）。
   const wireType = contract.contractType as string | null | undefined;
   const tmpl: TaskContractJson['template'] =
     wireType && PLAYER_CONTRACT_TYPES.has(wireType)
       ? (wireType as TaskContractJson['template'])
-      : conditionsToTemplate(contract.conditions, contract.party);
+      : ('' as TaskContractJson['template']);
 
-  // 2) currency 兜底链：
-  //    - partner.currency?.code（玩家对方有 currency 字段时最准）
-  //    - conditions[PAYMENT].amount.currency（对方是派系无 partner.currency，
-  //      货币信息在 conditions 里。amount.currency 是 string 直接是货币 code）
-  //    - 空字符串：稍后 matchContractJson 会拒（与 task.currency 比对失败）
-  const currency =
-    contract.partner.currency?.code ||
-    contract.conditions.find(c => c.amount?.currency)?.amount?.currency ||
-    '';
+  // currency：玩家对方 partner.currency?.code。空串表示未知，matchContractJson
+  // 会拒（currency mismatch）。
+  const currency = contract.partner.currency?.code ?? '';
 
   const fp: ContractFingerprint = {
     template: tmpl,

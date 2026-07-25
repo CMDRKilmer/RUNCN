@@ -196,11 +196,13 @@ const canShowCancelButton = computed(
 // 重新发布：仅 publisher 自己可把 CANCELLED 状态的任务转回 PUBLISHED。
 const canRepublish = computed(() => localTask.value.status === 'CANCELLED' && isPublisher.value);
 // CANCELLED / COMPLETED 状态下：仅发布者可物理删除。后端拒错由 store/error 提示。
-// partial claim 子任务不能删除（后端 CANNOT_DELETE_CHILD_TASK）；同样隐藏按钮。
-const canDelete = computed(
-  () =>
-    canDeleteTask(props.currentUser, localTask.value) && localTask.value.parentTaskId === undefined,
-);
+// partial claim 子任务在 COMPLETED / CANCELLED 后也允许删除。
+const canDelete = computed(() => {
+  if (!canDeleteTask(props.currentUser, localTask.value)) return false;
+  if (localTask.value.parentTaskId === undefined) return true;
+  // 子任务仅允许在终态（COMPLETED / CANCELLED）删除
+  return localTask.value.status === 'COMPLETED' || localTask.value.status === 'CANCELLED';
+});
 const canCreateContract = computed(
   () =>
     localTask.value.status === 'AWAITING_CONTRACT' &&
