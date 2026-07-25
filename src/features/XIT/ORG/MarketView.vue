@@ -266,7 +266,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
               <!-- 顶部动作栏：发布新任务快捷入口 -->
               <div :class="$style.actionBar">
                 <PrunButton
-                  dark
+                  primary
                   inline
                   @click.stop="
                     goPublish(row, 'BUY', bestBidPrice(row.orders) ?? bestAskPrice(row.orders) ?? 0)
@@ -274,7 +274,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                   去发布（买入）
                 </PrunButton>
                 <PrunButton
-                  dark
+                  primary
                   inline
                   @click.stop="
                     goPublish(
@@ -316,7 +316,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                         </td>
                         <td>{{ o.publisher }}</td>
                         <td :class="$style.actionCol">
-                          <PrunButton dark inline @click.stop="openClaim(o, row.ticker)">
+                          <PrunButton primary inline @click.stop="openClaim(o, row.ticker)">
                             接取
                           </PrunButton>
                         </td>
@@ -357,7 +357,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                         </td>
                         <td>{{ o.publisher }}</td>
                         <td :class="$style.actionCol">
-                          <PrunButton dark inline @click.stop="openClaim(o, row.ticker)">
+                          <PrunButton primary inline @click.stop="openClaim(o, row.ticker)">
                             接取
                           </PrunButton>
                         </td>
