@@ -9,6 +9,9 @@ import AddressPicker from '@src/features/XIT/CONTGEN/AddressPicker.vue';
 import { useTileState } from '@src/store/user-data-tiles';
 import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import { useClipboard } from '@src/hooks/use-clipboard';
+import { uploadJson } from '@src/utils/json-file';
+import { parseActJson } from '@src/features/XIT/CONTGEN/act-import';
+import { fixed02 } from '@src/utils/format';
 
 type Template = 'BUY' | 'SELL' | 'SHIP';
 
@@ -46,12 +49,25 @@ const origin = useTileState<string>('origin', '');
 const destination = useTileState<string>('destination', '');
 const price = useTileState<number | undefined>('price', undefined);
 const deadline = useTileState<number | undefined>('deadline', undefined);
+// BUY/SELL 模板时使用的"总价"输入。仅作拆分触发器，不进入 ContractJson
+// 输出——具体单价仍走 per-row `item.price`，与 SHIP 的顶层 price 语义隔离。
+const totalPrice = useTileState<number | undefined>('totalPrice', undefined);
 // Items list is local-only — we deliberately do NOT persist it via
 // `useTileState`. The tile-state helper returns a fresh default
 // array on every read, which silently drops mutations like
 // `items.value.push(...)`. The form is small enough that resetting
 // on remount is fine.
 const items = ref<Item[]>([{ ticker: '', amount: 0, price: 0 }]);
+
+// JSON 导入的临时 UI 状态——不持久化，刷新即丢；这与 uploadJson 的
+// "一次性消费"语义对齐。
+const importText = ref('');
+type ImportStatus = { kind: 'ok' | 'warn' | 'err'; message: string };
+const importStatus = ref<ImportStatus | null>(null);
+// 预览窗口里的"合同 / 导入"标签页。默认合同 JSON 预览；点切换按钮或
+// 「识别/上传」时不自动切（避免误抢用户当前在看的内容）。
+type PreviewMode = 'output' | 'import';
+const previewMode = ref<PreviewMode>('output');
 
 const currencies = ['ICA', 'NCC', 'AIC', 'CIS'];
 const templates: Template[] = ['BUY', 'SELL', 'SHIP'];
@@ -237,6 +253,109 @@ const { copy } = useClipboard();
 async function copyJson() {
   await copy(outputJson.value);
 }
+
+// ---- JSON 导入 ----
+
+// 粘贴 / 上传两条入口共用一条 apply 路径：把任意 JSON 形态解析成 ImportedRow[]
+// 然后覆盖 items。这里故意不去推断 template/currency/location —— 那些由
+// 用户在表单里继续维护，避免脚本写错时静默改了模板。
+function applyImported(rawJson: unknown) {
+  try {
+    const result = parseActJson(rawJson);
+    items.value = result.rows.map(row => ({
+      ticker: row.ticker,
+      amount: row.amount,
+      price: row.price ?? 0,
+    }));
+    importText.value = '';
+    previewMode.value = 'output';
+    const priceNote =
+      result.stats.withPrice < result.stats.unique
+        ? `，${result.stats.unique - result.stats.withPrice} 行缺单价`
+        : '';
+    importStatus.value = {
+      kind: result.stats.withPrice < result.stats.unique ? 'warn' : 'ok',
+      message: `已导入 ${result.stats.unique} 种 / ${result.stats.totalUnits} 件（来源：${result.source}）${priceNote}`,
+    };
+  } catch (e) {
+    importStatus.value = {
+      kind: 'err',
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
+function onImportClick() {
+  const text = importText.value.trim();
+  if (!text) {
+    importStatus.value = { kind: 'err', message: '请先粘贴 JSON。' };
+    return;
+  }
+  try {
+    applyImported(JSON.parse(text));
+  } catch {
+    importStatus.value = { kind: 'err', message: 'JSON 解析失败。' };
+  }
+}
+
+function onUploadClick() {
+  uploadJson(json => applyImported(json));
+}
+
+// 用户清空粘贴框时同步清掉旧状态——否则红字会黏在屏幕上误
+// 导已完成。
+watch(
+  () => importText.value,
+  next => {
+    if (next.trim().length === 0) importStatus.value = null;
+  },
+);
+
+// ---- 总价拆分 ----
+
+// 把总价 T 拆成首行单价 = T / amount（四舍五入到 0.01）；其余行单价 = 1。
+// 多个物品时 Σamount*price 自然不等于 T（差额 = n-1），用 warn 状态明示。
+const canApplyTotal = computed(
+  () => isBuyOrSell.value && typeof totalPrice.value === 'number' && items.value.length > 0,
+);
+
+function computeUnit(total: number, amount: number): number {
+  const safeAmount = Math.max(1, Math.ceil(amount));
+  const raw = total / safeAmount;
+  return Math.round(raw * 100) / 100;
+}
+
+function applyTotalPrice() {
+  if (!canApplyTotal.value) return;
+  const total = Number(totalPrice.value);
+  if (!Number.isFinite(total) || total < 0) {
+    importStatus.value = { kind: 'err', message: '请输入有效的总价。' };
+    return;
+  }
+  const first = items.value[0];
+  if (first === undefined || first.amount <= 0) {
+    importStatus.value = { kind: 'err', message: '请先添加至少一个有效物品。' };
+    return;
+  }
+  const amount = Math.max(1, Math.ceil(first.amount));
+  const unit = computeUnit(total, amount);
+  first.price = unit;
+  for (let i = 1; i < items.value.length; i++) {
+    items.value[i].price = 1;
+  }
+  const sum = items.value.reduce((s, it) => s + (it.amount ?? 0) * (it.price ?? 0), 0);
+  if (items.value.length === 1) {
+    importStatus.value = {
+      kind: 'ok',
+      message: `已应用总价 ${fixed02(total)}：单价 ${fixed02(unit)}`,
+    };
+  } else {
+    importStatus.value = {
+      kind: 'warn',
+      message: `已应用总价 ${fixed02(total)}；首行单价 ${fixed02(unit)}，其余单价 1；合计 ${fixed02(sum)}（不等于总价）`,
+    };
+  }
+}
 </script>
 
 <template>
@@ -335,7 +454,24 @@ async function copyJson() {
         <PrunButton :disabled="!canSubmit || isNewing" primary @click="copyJson"
           >复制 JSON</PrunButton
         >
+        <PrunButton primary @click="onImportClick">识别 JSON</PrunButton>
+        <PrunButton primary @click="onUploadClick">上传 JSON</PrunButton>
+        <PrunButton primary @click="previewMode = previewMode === 'output' ? 'import' : 'output'">
+          {{ previewMode === 'output' ? '切到导入 JSON' : '切到合同 JSON' }}
+        </PrunButton>
       </Commands>
+
+      <Active v-if="isBuyOrSell" label="总价" tooltip="拆分到首行单价；其余行单价统一为 1。">
+        <input
+          v-model.number="totalPrice"
+          type="number"
+          min="0"
+          step="0.01"
+          :class="[$style.input, $style.totalInput]"
+          placeholder="0.00"
+          :aria-label="`总价`" />
+        <PrunButton dark :disabled="!canApplyTotal" @click="applyTotalPrice">应用总价</PrunButton>
+      </Active>
 
       <div v-if="newDraftError" :class="$style.errors">
         <div>⚠ {{ newDraftError }}</div>
@@ -346,8 +482,45 @@ async function copyJson() {
     </div>
 
     <div :class="$style.preview">
-      <div :class="$style.previewLabel">JSON 预览</div>
-      <pre :class="$style.previewContent">{{ outputJson }}</pre>
+      <div :class="$style.previewHeader">
+        <div :class="$style.previewLabel">
+          {{ previewMode === 'output' ? '合同 JSON' : '导入 JSON' }}
+        </div>
+        <div :class="$style.previewTabs">
+          <button
+            type="button"
+            :class="[$style.previewTab, previewMode === 'output' ? $style.previewTabActive : null]"
+            @click="previewMode = 'output'">
+            合同
+          </button>
+          <button
+            type="button"
+            :class="[$style.previewTab, previewMode === 'import' ? $style.previewTabActive : null]"
+            @click="previewMode = 'import'">
+            导入
+          </button>
+        </div>
+      </div>
+      <pre v-if="previewMode === 'output'" :class="$style.previewContent">{{ outputJson }}</pre>
+      <textarea
+        v-else
+        v-model="importText"
+        :class="[$style.previewContent, $style.previewTextarea]"
+        spellcheck="false"
+        placeholder="粘贴 ACT JSON、{COF:100} 这样的清单或 CART 导出。点击「识别 JSON」自动覆盖下方物品清单。" />
+      <div v-if="previewMode === 'import' && importStatus" :class="$style.previewStatusRow">
+        <span
+          :class="[
+            $style.importStatusText,
+            importStatus.kind === 'ok'
+              ? $style.statusOk
+              : importStatus.kind === 'warn'
+                ? $style.statusWarn
+                : $style.statusErr,
+          ]">
+          {{ importStatus.message }}
+        </span>
+      </div>
     </div>
   </div>
 </template>
@@ -378,10 +551,40 @@ async function copyJson() {
   background: rgba(0, 0, 0, 0.2);
 }
 
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
 .previewLabel {
   font-size: 11px;
   color: #999;
-  margin-bottom: 4px;
+}
+
+.previewTabs {
+  display: flex;
+  gap: 4px;
+}
+
+.previewTab {
+  background: transparent;
+  border: 1px solid #555;
+  color: inherit;
+  padding: 1px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.previewTab:hover:not(.previewTabActive) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.previewTabActive {
+  background: rgba(255, 176, 0, 0.18);
+  border-color: #f0ad4e;
+  color: #f0ad4e;
 }
 
 .previewContent {
@@ -396,6 +599,23 @@ async function copyJson() {
   background: rgba(0, 0, 0, 0.3);
   border-radius: 2px;
   border: 1px solid #555;
+}
+
+.previewTextarea {
+  resize: vertical;
+  white-space: pre;
+  color: inherit;
+  outline: none;
+}
+
+.previewTextarea:focus {
+  border-color: #66afe9;
+}
+
+.previewStatusRow {
+  margin-top: 4px;
+  font-size: 11px;
+  word-break: break-word;
 }
 
 .input {
@@ -501,5 +721,26 @@ async function copyJson() {
   border-radius: 2px;
   font-size: 11px;
   color: #d9534f;
+}
+
+.totalInput {
+  flex: 0 0 120px;
+}
+
+.importStatusText {
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.statusOk {
+  color: #81c784;
+}
+
+.statusWarn {
+  color: #f0ad4e;
+}
+
+.statusErr {
+  color: #e57373;
 }
 </style>
