@@ -4,6 +4,10 @@
 
 浏览器扩展，用于简化 [Prosperous Universe](https://prosperousuniverse.com/) 游戏界面并添加实用功能。本版本将所有英文界面、按钮、提示、描述及代码注释翻译为中文，方便中文玩家使用。
 
+## 浏览器要求
+
+本扩展仅支持 **Chrome 148 及以上版本**（或同源 Chromium 内核的 Edge 148+）。该最低版本要求是为了使用 Chrome 内置 AI（Gemini Nano）实现本地化 AI 能力——**无需 API Key、无需联网、用户数据不离开本机**。Firefox、Safari 以及更低版本 Chrome 不在本扩展支持范围内。
+
 ## 汉化范围
 
 - **功能描述**：全部 120 个功能的名称与说明（基础 84 + 高级 36）

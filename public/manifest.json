@@ -3,16 +3,7 @@
   "version": "26.7.17",
   "description": "超级无敌方便工具",
   "manifest_version": 3,
-  "minimum_chrome_version": "107",
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "{891e0a50-2117-4413-b37d-5b77fbc281fd}",
-      "strict_min_version": "142.0",
-      "data_collection_permissions": {
-        "required": ["none"]
-      }
-    }
-  },
+  "minimum_chrome_version": "148",
   "permissions": [
     "storage"
   ],
