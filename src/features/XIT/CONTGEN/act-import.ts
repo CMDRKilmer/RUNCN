@@ -28,6 +28,9 @@ export interface ImportedContractItems {
     // 含单价（满足 BUY/SELL validateConfig 不报错的最小条件）的行数
     withPrice: number;
   };
+  // 可选：源 JSON 带 `name` 字段时一并透出。CONTGEN 用来回填合同名称
+  // 表单（BPC/CART 等面板的"导入"会带上这个字段）。
+  name?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -152,7 +155,24 @@ export function parseActJson(source: unknown): ImportedContractItems {
     throw new Error('未找到有效物品');
   }
 
-  return {
+  // 名稱字段提取：允許頂層 `name`（BPC 直接傳）或 `global.name`
+  // （CONTGEN 自輸出 / ACT 套包形態）。trim 後非空才回傳。
+  let name: string | undefined;
+  if (isRecord(source)) {
+    const topName = source.name;
+    if (typeof topName === 'string') {
+      const trimmed = topName.trim();
+      if (trimmed.length > 0) name = trimmed;
+    } else if (isRecord(source.global)) {
+      const globalName = source.global.name;
+      if (typeof globalName === 'string') {
+        const trimmed = globalName.trim();
+        if (trimmed.length > 0) name = trimmed;
+      }
+    }
+  }
+
+  const result: ImportedContractItems = {
     rows,
     source: sourceTag,
     stats: {
@@ -161,4 +181,6 @@ export function parseActJson(source: unknown): ImportedContractItems {
       withPrice: rows.filter(r => typeof r.price === 'number').length,
     },
   };
+  if (name !== undefined) result.name = name;
+  return result;
 }

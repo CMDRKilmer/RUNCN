@@ -12,6 +12,7 @@ import PrunButton from '@src/components/PrunButton.vue';
 import { userData } from '@src/store/user-data';
 import { getWarehouseName } from '@src/features/XIT/CART/cart-utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
+import { getTileState } from '@src/store/user-data-tiles';
 import {
   collectBlueprintNeeds,
   computeComponents,
@@ -196,6 +197,52 @@ function generateAct() {
   showBuffer(`XIT ACT_${commandName}`);
 }
 
+// 已选配件（如未选则全部）按 ticker:amount 序列化为顶层 materials 形态
+// 的 JSON，写到 'contgen-import' workspace key，然后打开 CONTGEN 缓冲窗。
+// CONTGEN 在 onMounted 消费一次后立即清空该 key，避免下次刷新又触发。
+//
+// 价格字段不传递——BPC 算的是最优买入价，与合同 / BUY/SELL 价格无关；
+// CONTGEN 会按顶部 BUY/SELL 的缺单价规则标红，由玩家手动填写。
+function sendToContgen() {
+  if (components.value.length === 0) {
+    return;
+  }
+  const tickersToSend =
+    selectedTickers.value.size > 0
+      ? new Set(selectedTickers.value)
+      : new Set(components.value.map(c => c.ticker));
+  const materials: Record<string, number> = {};
+  for (const c of components.value) {
+    if (!tickersToSend.has(c.ticker)) continue;
+    materials[c.ticker] = (materials[c.ticker] ?? 0) + c.amount;
+  }
+  if (Object.keys(materials).length === 0) {
+    return;
+  }
+  // 用 blueprint.name 作合同名——CONTGEN 收到后写到顶部「合同名称」字段。
+  // 与下方 generateAct 用同一段 ASCII 净化（XIT 参数仅吃 ASCII）：
+  //   1. 去非 ASCII 字符；
+  //   2. 把非 [A-Za-z0-9-] 折叠为单个空格；
+  //   3. 收敛尾随 / 重复空白。
+  // BPC 的 generateAct 拼的是 ${bpId} ${asciiName} Buy；这里只给单
+  // 个 name，免得污染用户后续手动改名的空间。
+  const bp = selectedBlueprint.value;
+  const asciiName = (bp?.name ?? '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const payload: { materials: Record<string, number>; name?: string } = { materials };
+  if (asciiName.length > 0) {
+    payload.name = asciiName;
+  }
+  const ws = getTileState<{ json?: string }>('contgen-import');
+  ws.json = JSON.stringify(payload);
+  showBuffer('XIT CONTGEN');
+}
+
+const canSendToContgen = computed(() => components.value.length > 0);
+
 // 与 ARB 一致：对当前可见的所有 (ticker, 交易所) 打开 CXOB 缓冲窗，
 // 拉取实时订单簿（cxobStore 收到数据后 bp-utils.ts 会自动切换到 live 价格）。
 function refreshPrices() {
@@ -289,6 +336,14 @@ function isBest(component: { bestExchange?: string }, code: string) {
       </label>
       <PrunButton primary :disabled="!canGenerateActOptions" @click="generateAct"
         >生成 ACT</PrunButton
+      >
+      <PrunButton
+        primary
+        :disabled="!canSendToContgen"
+        data-tooltip="把当前已选配件清单发送到 CONTGEN 用于起草合同"
+        data-tooltip-position="top"
+        @click="sendToContgen"
+        >导入到 CONTGEN</PrunButton
       >
     </div>
 

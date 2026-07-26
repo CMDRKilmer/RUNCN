@@ -12,6 +12,7 @@ import { useClipboard } from '@src/hooks/use-clipboard';
 import { uploadJson } from '@src/utils/json-file';
 import { parseActJson } from '@src/features/XIT/CONTGEN/act-import';
 import { fixed02 } from '@src/utils/format';
+import { getTileState } from '@src/store/user-data-tiles';
 
 type Template = 'BUY' | 'SELL' | 'SHIP';
 
@@ -64,6 +65,20 @@ const items = ref<Item[]>([{ ticker: '', amount: 0, price: 0 }]);
 const importText = ref('');
 type ImportStatus = { kind: 'ok' | 'warn' | 'err'; message: string };
 const importStatus = ref<ImportStatus | null>(null);
+
+// 其他面板（BPC / CART 等）可通过 'contgen-import' workspace key 把
+// JSON 直接喂给当前 tile。挂载时消费一次并立即清空，避免下次刷新
+// 再次触发。设计风格与 CART 模块的 "识别 XIT JSON" 一致（消费者
+// 拿到即清空），但走显式 key 避免与 cart-utils 的 parseCartImport
+// 工作区混淆。
+onMounted(() => {
+  const pending = getTileState<{ json?: string }>('contgen-import');
+  if (typeof pending.json === 'string' && pending.json.length > 0) {
+    applyImportedRaw(pending.json);
+    delete pending.json;
+  }
+});
+
 // 预览窗口里的"合同 / 导入"标签页。默认合同 JSON 预览；点切换按钮或
 // 「识别/上传」时不自动切（避免误抢用户当前在看的内容）。
 type PreviewMode = 'output' | 'import';
@@ -256,6 +271,19 @@ async function copyJson() {
 
 // ---- JSON 导入 ----
 
+// 其他面板（workspace key）喂过来的字符串路径。先 JSON.parse 再复用统一
+// applyImported，所以与「粘贴 / 上传」两条入口走完全相同的解析 / 错误反馈。
+function applyImportedRaw(rawJson: string) {
+  try {
+    applyImported(JSON.parse(rawJson));
+  } catch (e) {
+    importStatus.value = {
+      kind: 'err',
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 // 粘贴 / 上传两条入口共用一条 apply 路径：把任意 JSON 形态解析成 ImportedRow[]
 // 然后覆盖 items。这里故意不去推断 template/currency/location —— 那些由
 // 用户在表单里继续维护，避免脚本写错时静默改了模板。
@@ -268,6 +296,11 @@ function applyImported(rawJson: unknown) {
       price: row.price ?? 0,
     }));
     importText.value = '';
+    // 来源携带 name 时回填合同名称（BPC 导入蓝图名即用此字段）。
+    // 已有手动填写的 contractName 不覆盖，保留玩家工作。
+    if (result.name !== undefined) {
+      contractName.value = result.name;
+    }
     previewMode.value = 'output';
     const priceNote =
       result.stats.withPrice < result.stats.unique
