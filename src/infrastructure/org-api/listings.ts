@@ -6,13 +6,7 @@
 //   - claimListing：接取挂单 → 扣 remaining + 创建 task
 //   - cancelListing：取消挂单
 import { request } from './client';
-import type {
-  OrgListing,
-  OrgTask,
-  ListingType,
-  ListListingsResult,
-  ClaimListingResult,
-} from './types';
+import type { OrgListing, ListingType, ListListingsResult, ClaimListingResult } from './types';
 
 export interface ListListingsParams {
   commodity?: string;
