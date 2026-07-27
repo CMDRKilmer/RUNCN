@@ -199,7 +199,6 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
       <table :class="$style.table">
         <thead>
           <tr>
-            <th :class="$style.expandCol" />
             <th :class="$style.materialCol">商品</th>
             <th :class="$style.marketCol">最高买价</th>
             <th :class="$style.marketCol">最低卖价</th>
@@ -209,9 +208,6 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
         </thead>
         <tbody v-for="row in materialRows" :key="row.ticker">
           <tr :class="$style.row" @click="toggle(row.ticker)">
-            <td :class="$style.expand">
-              {{ expanded.has(row.ticker) ? '−' : '+' }}
-            </td>
             <td :class="$style.materialCell">
               <MaterialIcon :ticker="row.ticker" size="medium" />
               <span :class="$style.materialName">{{ row.name }}</span>
@@ -430,16 +426,6 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 }
 .row:hover {
   background: rgba(255, 255, 255, 0.04);
-}
-
-.expandCol {
-  width: 24px;
-  text-align: center;
-}
-.expand {
-  text-align: center;
-  font-family: monospace;
-  user-select: none;
 }
 
 .materialCol {
