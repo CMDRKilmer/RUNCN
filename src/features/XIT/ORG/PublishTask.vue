@@ -1,7 +1,10 @@
 <script setup lang="ts">
+// 阶段 4：PublishTask 改为发布挂单（/listings 端点）。
+//   单个挂单只挂一个商品（解耦后约束）。"添加物品"按钮移除。
+//   提交后返回 OrgListing，保留 id 供用户识别。
 import { computed, ref, watch } from 'vue';
-import type { TaskContractJson, TaskType } from '@src/infrastructure/org-api/types';
-import * as tasksApi from '@src/infrastructure/org-api/tasks';
+import type { ListingType } from '@src/infrastructure/org-api/types';
+import * as listingsApi from '@src/infrastructure/org-api/listings';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import ActionBar from '@src/components/ActionBar.vue';
@@ -17,7 +20,7 @@ type ItemType = { ticker: string; amount: number; price?: number };
 // 不传则按默认空白 + BUY 类型启动。
 const props = defineProps<{
   initialData?: {
-    type?: Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>;
+    type?: ListingType;
     ticker?: string;
     amount?: number;
     price?: number;
@@ -27,7 +30,7 @@ const props = defineProps<{
   };
 }>();
 
-const type = ref<Extract<TaskType, 'BUY' | 'SELL' | 'SHIP'>>(props.initialData?.type ?? 'BUY');
+const type = ref<ListingType>(props.initialData?.type ?? 'BUY');
 const currency = ref(props.initialData?.currency ?? 'ICA');
 const contractName = ref(props.initialData?.contractName ?? '');
 const location = ref(props.initialData?.location ?? '');
@@ -36,24 +39,21 @@ const destination = ref('');
 // `price` 在不同类型下语义不同：
 //   - SHIP: 作为"运费"（对齐 CONTGEN 字段命名）
 //   - BUY/SELL: 该字段从表单隐藏（运费的 PrUn 概念仅在 SHIP 下存在）
-//              每行 `item.price` 必填
-// 保留 ref 是为了让 SHIP 路径写入 contractJson.price 不需要分支。
+//              单 item 的 price 必填
 const price = ref<number | undefined>(undefined);
 const deadline = ref<number | undefined>(undefined);
-// 商品行：MarketView 预填时用 initialData，否则从空白开始。
-const items = ref<ItemType[]>([
-  {
-    ticker: props.initialData?.ticker ?? '',
-    amount: props.initialData?.amount ?? 0,
-    price: props.initialData?.price ?? 0,
-  },
-]);
-// 有效期：发布后多少天自动取消（架构 §12.21 任务有效期），内部换算成小时传给 API
+// 单 item（解耦后约束）：挂单只挂一个商品
+const item = ref<ItemType>({
+  ticker: props.initialData?.ticker ?? '',
+  amount: props.initialData?.amount ?? 0,
+  price: props.initialData?.price ?? 0,
+});
+// 有效期：发布后多少天自动取消（架构 §12.21 任务有效期），内部换算成 ISO 时间
 const expiresAfterDays = ref<number>(3);
 
 const error = ref('');
 const loading = ref(false);
-const publishedTaskId = ref<string | null>(null);
+const publishedListingId = ref<string | null>(null);
 
 const isShip = computed(() => type.value === 'SHIP');
 
@@ -61,13 +61,8 @@ const canSubmit = computed(() => {
   if (loading.value) {
     return false;
   }
-  if (items.value.length === 0) {
+  if (!item.value.ticker || item.value.amount <= 0) {
     return false;
-  }
-  for (const item of items.value) {
-    if (!item.ticker || item.amount <= 0) {
-      return false;
-    }
   }
   if (isShip.value) {
     if (!origin.value || !destination.value || origin.value === destination.value) {
@@ -77,40 +72,25 @@ const canSubmit = computed(() => {
       return false;
     }
   } else {
-    // BUY / SELL：必须有 location + 每行物品单价必填 > 0（CONTGEN 语义）
     if (!location.value) {
       return false;
     }
-    const allRowsHavePrice = items.value.every(
-      i => i.price !== undefined && i.price !== null && Number(i.price) > 0,
-    );
-    if (!allRowsHavePrice) {
+    if (
+      item.value.price === undefined ||
+      item.value.price === null ||
+      Number(item.value.price) <= 0
+    ) {
       return false;
     }
   }
   return true;
 });
 
-// 类型变化时重置仅 SHIP 适用的字段，避免 BUY/SELL 留下幽灵 price。
 watch(type, (next, prev) => {
   if (next !== 'SHIP' && prev === 'SHIP') {
     price.value = undefined;
   }
-  // SHIP 不需要每行 price；BUY/SELL 反之亦然。切换时归零以免影响 canSubmit。
-  items.value.forEach(it => {
-    if (next === 'SHIP') {
-      it.price = 0;
-    }
-  });
 });
-
-function addItem() {
-  items.value.push({ ticker: '', amount: 0, price: isShip.value ? 0 : 0 });
-}
-
-function removeItem(i: number) {
-  items.value.splice(i, 1);
-}
 
 async function onPublish() {
   if (!canSubmit.value) {
@@ -119,25 +99,18 @@ async function onPublish() {
   loading.value = true;
   error.value = '';
   try {
-    // 构造 contractJson（与 CONTGEN.vue ContractJson 对齐）
-    const contractJson: TaskContractJson = {
-      template: type.value,
+    const listing = await listingsApi.createListing({
+      type: type.value,
+      commodity: item.value.ticker,
+      amount: item.value.amount,
+      price: isShip.value ? (price.value ?? 0) : (item.value.price ?? 0),
       currency: currency.value,
-      name: contractName.value || undefined,
       location: isShip.value ? undefined : location.value,
       origin: isShip.value ? origin.value : undefined,
       destination: isShip.value ? destination.value : undefined,
-      price: price.value,
-      deadline: deadline.value,
-      items: items.value.map(i => ({
-        commodity: i.ticker,
-        amount: i.amount,
-        price: i.price,
-      })),
-    };
-    const expiresAt = new Date(Date.now() + expiresAfterDays.value * 86400_000).toISOString();
-    const task = await tasksApi.createTask({ type: type.value, contractJson, expiresAt });
-    publishedTaskId.value = task.id;
+      expiresAt: new Date(Date.now() + expiresAfterDays.value * 86400_000).toISOString(),
+    });
+    publishedListingId.value = listing.id;
   } catch (err) {
     error.value = err instanceof HttpError ? err.message : String(err);
   } finally {
@@ -146,7 +119,7 @@ async function onPublish() {
 }
 
 function resetForm() {
-  publishedTaskId.value = null;
+  publishedListingId.value = null;
   type.value = 'BUY';
   currency.value = 'ICA';
   contractName.value = '';
@@ -155,15 +128,15 @@ function resetForm() {
   destination.value = '';
   price.value = undefined;
   deadline.value = undefined;
-  items.value = [{ ticker: '', amount: 0, price: 0 }];
+  item.value = { ticker: '', amount: 0, price: 0 };
   expiresAfterDays.value = 3;
 }
 </script>
 
 <template>
   <div :class="[C.DraftConditionEditor.form, C.fonts.fontRegular, $style.container]">
-    <div v-if="publishedTaskId" :class="$style.success">
-      已发布，任务 ID：{{ publishedTaskId }}
+    <div v-if="publishedListingId" :class="$style.success">
+      已发布挂单，挂单 ID：{{ publishedListingId }}
       <PrunButton primary inline @click="resetForm">再发布一个</PrunButton>
     </div>
 
@@ -224,9 +197,9 @@ function resetForm() {
         </Active>
       </div>
 
-      <SectionHeader>物品清单</SectionHeader>
+      <SectionHeader>商品</SectionHeader>
       <div :class="$style.items">
-        <div v-for="(item, i) in items" :key="i" :class="$style.itemRow">
+        <div :class="$style.itemRow">
           <Active label="物料">
             <TextInput v-model="item.ticker" />
           </Active>
@@ -237,18 +210,14 @@ function resetForm() {
           <Active v-if="!isShip" label="单价">
             <NumberInput v-model="item.price" :min="0" />
           </Active>
-          <PrunButton danger inline @click="removeItem(i)">删除</PrunButton>
         </div>
-        <ActionBar>
-          <PrunButton dark inline type="button" @click="addItem">添加物品</PrunButton>
-        </ActionBar>
       </div>
 
       <div v-if="error" :class="$style.error">{{ error }}</div>
 
       <ActionBar>
         <PrunButton primary type="submit" :disabled="!canSubmit">
-          {{ loading ? '发布中...' : '发布任务' }}
+          {{ loading ? '发布中...' : '发布挂单' }}
         </PrunButton>
       </ActionBar>
     </form>

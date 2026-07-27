@@ -64,9 +64,9 @@ export interface OrgTask {
   claimerCompanyCode?: string;
   contractId?: string;
   contractCreator?: ContractCreator;
-  // 部分接取（partial claim）：子任务的 parentTaskId 指回原任务。
-  // 原任务的 parentTaskId 始终为 undefined。
-  parentTaskId?: string;
+  // listingId：解耦后 task 由哪个挂单接取产生（老任务为 undefined）。
+  listingId?: string;
+  claimSeq?: number;
   expiresAt?: string;
   createdAt: string;
   publishedAt?: string;
@@ -77,21 +77,49 @@ export interface OrgTask {
   updatedAt: string;
 }
 
-// claim 端点返回结构：
-//   完整接取 → { task }
-//   裁剪接取（partial） → { task: parent, childTask: reverseTask }
+// claim 端点返回结构：完整接取 → { task }
 export interface ClaimTaskResult {
   task: OrgTask;
-  childTask?: OrgTask;
 }
 
-// release 端点返回结构：
-//   完整接取任务 release → { task: 原任务 }
-//   部分接取子任务 release → { task: 父任务（amount 已加回）, parentTaskId, restoredAmount }
+// release 端点返回结构：完整接取任务 release → { task: 原任务 }
 export interface ReleaseTaskResult {
   task: OrgTask;
-  parentTaskId?: string;
-  restoredAmount?: number;
+}
+
+// ========== Listings（市场挂单，与任务解耦） ==========
+// 单个挂单对应单一商品，每被接取一次扣 remaining_amount 并产生一条独立 task。
+export type ListingType = 'BUY' | 'SELL' | 'SHIP';
+export type ListingStatus = 'OPEN' | 'CLOSED' | 'CANCELLED' | 'EXPIRED';
+
+export interface OrgListing {
+  id: string;
+  type: ListingType;
+  commodity: string;
+  amount: number;
+  remainingAmount: number;
+  price: number;
+  currency: string;
+  location?: string;
+  origin?: string;
+  destination?: string;
+  publisherId: string;
+  publisherUsername: string;
+  publisherCompanyCode: string;
+  status: ListingStatus;
+  expiresAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// /listings/:id/claim 返回结构：{ task, listing }
+export interface ClaimListingResult {
+  task: OrgTask;
+  listing: OrgListing;
+}
+
+export interface ListListingsResult {
+  items: OrgListing[];
 }
 
 // 任务备注（架构 §4.1）

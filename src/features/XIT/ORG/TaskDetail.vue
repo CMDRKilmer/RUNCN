@@ -46,22 +46,8 @@ const showBoardCancel = ref(false);
 // 删除二次确认：输入 "DELETE" 才允许点击"确认删除"，避免误点。
 const showDeleteConfirm = ref(false);
 const deleteConfirmText = ref('');
-// partial claim 子任务时：父任务只取它的 publisher 信息用于"原始任务发布者"展示。
-// 不需要整条父任务详情，避免无谓网络请求。
-const parentPublisher = ref<{ username: string; companyCode: string } | null>(null);
-
-async function loadParentPublisher(parentTaskId: string) {
-  try {
-    const parent = await tasksApi.getTask(parentTaskId);
-    parentPublisher.value = {
-      username: parent.publisherUsername,
-      companyCode: parent.publisherCompanyCode,
-    };
-  } catch (err) {
-    // 父任务可能已被删除（极少发生）；不影响子任务展示。
-    parentPublisher.value = null;
-  }
-}
+// 阶段 4：父子任务已废弃（解耦后接取走 /listings 端点）。
+//   没有"父任务"概念，不需要加载父任务 publisher。
 
 // 自动关联合同状态（ORG 任务接取后默认开启自动关联）。
 // canAutoLink=true → 自动调 startAutoLink；用户可手动关闭（停止轮询）。
@@ -71,11 +57,6 @@ watch(
   () => props.task,
   t => {
     localTask.value = t;
-    parentPublisher.value = null;
-    // 子任务：加载父任务 publisher 用于"原始任务发布者"展示
-    if (t.parentTaskId) {
-      loadParentPublisher(t.parentTaskId);
-    }
   },
   { immediate: true },
 );
@@ -170,39 +151,22 @@ const isClaimer = computed(() => localTask.value.claimerId === props.currentUser
 const isParticipant = computed(() => isPublisher.value || isClaimer.value);
 
 const canClaim = computed(() => localTask.value.status === 'PUBLISHED' && !isPublisher.value);
-// 释放按钮可见条件：
-//   - 完整接取任务：状态 AWAITING_CONTRACT 且我是 claimer
-//   - 部分接取子任务：状态 AWAITING_CONTRACT 且我是 publisher（接取者持有反向合同）
-//   - 都不能在已签反向合同后（IN_PROGRESS / COMPLETED）释放
+// 释放按钮可见条件：状态 AWAITING_CONTRACT 且我是 claimer
 const canRelease = computed(
-  () =>
-    localTask.value.status === 'AWAITING_CONTRACT' &&
-    (isClaimer.value ||
-      (localTask.value.publisherId === props.currentUser.id &&
-        localTask.value.parentTaskId !== undefined)),
+  () => localTask.value.status === 'AWAITING_CONTRACT' && isClaimer.value,
 );
 const canCancel = computed(() => canCancelTask(props.currentUser, localTask.value));
-// 仅在 status 不是 terminal（CANCELLED / COMPLETED）时显示"取消任务"按钮：
-// terminal 状态下取消语义不明，改用"删除任务"。
-// partial claim 子任务不能取消（后端 CANNOT_CANCEL_CHILD_TASK）；
-// 这里用 parentTaskId 提前隐藏，避免发起无效请求。
+// 仅在 status 不是 terminal（CANCELLED / COMPLETED）时显示"取消任务"按钮。
 const canShowCancelButton = computed(
   () =>
     canCancel.value &&
     localTask.value.status !== 'CANCELLED' &&
-    localTask.value.status !== 'COMPLETED' &&
-    localTask.value.parentTaskId === undefined,
+    localTask.value.status !== 'COMPLETED',
 );
 // 重新发布：仅 publisher 自己可把 CANCELLED 状态的任务转回 PUBLISHED。
 const canRepublish = computed(() => localTask.value.status === 'CANCELLED' && isPublisher.value);
-// CANCELLED / COMPLETED 状态下：仅发布者可物理删除。后端拒错由 store/error 提示。
-// partial claim 子任务在 COMPLETED / CANCELLED 后也允许删除。
-const canDelete = computed(() => {
-  if (!canDeleteTask(props.currentUser, localTask.value)) return false;
-  if (localTask.value.parentTaskId === undefined) return true;
-  // 子任务仅允许在终态（COMPLETED / CANCELLED）删除
-  return localTask.value.status === 'COMPLETED' || localTask.value.status === 'CANCELLED';
-});
+// CANCELLED / COMPLETED 状态下：仅发布者可物理删除。
+const canDelete = computed(() => canDeleteTask(props.currentUser, localTask.value));
 const canCreateContract = computed(
   () =>
     localTask.value.status === 'AWAITING_CONTRACT' &&
@@ -267,8 +231,8 @@ const showBoardCancelButton = computed(() =>
 
 // updateTask 接收任意带 .task 的返回值结构：
 //   - OrgTask（旧 API：patchTask / cancelTask / republishTask 等直接返 task）
-//   - ReleaseTaskResult（releaseTask 新版：{ task, parentTaskId?, restoredAmount? }）
-//   - ClaimTaskResult（claimTask：{ task, childTask? }）
+//   - ReleaseTaskResult（releaseTask：{ task }）
+//   - ClaimTaskResult（claimTask：{ task }）
 // 我们统一从结果里抽 .task 字段更新本地视图。
 async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
   loading.value = true;
@@ -287,20 +251,12 @@ async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
 
 async function onClaim() {
   const result = await tasksApi.claimTask(localTask.value.id);
-  // 完整接取：localTask = 原任务（已经 claimer_id 变化）
-  // 部分接取：localTask = parent（用户视角下他操作的就是原任务）
   localTask.value = result.task;
   emit('updated', result.task);
-  if (result.childTask) {
-    // 部分接取：通知上层可以切到子任务查看 AWAITING_CONTRACT 详情
-    emit('updated', result.task);
-  }
 }
 
 async function onRelease() {
   const result = await tasksApi.releaseTask(localTask.value.id);
-  // 完整接取：localTask 已是原任务（AWAITING_CONTRACT → PUBLISHED）
-  // 部分接取子任务 release：result.task 是父任务（amount 已加回）
   localTask.value = result.task;
   emit('updated', result.task);
 }
@@ -408,18 +364,8 @@ function onNotesChanged() {
         {{ formatNumber(localTask.contractJson.deadline) }} 天
       </div>
       <div>
-        <span :class="$style.key">
-          {{ localTask.parentTaskId ? '原始任务发布者' : '发布者' }}
-        </span>
-        <template v-if="localTask.parentTaskId && parentPublisher">
-          {{ parentPublisher.username }} ({{ parentPublisher.companyCode }})
-        </template>
-        <template v-else-if="localTask.parentTaskId && !parentPublisher">
-          <span style="color: rgb(148, 158, 166)">加载中...</span>
-        </template>
-        <template v-else>
-          {{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})
-        </template>
+        <span :class="$style.key">发布者</span>
+        {{ localTask.publisherUsername }} ({{ localTask.publisherCompanyCode }})
       </div>
       <div v-if="localTask.claimerUsername">
         <span :class="$style.key">接取者</span>

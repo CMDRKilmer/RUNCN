@@ -1,13 +1,10 @@
 <script setup lang="ts">
-// 独立"市场接取"Modal overlay：玩家在 MarketView 内点击某买单/卖单行的
-// 「接取」按钮后弹出本组件，输入想要接取的数量（≤ 原任务 amount），调用
-// tasksApi.claimTask(taskId, amount) 接取该任务。
-//
-// 接取后流程：用户后续在 TaskDetail 中走 CONTGEN 路径生成反向合同（架构 §3 状态机）
-// 此时反向合同 item.amount 可在 CONTGEN 端继续调整。
+// 阶段 4：TradeOverlay 改打 /listings/:id/claim 端点。
+//   接取挂单：扣 listing.remaining_amount + 创建一个独立 task（AWAITING_CONTRACT）。
+//   amount 是接取量（≤ remainingAmount）；部分接取也走同一端点。
 
 import { computed, ref, watch } from 'vue';
-import * as tasksApi from '@src/infrastructure/org-api/tasks';
+import * as listingsApi from '@src/infrastructure/org-api/listings';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
@@ -23,16 +20,16 @@ import { fixed2 } from '@src/utils/format';
 type Side = 'BUY' | 'SELL';
 
 const props = defineProps<{
-  // 目标任务的 ID（要接取哪个）
-  taskId: string;
+  // 目标挂单 ID
+  listingId: string;
   ticker: string;
-  // 原任务数量上限（裁剪接取量必须 ≤ 此值）
+  // 挂单剩余可接取量（接取量必须 ≤ 此值）
   maxAmount: number;
-  // 任务的单价 / 货币 / 交货地点（仅展示）
+  // 挂单单价 / 货币 / 交货地点（仅展示）
   price: number;
   currency: string;
   location?: string;
-  // 任务类型：B 接取表示我要卖给发布者；S 接取表示我要从发布者处买
+  // 挂单类型：B 接取表示我要卖给发布者；S 接取表示我要从发布者处买
   side: Side;
   // 发布者用户名（展示）
   publisher: string;
@@ -40,20 +37,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  // 接取成功后让 MarketView 刷新（任务从 PUBLISHED → AWAITING_CONTRACT）
+  // 接取成功后让 MarketView 刷新（挂单从 OPEN → 扣 remaining / CLOSED）
   (e: 'claimed'): void;
 }>();
 
 const material = computed(() => materialsStore.getByTicker(props.ticker));
 const materialName = computed(() => getMaterialName(material.value) ?? props.ticker);
 
-// 接取数量：默认 = 原任务 amount（完整接取）
+// 接取数量：默认 = 挂单 remainingAmount
 const amount = ref<number>(props.maxAmount);
 const error = ref('');
 const loading = ref(false);
 const claimedTaskId = ref<string | null>(null);
-// true = 裁剪接取，原任务保留在市场上，claimedTaskId 是反向子任务 id
-const isPartialClaim = ref(false);
 
 const canSubmit = computed(() => {
   if (loading.value) return false;
@@ -62,7 +57,6 @@ const canSubmit = computed(() => {
   return true;
 });
 
-// maxAmount 变化时同步 amount 字段（同一组件被复用接取不同任务时）
 watch(
   () => props.maxAmount,
   v => {
@@ -96,13 +90,11 @@ async function onClaim() {
   loading.value = true;
   error.value = '';
   try {
-    // claimTask 现在返回 ClaimTaskResult：
-    //   完整接取 → { task }
-    //   裁剪接取（partial） → { task: parent, childTask: reverseTask }
-    // 我们把"接取方持有的任务 id"展示给玩家：完整接取是原任务，裁剪接取是反向子任务。
-    const result = await tasksApi.claimTask(props.taskId, amount.value);
-    claimedTaskId.value = result.childTask?.id ?? result.task.id;
-    isPartialClaim.value = !!result.childTask;
+    // claimListing 返回 { task, listing }：
+    //   task 是新建的反向合同载体（AWAITING_CONTRACT）
+    //   listing 扣 remaining 后的最新快照
+    const result = await listingsApi.claimListing(props.listingId, amount.value);
+    claimedTaskId.value = result.task.id;
     emit('claimed');
   } catch (err) {
     error.value = err instanceof HttpError ? err.message : String(err);
@@ -153,8 +145,8 @@ function onClose() {
             <button :class="$style.qtyBtn" type="button" @click="amount = maxAmount">MAX</button>
           </div>
           <div :class="$style.qtyHint">
-            原任务数量：<strong>{{ maxAmount }}</strong>
-            （裁剪后发布反向合同时的 item.amount 将使用此值）
+            挂单剩余可接取量：<strong>{{ maxAmount }}</strong>
+            （接取后将扣减挂单剩余量，反向合同的 amount = 接取量）
           </div>
         </Active>
 
@@ -165,13 +157,8 @@ function onClose() {
         <div v-if="error" :class="$style.error">{{ error }}</div>
 
         <div v-if="claimedTaskId" :class="$style.success">
-          <template v-if="isPartialClaim">
-            裁剪接取成功。原任务保留在市场上等待其他接取者， 反向子任务 #{{ claimedTaskId }}
-            已为你创建，等待关联合同。
-          </template>
-          <template v-else>
-            接取成功，任务 #{{ claimedTaskId }} 已进入「待关联合同」状态。
-          </template>
+          接取成功，任务 #{{ claimedTaskId }} 已进入「待关联合同」状态。
+          <span v-if="amount < maxAmount">挂单剩余 {{ maxAmount - amount }} 仍在市场上。</span>
         </div>
 
         <ActionBar>

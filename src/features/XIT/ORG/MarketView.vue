@@ -1,7 +1,9 @@
 <script setup lang="ts">
+// 阶段 4：MarketView 改读 /listings，删除 tasks 摊平逻辑。
+//   单个 listing 已经是单商品实体，按 commodity 聚合后展示。
 import { computed, inject, onMounted, ref } from 'vue';
-import type { OrgTask } from '@src/infrastructure/org-api/types';
-import * as tasksApi from '@src/infrastructure/org-api/tasks';
+import type { OrgListing } from '@src/infrastructure/org-api/types';
+import * as listingsApi from '@src/infrastructure/org-api/listings';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
@@ -13,14 +15,14 @@ import { useOrgTileState } from './tile-state';
 import { fixed0, fixed2 } from '@src/utils/format';
 import { formatNumber } from './utils';
 
-// 单条任务的"市场挂单"：一个原 BUY/SELL 任务对应一条挂单行。
-// 这里不按 price 聚合——保留 taskId 是因为接取动作必须指明具体任务。
+// 单条挂单：来自 /listings 端点（与任务解耦）。
+//   remainingAmount 是当前可接取量；amount 是发布时的原始总量。
 interface MarketOrder {
-  taskId: string;
+  listingId: string;
   publisher: string;
   type: 'BUY' | 'SELL';
   price: number;
-  amount: number;
+  remainingAmount: number;
   currency: string;
   location?: string;
 }
@@ -28,9 +30,9 @@ interface MarketOrder {
 interface MaterialRow {
   ticker: string;
   name: string;
-  // 同一商品下所有 BUY/SELL 任务的挂单
+  // 同一商品下所有 BUY/SELL 挂单
   orders: MarketOrder[];
-  // 该商品所有任务合并去重后的交货地点
+  // 该商品所有挂单合并去重后的交货地点
   allLocations: string[];
 }
 
@@ -38,14 +40,13 @@ const loading = ref(false);
 const error = ref('');
 const expanded = ref<Set<string>>(new Set());
 
-const tasks = ref<OrgTask[]>([]);
+const listings = ref<OrgListing[]>([]);
 
 async function refresh() {
   loading.value = true;
   error.value = '';
   try {
-    const result = await tasksApi.listTasks({ scope: 'board', limit: 100 });
-    tasks.value = result.items.filter(t => t.type === 'BUY' || t.type === 'SELL');
+    listings.value = await listingsApi.listListings({ limit: 200 });
   } catch (err) {
     error.value = String(err);
   } finally {
@@ -62,9 +63,9 @@ function toggle(ticker: string) {
   expanded.value = next;
 }
 
-// TradeOverlay 预填：每个挂单行点击「接取」时打开，参数取自该行原任务
+// TradeOverlay 预填：每个挂单行点击「接取」时打开，参数取自该 listing
 interface TradePrefill {
-  taskId: string;
+  listingId: string;
   ticker: string;
   side: 'BUY' | 'SELL';
   maxAmount: number;
@@ -75,14 +76,12 @@ interface TradePrefill {
 }
 const tradePrefill = ref<TradePrefill | null>(null);
 
-// 每个挂单行右侧的 ticker 在表格上下文里已知（来自所属商品的 ticker），
-// 我们需要把 ticker 一起传给 TradeOverlay。
 function openClaim(order: MarketOrder, ticker: string) {
   tradePrefill.value = {
-    taskId: order.taskId,
+    listingId: order.listingId,
     ticker,
     side: order.type,
-    maxAmount: order.amount,
+    maxAmount: order.remainingAmount,
     price: order.price,
     currency: order.currency,
     location: order.location,
@@ -99,7 +98,7 @@ async function onTradeClaimed() {
 // 「去发布」切到 PublishTask 并预填
 const tab = useOrgTileState('tab');
 type PrefillSetFn = (data: {
-  type: 'BUY' | 'SELL';
+  type: 'BUY' | 'SELL' | 'SHIP';
   ticker: string;
   price: number;
   location?: string;
@@ -116,48 +115,43 @@ function goPublish(row: MaterialRow, side: 'BUY' | 'SELL', suggestedPrice: numbe
   });
 }
 
-// 聚合：把 tasks 摊平成 (commodity → orders[])。
-// 每条挂单来自任务的第一个有价 item。
+// 聚合：listings 已经是单商品，按 commodity 聚合展示。
 const materialRows = computed<MaterialRow[]>(() => {
   const map = new Map<string, MaterialRow>();
-  for (const task of tasks.value) {
-    const items = task.contractJson.items ?? [];
-    const taskLocation = task.contractJson.location ?? '';
-    const currency = task.contractJson.currency ?? 'ICA';
-    for (const item of items) {
-      if (!item.commodity) continue;
-      if (!Number.isFinite(item.price) || (item.price ?? 0) <= 0) continue;
-      const ticker = item.commodity;
-      let row = map.get(ticker);
-      if (!row) {
-        const material = materialsStore.getByTicker(ticker);
-        row = {
-          ticker,
-          name: getMaterialName(material) ?? ticker,
-          orders: [],
-          allLocations: [],
-        };
-        map.set(ticker, row);
-      }
-      row.orders.push({
-        taskId: task.id,
-        publisher: task.publisherUsername,
-        type: task.type as 'BUY' | 'SELL',
-        price: item.price as number,
-        amount: item.amount,
-        currency,
-        location: taskLocation || undefined,
-      });
-      if (taskLocation && !row.allLocations.includes(taskLocation)) {
-        row.allLocations.push(taskLocation);
-      }
+  for (const listing of listings.value) {
+    if (listing.status !== 'OPEN') continue;
+    if (listing.type !== 'BUY' && listing.type !== 'SELL') continue;
+    if (listing.remainingAmount <= 0) continue;
+    if (listing.price <= 0) continue;
+    const ticker = listing.commodity;
+    let row = map.get(ticker);
+    if (!row) {
+      const material = materialsStore.getByTicker(ticker);
+      row = {
+        ticker,
+        name: getMaterialName(material) ?? ticker,
+        orders: [],
+        allLocations: [],
+      };
+      map.set(ticker, row);
+    }
+    row.orders.push({
+      listingId: listing.id,
+      publisher: listing.publisherUsername,
+      type: listing.type,
+      price: listing.price,
+      remainingAmount: listing.remainingAmount,
+      currency: listing.currency,
+      location: listing.location,
+    });
+    if (listing.location && !row.allLocations.includes(listing.location)) {
+      row.allLocations.push(listing.location);
     }
   }
   // 挂单排序：BUY 按 price desc，SELL 按 price asc
   for (const row of map.values()) {
     row.orders.sort((a, b) => {
       if (a.type !== b.type) {
-        // BUY 排前
         return a.type === 'BUY' ? -1 : 1;
       }
       if (a.type === 'BUY') return b.price - a.price;
@@ -167,7 +161,6 @@ const materialRows = computed<MaterialRow[]>(() => {
   return Array.from(map.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
 });
 
-// 顶层摘要：BUY 最高价 / SELL 最低价 / 各侧总量
 function bestBidPrice(orders: MarketOrder[]): number | undefined {
   const bids = orders.filter(o => o.type === 'BUY');
   if (bids.length === 0) return undefined;
@@ -179,7 +172,7 @@ function bestAskPrice(orders: MarketOrder[]): number | undefined {
   return Math.min(...asks.map(o => o.price));
 }
 function totalAmount(orders: MarketOrder[], type: 'BUY' | 'SELL'): number {
-  return orders.filter(o => o.type === type).reduce((s, o) => s + o.amount, 0);
+  return orders.filter(o => o.type === type).reduce((s, o) => s + o.remainingAmount, 0);
 }
 function bestBid(orders: MarketOrder[]): MarketOrder | undefined {
   const bids = orders.filter(o => o.type === 'BUY');
@@ -229,7 +222,9 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                 <span :class="$style.marketPrice">
                   {{ fixed2(bestBid(row.orders)!.price) }}
                 </span>
-                <span :class="$style.marketQty"> ×{{ fixed0(bestBid(row.orders)!.amount) }} </span>
+                <span :class="$style.marketQty">
+                  ×{{ fixed0(bestBid(row.orders)!.remainingAmount) }}
+                </span>
               </template>
               <span v-else :class="$style.muted">--</span>
             </td>
@@ -239,7 +234,9 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                 <span :class="$style.marketPrice">
                   {{ fixed2(bestAsk(row.orders)!.price) }}
                 </span>
-                <span :class="$style.marketQty"> ×{{ fixed0(bestAsk(row.orders)!.amount) }} </span>
+                <span :class="$style.marketQty">
+                  ×{{ fixed0(bestAsk(row.orders)!.remainingAmount) }}
+                </span>
               </template>
               <span v-else :class="$style.muted">--</span>
             </td>
@@ -307,7 +304,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                     <tbody>
                       <tr v-for="(o, i) in row.orders.filter(o => o.type === 'BUY')" :key="`b${i}`">
                         <td :class="$style.detailNumCol">{{ fixed2(o.price) }}</td>
-                        <td :class="$style.detailNumCol">{{ formatNumber(o.amount) }}</td>
+                        <td :class="$style.detailNumCol">{{ formatNumber(o.remainingAmount) }}</td>
                         <td :class="$style.locCell">
                           <span v-if="o.location" :class="$style.locationChipSm">
                             {{ o.location }}
@@ -348,7 +345,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
                         v-for="(o, i) in row.orders.filter(o => o.type === 'SELL')"
                         :key="`s${i}`">
                         <td :class="$style.detailNumCol">{{ fixed2(o.price) }}</td>
-                        <td :class="$style.detailNumCol">{{ formatNumber(o.amount) }}</td>
+                        <td :class="$style.detailNumCol">{{ formatNumber(o.remainingAmount) }}</td>
                         <td :class="$style.locCell">
                           <span v-if="o.location" :class="$style.locationChipSm">
                             {{ o.location }}
@@ -378,7 +375,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
     <!-- 独立 Modal overlay：市场接取入口 -->
     <TradeOverlay
       v-if="tradePrefill"
-      :task-id="tradePrefill.taskId"
+      :listing-id="tradePrefill.listingId"
       :ticker="tradePrefill.ticker"
       :side="tradePrefill.side"
       :max-amount="tradePrefill.maxAmount"

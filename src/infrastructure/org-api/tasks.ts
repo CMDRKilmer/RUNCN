@@ -75,11 +75,8 @@ export async function claimTask(taskId: string, amount?: number): Promise<ClaimT
   });
   // 接取成功 → 任务进入 AWAITING_CONTRACT（接取者是 claimer）；注册到活跃集合，
   // globalTick 启动，开始合同自动关联 + sync contract status。
-  // 部分接取的 childTask 也是反向合同的活跃任务（接取者创建反向合同后等 link）。
+  // 阶段 4：解耦后不再有 partial claim childTask 概念。
   notifyTaskClaimed(result.task);
-  if (result.childTask) {
-    notifyTaskClaimed(result.childTask);
-  }
   return result;
 }
 
