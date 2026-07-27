@@ -3,7 +3,7 @@
   "version": "26.7.17",
   "description": "超级无敌方便工具",
   "manifest_version": 3,
-  "minimum_chrome_version": "148",
+  "minimum_chrome_version": "126",
   "permissions": [
     "storage"
   ],
