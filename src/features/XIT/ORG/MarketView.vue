@@ -197,6 +197,13 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
     </template>
     <template v-else>
       <table :class="$style.table">
+        <colgroup>
+          <col :class="$style.colMaterial" />
+          <col :class="$style.colMarket" />
+          <col :class="$style.colMarket" />
+          <col :class="$style.colNum" />
+          <col :class="$style.colNum" />
+        </colgroup>
         <thead>
           <tr>
             <th :class="$style.materialCol">商品</th>
@@ -240,7 +247,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
             <td :class="$style.numCell">{{ fixed0(totalAmount(row.orders, 'SELL')) }}</td>
           </tr>
           <tr v-if="expanded.has(row.ticker)" :class="$style.detailRow">
-            <td colspan="6" :class="$style.detailCell">
+            <td colspan="5" :class="$style.detailCell">
               <!--
                 位置信息区：详情展示区域中清晰、准确地显示相关位置信息
                 （架构要求）。row.allLocations 是 BUY + SELL 任务 location
@@ -403,9 +410,9 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 }
 
 .table {
-  width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
 }
 .table th,
 .table td {
@@ -428,9 +435,18 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.colMaterial {
+  width: 180px;
+}
+.colMarket {
+  width: 180px;
+}
+.colNum {
+  width: 90px;
+}
+
 .materialCol {
-  width: 30%;
-  min-width: 160px;
+  width: 180px;
 }
 .materialCell {
   display: flex;
@@ -442,8 +458,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 }
 
 .marketCol {
-  width: 20%;
-  min-width: 150px;
+  width: 180px;
 }
 .marketCell {
   padding: 2px 6px;
