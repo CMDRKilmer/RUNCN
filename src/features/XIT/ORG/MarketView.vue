@@ -197,13 +197,6 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
     </template>
     <template v-else>
       <table :class="$style.table">
-        <colgroup>
-          <col :class="$style.colMaterial" />
-          <col :class="$style.colMarket" />
-          <col :class="$style.colMarket" />
-          <col :class="$style.colNum" />
-          <col :class="$style.colNum" />
-        </colgroup>
         <thead>
           <tr>
             <th :class="$style.materialCol">商品</th>
@@ -421,6 +414,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   vertical-align: middle;
   white-space: nowrap;
   border-bottom: 1px solid var(--panel-border);
+  box-sizing: border-box;
 }
 .table th {
   color: rgb(200, 208, 214);
@@ -445,8 +439,10 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   width: 90px;
 }
 
-.materialCol {
+.materialCol,
+.materialCell {
   width: 180px;
+  min-width: 180px;
 }
 .materialCell {
   display: flex;
@@ -457,8 +453,10 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   color: rgb(226, 230, 233);
 }
 
-.marketCol {
+.marketCol,
+.marketCell {
   width: 180px;
+  min-width: 180px;
 }
 .marketCell {
   padding: 2px 6px;
@@ -504,8 +502,10 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   color: rgb(255, 255, 255);
 }
 
-.numCol {
-  width: 80px;
+.numCol,
+.numCell {
+  width: 90px;
+  min-width: 90px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -517,6 +517,8 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 .detailRow > td {
   padding: 0;
   background: var(--panel-background-alt);
+  width: 720px;
+  min-width: 720px;
 }
 .detailCell {
   padding: 8px 12px;
