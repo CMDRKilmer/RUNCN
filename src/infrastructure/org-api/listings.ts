@@ -7,6 +7,7 @@
 //   - cancelListing：取消挂单
 import { request } from './client';
 import type { OrgListing, ListingType, ListListingsResult, ClaimListingResult } from './types';
+import { notifyTaskClaimed } from './task-activity';
 
 export interface ListListingsParams {
   commodity?: string;
@@ -54,11 +55,16 @@ export interface ClaimListingParams {
 }
 
 // claim 返回 { task, listing }：task 是新创建的反向合同载体，listing 扣减后的最新快照。
+// 接取成功后调用 notifyTaskClaimed 把 task 加入活跃集合：
+//   - globalTick 启动，开始合同自动关联 + sync contract status
+//   - 与老 claimTask 路径行为对齐（task-activity.ts:28）
 export async function claimListing(listingId: string, amount: number): Promise<ClaimListingResult> {
-  return request<ClaimListingResult>(`/listings/${listingId}/claim`, {
+  const result = await request<ClaimListingResult>(`/listings/${listingId}/claim`, {
     method: 'POST',
     body: { amount } as ClaimListingParams,
   });
+  notifyTaskClaimed(result.task);
+  return result;
 }
 
 export async function cancelListing(listingId: string): Promise<OrgListing> {

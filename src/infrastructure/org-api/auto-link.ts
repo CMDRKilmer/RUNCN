@@ -57,13 +57,21 @@ const sessions = new Map<string, AutoLinkSession>();
 const dismissedTaskIds = new Set<string>();
 
 // 应用反转规则（与 utils.invertTemplate 保持一致）：
-//   task BUY + creator=claimer → 合同应是 SELL（接取者卖给发布者）
-//   task SELL + creator=claimer → 合同应是 BUY（接取者从发布者买）
+//   老 task（无 listingId，partial claim 时代的子任务）：
+//     task.type = publisher 视角的合同 type
+//     claimer 接取时 → 反转 BUY/SELL
+//   新 task（listingId 存在，从 listing claim 产生）：
+//     task.type 已经是 claimer 视角（接取者该签的合同 type）
+//     不需要反转
 //   SHIP 不反转（仅 publisher 创建）
 function effectiveTaskTemplate(task: OrgTask): TaskContractJson['template'] {
   const tmpl = task.contractJson.template;
   if (tmpl === 'SHIP') return 'SHIP';
-  // 任务侧没存 creator 字段；从 contractCreator 推断
+  // 新架构：从 listing claim 生成的 task，type 已经是 claimer 视角，不需要反转
+  if (task.listingId) {
+    return tmpl;
+  }
+  // 老架构：BUY/SELL 仅在接取者视角下反转；发布者视角保持原样
   const creatorIsPublisher = task.contractCreator === 'publisher';
   if (creatorIsPublisher) return tmpl;
   return tmpl === 'BUY' ? 'SELL' : 'BUY';
@@ -169,9 +177,22 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
       }
       const confirmed = await callbacks.onMatch(match);
       if (confirmed) {
-        // 根据匹配模板推断合同创建方：原始模板=发布者视角，反转模板=接取者视角
-        const matchedCreator: 'publisher' | 'claimer' =
-          match.matchedTemplate === session.task.contractJson.template ? 'publisher' : 'claimer';
+        // 根据匹配模板推断合同创建方：
+        //   老 task（无 listingId）：
+        //     - 原始模板=发布者视角（合同应是 publisher 签的）
+        //     - 反转模板=接取者视角（合同应是 claimer 签的）
+        //   新 task（listingId 存在）：
+        //     - contractJson.template 已经是 claimer 视角
+        //     - matchedTemplate 永远等于 contractJson.template（effectiveTaskTemplate 不反转）
+        //     - 因此合同创建方恒为 claimer
+        let matchedCreator: 'publisher' | 'claimer';
+        if (task.listingId) {
+          // 新架构：合同必须是 claimer 签的
+          matchedCreator = 'claimer';
+        } else {
+          matchedCreator =
+            match.matchedTemplate === session.task.contractJson.template ? 'publisher' : 'claimer';
+        }
         const updated = await tasksApi.linkContract(task.id, {
           contractId: match.contractId,
           contractCreator: matchedCreator,
