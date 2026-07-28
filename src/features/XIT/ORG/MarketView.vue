@@ -526,7 +526,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--rp-color-text-component, #bbb);
+  color: rgb(167, 176, 183);
   cursor: pointer;
   user-select: none;
 }
@@ -542,31 +542,35 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 }
 .searchInput {
   flex: 1;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--rp-color-text-component, #bbb);
-  padding: 6px 10px;
+  box-sizing: border-box;
+  background: rgb(26, 33, 38);
+  border: 1px solid rgb(61, 74, 84);
+  color: rgb(226, 230, 233);
+  padding: 4px 6px;
   border-radius: 2px;
+  font: inherit;
   font-size: 13px;
   outline: none;
 }
 .searchInput:focus {
-  border-color: var(--rp-color-accent-primary, #ffc856);
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
 }
 .searchInput::placeholder {
-  color: var(--rp-color-text, #999);
+  color: rgb(148, 158, 166);
 }
 .categorySelect {
   min-width: 220px;
 }
 .info {
   padding: 16px;
-  color: var(--rp-color-text, #999);
+  color: rgb(167, 176, 183);
   text-align: center;
 }
 .error {
   padding: 16px;
-  color: var(--rp-color-red, #d9534f);
+  color: rgb(229, 115, 115);
   text-align: center;
 }
 
