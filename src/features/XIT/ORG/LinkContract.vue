@@ -75,7 +75,9 @@ async function onSubmit() {
 
 <style module>
 .overlay {
-  position: fixed;
+  /* position: absolute so the popup is constrained to the closest
+     positioned ancestor (ORG window tile frame body), not the viewport. */
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -85,6 +87,7 @@ async function onSubmit() {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  overflow: auto;
 }
 .card {
   padding: 12px 16px 16px;

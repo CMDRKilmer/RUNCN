@@ -4,7 +4,7 @@ import type { AuthSession } from '@src/infrastructure/org-api/types';
 import * as authApi from '@src/infrastructure/org-api/auth';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { companyStore } from '@src/infrastructure/prun-api/data/company';
-import { usersStore } from '@src/infrastructure/prun-api/data/users';
+import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import Header from '@src/components/Header.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import Active from '@src/components/forms/Active.vue';
@@ -23,8 +23,9 @@ const emit = defineEmits<{
   (e: 'authenticated', session: AuthSession): void;
 }>();
 
-// 当前 PrUn 身份（从 store 读取，修正后 API 形态）
-const prunUsername = computed(() => usersStore.all.value?.[0]?.username ?? '');
+// 当前 PrUn 身份：必须从 userDataStore 取当前登录用户，
+// usersStore.all 缓存了所有见过的用户（含同公司他人），取 [0] 是错的。
+const prunUsername = computed(() => userDataStore.username ?? '');
 const companyCode = computed(() => companyStore.value?.code ?? '');
 
 const canSubmit = computed(() => {

@@ -226,6 +226,10 @@ const tabs = computed(() => {
   flex-direction: column;
   height: 100%;
   padding: 12px;
+  /* Anchor for TradeOverlay / LinkOverlay: they use position:absolute and
+     must be constrained to this ORG window, not escape to the viewport. */
+  position: relative;
+  min-height: 0;
 }
 .topBar {
   display: flex;
@@ -237,5 +241,9 @@ const tabs = computed(() => {
   flex: 1;
   overflow: auto;
   padding-top: 8px;
+  /* Ensure child overlays (TradeOverlay / LinkContract) clip to this area
+     even if a future ancestor loses its positioning. */
+  position: relative;
+  min-height: 0;
 }
 </style>

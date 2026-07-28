@@ -2,16 +2,18 @@ import { finishApiInitialization, initializeApi } from '@src/infrastructure/prun
 import { initializeUI } from '@src/infrastructure/prun-ui';
 import { initializeUserData } from '@src/store';
 import { initAudioInterceptor } from '@src/infrastructure/prun-ui/audio-interceptor';
-import { usersStore } from '@src/infrastructure/prun-api/data/users';
+import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import { companyStore } from '@src/infrastructure/prun-api/data/company';
 import * as boardApi from '@src/infrastructure/org-api/board';
 import PmmgMigrationGuide from '@src/components/PmmgMigrationGuide.vue';
 
 // 启用扩展时上报当前 PrUn 用户在线（ORG NON_ORG 统计的来源）。
-// 时机：initializeApi 完成（companyStore + usersStore 已稳定）→ features.init() 之前。
+// 时机：initializeApi 完成（companyStore + userDataStore 已稳定）→ features.init() 之前。
+// 注意：必须从 userDataStore 取当前登录用户的 username，
+//       usersStore.all 缓存了所有见过的用户（含同公司他人），取 [0] 是错的。
 // 失败不阻塞扩展加载。
 async function reportExtensionUserOnStartup() {
-  const prunUsername = usersStore.all.value?.[0]?.username;
+  const prunUsername = userDataStore.username;
   const companyCode = companyStore.value?.code;
   if (!prunUsername || !companyCode) {
     return;

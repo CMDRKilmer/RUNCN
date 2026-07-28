@@ -178,7 +178,9 @@ function onClose() {
 
 <style module>
 .overlay {
-  position: fixed;
+  /* position: absolute so the popup is constrained to the closest
+     positioned ancestor (ORG window tile frame body), not the viewport. */
+  position: absolute;
   inset: 0;
   z-index: 1200;
   background: rgba(0, 0, 0, 0.55);
@@ -186,6 +188,8 @@ function onClose() {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  /* Prevent the dim overlay from scrolling with the underlying list. */
+  overflow: auto;
 }
 .card {
   width: 100%;
