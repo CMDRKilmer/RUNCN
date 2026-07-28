@@ -48,14 +48,11 @@ export function getCategories(): string[] {
   return categories.map(x => x.id).sort();
 }
 
-// 把类别 id 解析为本地化显示名（找不到时回退到可读 name）。
+// 把类别 id 解析为本地化显示名。
+// 直接走 PrUn 的 getMaterialCategoryName（内部已带 i18n + store 兜底），
+// 与 MarketView 用同一份逻辑，避免双轨。
 export function resolveCategoryLabel(id: string): string {
-  const localized = getMaterialCategoryName(id);
-  if (localized) {
-    return localized;
-  }
-  const fallback = materialCategoriesStore.getById(id)?.name;
-  return fallback ?? id;
+  return getMaterialCategoryName(id) ?? id;
 }
 
 interface PriceLevel {

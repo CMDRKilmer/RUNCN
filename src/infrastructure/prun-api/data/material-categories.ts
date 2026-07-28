@@ -19,5 +19,6 @@ const getBySerializableName = createMapGetter(state.all, x => x.name, toSerializ
 
 export const materialCategoriesStore = {
   ...state,
+  getById: state.getById,
   getBySerializableName,
 };

@@ -49,21 +49,14 @@ export function rebuildCategoryLocalization() {
 function lookupMaterialCategoryI18n(category: { id: string; name: string }) {
   // 把 CamelCase 拆开：consumablesBasic -> consumables basic
   const spaced = category.name.replace(/([a-z])([A-Z])/g, '$1 $2');
-  const stripped = spaced
-    .toLowerCase()
-    .replaceAll(' ', '')
-    .replaceAll('-', '')
-    .replaceAll('(', '')
-    .replaceAll(')', '');
-  // 游戏的 i18n key 形如 `consumables_basic_`：name 小写 + 空格/括号替换为 `_`。
-  // 同时去掉末尾下划线以兼容带末尾 `_` 的格式（如 `consumables_basic_`）。
-  const underscored = spaced
-    .toLowerCase()
-    .replaceAll(' ', '_')
-    .replaceAll('-', '_')
-    .replaceAll('(', '_')
-    .replaceAll(')', '_')
-    .replace(/_+$/, '');
+  const lower = spaced.toLowerCase();
+  const stripped = lower.replace(/[\s\-()]+/g, '');
+  // 游戏 i18n key 两种格式：
+  //   1) 下划线分隔：`energy_systems`
+  //   2) 去空格保留括号：`consumables(basic)`
+  // 所以 underscored 把空格/括号替换为单个 `_`；spaceStripped 只去空格保留括号。
+  const underscored = lower.replace(/[\s\-()]+/g, '_').replace(/_+$/, '');
+  const spaceStripped = lower.replaceAll(' ', '');
   const variants = new Set<string>();
   // 1. id 原样
   variants.add(category.id);
@@ -71,13 +64,15 @@ function lookupMaterialCategoryI18n(category: { id: string; name: string }) {
   variants.add(category.id.toLowerCase());
   // 3. 全小写无分隔。例如 `consumablesbasic`
   variants.add(stripped);
-  // 4. 全小写下划线分隔（游戏实际格式）。例如 `consumables_basic_`
+  // 4. 全小写下划线分隔。例如 `energy_systems`
   variants.add(underscored);
-  // 5. 全小写带空格。例如 `consumables basic`
-  variants.add(spaced.toLowerCase());
-  // 6. name 原样
+  // 5. 全小写去空格保留括号。例如 `consumables(basic)`
+  variants.add(spaceStripped);
+  // 6. 全小写带空格。例如 `consumables basic`
+  variants.add(lower);
+  // 7. name 原样
   variants.add(category.name);
-  // 7. name 全小写
+  // 8. name 全小写
   variants.add(category.name.toLowerCase());
 
   for (const key of variants) {
@@ -124,7 +119,12 @@ export function getMaterialCategoryName(a?: string | null, b?: string | null): s
   }
   // 没命中缓存——做一次兜底查询
   const id = b === undefined ? a : a;
-  const name = b === undefined ? undefined : b;
-  const fallback = lookupMaterialCategoryI18n({ id, name: name ?? id });
-  return fallback;
+  // 兜底 1：去 categories store 查实体的真实 name（i18n 没收录的分类能显示英文名）
+  const realName: string | undefined =
+    b !== undefined && b !== null
+      ? b
+      : (materialCategoriesStore.all.value ?? []).find(c => c.id === a)?.name;
+  // 兜底 2：尝试用 id 当 name 查（极端 fallback）
+  const fallback = lookupMaterialCategoryI18n({ id, name: realName ?? id });
+  return fallback ?? realName;
 }

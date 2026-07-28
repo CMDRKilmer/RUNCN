@@ -6,9 +6,10 @@ import type { OrgListing } from '@src/infrastructure/org-api/types';
 import * as listingsApi from '@src/infrastructure/org-api/listings';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
+import { getMaterialName, getMaterialCategoryName } from '@src/infrastructure/prun-ui/i18n';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunButton from '@src/components/PrunButton.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
 import EmptyState from './EmptyState.vue';
 import TradeOverlay from './TradeOverlay.vue';
 import { useOrgTileState } from './tile-state';
@@ -30,6 +31,8 @@ interface MarketOrder {
 interface MaterialRow {
   ticker: string;
   name: string;
+  // PrUn 分类（用于顶部工具栏的分类下拉）
+  category: string;
   // 同一商品下所有 BUY/SELL 挂单
   orders: MarketOrder[];
   // 该商品所有挂单合并去重后的交货地点
@@ -39,6 +42,11 @@ interface MaterialRow {
 const loading = ref(false);
 const error = ref('');
 const expanded = ref<Set<string>>(new Set());
+
+// 顶部工具栏状态
+const onlyWithListings = ref<boolean>(true); // 默认只显示有挂单的
+const searchQuery = ref<string>(''); // 搜索 ticker / name
+const selectedCategory = ref<string>('all'); // 分类 id；'all' 表示不过滤
 
 const listings = ref<OrgListing[]>([]);
 
@@ -105,6 +113,11 @@ type PrefillSetFn = (data: {
 }) => void;
 const injectPrefillSet = inject<PrefillSetFn | null>('orgMarketPrefillSet', null);
 
+function goToPublishEmpty() {
+  // 顶部"发布挂单"按钮：直接切到发布 tab，不预填任何商品。
+  tab.value = 'publish';
+}
+
 function goPublish(row: MaterialRow, side: 'BUY' | 'SELL', suggestedPrice: number) {
   tab.value = 'publish';
   injectPrefillSet?.({
@@ -115,9 +128,28 @@ function goPublish(row: MaterialRow, side: 'BUY' | 'SELL', suggestedPrice: numbe
   });
 }
 
-// 聚合：listings 已经是单商品，按 commodity 聚合展示。
+// 聚合：以 PrUn 全商品目录（materialsStore.all）为底，按 commodity 摊平挂单。
+//   - 有挂单的行：rows.orders 不空，显示价格/量
+//   - 无挂单的行：rows.orders = []，模板自动渲染「--」+「暂无挂单」+「去发布」按钮
+//   这样市场展示游戏所有可交易商品（按 ticker 升序），玩家一眼能看出"哪些商品还没人挂"。
+//
+// 排除：resource=true（纯资源类，无市场）；SHIPPING 模板不影响商品列表。
 const materialRows = computed<MaterialRow[]>(() => {
   const map = new Map<string, MaterialRow>();
+  // 1) 先用 PrUn 全部商品做底（含无挂单的商品）
+  for (const material of materialsStore.all.value ?? []) {
+    if (material.resource) continue; // 资源类不参与市场
+    const ticker = material.ticker;
+    if (!ticker) continue;
+    map.set(ticker, {
+      ticker,
+      name: getMaterialName(material) ?? ticker,
+      category: material.category ?? '',
+      orders: [],
+      allLocations: [],
+    });
+  }
+  // 2) 把所有 OPEN 挂单摊到对应商品行
   for (const listing of listings.value) {
     if (listing.status !== 'OPEN') continue;
     if (listing.type !== 'BUY' && listing.type !== 'SELL') continue;
@@ -126,10 +158,13 @@ const materialRows = computed<MaterialRow[]>(() => {
     const ticker = listing.commodity;
     let row = map.get(ticker);
     if (!row) {
+      // listing 引用的商品在 PrUn materialsStore 里找不到（罕见，
+      // 比如自定义 ticker）—— 兜底创建行
       const material = materialsStore.getByTicker(ticker);
       row = {
         ticker,
         name: getMaterialName(material) ?? ticker,
+        category: material?.category ?? '',
         orders: [],
         allLocations: [],
       };
@@ -161,6 +196,62 @@ const materialRows = computed<MaterialRow[]>(() => {
   return Array.from(map.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
 });
 
+// 分类下拉选项：从 PrUn materialsStore 提取所有出现过的 category。
+//   PrUn 的 Material.category 字段存的是 categoryId（hash），分类名通过 getMaterialCategoryName(id)
+//   从 PrUn I18N 系统（PrunI18N["MaterialCategory.<key>"]）查本地化字符串。
+//   统一用 PrUn 的中文 i18n 机制，与 PrUn 其他面板显示的分类名保持一致。
+//
+// selectedCategory 存的是"分类 id"（key 稳定）；下拉 option 的 value 也是 id（key=value），
+// label 用 getMaterialCategoryName(id) 给用户看（中文）。
+const categoryIdToLabel = computed<Map<string, string>>(() => {
+  const map = new Map<string, string>();
+  for (const m of materialsStore.all.value ?? []) {
+    if (m.resource) continue;
+    if (!m.category) continue;
+    if (map.has(m.category)) continue;
+    const label = getMaterialCategoryName(m.category);
+    if (label) map.set(m.category, label);
+  }
+  return map;
+});
+
+const availableCategories = computed<Array<{ value: string; label: string }>>(() => {
+  const map = categoryIdToLabel.value;
+  return [
+    { value: 'all', label: '全部' },
+    ...Array.from(map.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, label]) => ({ value: id, label })),
+  ];
+});
+
+// 实际渲染到表格的行：三层过滤 + 排序。
+//   1) onlyWithListings：有挂单的行才显示
+//   2) searchQuery：ticker / name 不区分大小写包含
+//   3) selectedCategory：category 相等
+//   排序：有挂单的在前（按 ticker 升序），无挂单的在后（按 ticker 升序）。
+//   这样玩家取消"有挂单"过滤时，市场里"真东西"在前面、"空位"在后面。
+const displayRows = computed<MaterialRow[]>(() => {
+  const q = searchQuery.value.trim().toLowerCase();
+  const cat = selectedCategory.value;
+  const rows = materialRows.value.filter(r => {
+    if (onlyWithListings.value && r.orders.length === 0) return false;
+    // 分类过滤：selectedCategory 是分类 id（'all' 表示不过滤）
+    if (cat !== 'all' && r.category !== cat) return false;
+    if (q) {
+      const hay = `${r.ticker} ${r.name}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  return rows.sort((a, b) => {
+    // 有挂单的优先（按 ticker 升序）
+    if (a.orders.length > 0 && b.orders.length === 0) return -1;
+    if (a.orders.length === 0 && b.orders.length > 0) return 1;
+    return a.ticker.localeCompare(b.ticker);
+  });
+});
+
 function bestBidPrice(orders: MarketOrder[]): number | undefined {
   const bids = orders.filter(o => o.type === 'BUY');
   if (bids.length === 0) return undefined;
@@ -188,12 +279,38 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 
 <template>
   <div :class="$style.market">
-    <SectionHeader>市场</SectionHeader>
+    <!-- 标题行 -->
+    <div :class="$style.toolbarTop">
+      <SectionHeader>市场</SectionHeader>
+      <div :class="$style.toolbarRight">
+        <label :class="$style.checkboxLabel">
+          <input v-model="onlyWithListings" type="checkbox" />
+          有挂单
+        </label>
+        <PrunButton primary inline @click="goToPublishEmpty">发布挂单</PrunButton>
+      </div>
+    </div>
+
+    <!-- 过滤行：搜索 + 分类 -->
+    <div :class="$style.toolbarFilter">
+      <input
+        v-model="searchQuery"
+        type="text"
+        placeholder="搜索商品 (ticker / 名称)"
+        :class="$style.searchInput" />
+      <SelectInput
+        v-model="selectedCategory"
+        :options="availableCategories"
+        :class="$style.categorySelect" />
+    </div>
 
     <div v-if="loading" :class="$style.info">加载中...</div>
     <div v-else-if="error" :class="$style.error">{{ error }}</div>
     <template v-else-if="materialRows.length === 0">
-      <EmptyState message="暂无可显示的商品（无 BUY/SELL 任务或未填单价）" />
+      <EmptyState message="市场商品目录暂未加载（PrUn 仍在拉取 WORLD_MATERIAL_CATEGORIES）" />
+    </template>
+    <template v-else-if="displayRows.length === 0">
+      <EmptyState message="无匹配商品——调整搜索 / 分类，或取消「有挂单」过滤" />
     </template>
     <template v-else>
       <table :class="$style.table">
@@ -206,7 +323,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
             <th :class="$style.numCol">卖单量</th>
           </tr>
         </thead>
-        <tbody v-for="row in materialRows" :key="row.ticker">
+        <tbody v-for="row in displayRows" :key="row.ticker">
           <tr :class="$style.row" @click="toggle(row.ticker)">
             <td :class="$style.materialCell">
               <MaterialIcon :ticker="row.ticker" size="medium" />
@@ -391,14 +508,65 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   gap: 8px;
   padding: 4px 0;
 }
+
+/* 顶部工具栏 */
+.toolbarTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--rp-color-text-component, #bbb);
+  cursor: pointer;
+  user-select: none;
+}
+.checkboxLabel input {
+  margin: 0;
+  cursor: pointer;
+}
+.toolbarFilter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px 0;
+}
+.searchInput {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--rp-color-text-component, #bbb);
+  padding: 6px 10px;
+  border-radius: 2px;
+  font-size: 13px;
+  outline: none;
+}
+.searchInput:focus {
+  border-color: var(--rp-color-accent-primary, #ffc856);
+}
+.searchInput::placeholder {
+  color: var(--rp-color-text, #999);
+}
+.categorySelect {
+  min-width: 220px;
+}
 .info {
   padding: 16px;
-  color: var(--text-muted);
+  color: var(--rp-color-text, #999);
   text-align: center;
 }
 .error {
   padding: 16px;
-  color: var(--text-negative);
+  color: var(--rp-color-red, #d9534f);
   text-align: center;
 }
 

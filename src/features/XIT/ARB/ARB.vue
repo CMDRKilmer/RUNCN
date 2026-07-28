@@ -50,7 +50,9 @@ watch(
 
 const categoryOptions = computed(() => [
   { label: '全部类别', value: 'ALL' },
-  ...getCategories().map(id => ({ label: resolveCategoryLabel(id), value: id })),
+  ...getCategories()
+    .map(id => ({ label: resolveCategoryLabel(id), value: id }))
+    .sort((a, b) => a.label.localeCompare(b.label)),
 ]);
 
 const sortOptions = [
