@@ -287,7 +287,7 @@ async function globalTick(): Promise<void> {
   globalRunning = true;
   try {
     // 按需轮询：活跃任务集合为空时不做任何 listTasks 请求。
-    // 注册入口：tasksApi.claimTask / linkContract → notifyTaskClaimed → registerActiveTask。
+    // 注册入口：listings.claimListing / linkContract → notifyTaskClaimed → registerActiveTask。
     // 移除入口：notifyTaskUpdated 收到终态任务后 unregisterActiveTask；
     // 当 set 空时 unregister 内部 stopGlobalAutoLink 把 interval 也停了。
     if (activeLinkedTaskIds.size === 0) {

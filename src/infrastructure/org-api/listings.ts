@@ -54,10 +54,10 @@ export interface ClaimListingParams {
   amount: number;
 }
 
-// claim 返回 { task, listing }：task 是新创建的反向合同载体，listing 扣减后的最新快照。
+// claim 返回 { task, listing }：task 是新创建的反向合同载体（claimer 视角），listing 扣减后的最新快照。
 // 接取成功后调用 notifyTaskClaimed 把 task 加入活跃集合：
 //   - globalTick 启动，开始合同自动关联 + sync contract status
-//   - 与老 claimTask 路径行为对齐（task-activity.ts:28）
+// 架构迁移完成后这是唯一接取路径——老 /tasks/:id/claim 端点已删除。
 export async function claimListing(listingId: string, amount: number): Promise<ClaimListingResult> {
   const result = await request<ClaimListingResult>(`/listings/${listingId}/claim`, {
     method: 'POST',

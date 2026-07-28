@@ -10,7 +10,7 @@
 // 终态判定：COMPLETED / CANCELLED。终态后从 set 移除；set 空时 interval 停。
 //
 // 调用入口：
-//   - claimTask 成功后 → notifyTaskClaimed(task)
+//   - listings.claimListing 成功后 → notifyTaskClaimed(task)
 //   - linkContract / matchContract 自动关联成功后 → notifyTaskClaimed(task)
 //   - 任意"任务可能进入终态"的写操作后 → notifyTaskUpdated(task)
 
@@ -24,7 +24,7 @@ function needsActivity(task: OrgTask): boolean {
   return task.status === 'AWAITING_CONTRACT' || task.status === 'IN_PROGRESS';
 }
 
-// claimTask 成功 / 自动 link 成功后调用：把任务加入活跃集合。
+// listings.claimListing 成功 / 自动 link 成功后调用：把任务加入活跃集合。
 export function notifyTaskClaimed(task: OrgTask): void {
   if (!needsActivity(task)) return;
   registerActiveTask(task.id);

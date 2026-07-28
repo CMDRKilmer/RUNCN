@@ -142,7 +142,8 @@ const isPublisher = computed(() => localTask.value.publisherId === props.current
 const isClaimer = computed(() => localTask.value.claimerId === props.currentUser.id);
 const isParticipant = computed(() => isPublisher.value || isClaimer.value);
 
-const canClaim = computed(() => localTask.value.status === 'PUBLISHED' && !isPublisher.value);
+// 架构迁移后：接取只能从 listing 进入（TradeOverlay），不再有 TaskDetail 直接接取入口。
+//   canClaim（PUBLISHED 老 task 接取）已删除——所有 PUBLISHED task 都已迁移到 listings 或被清理。
 // 释放按钮可见条件：状态 AWAITING_CONTRACT 且我是 claimer
 const canRelease = computed(
   () => localTask.value.status === 'AWAITING_CONTRACT' && isClaimer.value,
@@ -224,7 +225,7 @@ const showBoardCancelButton = computed(() =>
 // updateTask 接收任意带 .task 的返回值结构：
 //   - OrgTask（旧 API：patchTask / cancelTask / republishTask 等直接返 task）
 //   - ReleaseTaskResult（releaseTask：{ task }）
-//   - ClaimTaskResult（claimTask：{ task }）
+//   - ClaimListingResult（claimListing：{ task, listing }）
 // 我们统一从结果里抽 .task 字段更新本地视图。
 async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
   loading.value = true;
@@ -239,12 +240,6 @@ async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
   } finally {
     loading.value = false;
   }
-}
-
-async function onClaim() {
-  const result = await tasksApi.claimTask(localTask.value.id);
-  localTask.value = result.task;
-  emit('updated', result.task);
 }
 
 async function onRelease() {
@@ -412,7 +407,6 @@ function onNotesChanged() {
 
     <!-- ActionBar 自带容器间距与分隔；PrunButton 自动套上主题。 -->
     <ActionBar>
-      <PrunButton v-if="canClaim" primary :disabled="loading" @click="onClaim">接取任务</PrunButton>
       <PrunButton v-if="canRelease" primary :disabled="loading" @click="onRelease"
         >释放任务</PrunButton
       >

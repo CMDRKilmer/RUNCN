@@ -1,6 +1,5 @@
 // src/infrastructure/org-api/tasks.ts
 import type {
-  ClaimTaskResult,
   ListTasksResult,
   OrgTask,
   PollScope,
@@ -65,20 +64,9 @@ export async function patchTask(taskId: string, params: PatchTaskParams): Promis
   });
 }
 
-export async function claimTask(taskId: string, amount?: number): Promise<ClaimTaskResult> {
-  // MarketView 接取面板允许裁剪接取量（≤ 原任务 amount）。
-  // - 完整接取或 amount 等于剩余：返回 { task: task }
-  // - 部分接取：返回 { task: parent, childTask: reverseTask }
-  const result = await request<ClaimTaskResult>(`/tasks/${taskId}/claim`, {
-    method: 'POST',
-    body: amount !== undefined ? { amount } : undefined,
-  });
-  // 接取成功 → 任务进入 AWAITING_CONTRACT（接取者是 claimer）；注册到活跃集合，
-  // globalTick 启动，开始合同自动关联 + sync contract status。
-  // 阶段 4：解耦后不再有 partial claim childTask 概念。
-  notifyTaskClaimed(result.task);
-  return result;
-}
+// 老架构 claimTask 已删除——接取走 listings.claimListing（listings.ts）。
+//   MarketView / TradeOverlay 调 listListings 后由用户点接取 → 弹出 TradeOverlay
+//   → 调 listingsApi.claimListing(listingId, amount) → 通知 notifyTaskClaimed。
 
 export async function releaseTask(taskId: string): Promise<ReleaseTaskResult> {
   // 完整接取 → { task }

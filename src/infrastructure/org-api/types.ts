@@ -77,12 +77,8 @@ export interface OrgTask {
   updatedAt: string;
 }
 
-// claim 端点返回结构：完整接取 → { task }
-export interface ClaimTaskResult {
-  task: OrgTask;
-}
-
 // release 端点返回结构：完整接取任务 release → { task: 原任务 }
+// 老架构 ClaimTaskResult（{ task }）已删除——接取走 /listings/:id/claim（ClaimListingResult）。
 export interface ReleaseTaskResult {
   task: OrgTask;
 }

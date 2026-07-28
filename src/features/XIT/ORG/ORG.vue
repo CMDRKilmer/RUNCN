@@ -87,7 +87,7 @@ onMounted(() => {
   if (session.value) {
     setCurrentUser(session.value.user);
     startPolling(pollCallbacks);
-    // auto-link 现在按需：接取任务（tasksApi.claimTask）成功后才注册到活跃集合，
+    // auto-link 现在按需：接取任务（listings.claimListing）成功后才注册到活跃集合，
     // globalTick interval 才会起来。面板 mount 时不再无脑起。
     // 这里仍调一次 startGlobalAutoLink 以初始化 callbacks 占位。
     startGlobalAutoLink();
