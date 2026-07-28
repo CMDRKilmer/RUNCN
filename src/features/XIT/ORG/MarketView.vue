@@ -9,7 +9,6 @@ import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getMaterialName, getMaterialCategoryName } from '@src/infrastructure/prun-ui/i18n';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunButton from '@src/components/PrunButton.vue';
-import SelectInput from '@src/components/forms/SelectInput.vue';
 import EmptyState from './EmptyState.vue';
 import TradeOverlay from './TradeOverlay.vue';
 import { useOrgTileState } from './tile-state';
@@ -298,10 +297,11 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
         type="text"
         placeholder="搜索商品 (ticker / 名称)"
         :class="$style.searchInput" />
-      <SelectInput
-        v-model="selectedCategory"
-        :options="availableCategories"
-        :class="$style.categorySelect" />
+      <select v-model="selectedCategory" :class="$style.categorySelect">
+        <option v-for="opt in availableCategories" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
     </div>
 
     <div v-if="loading" :class="$style.info">加载中...</div>
@@ -561,7 +561,21 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   color: rgb(148, 158, 166);
 }
 .categorySelect {
+  box-sizing: border-box;
   min-width: 220px;
+  padding: 3px 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+}
+.categorySelect:focus {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
 }
 .info {
   padding: 16px;

@@ -93,14 +93,6 @@ const linkedContract = computed(() => {
 // 注意：仅在用户**已经看到这条任务**时拉一次，避免一打开 Org 就发几十个 CONTC。
 // 用 watch + 一个 flag 实现 once 语义。
 let linkedContractFetchAttempted = false;
-console.log(
-  '[TaskDetail] mount, task.contractId=',
-  localTask.value.contractId,
-  'store.fetched=',
-  contractsStore.fetched.value,
-  'store.all?.length=',
-  contractsStore.all.value?.length ?? 'n/a',
-);
 watch(
   linkedContract,
   contract => {
