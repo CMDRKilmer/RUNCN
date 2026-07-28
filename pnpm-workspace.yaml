@@ -3,6 +3,12 @@ packages:
 
 overrides:
   picomatch: ^2.3.2
-  brace-expansion: ^5.0.6
+  # brace-expansion: pin to 5.0.8 to clear Dependabot #38 (DoS via unbounded
+  # expansion length, < 5.0.8 vulnerable). Was ^5.0.6 which resolved to 5.0.7.
+  brace-expansion: 5.0.8
+  # postcss: pin to 8.5.18 to clear Dependabot #37 (path traversal in
+  # sourceMappingURL auto-loading, < 8.5.18 vulnerable). Vite 7's transitive
+  # ^8.5.17 still resolves to vulnerable versions; this override forces patched.
+  postcss: 8.5.18
   ws: 8.21.0
   flatted: 3.4.2
