@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { OrgTask, OrgUser, PollScope } from '@src/infrastructure/org-api/types';
+import type { OrgTask, OrgListing, OrgUser, PollScope } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
+import * as listingsApi from '@src/infrastructure/org-api/listings';
 import TaskDetail from './TaskDetail.vue';
+import ListingDetail from './ListingDetail.vue';
 import LinkContract from './LinkContract.vue';
 import EmptyState from './EmptyState.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
@@ -11,6 +13,10 @@ import { formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 // UI Tab 键：'shipping' 仅展示 SHIP 任务；'published' / 'claimed' 直接透传给 API。
 // 后端 /tasks scope 枚举是 'board' | 'published' | 'claimed'，不接受 'shipping'。
 type UiScope = 'shipping' | 'published' | 'claimed';
+
+// 显示行：要么是真实 task，要么是来自 listings 的虚拟行（仅在 'published' 视图出现）。
+//   虚拟行展示 OPEN 状态的挂单——这些还没有 task（接取后才生成 task）。
+type DisplayRow = { kind: 'task'; task: OrgTask } | { kind: 'listing'; listing: OrgListing };
 
 const scopeLabel = computed(() => {
   switch (props.scope) {
@@ -30,10 +36,11 @@ const props = defineProps<{
   currentUser: OrgUser;
 }>();
 
-const tasks = ref<OrgTask[]>([]);
+const rows = ref<DisplayRow[]>([]);
 const loading = ref(false);
 const error = ref('');
 const selectedTask = ref<OrgTask | null>(null);
+const selectedListing = ref<OrgListing | null>(null);
 // LinkContract 是 fixed overlay（z-index:1000），TaskDetail 也是 fixed overlay（z-index:1100）。
 // 必须放在 TaskDetail 外，独立成兄弟层；层级靠 z-index 区分（LinkContract 略低）。
 const showLinkContract = ref(false);
@@ -51,7 +58,25 @@ async function refresh() {
       type: props.scope === 'shipping' ? 'SHIP' : undefined,
       limit: 100,
     });
-    tasks.value = result.items;
+    const taskRows: DisplayRow[] = result.items.map(t => ({ kind: 'task', task: t }));
+
+    // 'published' 视图额外拉取 /listings?scope=mine，把 OPEN 状态的挂单也展示出来。
+    // 这些挂单还没被接取，所以没有 task；显示成"挂单中"虚拟行。
+    if (props.scope === 'published') {
+      const listings = await listingsApi.listListings({ scope: 'mine', limit: 100 });
+      const listingRows: DisplayRow[] = listings
+        .filter(l => l.status === 'OPEN')
+        .map(l => ({ kind: 'listing', listing: l }));
+      // 合并：task 行在前（已接取/合同中），listing 行在后（挂单中）。
+      // 用 createdAt 降序，listings 表 createdAt 是 ISO8601，task 也是 ISO8601——可比较。
+      rows.value = [...taskRows, ...listingRows].sort((a, b) => {
+        const aTime = a.kind === 'task' ? a.task.createdAt : a.listing.createdAt;
+        const bTime = b.kind === 'task' ? b.task.createdAt : b.listing.createdAt;
+        return bTime.localeCompare(aTime);
+      });
+    } else {
+      rows.value = taskRows;
+    }
   } catch (err) {
     error.value = String(err);
   } finally {
@@ -67,6 +92,7 @@ watch(
   () => props.scope,
   () => {
     selectedTask.value = null;
+    selectedListing.value = null;
     showLinkContract.value = false;
     void refresh();
   },
@@ -75,9 +101,9 @@ watch(
 // 详情更新后同步到本地列表（拉取最新 task 后再用 returned 对象替换）
 function onTaskUpdated(updated: OrgTask) {
   selectedTask.value = updated;
-  const idx = tasks.value.findIndex(t => t.id === updated.id);
+  const idx = rows.value.findIndex(r => r.kind === 'task' && r.task.id === updated.id);
   if (idx >= 0) {
-    tasks.value.splice(idx, 1, updated);
+    rows.value.splice(idx, 1, { kind: 'task', task: updated });
   }
 }
 
@@ -98,9 +124,9 @@ function onRequestLinkContract() {
 async function onContractLinked(updated: OrgTask) {
   selectedTask.value = updated;
   showLinkContract.value = false;
-  const idx = tasks.value.findIndex(t => t.id === updated.id);
+  const idx = rows.value.findIndex(r => r.kind === 'task' && r.task.id === updated.id);
   if (idx >= 0) {
-    tasks.value.splice(idx, 1, updated);
+    rows.value.splice(idx, 1, { kind: 'task', task: updated });
   }
   void refresh();
 }
@@ -110,15 +136,16 @@ async function onContractLinked(updated: OrgTask) {
 function onTaskDeleted(snapshot: OrgTask) {
   selectedTask.value = null;
   showLinkContract.value = false;
-  const idx = tasks.value.findIndex(t => t.id === snapshot.id);
+  const idx = rows.value.findIndex(r => r.kind === 'task' && r.task.id === snapshot.id);
   if (idx >= 0) {
-    tasks.value.splice(idx, 1);
+    rows.value.splice(idx, 1);
   }
   void refresh();
 }
 
 onBeforeUnmount(() => {
   selectedTask.value = null;
+  selectedListing.value = null;
   showLinkContract.value = false;
 });
 
@@ -186,6 +213,31 @@ function getStatusColor(status: OrgTask['status']): string {
 
 function selectTask(task: OrgTask) {
   selectedTask.value = task;
+  // task 行被点开时收起 listing 详情（互斥）
+  selectedListing.value = null;
+}
+
+function selectListing(listing: OrgListing) {
+  // 再次点击同一行收起（toggle 行为）
+  if (selectedListing.value?.id === listing.id) {
+    selectedListing.value = null;
+  } else {
+    selectedListing.value = listing;
+    // 收起 task 详情（互斥）
+    selectedTask.value = null;
+    showLinkContract.value = false;
+  }
+}
+
+// listing 详情关闭：清空 selectedListing + 触发整列表 refresh。
+function onListingDetailClosed() {
+  selectedListing.value = null;
+  void refresh();
+}
+
+// listing 取消成功：refresh 整列表（listings 行可能消失或变 CLOSED）。
+function onListingCancelled() {
+  void refresh();
 }
 </script>
 
@@ -196,7 +248,7 @@ function selectTask(task: OrgTask) {
 
     <div v-if="loading" :class="$style.info">加载中...</div>
     <div v-else-if="error" :class="$style.error">{{ error }}</div>
-    <template v-else-if="tasks.length === 0">
+    <template v-else-if="rows.length === 0">
       <EmptyState message="暂无任务" />
     </template>
     <template v-else>
@@ -213,31 +265,60 @@ function selectTask(task: OrgTask) {
           </tr>
         </thead>
         <tbody>
-          <template v-for="task in tasks" :key="task.id">
-            <tr
-              :class="[$style.row, selectedTask?.id === task.id ? $style.selected : '']"
-              @click="selectTask(task)">
-              <td :class="$style.type">{{ getTypeLabel(task.type) }}</td>
-              <td>{{ task.contractJson.name || task.type }}</td>
-              <td>{{ getItemSummary(task) }}</td>
-              <td>{{ getLocationText(task) }}</td>
-              <td>{{ task.publisherUsername }}</td>
-              <td>{{ getPriceText(task) }}</td>
-              <td :style="{ color: getStatusColor(task.status) }">{{
-                statusLabel(task.status, task.contractId)
-              }}</td>
-            </tr>
-            <tr v-if="selectedTask?.id === task.id" :class="$style.detailRow">
-              <td colspan="7">
-                <TaskDetail
-                  :task="selectedTask"
-                  :current-user="currentUser"
-                  @close="onDetailClosed"
-                  @updated="onTaskUpdated"
-                  @link-contract="onRequestLinkContract"
-                  @deleted="onTaskDeleted" />
-              </td>
-            </tr>
+          <template v-for="row in rows" :key="row.kind === 'task' ? row.task.id : row.listing.id">
+            <!-- task 行：可点开 TaskDetail 做合同关联等操作 -->
+            <template v-if="row.kind === 'task'">
+              <tr
+                :class="[$style.row, selectedTask?.id === row.task.id ? $style.selected : '']"
+                @click="selectTask(row.task)">
+                <td :class="$style.type">{{ getTypeLabel(row.task.type) }}</td>
+                <td>{{ row.task.contractJson.name || row.task.type }}</td>
+                <td>{{ getItemSummary(row.task) }}</td>
+                <td>{{ getLocationText(row.task) }}</td>
+                <td>{{ row.task.publisherUsername }}</td>
+                <td>{{ getPriceText(row.task) }}</td>
+                <td :style="{ color: getStatusColor(row.task.status) }">{{
+                  statusLabel(row.task.status, row.task.contractId)
+                }}</td>
+              </tr>
+              <tr v-if="selectedTask?.id === row.task.id" :class="$style.detailRow">
+                <td colspan="7">
+                  <TaskDetail
+                    :task="selectedTask"
+                    :current-user="currentUser"
+                    @close="onDetailClosed"
+                    @updated="onTaskUpdated"
+                    @link-contract="onRequestLinkContract"
+                    @deleted="onTaskDeleted" />
+                </td>
+              </tr>
+            </template>
+            <!-- listing 行：纯挂单（OPEN）展示，点击展开 ListingDetail -->
+            <template v-else>
+              <tr
+                :class="[$style.row, selectedListing?.id === row.listing.id ? $style.selected : '']"
+                @click="selectListing(row.listing)">
+                <td :class="$style.type">{{ row.listing.type === 'BUY' ? '采购' : '出售' }}</td>
+                <td>{{ row.listing.type }} {{ row.listing.commodity }}</td>
+                <td>
+                  {{ formatNumber(row.listing.remainingAmount) }} /
+                  {{ formatNumber(row.listing.amount) }} {{ row.listing.commodity }}
+                </td>
+                <td>{{ row.listing.location ?? '—' }}</td>
+                <td>{{ row.listing.publisherUsername }}</td>
+                <td>{{ formatAmountWithCurrency(row.listing.price, row.listing.currency) }}</td>
+                <td :style="{ color: 'var(--text-muted)' }">挂单中</td>
+              </tr>
+              <tr v-if="selectedListing?.id === row.listing.id" :class="$style.detailRow">
+                <td colspan="7">
+                  <ListingDetail
+                    :listing="selectedListing"
+                    :current-user="currentUser"
+                    @close="onListingDetailClosed"
+                    @cancelled="onListingCancelled" />
+                </td>
+              </tr>
+            </template>
           </template>
         </tbody>
       </table>

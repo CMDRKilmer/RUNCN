@@ -3,17 +3,29 @@ import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill'
 import type { TaskContractJson, TaskType } from '@src/infrastructure/org-api/types';
 
 // 合同类型反转规则（架构 §3 + §7.2）：
-// BUY 任务由接取者创建 SELL 合同（接取者卖物料给发布者）
-// SELL 任务由接取者创建 BUY 合同（接取者从发布者买物料）
-// SHIP 任务保持 SHIP（仅由发布者创建，contractCreator = publisher）
+//
+// 老 task（无 listingId，partial claim 时代的子任务）：
+//   task.type = publisher 视角的合同 type
+//   claimer 接取时 → 反转 BUY/SELL
+//
+// 新 task（从 listing claim 生成的，task.listingId 存在）：
+//   task.type 已经是 claimer 视角（接取者该签的合同 type）
+//   不需要反转
+//
+// SHIP 任务：保持 SHIP；仅由发布者创建（contractCreator = publisher）
 export function invertTemplate(
   template: TaskContractJson['template'],
   creatorIsPublisher: boolean,
+  taskHasListing = false,
 ): TaskContractJson['template'] {
   if (template === 'SHIP') {
     return 'SHIP';
   }
-  // BUY/SELL 仅在接取者视角下反转；发布者视角保持原样
+  // 新架构：从 listing claim 产生的 task，type 已经是 claimer 视角，不需要反转
+  if (taskHasListing) {
+    return template;
+  }
+  // 老架构：BUY/SELL 仅在接取者视角下反转；发布者视角保持原样
   if (creatorIsPublisher) {
     return template;
   }
@@ -34,6 +46,7 @@ export async function sendTaskToContd(
   contractJson: TaskContractJson,
   taskType: TaskType,
   creatorIsPublisher = false,
+  taskHasListing = false,
 ): Promise<{ newNaturalId: string }> {
   // Apply contract-type inversion rules. `taskType` is reserved
   // for future use (LOAN contracts, etc.); for the current BUY/
@@ -46,7 +59,7 @@ export async function sendTaskToContd(
   const prefixedName = baseName ? `ORG-${baseName}` : 'ORG-';
   const inverted: TaskContractJson = {
     ...contractJson,
-    template: invertTemplate(contractJson.template, creatorIsPublisher),
+    template: invertTemplate(contractJson.template, creatorIsPublisher, taskHasListing),
     name: prefixedName,
   };
   return await newContractDraftAndFill(JSON.stringify(inverted, null, 2));

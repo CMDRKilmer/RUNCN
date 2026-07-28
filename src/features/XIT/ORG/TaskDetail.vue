@@ -307,13 +307,21 @@ async function onDelete() {
 async function onCreateContract() {
   // 谁在操作谁就是 creator：当前用户是发布者则不反转，是接取者则反转
   const creatorIsPublisher = localTask.value.publisherId === props.currentUser.id;
+  // 新架构（解耦后）：从 listing claim 生成的 task，task.type 已经是 claimer 视角，
+  //   不需要在 invertTemplate 里再反转。task.listingId 存在即标记。
+  const taskHasListing = localTask.value.listingId !== undefined;
   // Mirror the try/catch shape of the other handlers above so a
   // failure in the auto-fill helper (e.g. timed-out store update)
   // surfaces in the same error banner as the rest of the panel.
   loading.value = true;
   error.value = '';
   try {
-    await sendTaskToContd(localTask.value.contractJson, localTask.value.type, creatorIsPublisher);
+    await sendTaskToContd(
+      localTask.value.contractJson,
+      localTask.value.type,
+      creatorIsPublisher,
+      taskHasListing,
+    );
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
