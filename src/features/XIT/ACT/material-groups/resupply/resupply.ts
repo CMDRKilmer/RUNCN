@@ -96,7 +96,7 @@ act.addMaterialGroup<Config>({
       }
       const rawRequired =
         (data.useBaseInv ?? true) ? days * dailyConsume - inventory : days * dailyConsume;
-      const need = Math.floor(Math.max(0, rawRequired));
+      const need = Math.ceil(Math.max(0, rawRequired));
       if (need > 0) {
         parsedGroup[ticker] = need;
       }

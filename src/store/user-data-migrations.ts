@@ -143,7 +143,7 @@ const migrations: MigrationEntry[] = [
         return;
       }
 
-      if (!userData.cart.name || userData.cart.name === '\u8d2d\u7269\u8f66') {
+      if (!userData.cart.name || userData.cart.name === '购物车') {
         userData.cart.name = 'Shopping Cart';
       }
     },
@@ -153,12 +153,12 @@ const migrations: MigrationEntry[] = [
     userData => {
       if (!userData.cart) {
         userData.cart = {
-          name: 'Shopping Cart',
+          name: '购物车',
           exchange: '',
           items: [],
         };
       } else {
-        userData.cart.name ??= 'Shopping Cart';
+        userData.cart.name ??= '购物车';
         userData.cart.exchange ??= '';
         userData.cart.items ??= [];
       }
@@ -167,7 +167,7 @@ const migrations: MigrationEntry[] = [
       if (!sidebar.some(([, cmd]: [string, string]) => cmd === 'XIT CART')) {
         const factionIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT FACTION');
         const targetIdx = factionIdx >= 0 ? factionIdx + 1 : sidebar.length;
-        sidebar.splice(targetIdx, 0, ['\u8d2d\u7269\u8f66', 'XIT CART']);
+        sidebar.splice(targetIdx, 0, ['购物车', 'XIT CART']);
       }
     },
   ],
@@ -182,11 +182,11 @@ const migrations: MigrationEntry[] = [
     },
   ],
   [
-    '25.03.2026 Rename BURN to 报告',
+    '25.03.2026 Rename BURN to 消耗',
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;
       const idx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT BURN');
-      if (idx >= 0) sidebar[idx][0] = '报告';
+      if (idx >= 0) sidebar[idx][0] = '消耗';
     },
   ],
   [
@@ -213,7 +213,7 @@ const migrations: MigrationEntry[] = [
       }
       if (!sidebar.some(([, cmd]: [string, string]) => cmd === 'XIT FACTION')) {
         const targetIdx = jhIdx >= 0 ? jhIdx + 1 : sidebar.length;
-        sidebar.splice(targetIdx, 0, ['组织', 'XIT FACTION']);
+        sidebar.splice(targetIdx, 0, ['琉璃', 'XIT ORG']);
       }
     },
   ],
@@ -243,7 +243,7 @@ const migrations: MigrationEntry[] = [
       const sidebar: [string, string][] = userData.settings.sidebar;
       if (!sidebar.some(([, cmd]: [string, string]) => cmd === 'XIT JH')) {
         const helpIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT HELP');
-        sidebar.splice(helpIdx >= 0 ? helpIdx + 1 : sidebar.length, 0, ['JH', 'XIT JH']);
+        sidebar.splice(helpIdx >= 0 ? helpIdx + 1 : sidebar.length, 0, ['计划', 'XIT JH']);
       }
     },
   ],

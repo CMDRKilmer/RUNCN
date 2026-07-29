@@ -146,7 +146,7 @@ function calcLoadAmounts(targetDays: number): LoadResult {
     const required = Math.max(0, rawRequired);
     if (required <= 0) continue;
 
-    const loadAmount = Math.floor(required);
+    const loadAmount = Math.ceil(required);
     loadAmounts[ticker] = loadAmount;
 
     const mat = materialsStore.getByTicker(ticker);
