@@ -8,6 +8,8 @@ import ListingDetail from './ListingDetail.vue';
 import LinkContract from './LinkContract.vue';
 import EmptyState from './EmptyState.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import PublishOverlay from './PublishOverlay.vue';
 import { formatAmountWithCurrency, formatNumber, statusLabel } from './utils';
 
 // UI Tab 键：'shipping' 仅展示 SHIP 任务；'published' / 'claimed' 直接透传给 API。
@@ -239,12 +241,34 @@ function onListingDetailClosed() {
 function onListingCancelled() {
   void refresh();
 }
+
+// 发布挂单对话框：仅 shipping tab 显示发布按钮（默认 SHIP）
+const showPublishOverlay = ref(false);
+function openPublishShipping() {
+  showPublishOverlay.value = true;
+}
+function onPublishedShipping() {
+  showPublishOverlay.value = false;
+  void refresh();
+}
 </script>
 
 <template>
   <div :class="$style.list">
-    <!-- 用 PrUn 风格小节标题（SectionHeader 已是 PrUn 官方样式） -->
-    <SectionHeader>{{ scopeLabel }}</SectionHeader>
+    <!-- 标题行：左侧 SectionHeader，shipping tab 右侧带"发布运输"按钮 -->
+    <div :class="$style.titleRow">
+      <SectionHeader>{{ scopeLabel }}</SectionHeader>
+      <PrunButton v-if="scope === 'shipping'" primary inline @click="openPublishShipping">
+        发布运输
+      </PrunButton>
+    </div>
+
+    <!-- 发布对话框 -->
+    <PublishOverlay
+      v-if="showPublishOverlay"
+      :initial-data="{ type: 'SHIP' }"
+      @close="showPublishOverlay = false"
+      @published="onPublishedShipping" />
 
     <div v-if="loading" :class="$style.info">加载中...</div>
     <div v-else-if="error" :class="$style.error">{{ error }}</div>
@@ -339,6 +363,12 @@ function onListingCancelled() {
   flex-direction: column;
   gap: 8px;
   padding: 4px 0;
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 .info {
   padding: 16px;

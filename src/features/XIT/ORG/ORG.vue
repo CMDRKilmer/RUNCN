@@ -19,7 +19,6 @@ import AuthOverlay from './AuthOverlay.vue';
 import RoleBadge from './RoleBadge.vue';
 import TaskList from './TaskList.vue';
 import MarketView from './MarketView.vue';
-import PublishTask from './PublishTask.vue';
 import BoardPanel from './board/BoardPanel.vue';
 import Header from '@src/components/Header.vue';
 import ActionBar from '@src/components/ActionBar.vue';
@@ -149,14 +148,13 @@ async function recoverActiveTasks(): Promise<void> {
 
 const tabs = computed(() => {
   const list: Array<{
-    key: 'market' | 'shipping' | 'published' | 'claimed' | 'publish' | 'board-admin';
+    key: 'market' | 'shipping' | 'published' | 'claimed' | 'board-admin';
     label: string;
   }> = [
     { key: 'market', label: '市场' },
     { key: 'shipping', label: '运输' },
     { key: 'published', label: '我的发布' },
     { key: 'claimed', label: '我的接取' },
-    { key: 'publish', label: '发布任务' },
   ];
   if (canSeeBoardPanel(currentUser.value)) {
     list.push({ key: 'board-admin', label: '管理' });
@@ -210,10 +208,6 @@ const tabs = computed(() => {
           v-else-if="tab === 'shipping' || tab === 'published' || tab === 'claimed'"
           :scope="tab"
           :current-user="session.user" />
-        <PublishTask
-          v-else-if="tab === 'publish'"
-          :initial-data="pendingPublishPrefill ?? undefined"
-          @consumed="() => (pendingPublishPrefill = null)" />
         <BoardPanel v-else-if="tab === 'board-admin'" :current-user="session.user" />
       </main>
     </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 阶段 4：MarketView 改读 /listings，删除 tasks 摊平逻辑。
 //   单个 listing 已经是单商品实体，按 commodity 聚合后展示。
-import { computed, inject, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { OrgListing } from '@src/infrastructure/org-api/types';
 import * as listingsApi from '@src/infrastructure/org-api/listings';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
@@ -11,7 +11,7 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import EmptyState from './EmptyState.vue';
 import TradeOverlay from './TradeOverlay.vue';
-import { useOrgTileState } from './tile-state';
+import PublishOverlay from './PublishOverlay.vue';
 import { fixed0, fixed2 } from '@src/utils/format';
 import { formatNumber } from './utils';
 
@@ -102,29 +102,32 @@ async function onTradeClaimed() {
   await refresh();
 }
 
-// 「去发布」切到 PublishTask 并预填
-const tab = useOrgTileState('tab');
-type PrefillSetFn = (data: {
-  type: 'BUY' | 'SELL' | 'SHIP';
-  ticker: string;
-  price: number;
+// 发布挂单对话框状态：被 PublishOverlay 控制
+const showPublishOverlay = ref(false);
+const publishInitial = ref<{
+  type?: 'BUY' | 'SELL' | 'SHIP';
+  ticker?: string;
+  amount?: number;
+  price?: number;
+  currency?: string;
   location?: string;
-}) => void;
-const injectPrefillSet = inject<PrefillSetFn | null>('orgMarketPrefillSet', null);
+} | null>(null);
 
-function goToPublishEmpty() {
-  // 顶部"发布挂单"按钮：直接切到发布 tab，不预填任何商品。
-  tab.value = 'publish';
+function openPublishEmpty() {
+  // 顶部"发布挂单"按钮：打开对话框，无预填
+  publishInitial.value = null;
+  showPublishOverlay.value = true;
 }
 
 function goPublish(row: MaterialRow, side: 'BUY' | 'SELL', suggestedPrice: number) {
-  tab.value = 'publish';
-  injectPrefillSet?.({
+  // 打开发布对话框，预填商品 / 价格 / 位置
+  publishInitial.value = {
     type: side,
     ticker: row.ticker,
-    price: suggestedPrice,
+    price: suggestedPrice > 0 ? suggestedPrice : undefined,
     location: row.allLocations[0],
-  });
+  };
+  showPublishOverlay.value = true;
 }
 
 // 聚合：以 PrUn 全商品目录（materialsStore.all）为底，按 commodity 摊平挂单。
@@ -286,7 +289,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
           <input v-model="onlyWithListings" type="checkbox" />
           有挂单
         </label>
-        <PrunButton primary inline @click="goToPublishEmpty">发布挂单</PrunButton>
+        <PrunButton primary inline @click="openPublishEmpty">发布挂单</PrunButton>
       </div>
     </div>
 
@@ -498,6 +501,16 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
       :publisher="tradePrefill.publisher"
       @close="closeTrade"
       @claimed="onTradeClaimed" />
+
+    <!-- 发布挂单对话框：BUY / SELL 入口（置顶 z-index） -->
+    <PublishOverlay
+      v-if="showPublishOverlay"
+      :initial-data="publishInitial ?? undefined"
+      @close="showPublishOverlay = false"
+      @published="
+        showPublishOverlay = false;
+        refresh();
+      " />
   </div>
 </template>
 
