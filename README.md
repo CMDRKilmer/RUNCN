@@ -11,8 +11,8 @@
 ## 汉化范围
 
 - **功能描述**：全部 120 个功能的名称与说明（基础 84 + 高级 36）
-- **XIT 面板**：START、HELP、CMDS、HEALTH、HQUC、CHAT、BURN、TODO、NOTE、CMDL、SORT 等
-- **设置面板**：SET、FEAT、FIN(SET)、GAME、BFR、PMMG
+- **XIT 面板**：START、HELP、CMDS、HEALTH、HQUC、CHAT、BURN、TODO、NOTE、CMDL、SORT、ORG、ACT、CONTC、CONTD、CONTGEN、PLAN、PROD、PWARN、WFOR、EXP、FINBS、FINCH、FINPR、CALC、HAUL、LOAN、NOTE、TODO、CMDS 等
+- **设置面板**：SET、FEAT、FIN(SET)、GAME、BFR、PMMG、DARK、TRANSLATE
 - **合同系统**：CONTS/CONTC/CXTS 面板 + 29 个合同条件
 - **财务系统**：FIN 面板（10 个财务指标）、FINBS 资产负债表、FINCH 图表（60+ 标签）
 - **自动化系统**：ACT 面板（补给/维修/加油/交易/转运等 30+ 个操作日志）
@@ -20,6 +20,18 @@
 - **共享组件**：确认弹窗、加载提示、材料图标等
 - **代码注释**：约 180 条英文注释全部翻译
 - **合计修改**：285 个文件，1185 处新增，1383 处删除
+
+## 自定义功能（ORG 组织管理面板）
+
+`XIT ORG`（原 `XIT FACTION` 已废弃）是一套基于 `prun.kilmer.cn` 后端的组织内任务发布 / 接取 / 合同联动面板，包含以下能力：
+
+- **市场**：浏览公开市场挂单（单商品发布、按状态 / ticker 排序、支持搜索与分类筛选），一键接取或裁剪接取量。
+- **运输**：多段路线运输任务的发布、浏览与接取。
+- **我的发布 / 我的接取**：发布者可物理删除终态任务（输入 `DELETE` 二次确认），接取者按状态实时刷新任务列表。
+- **管理**：董事会可见的邀请码生成、用户管理（最后活跃时间排序）、审计日志、组织统计。
+- **自动关联合同**：前端指纹 + 后端权威匹配（`POST /tasks/:id/match-contract`）双保险，自动从任务 `contractJson` 反推合同模板并绑定 PrUn 合同面板；时间窗预筛过滤过旧或过新的合同；session 过期自动停轮询。
+- **挂单详情**：与任务解耦的挂单独立展示与取消流程。
+- **CONTGEN**：合同 JSON 生成器，支持 ACT JSON 导入、跨面板（BPC）蓝图物料导入、模板总价按规则拆分到物品单价；可一键新建并填充 PrUn 合同草稿。
 
 ## 功能亮点
 

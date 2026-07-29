@@ -1,41 +1,51 @@
 # 更新日志
 
-**日期**: 2026-07-24
-**说明**: ORG 任务面板持续打磨：UI 与 PrUn 整体风格统一、新增自动关联合同（前端指纹 + 后端权威匹配）、市场面板与接取裁剪、CONTGEN 一键新建并填充、权限 / 状态 / 错误处理与多项修复
+**日期**: 2026-07-29
+**说明**: ORG 任务面板持续迭代：完成挂单与任务解耦（阶段 4）、自动关联合同时间窗预筛与权威匹配、发布流程重构为模态对话框、任务列表实时刷新、`XIT ORG` 快捷键重绑、安全加固与多项修复
 
 ### ✨ Features
 
-- **`XIT/ORG`**：发布表单对齐 PrUn `CONTGEN` 语义：运费字段仅 `SHIP` 显示，`BUY`/`SELL` 每行单价必填；表单顶部"顶层总价"改名为"运费"。
-- **`XIT/ORG`**：任务状态由统一的 `statusLabel` 工具展示替代原始状态文本；新增 `contractId` 参数适配，状态标签逻辑更完善。
-- **`XIT/ORG`**：发布者可"物理删除"自己发布的任务（CANCELLED / COMPLETED 等终态显示删除按钮，需输入 `DELETE` 二次确认）；`TaskDetail` 新增 `deleted` 事件，`TaskList` 本地 splice + refresh 同步移除。终端态取消按钮与删除按钮互斥。
-- **`XIT/ORG`**：价格统一千分位显示；切 tab 后任务详情残留修复。
-- **`XIT/ORG`**：组织任务管理面板（市场 / 运输 / 我的发布 / 我的接取 / 发布任务 / 管理）正式上线，支持非组织用户角色识别与统计、上报（登入用户、组织成员、在线非组织用户分类明确）。
-- **`XIT/ORG`**：新增市场面板，支持浏览公开市场任务并接取；接取任务支持裁剪（修改金额 / 价格 / 地点）。
-- **`XIT/ORG`**：自动关联合同 —— 任务面板持前端指纹生成 + 30s 轮询 + 5s 倒计时确认；关联对接后端权威匹配，前端仅做拉取与展示；自动关联在 ORG tile 全局开启，登出/关闭面板时清理所有 session。
-- **`XIT/ORG`**：发布人展示优化：`TaskDetail` 自动关联 watch 时机修复（避免 TDZ），全局 auto-link 启动器与发布人展示分离。
-- **`XIT/CONTGEN`**：抽离合同创建流程为复用模块；新增"一键新建并填充合同草稿"功能，自动定位 PrUn 合同草稿面板并填写 JSON。
-- **`XIT/CONTGEN`**：移除冗余 `sendToContd` 函数及对应按钮（被一键新建并填充流程替代）。
-- **`BPC`**：`bpc-utils` 价格来源简化并修复 `CXOB` 处理。
+- **`org-api/auto-link`**：合同自动关联新增时间窗预筛逻辑（过滤过旧或过新的合同），配合后端权威匹配统一指纹规则；移除不可靠的 partner 名称校验，改用时间窗 + 指纹 + 唯一约束兜底。
+- **`XIT/ORG`**：任务列表实时刷新 —— 新增全局任务事件总线，任务变更实时推送；为任务列表添加作用域过滤逻辑，避免显示无关任务。
+- **`XIT/ORG`**：发布流程重构 —— 移除 `PublishTask` 组件和 publish 标签页，新增 `PublishOverlay` 模态发布挂单对话框；在市场页和运输页分别集成发布功能。
+- **`XIT/ORG`**：交易面板（`TradeOverlay`）UI 布局与交互优化，新增"创建合同"功能。
+- **`XIT/ORG,ARB`**：重构分类逻辑 —— 统一使用 PrUn 内置 `getMaterialCategoryName` 移除冗余本地 fallback；给 `ARB` 模块的分类选项添加字母排序；为 ORG 市场页面添加搜索、分类筛选和仅显示有挂单商品的功能；优化市场页面展示逻辑，按挂单状态和 ticker 排序商品列表；重构 i18n 分类查找逻辑，增加多种匹配变体。
+- **`XIT/ORG`**：新增挂单详情面板（`ListingDetail.vue`），实现挂单详情展示与取消功能；重构 `TaskList.vue`，新增 `DisplayRow` 类型区分任务/挂单行；扩展 `TaskList` 支持在 published 视图加载并展示 `OPEN` 状态的挂单。
+- **`XIT/CONTGEN+BPC`**：跨面板导入蓝图物料到合同生成器 —— 扩展 `ImportedContractItems` 类型支持回填合同名；优化 `parseActJson` 支持从顶层或 global 字段提取合同名；为 `CONTGEN` 添加 workspace 导入通道；为 `BPC` 新增"导入到 CONTGEN"按钮，自动净化蓝图名作为合同名。
+- **`XIT/CONTGEN`**：实现 ACT JSON 导入与总价拆分功能，支持多种输入形态并保留单价信息；新增 BUY/SELL 模板总价拆分功能，支持将总价按规则分配到物品单价中。
+- **`org-api`**：挂单与任务解耦（阶段 4）—— 新增挂单 API 模块与数据模型；重构 `TradeOverlay`/`MarketView`/`PublishTask` 组件适配新流程；移除 partial claim 父子任务相关逻辑；新增挂单解耦文档说明整体改造方案。
 
 ### 🔧 Improvements
 
-- **`XIT/ORG`**：UI 与 PrUn 整体风格统一 —— 全面切换 `PrunButton` / `Header` / `SectionHeader` / `Active` / `PrunLink` / `ActionBar` 等共享组件；按钮改为 `neutral/primary/danger/dark` 语义；表单控件走 `forms/Active`；Tabs 切换为 `C.Tabs.*` + `toggleIndicator` 阴影；容器统一 `C.Panel.panel`；`RoleBadge` 用 `C.Chip.chip` 渐变金属色。
-- **`XIT/ORG`**：LinkContract 移除未使用的 `candidateContracts` 与 `contractsStore` 导入。
-- **`XIT/ORG`**：任务统计（Stats）按生命周期进度固定展示顺序。
-- **`XIT/ORG`**：非组织用户在线上报从 ORG tile 迁移到扩展启动阶段，关闭面板不再影响上报。
-- **`XIT/ORG`**：错误处理补齐合法 `tab` 枚举值；`deleteTask` 区分"任务不存在"与"端点未部署"，输出中文友好提示；移除未使用的导入。
-- **`ORG`**：开发与生产 API 接口地址统一替换为新域 `prun.kilmer.cn`。
-- **依赖清理**：清理冗余依赖、废弃工具函数与无用代码；重新生成 `pnpm-lock.yaml`。
+- **`XIT/ACT`**：将计算所需资源量的 `floor` 改为 `ceil`，避免出现资源不足的情况。
+- **`XIT/ARB`**：批量更新侧边栏菜单与购物车的中文显示名称，同步购物车名称与数据迁移逻辑。
+- **`XIT/ORG`**：`MarketView` 替换 `SelectInput` 为原生 `select` 并优化样式；移除 `TaskDetail.vue` 中无用的调试日志；统一替换 CSS 自定义变量为硬编码色值。
+- **`XIT/ORG`**：优化表格列样式与布局 —— 移除冗余 `colgroup`、统一 `box-sizing`/`min-width`、调整各列宽度、为表格添加 `table-layout: fixed` 实现稳定布局。
+- **`XIT/ORG`**：移除表格展开列相关代码和样式，简化市场页面表格布局。
+- **`XIT/ORG`**：`MarketView` 按钮样式从 dark 改为 primary，统一页面内操作按钮主题色。
+- **`XIT/auto-link`**：重构 `auto-link` 为按需启停的活跃任务管理 —— 新增 `task-activity` 模块集中管理活跃任务集合，实现 `globalTick` 按需启停；改造 `claimTask`/`linkContract` 等接口，在任务状态变更时自动注册/注销活跃任务；移除全局无脑启动的 auto-link 轮询，改为任务状态变化触发启停；新增 `recoverActiveTasks` 函数。
+- **`org-api`**：简化导入语句，合并类型导入。
+- **依赖升级**：升级 `socket.io-parser`、`vue`、`@vitejs/plugin-vue` 等多个依赖包到最新版本，移除 `@types/uuid` 依赖。
+- **依赖安全**：升级 `postcss` 到 8.5.24、`brace-expansion` 到 5.0.8，修复 Dependabot 告警（postcss sourceMappingURL Path Traversal、brace-expansion DoS）。
+- **`sidebar`**：`XIT ORG` 快捷键重绑（原 `XIT FACTION` 已废弃）。
 
 ### 🐛 Bug Fixes
 
-- **`XIT/ORG`**：修复运行时 `TypeError` —— PrUn 并没有 `C.Panel` / `C.Chip` 命名空间（之前误用了猜测的类名），统一改回真正的 PrUn CSS module 路径，避免 `RoleBadge` / `TaskCard` / `TaskDetail` / `PublishTask` / `AuthOverlay` / `LinkContract` 启动崩溃。
-- **`XIT/ORG`**：修复任务卡片类型显示与轮询逻辑问题。
-- **`XIT/ORG`**：修复发布者创建合同时模板反转错误 —— `onCreateContract` 改用当前操作者身份（`publisherId === currentUser.id`）判断是否反转，替代硬编码的 `contractCreator`；自动匹配优先尝试原始模板（发布者视角不反转），反转模板作为 fallback；`linkContract` 根据实际匹配模板推断正确的 `contractCreator`。
+- **`XIT/ORG`**：弹窗限制在 ORG 窗口内，并修正 PrUn 身份来源 —— `TradeOverlay`/`LinkContract` 改为 `position: absolute` 避免覆盖整个视口；`ORG.vue` 容器加 `position: relative + min-height: 0` 作为定位锚点；`main.ts`/`AuthOverlay.vue` 把当前 PrUn 身份来源从 `usersStore.all[0]` 改为 `userDataStore.username`，避免同公司其他用户名被误读。
+- **`org-api`**：完成旧版接取接口迁移，删除废弃 `claimTask` 相关代码（`types.ts`、`tasks.ts` 注释、所有调用方），接取统一走 `listings.claimListing`；`TaskDetail.vue` 移除直接接取按钮。
+- **`org-api`**：修复接取挂单后合同自动关联逻辑 —— 为 `claimListing` 添加接取成功后的活跃任务通知；区分新老任务的合同自动关联规则，简化新架构下的创建方判断。
+- **`org-api, task-detail`**：修复自动关联和删除权限逻辑 —— 移除合同状态 OPEN 过滤，支持终态合同自动关联；调整子任务删除权限，允许终态下删除 partial claim 子任务；简化合同关联的模板和货币解析逻辑。
+- **`auto-link`**：修复 session 过期后 auto-link 持续发送 401 请求 —— `ORG.vue` 在 `onUnauthorizedCallback` 中加入 `stopGlobalAutoLink`；`auto-link.ts` 在 `globalTick` 检测到 401/403 自动停止轮询；`client.ts` 添加 `sessionExpired` 标志防止并发 401 重复触发回调；`auth.ts` 在登录/注册成功后重置标志。
+
+### 🔒 Security
+
+- **`isValidUrl`**：复用 `SAFE_SCHEMES` 白名单限制 http/https 协议，与 `isSafeUrl` 行为一致；修复 CodeQL `js/incomplete-url-substring-sanitization` 告警。
+- **`formatDateTime`**：移除无操作的 `s.replace(' ', ' ')` 自身替换，修复 CodeQL `js/identity-replacement` 告警。
 
 ### 📝 Docs
 
-- **`ORG`**：新增自动关联合同方案设计文档 `AUTO_LINK_CONTRACT.md`，标注 B+C 已落地并列出已知简化点。
+- **XIT 命令一览**：新增 `XIT命令一览.txt`，集中列出全部 `XIT` 命令的用途与参数。
+- **`org-api/listings-decoupling`**：新增挂单与任务解耦的设计文档。
 
 ## 26.7.24 (后续)
 
