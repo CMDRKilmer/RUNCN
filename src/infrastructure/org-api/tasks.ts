@@ -79,6 +79,16 @@ export async function releaseTask(taskId: string): Promise<ReleaseTaskResult> {
   return result;
 }
 
+// 解绑合同：清空 task.contractId / contractCreator，状态保持 AWAITING_CONTRACT。
+//   用于「误关联 / 关联错误合同」后的修正，以及 release 之前的清理
+//   （后端 releaseListingClaim 在 contract_id 非空时返回 400）。
+//   调用方负责确认 task 仍处于可解绑的状态（后端 service 也会再次校验）。
+export async function unlinkContract(taskId: string): Promise<OrgTask> {
+  const task = await request<OrgTask>(`/tasks/${taskId}/unlink-contract`, { method: 'POST' });
+  notifyTaskUpdated(task);
+  return task;
+}
+
 export async function cancelTask(taskId: string, reason?: string): Promise<OrgTask> {
   const task = await request<OrgTask>(`/tasks/${taskId}/cancel`, {
     method: 'POST',

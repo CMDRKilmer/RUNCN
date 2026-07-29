@@ -3,6 +3,7 @@ import type { OrgTask, OrgUser, TaskStatus } from './types';
 import { listTasks } from './tasks';
 import { fetchMe } from './auth';
 import { updateUser } from './session';
+import { HttpError } from './client';
 
 const POLL_INTERVAL_MS = 30_000;
 const ROLE_REFRESH_INTERVAL_MS = 60_000; // 每分钟刷新一次 role
@@ -58,6 +59,13 @@ async function pollOnce(callbacks: PollCallbacks): Promise<void> {
     // 推进游标：空结果回退为当前时间，避免下次重复拉取相同区间。
     lastPollAt = tasks.length > 0 ? tasks[tasks.length - 1].updatedAt : new Date().toISOString();
   } catch (err) {
+    // 401/403 → session 已失效，停止全局轮询避免每 30s 重发同一请求刷 401。
+    // session 清理 + AuthOverlay 显示由 client.ts 的 onUnauthorizedCallback 负责。
+    if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+      console.warn('[polling] Auth expired, stopping polling');
+      stopPolling();
+      return;
+    }
     callbacks.onError(err);
   }
 
@@ -73,8 +81,14 @@ async function pollOnce(callbacks: PollCallbacks): Promise<void> {
         updateUser(me);
         callbacks.onRoleChanged(oldRole, me.role);
       }
-    } catch {
-      // role 刷新失败不阻塞主轮询
+    } catch (err) {
+      // 401/403 时也停止轮询，避免每分钟 fetchMe 持续刷 401
+      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+        console.warn('[polling] Auth expired during role refresh, stopping polling');
+        stopPolling();
+        return;
+      }
+      // 其他错误（含网络抖动）不阻塞主轮询
     }
   }
 }

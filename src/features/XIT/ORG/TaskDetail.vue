@@ -243,9 +243,23 @@ async function updateTask(op: () => Promise<{ task: OrgTask } | OrgTask>) {
 }
 
 async function onRelease() {
-  const result = await tasksApi.releaseTask(localTask.value.id);
-  localTask.value = result.task;
-  emit('updated', result.task);
+  loading.value = true;
+  error.value = '';
+  try {
+    // release 之前必须先解绑合同：后端 releaseListingClaim 在 contract_id 非空时
+    // 返回 400 'Task already has a contract linked; unlink before release'。
+    // 若 AWAITING_CONTRACT / IN_PROGRESS 状态下已关联合同，先 unlink 再 release。
+    if (localTask.value.contractId) {
+      localTask.value = await tasksApi.unlinkContract(localTask.value.id);
+    }
+    const result = await tasksApi.releaseTask(localTask.value.id);
+    localTask.value = result.task;
+    emit('updated', result.task);
+  } catch (err) {
+    error.value = err instanceof HttpError ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function onCancel() {
