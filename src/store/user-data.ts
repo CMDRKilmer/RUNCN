@@ -50,6 +50,7 @@ export const initialUserData = deepFreeze({
       ['设置', 'XIT SET'],
       ['帮助', 'XIT HELP'],
       ['计划', 'XIT JH'],
+      ['琉璃', 'XIT ORG'],
       ['\u8d2d\u7269\u8f66', 'XIT CART'],
     ] as [string, string][],
     buffers: [] as [string, number, number][],

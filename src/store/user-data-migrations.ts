@@ -17,6 +17,16 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '29.07.2026 Rebind 琉璃 sidebar entry to XIT ORG',
+    userData => {
+      const sidebar: [string, string][] = userData.settings.sidebar;
+      const idx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT FACTION');
+      if (idx >= 0) {
+        sidebar[idx][1] = 'XIT ORG';
+      }
+    },
+  ],
+  [
     '15.07.2026 Convert dark mode to invert mode',
     userData => {
       const dm = userData.settings.darkMode;
