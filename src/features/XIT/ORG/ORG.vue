@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, readonly, ref } from 'vue';
-import type { AuthSession, OrgUser, TaskType } from '@src/infrastructure/org-api/types';
+import type { AuthSession, OrgTask, OrgUser, TaskType } from '@src/infrastructure/org-api/types';
 import { getStoredSession, setOnUnauthorizedCallback } from '@src/infrastructure/org-api/client';
 import * as authApi from '@src/infrastructure/org-api/auth';
 import {
@@ -56,15 +56,36 @@ provide('orgMarketPrefillSet', (data: typeof pendingPublishPrefill.value) => {
   pendingPublishPrefill.value = data;
 });
 
+// 任务更新事件总线（实时渲染通道）：
+//   - auto-link 触发 onLinked / onStatusSynced 时调用 notifyTaskUpdated(task)
+//   - polling 触发 onTaskStatusChanged 时也调用 notifyTaskUpdated(task)
+//   - TaskList / TaskDetail 订阅 onTaskUpdated，自行决定是否替换本地行
+// 这样"我的接取/我的发布"列表可以在 5 秒级 auto-link 节奏内看到任务状态变化。
+type TaskEventListener = (task: OrgTask) => void;
+const taskEventListeners: TaskEventListener[] = [];
+provide('orgTaskEvents', {
+  subscribe: (fn: TaskEventListener) => {
+    taskEventListeners.push(fn);
+    return () => {
+      const idx = taskEventListeners.indexOf(fn);
+      if (idx >= 0) taskEventListeners.splice(idx, 1);
+    };
+  },
+});
+function notifyTaskUpdated(task: OrgTask) {
+  for (const fn of taskEventListeners) fn(task);
+}
+
 // 任务状态变化通知（架构 §12.11）
 const pollCallbacks: PollCallbacks = {
   onTaskStatusChanged: (task, oldStatus, newStatus) => {
     console.info(`[ORG] Task ${task.id} status: ${oldStatus} → ${newStatus}`);
-    // TODO: 接入 PrUn NOTS 通知（架构 §7.3 双通道通知）
-    // 暂用 console + 面板内 Badge（TaskList 内通过轮询刷新自动反映）
+    // 实时推送到 TaskList / TaskDetail（5 秒级刷新通道）
+    notifyTaskUpdated(task);
   },
   onNewTask: task => {
     console.info(`[ORG] New task: ${task.id}`);
+    notifyTaskUpdated(task);
   },
   onRoleChanged: (oldRole, newRole) => {
     console.info(`[ORG] Role changed: ${oldRole} → ${newRole}`);
@@ -89,7 +110,12 @@ onMounted(() => {
     // auto-link 现在按需：接取任务（listings.claimListing）成功后才注册到活跃集合，
     // globalTick interval 才会起来。面板 mount 时不再无脑起。
     // 这里仍调一次 startGlobalAutoLink 以初始化 callbacks 占位。
-    startGlobalAutoLink();
+    // 5 秒级自动 link / sync 触发时通过 callbacks 转发到 taskEvents 总线，
+    // TaskList 订阅后即时更新列表行（替代原本只靠 30s polling）。
+    startGlobalAutoLink({
+      onLinked: task => notifyTaskUpdated(task),
+      onStatusSynced: task => notifyTaskUpdated(task),
+    });
     // 恢复扫描：把刷新前已在进行中的任务重新拉回活跃集合，
     // 否则 module-level 单例的 activeLinkedTaskIds 是空的，interval 不会起。
     void recoverActiveTasks();
@@ -111,7 +137,11 @@ function onAuthenticated(newSession: AuthSession) {
   setCurrentUser(newSession.user);
   startPolling(pollCallbacks);
   // 登入后初始化 auto-link callbacks；interval 仍按活跃任务数量按需启停。
-  startGlobalAutoLink();
+  // 同样注册 onLinked / onStatusSynced，让 TaskList 即时看到 link / sync 结果。
+  startGlobalAutoLink({
+    onLinked: task => notifyTaskUpdated(task),
+    onStatusSynced: task => notifyTaskUpdated(task),
+  });
   // 恢复扫描：与 mount 时相同，登入后把已有进行中的任务注册到活跃集合。
   void recoverActiveTasks();
 }

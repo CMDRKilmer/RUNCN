@@ -4,6 +4,7 @@
 //   amount 是接取量（≤ remainingAmount）；部分接取也走同一端点。
 
 import { computed, ref, watch } from 'vue';
+import type { OrgTask } from '@src/infrastructure/org-api/types';
 import * as listingsApi from '@src/infrastructure/org-api/listings';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
@@ -12,9 +13,9 @@ import Header from '@src/components/Header.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import ActionBar from '@src/components/ActionBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
-import Active from '@src/components/forms/Active.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import { sendTaskToContd } from './utils';
 import { fixed2 } from '@src/utils/format';
 
 type Side = 'BUY' | 'SELL';
@@ -48,7 +49,11 @@ const materialName = computed(() => getMaterialName(material.value) ?? props.tic
 const amount = ref<number>(props.maxAmount);
 const error = ref('');
 const loading = ref(false);
-const claimedTaskId = ref<string | null>(null);
+// 接取成功后保存完整 task 对象，供"创建合同"按钮调 sendTaskToContd。
+// 任务一定有 listingId（来自 listing 接取路径），无需反转模板。
+const claimedTask = ref<OrgTask | null>(null);
+const claimedTaskId = computed(() => claimedTask.value?.id ?? null);
+const creatingContract = ref(false);
 
 const canSubmit = computed(() => {
   if (loading.value) return false;
@@ -94,12 +99,32 @@ async function onClaim() {
     //   task 是新建的反向合同载体（AWAITING_CONTRACT）
     //   listing 扣 remaining 后的最新快照
     const result = await listingsApi.claimListing(props.listingId, amount.value);
-    claimedTaskId.value = result.task.id;
+    claimedTask.value = result.task;
     emit('claimed');
   } catch (err) {
     error.value = err instanceof HttpError ? err.message : String(err);
   } finally {
     loading.value = false;
+  }
+}
+
+// 在 PrUn CONTD 里创建新合同并自动填入 task 的合同条件。
+// 新架构：task 一定有 listingId（来自 listing 接取），template 不需要反转。
+async function onCreateContract() {
+  if (!claimedTask.value) return;
+  creatingContract.value = true;
+  error.value = '';
+  try {
+    await sendTaskToContd(
+      claimedTask.value.contractJson,
+      claimedTask.value.type,
+      false, // creatorIsPublisher（新架构：合同由 claimer 创建）
+      true, // taskHasListing：标记走"不反转"分支
+    );
+  } catch (err) {
+    error.value = err instanceof HttpError ? err.message : String(err);
+  } finally {
+    creatingContract.value = false;
   }
 }
 
@@ -130,25 +155,34 @@ function onClose() {
       <div :class="$style.form">
         <!--
           数量自定义控件：NumberInput + ± 按钮组。
-          - 上限是原任务 amount（裁剪）
-          - 默认填满（接取全部）
+          布局：上下两行
+            1) NumberInput（占满宽度，行高清晰）
+            2) 6 个 ± 按钮 + MAX 按钮（按比例分摊宽度）
+          上限 = maxAmount；默认填满（接取全部）。
         -->
-        <Active label="接取数量">
-          <div :class="$style.qty">
+        <div :class="$style.qtyBlock">
+          <div :class="$style.qtyInputRow">
+            <span :class="$style.qtyLabel">接取数量</span>
+            <NumberInput v-model="amount" :min="1" :max="maxAmount" :class="$style.qtyInput" />
+          </div>
+          <div :class="$style.qtyButtons">
             <button :class="$style.qtyBtn" type="button" @click="inc(-100)">−100</button>
             <button :class="$style.qtyBtn" type="button" @click="inc(-10)">−10</button>
             <button :class="$style.qtyBtn" type="button" @click="inc(-1)">−1</button>
-            <NumberInput v-model="amount" :min="1" :max="maxAmount" />
             <button :class="$style.qtyBtn" type="button" @click="inc(1)">+1</button>
             <button :class="$style.qtyBtn" type="button" @click="inc(10)">+10</button>
             <button :class="$style.qtyBtn" type="button" @click="inc(100)">+100</button>
-            <button :class="$style.qtyBtn" type="button" @click="amount = maxAmount">MAX</button>
+            <button
+              :class="[$style.qtyBtn, $style.qtyBtnMax]"
+              type="button"
+              @click="amount = maxAmount">
+              MAX
+            </button>
           </div>
           <div :class="$style.qtyHint">
             挂单剩余可接取量：<strong>{{ maxAmount }}</strong>
-            （接取后将扣减挂单剩余量，反向合同的 amount = 接取量）
           </div>
-        </Active>
+        </div>
 
         <div :class="$style.total">
           预估总价：<strong>{{ fixed2(totalCost) }}</strong> {{ currency }}
@@ -156,18 +190,22 @@ function onClose() {
 
         <div v-if="error" :class="$style.error">{{ error }}</div>
 
-        <div v-if="claimedTaskId" :class="$style.success">
-          接取成功，任务 #{{ claimedTaskId }} 已进入「待关联合同」状态。
-          <span v-if="amount < maxAmount">挂单剩余 {{ maxAmount - amount }} 仍在市场上。</span>
+        <div v-if="claimedTask" :class="$style.success">
+          <div :class="$style.successMsg">
+            接取成功，任务 #{{ claimedTaskId }} 已进入「待关联合同」状态。
+            <span v-if="amount < maxAmount">挂单剩余 {{ maxAmount - amount }} 仍在市场上。</span>
+          </div>
+          <div :class="$style.successActions">
+            <PrunButton primary inline :disabled="creatingContract" @click="onCreateContract">
+              {{ creatingContract ? '创建中…' : '创建合同' }}
+            </PrunButton>
+            <PrunButton dark inline @click="onClose">关闭</PrunButton>
+          </div>
         </div>
 
-        <ActionBar>
+        <ActionBar v-if="!claimedTask">
           <PrunButton dark inline type="button" @click="onClose">关闭</PrunButton>
-          <PrunButton
-            primary
-            type="button"
-            :disabled="!canSubmit || !!claimedTaskId"
-            @click="onClaim">
+          <PrunButton primary type="button" :disabled="!canSubmit" @click="onClaim">
             {{ loading ? '接取中…' : '接取此任务' }}
           </PrunButton>
         </ActionBar>
@@ -233,27 +271,53 @@ function onClose() {
   gap: 6px;
   margin-top: 6px;
 }
-.qty {
+.qtyBlock {
   display: flex;
-  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+}
+.qtyInputRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.qtyLabel {
+  flex: 0 0 80px;
+  font-size: 12px;
+  color: rgb(200, 208, 214);
+}
+.qtyInput {
+  flex: 1;
+}
+.qtyButtons {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
   gap: 2px;
 }
 .qtyBtn {
-  padding: 0 8px;
+  padding: 6px 0;
   border: 1px solid rgb(61, 74, 84);
   background: rgb(26, 33, 38);
   color: rgb(226, 230, 233);
   cursor: pointer;
   font: inherit;
   font-size: 11px;
+  text-align: center;
+  border-radius: 2px;
+  transition: border-color 0.1s ease;
 }
 .qtyBtn:hover {
   border-color: rgb(255, 176, 0);
 }
+.qtyBtnMax {
+  background: rgb(48, 38, 16);
+  border-color: rgb(255, 176, 0);
+  color: rgb(255, 200, 64);
+  font-weight: 600;
+}
 .qtyHint {
   font-size: 11px;
   color: rgb(148, 158, 166);
-  margin-top: 4px;
 }
 .qtyHint strong {
   color: rgb(255, 200, 64);
@@ -276,6 +340,19 @@ function onClose() {
 .success {
   color: var(--text-positive, #5cb85c);
   font-size: 12px;
-  padding: 4px 0;
+  padding: 8px 10px;
+  background: rgba(92, 184, 92, 0.08);
+  border: 1px solid rgba(92, 184, 92, 0.3);
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.successMsg {
+  line-height: 1.5;
+}
+.successActions {
+  display: flex;
+  gap: 8px;
 }
 </style>

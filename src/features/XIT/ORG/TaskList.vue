@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { OrgTask, OrgListing, OrgUser, PollScope } from '@src/infrastructure/org-api/types';
 import * as tasksApi from '@src/infrastructure/org-api/tasks';
 import * as listingsApi from '@src/infrastructure/org-api/listings';
@@ -108,6 +108,33 @@ function onTaskUpdated(updated: OrgTask) {
     rows.value.splice(idx, 1, { kind: 'task', task: updated });
   }
 }
+
+// 订阅全局任务事件总线（ORG.vue 提供）：
+//   - onLinked / onStatusSynced 5 秒级触发，实时刷新"我的接取/发布"列表
+//   - 过滤条件：仅当 task 与当前 scope 匹配时才替换（避免列表里冒出无关任务）
+const taskEvents = inject<{
+  subscribe: (fn: (task: OrgTask) => void) => () => void;
+} | null>('orgTaskEvents', null);
+
+function isInScope(task: OrgTask): boolean {
+  // shipping scope：只关心 SHIP 任务
+  if (props.scope === 'shipping') return task.type === 'SHIP';
+  // published / claimed：用户作为 publisher 或 claimer 的任务
+  // （实际 visibility 由后端控制；这里宽松匹配让 publish/claim 双向都收到）
+  return true;
+}
+
+let unsubscribe: (() => void) | null = null;
+onMounted(() => {
+  if (!taskEvents) return;
+  unsubscribe = taskEvents.subscribe(task => {
+    if (!isInScope(task)) return;
+    onTaskUpdated(task);
+  });
+});
+onBeforeUnmount(() => {
+  if (unsubscribe) unsubscribe();
+});
 
 // 简单刷新：外部可通过轮询间接刷新；详情页关闭后重新拉取
 function onDetailClosed() {
