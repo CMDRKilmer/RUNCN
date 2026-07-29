@@ -64,6 +64,28 @@ const dismissedTaskIds = new Set<string>();
 //     task.type 已经是 claimer 视角（接取者该签的合同 type）
 //     不需要反转
 //   SHIP 不反转（仅 publisher 创建）
+
+// 时间窗预筛：合同 date 必须在 task 关键时间点附近，避免 link 到很老 / 未来的合同。
+// 规则：
+//   - 合同 date >= task.claimed_at - 1h（玩家接取前 1 小时内签的也允许，
+//     避免接取时同时签合同的边缘时序）
+//   - 合同 date <= task.claimed_at + 7 天（任务 deadline 期限内）
+// partner.name 严格 username 比对不可靠（PrUn partner.name 是公司名 "Quantum
+// Pulse Inc"，不是 username "kolo"），所以**关掉** partner 校验，依赖
+// 时间窗 + 严格 fingerprint + 单合同/单 task 的 UNIQUE 约束兜底。
+function contractInTimeWindow(contract: PrunApi.Contract, task: OrgTask): boolean {
+  // contract.date 是 PrUn DateTime { timestamp: number }；task 时间是 ISO 字符串
+  const contractMs = contract.date?.timestamp;
+  const taskClaimed = task.claimedAt ?? task.createdAt;
+  if (typeof contractMs !== 'number' || !taskClaimed) return true;
+  const claimedMs = new Date(taskClaimed).getTime();
+  if (Number.isNaN(claimedMs)) return true;
+  // 提前 1 小时（玩家可能同时接取+签合同）
+  if (contractMs < claimedMs - 60 * 60 * 1000) return false;
+  if (contractMs > claimedMs + 7 * 24 * 60 * 60 * 1000) return false;
+  return true;
+}
+
 function effectiveTaskTemplate(task: OrgTask): TaskContractJson['template'] {
   const tmpl = task.contractJson.template;
   if (tmpl === 'SHIP') return 'SHIP';
@@ -90,13 +112,27 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
   if (!all) {
     return null;
   }
-  // 发布者发送的合同不反转：优先用原始模板匹配，失败再尝试反转模板
+  // 尝试三个 template：
+  //   - task contractJson 原 template（claimer 视角：新架构下与实际合同一致）
+  //   - 反转后 template（publisher 视角兼容老 task）
+  //   - SHIP（独立兜底）
+  // PrUn 玩家合同在 CONTS 列表里 wire contractType 通常为 null（accept 后
+  // 服务端清空），仅凭 contract.contractType 区分 BUY/SELL 不可靠——
+  // 见 contract-link.ts:inferContractTemplate 注释。
+  // 实际匹配由 fingerprint 严格比对决定，多试一个 template 只是为了兼容
+  // 老架构的反转语义。
   const invertedTemplate = effectiveTaskTemplate(session.task);
   const originalTemplate = session.task.contractJson.template;
-  const templatesToTry =
-    invertedTemplate !== originalTemplate
-      ? [originalTemplate, invertedTemplate]
-      : [originalTemplate];
+  const orderedTemplates: TaskContractJson['template'][] = [];
+  if (originalTemplate === 'SHIP' || invertedTemplate === 'SHIP') {
+    orderedTemplates.push('SHIP');
+  }
+  if (originalTemplate !== 'SHIP') orderedTemplates.push(originalTemplate);
+  if (invertedTemplate !== originalTemplate && invertedTemplate !== 'SHIP') {
+    orderedTemplates.push(invertedTemplate);
+  }
+  // 去重
+  const templatesToTry = Array.from(new Set(orderedTemplates));
 
   for (const contract of all) {
     if (session.dismissedContractIds.has(contract.id)) continue;
@@ -105,6 +141,13 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
     // 若按 OPEN 过滤，错过这一窗口后就永远关联不上。
     // 终态合同（CANCELLED / FULFILLED / TERMINATED 等）被 link 后由后端
     // sync-status 立即把任务推到对应终态，行为可接受。
+    // 时间窗预筛：避免 link 到历史 fingerprint 相同的旧合同。
+    // 严格 partner 校验因 PrUn partner.name 是公司名（"Quantum Pulse Inc"）
+    // 而非 username（"kolo"）无法生效；改用时间窗 + 严格 fingerprint + 单
+    // 合同/单 task 的 UNIQUE 约束兜底。
+    if (!contractInTimeWindow(contract, session.task)) {
+      continue;
+    }
     for (const tmpl of templatesToTry) {
       const taskJsonForMatch: TaskContractJson = {
         ...session.task.contractJson,
@@ -164,7 +207,6 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
         fingerprint: contractToFingerprint(match.contract),
         autoLink: false,
       });
-      console.log('[auto-link] backend verify result:', verifyResult);
       if (!verifyResult.matched) {
         console.log('[auto-link] backend rejected match, reason:', verifyResult.reason);
         session.dismissedContractIds.add(match.contractId);
