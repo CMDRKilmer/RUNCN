@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { cxosStore } from '@src/infrastructure/prun-api/data/cxos';
+import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { deleteExchangeOrderFromClick } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
 import { fixed0, formatCurrency } from '@src/utils/format';
+import { sleep } from '@src/utils/sleep';
 import { isEmpty } from 'ts-extras';
 
 const orders = computed(() => cxosStore.all.value);
@@ -50,8 +52,8 @@ const filteredOrders = computed<OrderWithRank[]>(() => {
     return true;
   });
 
-  // 按 (交易所, 类型) 分组计算排名
-  const groups = new Map<string, OrderWithRank[]>();
+  // 通过市场订单簿计算真实排名
+  const brokers = cxobStore.all.value;
   const result: OrderWithRank[] = [];
   for (const o of filtered) {
     const withRank: OrderWithRank = { ...o, rank: '' };
@@ -60,22 +62,24 @@ const filteredOrders = computed<OrderWithRank[]>(() => {
       result.push(withRank);
       continue;
     }
-    const key = `${o.exchange.code}|${o.type}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(withRank);
-    result.push(withRank);
-  }
-  for (const [, group] of groups) {
-    const isSelling = group[0].type === 'SELLING';
-    group.sort((a, b) => {
-      const diff = a.limit.amount - b.limit.amount;
-      return isSelling ? diff : -diff;
-    });
-    let rank = 0;
-    for (const o of group) {
-      rank++;
-      o.rank = `#${rank}`;
+    // 查找匹配的订单簿（同交易所 + 同 ticker）
+    const broker = brokers?.find(
+      b => b.exchange.code === o.exchange.code && b.material.ticker === o.material.ticker,
+    );
+    if (!broker) {
+      withRank.rank = '?';
+      result.push(withRank);
+      continue;
     }
+    const orders = o.type === 'SELLING' ? broker.sellingOrders : broker.buyingOrders;
+    // 按限价排序：卖单从低到高，买单从高到低
+    const sorted = [...orders].sort((a, b) => {
+      const diff = a.limit.amount - b.limit.amount;
+      return o.type === 'SELLING' ? diff : -diff;
+    });
+    const idx = sorted.findIndex(x => x.id === o.id);
+    withRank.rank = idx >= 0 ? `#${idx + 1}` : '?';
+    result.push(withRank);
   }
 
   // 按交易所优先级排序, 同交易所按材料代码排序
@@ -119,6 +123,71 @@ const typeMap: Record<string, { label: string; cls: string }> = {
   BUYING: { label: '买入', cls: 'type-buying' },
   SELLING: { label: '卖出', cls: 'type-selling' },
 };
+
+// ── 一键加载市场排名 ──
+const missingTickers = computed(() => {
+  const brokers = cxobStore.all.value;
+  if (!brokers || !filteredOrders.value) return 0;
+  const loaded = new Set<string>();
+  for (const b of brokers) loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+  return filteredOrders.value.filter(
+    o => o.status !== 'FILLED' && !loaded.has(`${o.exchange.code}|${o.material.ticker}`),
+  ).length;
+});
+
+const loadingRanks = ref(false);
+
+async function loadAllRanks() {
+  loadingRanks.value = true;
+  const brokers = cxobStore.all.value ?? [];
+  const loaded = new Set<string>();
+  for (const b of brokers) loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+
+  const toLoad: { key: string; command: string }[] = [];
+  for (const o of filteredOrders.value) {
+    if (o.status === 'FILLED') continue;
+    const key = `${o.exchange.code}|${o.material.ticker}`;
+    if (loaded.has(key)) continue;
+    loaded.add(key);
+    toLoad.push({
+      key,
+      command: `CXPO ${o.material.ticker}.${o.exchange.code}`,
+    });
+  }
+  if (toLoad.length === 0) {
+    loadingRanks.value = false;
+    return;
+  }
+
+  const opened: Element[] = [];
+  for (const { command } of toLoad) {
+    const win = await showBuffer(command, { force: true, autoSubmit: true });
+    if (win) opened.push(win);
+  }
+
+  // 轮询等待数据，最多 10 秒
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    const allReady = toLoad.every(({ key }) => {
+      const [exchange, ticker] = key.split('|');
+      return cxobStore.all.value?.some(
+        b => b.exchange.code === exchange && b.material.ticker === ticker,
+      );
+    });
+    if (allReady) break;
+    await sleep(300);
+  }
+
+  // 关闭临时窗口
+  for (const win of opened) {
+    const buttons = win.getElementsByClassName(C.Window.button);
+    const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
+      HTMLElement | undefined;
+    closeBtn?.click();
+  }
+
+  loadingRanks.value = false;
+}
 
 // ── 切换筛选 ──
 function toggleStatus(s: string) {
@@ -166,6 +235,14 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
           {{ statusMap[s].label }}
         </PrunButton>
       </div>
+      <PrunButton
+        v-if="missingTickers > 0"
+        dark
+        inline
+        :disabled="loadingRanks"
+        @click="loadAllRanks">
+        {{ loadingRanks ? '加载中…' : `加载排名 (${missingTickers})` }}
+      </PrunButton>
       <div :class="$style.filterGroup">
         <label :class="$style.filterLabel">交易所</label>
         <select v-model="exchangeFilter" :class="$style.select">
