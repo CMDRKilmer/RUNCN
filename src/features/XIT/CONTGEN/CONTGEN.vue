@@ -164,19 +164,12 @@ const output = computed<ContractJson>(() => {
     cleanedItems.length > 0 && cleanedItems.every(it => typeof it.price === 'number');
   if (
     price.value !== undefined &&
-    price.value !== null &&
-    price.value !== '' &&
     price.value >= 0 &&
     (isShip.value || !allRowsHaveExplicitPrice)
   ) {
     result.price = Number(price.value);
   }
-  if (
-    deadline.value !== undefined &&
-    deadline.value !== null &&
-    deadline.value !== '' &&
-    deadline.value > 0
-  ) {
+  if (deadline.value !== undefined && deadline.value > 0) {
     result.deadline = Number(deadline.value);
   }
   return result;
