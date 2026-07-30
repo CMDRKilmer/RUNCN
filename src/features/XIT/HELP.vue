@@ -11,6 +11,8 @@ const categoryMap: Record<string, string> = {
   CXOS: '经济与财务',
   CXTS: '经济与财务',
   FXTS: '经济与财务',
+  FX: '经济与财务',
+  FOREX: '经济与财务',
   CONTS: '合同',
   CONTSS: '合同',
   CONTC: '合同',
@@ -80,11 +82,13 @@ const grouped = computed(() => {
   for (const cat of categoryOrder) map.set(cat, []);
 
   for (const entry of xit.registry) {
-    const commands = castArray(entry.command);
-    const cmd = commands[0];
-    const aliases = commands.slice(1);
+    const commands = castArray<string>(entry.command);
+    const cmd: string = commands[0];
+    const aliases: string[] = commands.slice(1);
     const cat = categoryMap[cmd] ?? '其他';
-    if (!map.has(cat)) map.set(cat, []);
+    if (!map.has(cat)) {
+      map.set(cat, []);
+    }
 
     let name: string;
     if (typeof entry.name === 'string') {
