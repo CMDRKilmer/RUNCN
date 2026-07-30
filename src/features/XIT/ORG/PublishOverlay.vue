@@ -214,13 +214,16 @@ function resetForm() {
 
 <style module>
 .backdrop {
-  position: fixed;
+  /* position: absolute so the popup is constrained to the closest
+     positioned ancestor (ORG window tile frame body), not the viewport. */
+  position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  overflow: auto;
 }
 .modal {
   background: var(--panel-background, #1a1a1a);
