@@ -310,7 +310,7 @@ function onPublishedShipping() {
             <th>标题</th>
             <th>物品</th>
             <th>{{ scope === 'shipping' ? '路线' : '位置/路线' }}</th>
-            <th>{{ scope === 'shipping' ? '发布者' : '状态' }}</th>
+            <th>发布者</th>
             <th>价格</th>
             <th>状态</th>
           </tr>
