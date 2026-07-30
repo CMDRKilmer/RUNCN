@@ -98,7 +98,7 @@ const grouped = computed(() => {
       name = entry.description.split('\n')[0] || cmd;
     }
 
-    map.get(cat)!.push({ cmd, aliases, name, description: entry.description });
+    map.get(cat)!.push({ cmd, aliases, name, description: entry.description, category: cat });
   }
   return [...map.entries()].filter(([, list]) => list.length > 0);
 });
