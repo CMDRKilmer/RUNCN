@@ -22,6 +22,7 @@ import './FIN/FIN';
 import './FIN/FINPR';
 import './FINBS/FINBS';
 import './FINCH/FINCH';
+import './FX/FX';
 import './FXTS/FXTS';
 import './GIF/GIF';
 import './HEALTH';
