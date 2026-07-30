@@ -27,9 +27,19 @@ const exchangeStationMap: Record<string, string> = {
 const exchanges = Object.keys(exchangeStationMap);
 const exchange = ref(exchanges[0]);
 const useBaseInv = ref(true);
+const timeOffset = ref<'now' | '24' | '48'>('now');
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'JIANZHUWEIXIU';
+
+const repairMaterialsKey = computed<'repairMaterials' | 'repairMaterials24' | 'repairMaterials48'>(
+  () =>
+    timeOffset.value === '24'
+      ? 'repairMaterials24'
+      : timeOffset.value === '48'
+        ? 'repairMaterials48'
+        : 'repairMaterials',
+);
 
 function onGenerateClick() {
   if (!site.value) {
@@ -52,7 +62,8 @@ function onGenerateClick() {
 
   const materials: Record<string, number> = {};
   for (const platform of site.value.platforms) {
-    for (const { material, amount } of platform.repairMaterials) {
+    const repairMaterials = platform[repairMaterialsKey.value] ?? [];
+    for (const { material, amount } of repairMaterials) {
       materials[material.ticker] = (materials[material.ticker] ?? 0) + amount;
     }
   }
@@ -133,6 +144,15 @@ function onGenerateClick() {
       </Active>
       <Active label="扣除基地库存" tooltip="扣除基地仓库中已有的材料后再计算采购量。">
         <RadioItem v-model="useBaseInv">扣除基地库存</RadioItem>
+      </Active>
+      <Active label="时间偏移" tooltip="对应 BRA 面板上的「现在」「+24h」「+48h」预览。">
+        <SelectInput
+          v-model="timeOffset"
+          :options="[
+            { label: '现在', value: 'now' },
+            { label: '+24h', value: '24' },
+            { label: '+48h', value: '48' },
+          ]" />
       </Active>
       <Commands>
         <PrunButton primary @click="onGenerateClick">生成</PrunButton>
