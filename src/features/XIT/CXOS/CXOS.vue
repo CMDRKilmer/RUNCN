@@ -8,6 +8,7 @@ import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { deleteExchangeOrderFromClick } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
 import { fixed0, formatCurrency } from '@src/utils/format';
+import { getMaterialNameByTicker } from '@src/util';
 import { isEmpty } from 'ts-extras';
 
 const orders = computed(() => cxosStore.all.value);
@@ -123,6 +124,13 @@ const typeMap: Record<string, { label: string; cls: string }> = {
   SELLING: { label: '卖出', cls: 'type-selling' },
 };
 
+// 表格里金额显示：formatCurrency 默认用玩家主币符号，但订单实际货币可能是
+// ICA/NCC/AIC/CIS 中任一种。混在一起显示会让玩家误以为是同一面额相加，
+// 所以这里显式把订单实际的货币代码后缀上去。
+function formatOrderAmount(value: number, currency: string): string {
+  return `${fixed0(value)} ${currency}`;
+}
+
 // ── 一键加载市场排名 ──
 const missingTickers = computed(() => {
   const brokers = cxobStore.all.value;
@@ -200,8 +208,8 @@ function toggleStatus(s: string) {
   statusFilters.value = next;
 }
 
-function openCxob(ticker: string, exchange: string) {
-  showBuffer(`CXOB ${ticker}.${exchange}`);
+function openCxpo(ticker: string, exchange: string) {
+  showBuffer(`CXPO ${ticker}.${exchange}`);
 }
 
 function onDeleteClick(event: MouseEvent, orderId: string) {
@@ -286,14 +294,14 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
           v-for="order in filteredOrders"
           :key="order.id"
           :class="[order.status === 'FILLED' && $style.filledRow]">
-          <!-- 材料图标 + 代码 -->
+          <!-- 材料图标 + 中文名 -->
           <td>
             <div :class="$style.materialCell">
               <MaterialIcon :ticker="order.material.ticker" size="small" compact />
               <span
                 :class="$style.tickerLink"
-                @click="openCxob(order.material.ticker, order.exchange.code)">
-                {{ order.material.ticker }}
+                @click="openCxpo(order.material.ticker, order.exchange.code)">
+                {{ getMaterialNameByTicker(order.material.ticker) ?? order.material.ticker }}
               </span>
             </div>
           </td>
@@ -319,7 +327,7 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
           </td>
           <!-- 限价 -->
           <td :class="$style.number">
-            {{ formatCurrency(order.limit.amount, fixed0) }}
+            {{ formatOrderAmount(order.limit.amount, order.limit.currency) }}
           </td>
           <!-- 排名 -->
           <td :class="[$style.number, $style.rankCell]">
@@ -327,7 +335,7 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
           </td>
           <!-- 总价 -->
           <td :class="$style.number">
-            {{ formatCurrency(order.amount * order.limit.amount, fixed0) }}
+            {{ formatOrderAmount(order.amount * order.limit.amount, order.limit.currency) }}
           </td>
           <!-- 状态 -->
           <td :class="[statusMap[order.status].cls, $style.statusCell]">
