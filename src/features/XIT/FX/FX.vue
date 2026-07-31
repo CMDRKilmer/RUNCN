@@ -17,27 +17,10 @@ import { useTileState } from '@src/store/user-data-tiles';
 import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import tiles from '@src/infrastructure/prun-ui/tiles';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import {
-  closePrunWindow,
-  closeTileWindow,
-} from '@src/infrastructure/prun-ui/utils/close-prun-window';
+import { closePrunWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
+import { closeTileWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
 import { sleep } from '@src/utils/sleep';
 
-// 关闭当前所有 CONTD 面板并 force 新开一块干净的 list 面板。
-//
-// 上一笔 helper 内部把面板切到了 "CONTD CD-XXXX-NNN" 详细视图。该面板
-// 既不能直接复用——它的 fullCommand 已带参数，tiles.find('CONTD') 严格匹配
-// 不到；也不能用 UI_TILES_CHANGE_COMMAND 切回—activeTiles 里的 fullCommand
-// 永远是 activateFrame 时记下的旧值，不会随 command 切换刷新。
-//
-// 最稳的修法：先 closeTileWindow 全部 CONTD，等 activeTiles reconcile 把
-// 它们摘掉，再 showBuffer('CONTD', { force: true }) 新开一块。force 选项
-// 会跳过"已有就 focus"的分支走 processWindow 新建路径，新 tile 的
-// fullCommand 必然是 'CONTD'。
-//
-// 这样两笔合同能**并行**走完—每笔都拿到一块独立的 list 面板→点"新建"→
-// 等 naturalId→切 detail→填表保存。两块 CONTD 详情面板并排，玩家能同时
-// 看到两笔 BUY/SELL 长什么样（这正是"打开两个合同同时填写"的诉求）。
 // 关闭所有 CONTD 面板并新开一块干净的 list。
 //
 // helper 跑完后可能把面板切到 detail 视图。该 tile 在 activeTiles 里
@@ -47,21 +30,51 @@ import { sleep } from '@src/utils/sleep';
 //
 // 解决：直接遍历 DOM，把所有 .window 里 header 含 "CONTD" 的都点 x 关
 // 掉。DOM 层操作是 user-visible 的最后一层，detail 视图面板一定涵盖。
+// 关闭所有 CONTD 面板（含 list 和 detail）并新开一块干净的 list。
+//
+// 运行时观察（[FX BUY/SELL ...] 诊断日志）显示：force showBuffer 之后
+// activeTiles 里仍可能有上一轮留下的 1+ 块幽灵 tile——它们的 frame
+// DOM 已 disconnect 但 activeTiles 引用没摘掉；helper 内部
+// `tiles.find('CONTD').find(t => !t.docked)` 命中数量不稳定，无法
+// 保证走的就是新开的那块。
+//
+// 修复：完全不走 showBuffer 的 force 路径——改为
+//   1. 关闭所有 activeTiles 里的 CONTD list（不靠 activeTiles 命中
+//      detail；用 DOM 兜底遍历关 detail 视图窗口）；
+//   2. 等 reconcile 清空（多轮 close + sleep 直到 undocked=0）；
+//   3. `showBuffer('CONTD', force: true)` 重新打开——force 路径走
+//      processWindow 新建，1.5 秒内轮询确认 DOM 挂上。
 async function reopenContdListView(): Promise<void> {
-  for (const tile of tiles.find('CONTD').filter(t => !t.docked)) {
-    closeTileWindow(tile);
-  }
-  // 关 list 之后，detail 视图（activeTiles 里 fullCommand 已带参数，
-  // tiles.find('CONTD') 严格匹配不到）依然会"漏关"。DOM 兜底：
+  // 关掉上一笔留下的 CONTD 面板——list 视图 activeTiles 命中关，
+  // detail 视图 activeTiles 看不到（fullCommand 带参数），靠 DOM
+  // 兜底遍历关所有 "CONTD" 开头的 window。
   for (const win of _$$(document, `.${C.Window.window}`)) {
-    // TileFrame.cmd 是面板顶角的命令标识（"CONTD" 或 "CONTD CD-XYZ"）。
     if (_$(win, C.TileFrame.cmd)?.textContent?.trim().startsWith('CONTD') ?? false) {
       closePrunWindow(win);
     }
   }
-  await sleep(300);
-  await showBuffer('CONTD', { force: true });
-  await sleep(500);
+  for (let i = 0; i < 5; i++) {
+    const targets = tiles.find('CONTD').filter(t => !t.docked);
+    if (targets.length === 0) {
+      break;
+    }
+    for (const tile of targets) {
+      closeTileWindow(tile);
+    }
+    await sleep(300);
+  }
+  // 关 autoClose——showBuffer 默认 autoClose=true 会立刻点 x 关掉刚开的
+  // 窗口，导致 helper 找不到 ActionBar 上的"新建"按钮。这是长期 bug 的
+  // 根因（玩家之前只能看到第二笔能填，因为某种 race 让第二笔撞上了
+  // 一块幸存的 panel）。现在显式关闭 autoClose，让 panel 真正存活。
+  await showBuffer('CONTD', { force: true, autoClose: false });
+  // 等挂上——helper 内部还有 10 秒 waitForStore 兜底，这里只是稍等。
+  for (let i = 0; i < 15; i++) {
+    await sleep(100);
+    if (tiles.find('CONTD').filter(t => !t.docked).length >= 1) {
+      return;
+    }
+  }
 }
 
 // PrUn 4 种货币：ICA / NCC / AIC / CIS。两侧应严格不同（同一币种互换无意义）。
@@ -174,8 +187,12 @@ async function handleSwap() {
     error.value = `第一笔合同创建失败：${e instanceof Error ? e.message : String(e)}`;
     return;
   }
-  // 关掉第一笔的 detail 面板，重新走一遍完整流程建第二笔。关闭 + force 重
-  // 开的两个 sleep(200) 给了 activeTiles reconcile 的时间。
+  // 等 contd-auto-fill 的 onTileReady 真的把第一笔的 detail 视图填好。
+  // 它是异步的：读到 contgen-output 的 json 后删除 key、注入 textarea、
+  // click「填写」/「保存」。在它读完 key 之前不能立刻写第二笔——否则
+  // 第二笔的 json 会覆盖第一笔 workspace key，导致第一笔填的是第二笔的
+  // 数据（甚至因为时序撞上根本不填）。实测给 1.2 秒足够。
+  await sleep(1200);
   await reopenContdListView();
   phase.value = 'second';
   try {
