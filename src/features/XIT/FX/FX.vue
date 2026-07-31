@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 换汇页：选定 (源货币 -> 目标货币) 与金额，按钮触发两笔 CMK 合同的顺序创建：
-//   1. BUY  CMK @ HRT, currency = 源货币
-//   2. SELL CMK @ HRT, currency = 目标货币
+// 换汇页：选定 (源货币 -> 目标货币) 与金额，按钮触发两笔 RAT 合同的顺序创建：
+//   1. SELL RAT @ HRT, currency = 源货币（玩家卖出 RAT，源币进账）
+//   2. BUY  RAT @ HRT, currency = 目标货币（玩家买入 RAT，目标币出账）
 // 复用 CONTGEN/new-and-fill 的 newContractDraftAndFill：把 JSON 写到
 // 'contgen-output' workspace key，让 contd-auto-fill 在新打开的 CONTD 面板里
 // 自动填表并保存。这样走的是与 CONTGEN 完全相同的稳定路径。
@@ -92,10 +92,12 @@ const fromCurrency = useTileState<Currency>('fromCurrency', 'ICA');
 const toCurrency = useTileState<Currency>('toCurrency', 'AIC');
 const amount = useTileState<number | undefined>('amount', undefined);
 
-// 玩家在 FX 页填的"金额"语义是"换汇单价"：1 件 CMK 的 BUY/SELL 价格。
-// 商品数量固定 1，避免单价×数量算出来的总数让玩家困惑。currency 决定
-// 是 BUY CMK（用源币付）还是 SELL CMK（换成目标币收）。合同名预设
-// "BUY{价格}{源币}" / "SELL{价格}{目标币}"，去掉 .0 / 末尾小数。
+// 玩家在 FX 页填的"金额"语义是"换汇单价"：1 件 RAT 的 BUY/SELL 价格。
+// 商品数量固定 1，避免单价×数量算出来的总数让玩家困惑。
+// 换汇方向是「源 → 目标」：玩家想把手里的源币换成目标币。流程是：
+//   - SELL RAT 收 源币（玩家在 SELL 里收到源币）；
+//   - BUY  RAT 付 目标币（玩家在 BUY 里付出目标币）。
+// 合同名预设 "SELL{价格}{源币}" / "BUY{价格}{目标币}"。
 function buildSwapJson(template: 'BUY' | 'SELL', currency: Currency): string {
   const unitPrice = amount.value ?? 0;
   // 价格取整数：与玩家输入的"1,000,000"格式一致，避免出现小数尾巴。
@@ -134,9 +136,9 @@ const canSubmit = computed(() => {
 const buttonLabel = computed(() => {
   switch (phase.value) {
     case 'first':
-      return `创建 BUY ${COMMODITY}…`;
-    case 'second':
       return `创建 SELL ${COMMODITY}…`;
+    case 'second':
+      return `创建 BUY ${COMMODITY}…`;
     case 'done':
       return '✓ 完成';
     default:
@@ -163,8 +165,8 @@ async function handleSwap() {
   }
   error.value = null;
   // 走两轮独立的"重建 list 面板 → 创建填表"流程：
-  //   1. 关闭所有 CONTD 面板 → 新开一块 list → 走 helper（BUY RAT）
-  //   2. 关掉第一笔的 detail 面板 → 再开一块 list → 再走 helper（SELL RAT）
+  //   1. 关闭所有 CONTD 面板 → 新开一块 list → 走 helper（SELL RAT 收源币）
+  //   2. 关掉第一笔的 detail 面板 → 再开一块 list → 再走 helper（BUY RAT 付目标币）
   //
   // 为何这么干——之前反复折戟的两个根因：
   //   (a) helper 内部把 list 切到 detail 后，UI 显示已"填好保存"但 activeTiles
@@ -181,7 +183,7 @@ async function handleSwap() {
   await reopenContdListView();
   phase.value = 'first';
   try {
-    await newContractDraftAndFill(buildSwapJson('BUY', fromCurrency.value));
+    await newContractDraftAndFill(buildSwapJson('SELL', fromCurrency.value));
   } catch (e) {
     phase.value = 'idle';
     error.value = `第一笔合同创建失败：${e instanceof Error ? e.message : String(e)}`;
@@ -196,7 +198,7 @@ async function handleSwap() {
   await reopenContdListView();
   phase.value = 'second';
   try {
-    await newContractDraftAndFill(buildSwapJson('SELL', toCurrency.value));
+    await newContractDraftAndFill(buildSwapJson('BUY', toCurrency.value));
   } catch (e) {
     phase.value = 'idle';
     error.value = `第二笔合同创建失败：${e instanceof Error ? e.message : String(e)}`;

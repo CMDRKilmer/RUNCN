@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { cxosStore } from '@src/infrastructure/prun-api/data/cxos';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
@@ -188,6 +188,22 @@ async function loadAllRanks() {
 
   loadingRanks.value = false;
 }
+
+// ── 打开时自动加载实时价格 ──
+// 首次挂载 / 重开时触发：等订单数据到位后跑一遍 loadAllRanks()。
+// loadAllRanks 内部已做了「已加载的 ticker 跳过」的判断，所以即使上次
+// 会话留下的 cxobStore 数据完整，本次不会重复开 CXPO 窗口。
+onMounted(() => {
+  watch(
+    orders,
+    o => {
+      if (o && o.length > 0 && !loadingRanks.value) {
+        void loadAllRanks();
+      }
+    },
+    { immediate: true },
+  );
+});
 
 // ── 切换筛选 ──
 function toggleStatus(s: string) {
