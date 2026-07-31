@@ -8,7 +8,6 @@ import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { deleteExchangeOrderFromClick } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
 import { fixed0, formatCurrency } from '@src/utils/format';
-import { sleep } from '@src/utils/sleep';
 import { isEmpty } from 'ts-extras';
 
 const orders = computed(() => cxosStore.all.value);
@@ -151,7 +150,7 @@ async function loadAllRanks() {
     loaded.add(key);
     toLoad.push({
       key,
-      command: `CXPO ${o.material.ticker}.${o.exchange.code}`,
+      command: `CXOB ${o.material.ticker}.${o.exchange.code}`,
     });
   }
   if (toLoad.length === 0) {
@@ -159,32 +158,20 @@ async function loadAllRanks() {
     return;
   }
 
-  const opened: Element[] = [];
-  for (const { command } of toLoad) {
-    const win = await showBuffer(command, { force: true, autoSubmit: true });
-    if (win) opened.push(win);
+  // 后台静默拉取：每个 ticker 开一块 CXOB 订单簿，服务器推回 COMEX_BROKER_DATA
+  // 后由 closeWhen 自动关窗，玩家看不到任何窗口闪烁。
+  const waiters: Promise<unknown>[] = [];
+  for (const { key, command } of toLoad) {
+    const [exchange, ticker] = key.split('|');
+    const ready = computed(
+      () =>
+        cxobStore.all.value?.some(
+          b => b.exchange.code === exchange && b.material.ticker === ticker,
+        ) === true,
+    );
+    waiters.push(showBuffer(command, { autoClose: true, closeWhen: ready }));
   }
-
-  // 轮询等待数据，最多 10 秒
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    const allReady = toLoad.every(({ key }) => {
-      const [exchange, ticker] = key.split('|');
-      return cxobStore.all.value?.some(
-        b => b.exchange.code === exchange && b.material.ticker === ticker,
-      );
-    });
-    if (allReady) break;
-    await sleep(300);
-  }
-
-  // 关闭临时窗口
-  for (const win of opened) {
-    const buttons = win.getElementsByClassName(C.Window.button);
-    const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
-      HTMLElement | undefined;
-    closeBtn?.click();
-  }
+  await Promise.all(waiters);
 
   loadingRanks.value = false;
 }
@@ -192,7 +179,7 @@ async function loadAllRanks() {
 // ── 打开时自动加载实时价格 ──
 // 首次挂载 / 重开时触发：等订单数据到位后跑一遍 loadAllRanks()。
 // loadAllRanks 内部已做了「已加载的 ticker 跳过」的判断，所以即使上次
-// 会话留下的 cxobStore 数据完整，本次不会重复开 CXPO 窗口。
+// 会话留下的 cxobStore 数据完整，本次不会重复开 CXOB 窗口。
 onMounted(() => {
   watch(
     orders,
