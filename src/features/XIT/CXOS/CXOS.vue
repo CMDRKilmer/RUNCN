@@ -97,7 +97,7 @@ const stats = computed(() => {
   const byCurrency: Record<string, { total: number; count: number }> = {};
   for (const o of active) {
     const ccy = o.limit.currency;
-    if (!byCurrency[ccy]) byCurrency[ccy] = { total: 0, count: 0 };
+    if (!(ccy in byCurrency)) byCurrency[ccy] = { total: 0, count: 0 };
     byCurrency[ccy].total += o.amount * o.limit.amount;
     byCurrency[ccy].count += 1;
   }
@@ -134,7 +134,7 @@ function formatOrderAmount(value: number, currency: string): string {
 // ── 一键加载市场排名 ──
 const missingTickers = computed(() => {
   const brokers = cxobStore.all.value;
-  if (!brokers || !filteredOrders.value) return 0;
+  if (!brokers) return 0;
   const loaded = new Set<string>();
   for (const b of brokers) loaded.add(`${b.exchange.code}|${b.material.ticker}`);
   return filteredOrders.value.filter(
