@@ -200,8 +200,8 @@ function toggleStatus(s: string) {
   statusFilters.value = next;
 }
 
-function openCxpo(ticker: string, exchange: string) {
-  showBuffer(`CXPO ${ticker}.${exchange}`);
+function openCxob(ticker: string, exchange: string) {
+  showBuffer(`CXOB ${ticker}.${exchange}`);
 }
 
 function onDeleteClick(event: MouseEvent, orderId: string) {
@@ -292,7 +292,7 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
               <MaterialIcon :ticker="order.material.ticker" size="small" compact />
               <span
                 :class="$style.tickerLink"
-                @click="openCxpo(order.material.ticker, order.exchange.code)">
+                @click="openCxob(order.material.ticker, order.exchange.code)">
                 {{ order.material.ticker }}
               </span>
             </div>
