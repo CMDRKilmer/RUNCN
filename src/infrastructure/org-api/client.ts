@@ -17,6 +17,27 @@ let refreshPromise: Promise<AuthSession | null> | null = null;
 // session 已过期标志：防止 refreshSession 被多次调用时重复触发 onUnauthorized / clearSession
 let sessionExpired = false;
 
+// 主动预刷新阈值：access token 剩余有效期不足此秒数时，
+// 在原请求发出前先 refresh，避免以过期 token 发出 401 请求。
+const REFRESH_AHEAD_SECONDS = 60;
+
+// 解析 JWT 的 exp（Unix 秒）。非 JWT 或不含 exp 时返回 null。
+// 不做签名校验——后端会在 401 时兜底；这里只用来决策"是否要提前 refresh"。
+function getAccessTokenExp(token: string): number | null {
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    // base64url → base64
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+    const json = atob(padded);
+    const obj = JSON.parse(json) as { exp?: unknown };
+    return typeof obj.exp === 'number' ? obj.exp : null;
+  } catch {
+    return null;
+  }
+}
+
 async function refreshSession(): Promise<AuthSession | null> {
   if (sessionExpired) {
     return null;
@@ -98,10 +119,24 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (!options.rawBody && options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
+
+  // 预刷新：access token 剩余有效期不足阈值时先 refresh，
+  // 避免原请求以过期 token 发出 401（浏览器 DevTools 会把 4xx 标红，无法抑制）。
+  // 非 JWT / 无 exp / refresh 也失败 → 静默回退到原 401 refresh 逻辑。
   if (!options.skipAuth) {
     const token = getAccessToken();
     if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+      const exp = getAccessTokenExp(token);
+      if (exp !== null && exp - Math.floor(Date.now() / 1000) < REFRESH_AHEAD_SECONDS) {
+        const newSession = await refreshSession();
+        if (newSession) {
+          headers['Authorization'] = `Bearer ${newSession.accessToken}`;
+        } else {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+      } else {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
     }
   }
 
