@@ -6,8 +6,14 @@ import MaterialIcon from '@src/components/MaterialIcon.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { deleteExchangeOrderFromClick } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
-import { fixed0, formatCurrency } from '@src/utils/format';
+import {
+  deleteExchangeOrder,
+  deleteExchangeOrderFromClick,
+} from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
+import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { changeInputValue, clickElement } from '@src/util';
+import { fixed0, fixed02, formatCurrency } from '@src/utils/format';
+import { sleep } from '@src/utils/sleep';
 import { getMaterialNameByTicker } from '@src/util';
 import { isEmpty } from 'ts-extras';
 
@@ -215,6 +221,211 @@ function openCxpo(ticker: string, exchange: string) {
 function onDeleteClick(event: MouseEvent, orderId: string) {
   deleteExchangeOrderFromClick(event, orderId, 'CXOS');
 }
+
+// ── 压价 ──
+function getPriceStep(price: number) {
+  if (price >= 10000) return 100;
+  if (price >= 1000) return 10;
+  return 1;
+}
+
+async function openCxpoTile(command: string) {
+  // 后台静默打开：autoClose + closeWhen，窗口全程不可见
+  const closeWhen = ref(false);
+  const win = await showBuffer(command, { autoClose: true, closeWhen });
+  return { win, closeWhen };
+}
+
+function poll<T>(get: () => T | undefined, ms: number): Promise<T | undefined> {
+  return new Promise(resolve => {
+    const deadline = Date.now() + ms;
+    const tick = async () => {
+      const value = get();
+      if (value) {
+        resolve(value);
+        return;
+      }
+      if (Date.now() > deadline) {
+        resolve(undefined);
+        return;
+      }
+      await sleep(200);
+      void tick();
+    };
+    void tick();
+  });
+}
+
+function onPriceCut(event: MouseEvent, order: OrderWithRank) {
+  if (order.type !== 'SELLING') return;
+  const target = computeTargetPrice(order);
+  if (!target) {
+    return;
+  }
+  const displayPrice = fixed02(target);
+  showConfirmationOverlay(
+    event,
+    () => {
+      void runPriceCut(event.target as Element, order, target);
+    },
+    {
+      message: `删除当前订单，并以 ${displayPrice} 压价重新挂单？`,
+      confirmLabel: '压价',
+    },
+  );
+}
+
+// 计算目标压价：排除自己的订单，取当前最低卖价 - 步长
+function computeTargetPrice(order: OrderWithRank) {
+  const broker = cxobStore.all.value?.find(
+    b => b.exchange.code === order.exchange.code && b.material.ticker === order.material.ticker,
+  );
+  if (!broker || broker.sellingOrders.length === 0) {
+    return undefined;
+  }
+  const others = broker.sellingOrders.filter(o => o.id !== order.id);
+  if (others.length === 0) {
+    return undefined;
+  }
+  const lowest = Math.min(...others.map(o => o.limit.amount));
+  const target = lowest - getPriceStep(lowest);
+  return target > 0 ? target : undefined;
+}
+
+// ── 批量压价 ──
+const batchRunning = ref(false);
+
+// 当前筛选结果中的可压价卖单
+const batchableOrders = computed(() =>
+  filteredOrders.value.filter(o => o.type === 'SELLING' && o.status !== 'FILLED'),
+);
+
+// 选中的订单 id（仅卖单可选中）
+const selectedIds = ref(new Set<string>());
+
+const selectedOrders = computed(() =>
+  filteredOrders.value.filter(o => selectedIds.value.has(o.id)),
+);
+
+const allSelected = computed(
+  () =>
+    batchableOrders.value.length > 0 &&
+    batchableOrders.value.every(o => selectedIds.value.has(o.id)),
+);
+
+function toggleSelect(order: OrderWithRank) {
+  if (order.type !== 'SELLING' || order.status === 'FILLED') return;
+  const next = new Set(selectedIds.value);
+  if (next.has(order.id)) {
+    next.delete(order.id);
+  } else {
+    next.add(order.id);
+  }
+  selectedIds.value = next;
+}
+
+function toggleSelectAll() {
+  if (allSelected.value) {
+    selectedIds.value = new Set();
+  } else {
+    selectedIds.value = new Set(batchableOrders.value.map(o => o.id));
+  }
+}
+
+async function batchPriceCut() {
+  if (batchRunning.value) return;
+  const sells = selectedOrders.value;
+  if (sells.length === 0) return;
+
+  batchRunning.value = true;
+  const targetElement = document.querySelector(`.${C.TileFrame.body}`) ?? document.body;
+  try {
+    // 按 (交易所, 材料) 分组
+    const groups = new Map<string, OrderWithRank[]>();
+    for (const o of sells) {
+      const key = `${o.exchange.code}|${o.material.ticker}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(o);
+    }
+
+    for (const [key, orders] of groups) {
+      const [exchange, ticker] = key.split('|');
+      const broker = cxobStore.all.value?.find(
+        b => b.exchange.code === exchange && b.material.ticker === ticker,
+      );
+      if (!broker) continue;
+      // 市场最低卖价（排除自己的所有订单）
+      const myIds = new Set(orders.map(o => o.id));
+      const others = broker.sellingOrders.filter(o => !myIds.has(o.id));
+      if (others.length === 0) continue;
+      let currentLowest = Math.min(...others.map(o => o.limit.amount));
+
+      // 组内按当前价格从低到高处理：第一个压到最低-1档，
+      // 后续订单在前一个目标价基础上再压一档，保证依次霸榜前几名。
+      const sorted = [...orders].sort((a, b) => a.limit.amount - b.limit.amount);
+      for (const order of sorted) {
+        const step = getPriceStep(currentLowest);
+        const target = currentLowest - step;
+        if (target <= 0) continue;
+        currentLowest = target;
+        await runPriceCut(targetElement, order, target);
+      }
+    }
+  } finally {
+    batchRunning.value = false;
+    selectedIds.value = new Set();
+  }
+}
+
+async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: number) {
+  // 1. 删除旧订单（不带确认，压价已确认过）
+  const deleted = await deleteExchangeOrder(target, order.id, 'CXOS', true);
+  if (!deleted) {
+    return;
+  }
+  // 2. 后台静默打开 CXPO 面板
+  const { win, closeWhen } = await openCxpoTile(
+    `CXPO ${order.material.ticker}.${order.exchange.code}`,
+  );
+  if (!win) {
+    return;
+  }
+  try {
+    // 3. 轮询等待表单渲染
+    const form = await poll(() => _$(win, C.ComExPlaceOrderForm.form), 8000);
+    if (!form) {
+      return;
+    }
+    // 4. 轮询等待输入框出现
+    const inputs = await poll(() => {
+      const list = _$$(form, 'input');
+      return list.length >= 2
+        ? [list[0] as HTMLInputElement, list[1] as HTMLInputElement]
+        : undefined;
+    }, 8000);
+    if (!inputs) {
+      return;
+    }
+    const [quantityInput, priceInput] = inputs;
+    changeInputValue(quantityInput, fixed0(order.amount));
+    changeInputValue(priceInput, fixed02(targetPrice));
+    // 等待输入事件被 React 处理
+    await sleep(200);
+    // 5. 卖出按钮限定在按钮区内查找
+    const buttonsField = form.children[12];
+    if (!buttonsField) {
+      return;
+    }
+    const sellButton = _$(buttonsField, C.Button.danger);
+    if (sellButton) {
+      clickElement(sellButton);
+    }
+    // 给服务器留出处理时间后关闭后台窗口
+    await sleep(1500);
+  } finally {
+    closeWhen.value = true;
+  }
+}
 </script>
 
 <template>
@@ -254,6 +465,16 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
         @click="loadAllRanks">
         {{ loadingRanks ? '加载中…' : `加载排名 (${missingTickers})` }}
       </PrunButton>
+      <PrunButton dark inline :primary="allSelected" @click="toggleSelectAll">
+        {{ allSelected ? '取消全选' : '全选' }}
+      </PrunButton>
+      <PrunButton
+        danger
+        inline
+        :disabled="batchRunning || selectedOrders.length === 0"
+        @click="batchPriceCut">
+        {{ batchRunning ? '压价中…' : `批量压价 (${selectedOrders.length})` }}
+      </PrunButton>
       <div :class="$style.filterGroup">
         <label :class="$style.filterLabel">交易所</label>
         <select v-model="exchangeFilter" :class="$style.select">
@@ -275,6 +496,7 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
     <table>
       <thead>
         <tr>
+          <th>选择</th>
           <th>材料</th>
           <th>类型</th>
           <th>交易所</th>
@@ -288,12 +510,20 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
       </thead>
       <tbody>
         <tr v-if="isEmpty(filteredOrders)">
-          <td colspan="9" :class="$style.empty">没有匹配的挂单</td>
+          <td colspan="10" :class="$style.empty">没有匹配的挂单</td>
         </tr>
         <tr
           v-for="order in filteredOrders"
           :key="order.id"
           :class="[order.status === 'FILLED' && $style.filledRow]">
+          <!-- 选择 -->
+          <td>
+            <input
+              type="checkbox"
+              :checked="selectedIds.has(order.id)"
+              :disabled="order.type !== 'SELLING' || order.status === 'FILLED'"
+              @change="toggleSelect(order)" />
+          </td>
           <!-- 材料图标 + 中文名 -->
           <td>
             <div :class="$style.materialCell">
@@ -349,6 +579,13 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
               inline
               @click="(e: MouseEvent) => onDeleteClick(e, order.id)">
               删除
+            </PrunButton>
+            <PrunButton
+              v-if="order.type === 'SELLING' && order.status !== 'FILLED'"
+              danger
+              inline
+              @click="(e: MouseEvent) => onPriceCut(e, order)">
+              压价
             </PrunButton>
           </td>
         </tr>
@@ -514,6 +751,51 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
 .actionCell {
   text-align: center;
   white-space: nowrap;
+}
+
+/* ── 选中复选框（游戏风格深蓝） ── */
+.container input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  background: #0d1a24;
+  border: 1px solid #2b485a;
+  border-radius: 2px;
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.container input[type='checkbox']:hover {
+  border-color: #3d6a8a;
+}
+
+.container input[type='checkbox']:checked {
+  background: #1a6a8a;
+  border-color: #2b7a9a;
+}
+
+.container input[type='checkbox']:checked::after {
+  content: '✓';
+  color: #d8ecf5;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.container input[type='checkbox']:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* ── 空状态 ── */
