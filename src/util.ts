@@ -173,13 +173,3 @@ export async function clickElement(element?: HTMLElement | null) {
 
   window.getSelection()?.removeAllRanges();
 }
-
-export function mouseOverElement(from: HTMLElement, to: HTMLElement) {
-  const mouseEvent = new MouseEvent('mouseout', {
-    bubbles: true,
-    cancelable: true,
-    relatedTarget: to,
-    view: window,
-  });
-  from.dispatchEvent(mouseEvent);
-}

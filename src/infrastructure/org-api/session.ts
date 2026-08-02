@@ -47,9 +47,3 @@ export function getRefreshToken(): string | null {
 export function updateUser(user: OrgUser): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
-
-// 仅更新 tokens（用于 /auth/refresh 滚动续期）
-export function updateTokens(accessToken: string, refreshToken: string): void {
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-}

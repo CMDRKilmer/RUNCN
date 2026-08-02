@@ -8,10 +8,6 @@ export function isBoard(user: OrgUser | null | undefined): boolean {
   return user?.role === 'BOARD';
 }
 
-export function canCancelAny(user: OrgUser | null | undefined): boolean {
-  return isBoard(user);
-}
-
 export function canCancelTask(user: OrgUser | null | undefined, task: OrgTask): boolean {
   if (!user) {
     return false;

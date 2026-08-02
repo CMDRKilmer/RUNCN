@@ -82,24 +82,6 @@ export function formatAmountWithCurrency(value: number | undefined, currency: st
   return currency ? `${formatNumber(value)} ${currency}` : formatNumber(value);
 }
 
-// 状态颜色 helper（与 TaskCard.vue statusColor 一致，供其他视图复用）
-export function statusColor(status: string): string {
-  switch (status) {
-    case 'PUBLISHED':
-      return 'var(--text-muted)';
-    case 'AWAITING_CONTRACT':
-      return 'var(--text-warning, #f0ad4e)';
-    case 'IN_PROGRESS':
-      return 'var(--accent)';
-    case 'COMPLETED':
-      return 'var(--text-positive, #5cb85c)';
-    case 'CANCELLED':
-      return 'var(--text-negative, #d9534f)';
-    default:
-      return 'var(--text-muted)';
-  }
-}
-
 // 状态中文标签：把后端 enum 转成用户友好的中文。
 // 状态机语义（架构 §3）：
 //   PUBLISHED                          → 待接取（已发布，等待其他人接取）

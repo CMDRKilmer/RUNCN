@@ -481,14 +481,3 @@ export function dismissAutoLink(taskId: string): void {
   stopAutoLink(taskId);
   dismissedTaskIds.add(taskId);
 }
-
-// 用户重连 / 重新登入 / 显式重置时清空 dismissed 集合。
-export function resetAutoLinkDismissed(): void {
-  dismissedTaskIds.clear();
-}
-
-// 重置所有 active 任务注册（登出/切换用户时调用）。
-// 与 resetPollingState 配套；interval 已被 stopGlobalAutoLink 清掉。
-export function resetActiveTasks(): void {
-  activeLinkedTaskIds.clear();
-}

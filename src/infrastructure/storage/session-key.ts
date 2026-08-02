@@ -160,16 +160,6 @@ export async function decryptWithSessionKey(blob: EncryptedString): Promise<stri
   }
 }
 
-export function isEncryptedString(value: unknown): value is EncryptedString {
-  if (value === null || typeof value !== 'object') {
-    return false;
-  }
-  const v = (value as { v?: unknown }).v;
-  const iv = (value as { iv?: unknown }).iv;
-  const ct = (value as { ct?: unknown }).ct;
-  return typeof v === 'number' && typeof iv === 'string' && typeof ct === 'string';
-}
-
 function isEnvelope(value: unknown): value is SessionKeyEnvelope {
   if (value === null || typeof value !== 'object') {
     return false;

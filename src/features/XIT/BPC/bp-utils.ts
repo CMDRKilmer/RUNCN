@@ -10,7 +10,6 @@
 // 币种按 1:1 比较，不做汇率换算（同 ARB 的约定）；各交易所总价仍以本币种展示。
 
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
-import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { isFiniteOrder } from '@src/core/orders';
 
 export interface BpcExchange {
@@ -60,18 +59,6 @@ export interface BpcTotals {
   mixedTotal: number;
   // 任意交易所都没有报价的配件数。
   mixedMissing: number;
-}
-
-// 屏蔽列表：玩家不想在 BPC 中看的交易所（CI2/NC2 是 AI 主导、流动性差）。
-const BPC_EXCLUDED_EXCHANGES = new Set(['CI2', 'NC2']);
-
-// 六个 CX 交易所（去除屏蔽列表），按代码排序，各带本币种。
-export function getBpcExchanges(): BpcExchange[] {
-  return (exchangesStore.all.value ?? [])
-    .slice()
-    .filter(x => !BPC_EXCLUDED_EXCHANGES.has(x.code))
-    .sort((a, b) => a.code.localeCompare(b.code))
-    .map(x => ({ code: x.code, currency: x.currency.code }));
 }
 
 // 把实时订单簿的卖单聚合为「价位 -> 总量」，遇到 MM 无限量订单即止
@@ -203,7 +190,7 @@ export function computeTotals(
     let missing = 0;
     for (const component of selected) {
       const point = component.prices.get(exchange.code);
-      if (!point) {
+      if (point === undefined || point === null) {
         missing++;
         continue;
       }
@@ -231,7 +218,7 @@ export function computeTotals(
   let mixedTotal = 0;
   let mixedMissing = 0;
   for (const component of selected) {
-    if (component.bestPrice === undefined) {
+    if (component.bestPrice === undefined || component.bestPrice === null) {
       mixedMissing++;
       continue;
     }
