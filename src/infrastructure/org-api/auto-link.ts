@@ -286,7 +286,8 @@ export function isAutoLinkRunning(taskId: string): boolean {
 // 已包含后端权威比对），同 TaskDetail 路径一致。
 //
 // 用户主动关闭：调用 dismissAutoLink(taskId)，后续全局 tick 跳过。
-// 重置（用户重连、登出重登等）：resetAutoLinkDismissed() 清空。
+// dismissedTaskIds 在新 session 起始为空（模块级 Set 不持久化），
+// 用户重连 / 登出重登会自动「重置」——无需显式 reset 接口。
 export interface GlobalAutoLinkCallbacks {
   onLinked?: (task: OrgTask) => void;
   // 合同 status 变化触发 sync 后的回调（如 FULFILLED → 任务 COMPLETED）。
