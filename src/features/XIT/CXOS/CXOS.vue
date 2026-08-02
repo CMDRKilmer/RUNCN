@@ -241,7 +241,7 @@ function poll<T>(get: () => T | undefined, ms: number): Promise<T | undefined> {
     const deadline = Date.now() + ms;
     const tick = async () => {
       const value = get();
-      if (value) {
+      if (value !== undefined && value !== null) {
         resolve(value);
         return;
       }
@@ -259,7 +259,7 @@ function poll<T>(get: () => T | undefined, ms: number): Promise<T | undefined> {
 function onPriceCut(event: MouseEvent, order: OrderWithRank) {
   if (order.type !== 'SELLING') return;
   const target = computeTargetPrice(order);
-  if (!target) {
+  if (target === undefined || target === null || Number.isNaN(target)) {
     return;
   }
   const displayPrice = fixed02(target);
@@ -387,7 +387,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   const { win, closeWhen } = await openCxpoTile(
     `CXPO ${order.material.ticker}.${order.exchange.code}`,
   );
-  if (!win) {
+  if (win === undefined || win === null) {
     return;
   }
   try {
@@ -413,7 +413,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
     await sleep(200);
     // 5. 卖出按钮限定在按钮区内查找
     const buttonsField = form.children[12];
-    if (!buttonsField) {
+    if (buttonsField === undefined || buttonsField === null) {
       return;
     }
     const sellButton = _$(buttonsField, C.Button.danger);

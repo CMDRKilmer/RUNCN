@@ -289,6 +289,21 @@ function onClose() {
 .qtyInput {
   flex: 1;
 }
+.qtyInput :global(input) {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+.qtyInput :global(input:focus) {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
+}
 .qtyButtons {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
