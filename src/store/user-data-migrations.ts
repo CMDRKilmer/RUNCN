@@ -17,60 +17,6 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
-    '05.08.2026 Add repair plan settings',
-    userData => {
-      if (!userData.settings.repairPlan) {
-        userData.settings.repairPlan = {
-          valuePerEfficiencyDay: 0,
-          defaultThreshold: 0.85,
-        };
-      } else {
-        userData.settings.repairPlan.valuePerEfficiencyDay ??= 0;
-        userData.settings.repairPlan.defaultThreshold ??= 0.85;
-      }
-      const sidebar: [string, string][] = userData.settings.sidebar;
-      if (!sidebar.some(([, cmd]: [string, string]) => cmd === 'XIT REPP')) {
-        const repIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT REP');
-        sidebar.splice(repIdx >= 0 ? repIdx + 1 : sidebar.length, 0, ['维修预测', 'XIT REPP']);
-      }
-    },
-  ],
-  [
-    '05.08.2026 Drop repairPlan.dailyOutputValue (PRUNplanner auto-reads from ProductionLine)',
-    userData => {
-      if (userData.settings.repairPlan) {
-        delete userData.settings.repairPlan.dailyOutputValue;
-        delete userData.settings.repairPlan.defaultThreshold;
-        delete userData.settings.repairPlan.valuePerEfficiencyDay;
-      }
-    },
-  ],
-  [
-    '05.08.2026 Drop repairPlan.defaultThreshold',
-    userData => {
-      if (userData.settings.repairPlan) {
-        delete userData.settings.repairPlan.defaultThreshold;
-      }
-    },
-  ],
-  [
-    '05.08.2026 Rename repair plan valuation to dailyOutputValue',
-    userData => {
-      const plan = userData.settings.repairPlan;
-      if (plan && 'valuePerEfficiencyDay' in plan && plan.dailyOutputValue === undefined) {
-        plan.dailyOutputValue = plan.valuePerEfficiencyDay ?? 0;
-        delete plan.valuePerEfficiencyDay;
-      }
-      if (!plan) {
-        userData.settings.repairPlan = {
-          dailyOutputValue: 0,
-        };
-      } else {
-        plan.dailyOutputValue ??= 0;
-      }
-    },
-  ],
-  [
     '29.07.2026 Rebind 琉璃 sidebar entry to XIT ORG',
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;

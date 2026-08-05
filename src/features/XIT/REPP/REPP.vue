@@ -70,12 +70,84 @@ const predictions = computed(() => {
 
 const isMultiSite = computed(() => (sites.value?.length ?? 0) > 1);
 
-const earliest = computed(() => predictions.value?.[0]);
-const dueCount = computed(
-  () => predictions.value?.filter(p => p.daysUntilTrigger <= 0).length ?? 0,
-);
+// 折叠状态:按 (naturalId, ticker) 索引展开/折叠。true = 展开。
+const expanded = ref<Record<string, boolean>>({});
 
-// 数据就绪统计:用于在面板顶部提示"等待 CX / 等待生产数据"等。
+function groupKey(naturalId: string, ticker: string): string {
+  return `${naturalId}\u0000${ticker}`;
+}
+
+interface RepairGroup {
+  naturalId: string;
+  target: string;
+  ticker: string;
+  members: NonNullable<typeof predictions.value>[number][];
+  // 共享的 per-line sweep 结果(per-member 一致,取首)。
+  dailyRevenue: number | undefined;
+  optimalDay: number | undefined;
+  optimalDailyProfit: number | undefined;
+  optimalRepairCost: number | undefined;
+  // 聚合统计。
+  count: number;
+  ageMin: number;
+  ageMax: number;
+  // 触发时间:取最早的。
+  triggerTimestamp: number;
+  daysUntilTrigger: number;
+  dueCount: number; // 组内已到期成员数
+}
+
+const groups = computed<RepairGroup[]>(() => {
+  const list = predictions.value ?? [];
+  const map = new Map<string, RepairGroup>();
+  for (const p of list) {
+    const key = groupKey(p.naturalId, p.ticker);
+    let g = map.get(key);
+    if (!g) {
+      g = {
+        naturalId: p.naturalId,
+        target: p.target,
+        ticker: p.ticker,
+        members: [],
+        dailyRevenue: p.dailyRevenue,
+        optimalDay: p.optimalDay,
+        optimalDailyProfit: p.optimalDailyProfit,
+        optimalRepairCost: p.optimalRepairCost,
+        count: 0,
+        ageMin: Infinity,
+        ageMax: -Infinity,
+        triggerTimestamp: p.triggerTimestamp,
+        daysUntilTrigger: p.daysUntilTrigger,
+        dueCount: 0,
+      };
+      map.set(key, g);
+    }
+    g.members.push(p);
+    g.count++;
+    g.ageMin = Math.min(g.ageMin, p.ageDays);
+    g.ageMax = Math.max(g.ageMax, p.ageDays);
+    if (p.triggerTimestamp < g.triggerTimestamp) {
+      g.triggerTimestamp = p.triggerTimestamp;
+      g.daysUntilTrigger = p.daysUntilTrigger;
+    }
+    if (p.daysUntilTrigger <= 0) {
+      g.dueCount++;
+    }
+  }
+  // 组内按 ageDays 升序(最该修的在上),按 triggerTimestamp 升序排序组。
+  for (const g of map.values()) {
+    g.members.sort((a, b) => a.ageDays - b.ageDays);
+  }
+  return [...map.values()].sort((a, b) => a.triggerTimestamp - b.triggerTimestamp);
+});
+
+const totalMembers = computed(() => groups.value.reduce((s, g) => s + g.count, 0));
+const totalDue = computed(() => groups.value.reduce((s, g) => s + g.dueCount, 0));
+
+// 用于倒计时区显示最早触发的"组"。
+const earliest = computed(() => groups.value[0]);
+
+// 数据就绪统计(基于 members 粒度)。
 const stats = computed(() => {
   const list = predictions.value ?? [];
   const total = list.length;
@@ -106,6 +178,22 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
   }
   return '';
 }
+
+function ageRangeText(g: RepairGroup): string {
+  if (g.count === 1) {
+    return `${fixed1(g.ageMin)} 天`;
+  }
+  return `${fixed1(g.ageMin)}–${fixed1(g.ageMax)} 天`;
+}
+
+function isExpanded(g: RepairGroup): boolean {
+  return expanded.value[groupKey(g.naturalId, g.ticker)] === true;
+}
+
+function toggle(g: RepairGroup) {
+  const key = groupKey(g.naturalId, g.ticker);
+  expanded.value[key] = !isExpanded(g);
+}
 </script>
 
 <template>
@@ -116,14 +204,15 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
       <div>
         最早触发:
         <span v-if="earliest && earliest.optimalDay !== undefined" :class="urgencyClass(earliest)">
-          {{ earliest.ticker }} @ {{ earliest.target }} — {{ triggerText(earliest) }}
+          {{ earliest.ticker }} @ {{ earliest.target }} —
+          {{ triggerText(earliest) }}
         </span>
         <span v-else>暂无预测</span>
       </div>
       <div>
         待维修建筑数:
-        <span :class="dueCount > 0 ? C.ColoredValue.negative : ''">{{ dueCount }}</span>
-        / {{ predictions.length }}
+        <span :class="totalDue > 0 ? C.ColoredValue.negative : ''">{{ totalDue }}</span>
+        / {{ totalMembers }}（{{ groups.length }} 组）
       </div>
       <div :class="$style.hint">
         数据就绪: 日产 {{ stats.withDailyRevenue }}/{{ stats.total }}, 修满
@@ -132,12 +221,14 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
       </div>
     </div>
 
-    <SectionHeader>逐建筑</SectionHeader>
+    <SectionHeader>逐建筑(按基地 + 类型聚合)</SectionHeader>
     <table>
       <thead>
         <tr>
+          <th></th>
           <th>代码</th>
           <th v-if="isMultiSite">目标</th>
+          <th>数量</th>
           <th>年龄</th>
           <th>日产估值</th>
           <th>当前修满成本</th>
@@ -147,44 +238,92 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
         </tr>
       </thead>
       <tbody>
-        <tr v-if="predictions.length === 0">
-          <td colspan="8" style="text-align: center; opacity: 0.5; padding: 12px">
+        <tr v-if="groups.length === 0">
+          <td
+            :colspan="isMultiSite ? 10 : 9"
+            style="text-align: center; opacity: 0.5; padding: 12px">
             无可维修建筑
           </td>
         </tr>
-        <tr v-for="p in predictions" :key="objectId(p)">
-          <td>{{ p.ticker }}</td>
-          <td v-if="isMultiSite">
-            <PrunLink :command="`XIT REPP ${p.naturalId}`">{{ p.target }}</PrunLink>
-          </td>
-          <td :class="p.daysUntilTrigger <= 0 ? C.ColoredValue.negative : ''">
-            {{ fixed1(p.ageDays) }} 天
-          </td>
-          <td>
-            <span
-              v-if="p.dailyRevenue !== undefined"
-              :data-tooltip="'PRUNplanner 算法:(outputs×Bid − inputs×Ask) × maxDailyRuns,从 PrUn ProductionLine 读取'"
-              data-tooltip-position="left"
-              >{{ formatCurrency(p.dailyRevenue, fixed1) }}</span
+        <template v-for="g in groups" :key="g.naturalId + ':' + g.ticker">
+          <tr :class="$style.groupRow">
+            <td>
+              <button
+                type="button"
+                :class="$style.foldBtn"
+                :aria-label="isExpanded(g) ? '折叠' : '展开'"
+                @click="toggle(g)">
+                {{ isExpanded(g) ? '▼' : '▶' }}
+              </button>
+            </td>
+            <td
+              ><strong>{{ g.ticker }}</strong></td
             >
-            <span v-else data-tooltip="无活跃生产订单或全建材料未找到">--</span>
-          </td>
-          <td>{{ formatCurrency(p.currentRepairCost, fixed1) }}</td>
-          <td>
-            <span
-              v-if="p.optimalDay !== undefined"
-              :data-tooltip="'按 PRUNplanner 模型,每 ' + p.optimalDay + ' 天维修一次的日均利润最大'"
-              data-tooltip-position="left"
-              >{{ p.optimalDay }} 天</span
-            >
-            <span v-else data-tooltip="无日产估值或全建材料">--</span>
-          </td>
-          <td :class="urgencyClass(p)">
-            <span v-if="p.optimalDay !== undefined">{{ triggerText(p) }}</span>
-            <span v-else>--</span>
-          </td>
-          <td>{{ formatCurrency(p.optimalDailyProfit, fixed1) }}</td>
-        </tr>
+            <td v-if="isMultiSite">
+              <PrunLink :command="`XIT REPP ${g.naturalId}`">{{ g.target }}</PrunLink>
+            </td>
+            <td>{{ g.count }}</td>
+            <td>
+              <span :class="g.daysUntilTrigger <= 0 ? C.ColoredValue.negative : ''">
+                {{ ageRangeText(g) }}
+              </span>
+            </td>
+            <td>
+              <span
+                v-if="g.dailyRevenue !== undefined"
+                :data-tooltip="
+                  g.count > 1
+                    ? `${g.count} 座共享同一 production line,dailyRevenue 为该 line 的总和`
+                    : 'PRUNplanner 算法:outputs×Bid − inputs×Ask × maxDailyRuns'
+                "
+                data-tooltip-position="left"
+                >{{ formatCurrency(g.dailyRevenue, fixed1) }}</span
+              >
+              <span v-else data-tooltip="无活跃生产订单">--</span>
+            </td>
+            <td>
+              <span
+                :data-tooltip="g.count > 1 ? `${g.count} 座建筑修满成本的总和` : undefined"
+                data-tooltip-position="left"
+                >{{
+                  formatCurrency(
+                    g.members.reduce((s, m) => s + (m.currentRepairCost ?? 0), 0),
+                    fixed1,
+                  )
+                }}</span
+              >
+            </td>
+            <td>
+              <span
+                v-if="g.optimalDay !== undefined"
+                :data-tooltip="
+                  '按 PRUNplanner 模型,每 ' + g.optimalDay + ' 天维修一次的日均利润最大'
+                "
+                data-tooltip-position="left"
+                >{{ g.optimalDay }} 天</span
+              >
+              <span v-else data-tooltip="无日产估值或全建材料">--</span>
+            </td>
+            <td :class="urgencyClass(g)">
+              <span v-if="g.optimalDay !== undefined">{{ triggerText(g) }}</span>
+              <span v-else>--</span>
+            </td>
+            <td>{{ formatCurrency(g.optimalDailyProfit, fixed1) }}</td>
+          </tr>
+          <template v-if="isExpanded(g)">
+            <tr v-for="m in g.members" :key="objectId(m)" :class="$style.memberRow">
+              <td></td>
+              <td colspan="2" style="text-align: right; opacity: 0.7">↳ {{ m.ticker }}</td>
+              <td></td>
+              <td :class="m.daysUntilTrigger <= 0 ? C.ColoredValue.negative : ''">
+                {{ fixed1(m.ageDays) }} 天
+              </td>
+              <td></td>
+              <td>{{ formatCurrency(m.currentRepairCost, fixed1) }}</td>
+              <td colspan="3"></td>
+            </tr>
+          </template>
+        </template>
       </tbody>
     </table>
   </template>
@@ -204,7 +343,33 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
   margin-top: 4px;
 }
 
-table tr > :not(:first-child) {
+.groupRow {
+  font-weight: 500;
+}
+
+.memberRow td {
+  padding: 2px 6px;
+  font-size: 0.92em;
+  opacity: 0.85;
+}
+
+.foldBtn {
+  background: transparent;
+  border: 1px solid currentColor;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 6px;
+  border-radius: 3px;
+  line-height: 1;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.foldBtn:hover {
+  opacity: 1;
+}
+
+table tr > :not(:first-child):not(:nth-child(2)) {
   text-align: right;
 }
 </style>

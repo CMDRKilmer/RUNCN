@@ -49,7 +49,6 @@ export const initialUserData = deepFreeze({
       ['脚本', 'XIT ACT'],
       ['消耗', 'XIT BURN'],
       ['维护', 'XIT REP'],
-      ['维修预测', 'XIT REPP'],
       ['设置', 'XIT SET'],
       ['帮助', 'XIT HELP'],
       ['计划', 'XIT JH'],
