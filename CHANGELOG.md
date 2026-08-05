@@ -1,5 +1,17 @@
 # 更新日志
 
+**日期**: 2026-08-05
+**说明**: 新增 `XIT REPP` 维修预测面板，照搬 PRUNplanner 日均利润最大化模型从 PrUn ProductionLine 自动读取 per-day 净产出，扫描最优维修触发间隔
+
+### ✨ Features
+
+- **`XIT/REPP`**（别名 `REPAIR_PLAN`）：基于 [PRUNplanner](https://github.com/PRUNplanner/frontend) 维修预测模型 —— sigmoid 效率公式 `0.33 + 0.67 / (1 + e^((1789/25000) × (D − 100.87)))`、维修材料公式 `input − floor((input × (180 − min(180, D))) / 180)`、按日均利润 `avgRevenue − amortizedRepair` 最大化扫描 D∈[0,180] 天最优维修间隔。`dailyRevenue` 从 PrUn ProductionLine 的 `outputs×Bid − inputs×Ask × maxDailyRuns` 自动读取（PRODUCTION 建筑）；RESOURCES 建筑因无 production line 显示 `--`。面板顶部显示数据就绪统计与 CX 价格加载状态。
+
+### 🔧 Improvements
+
+- **`XIT/HELP`**：在"生产与基地"分类下注册 REPP / REPAIR_PLAN 命令，使其出现在 `XIT HELP` 列表。
+- **`user-data/repair-plan`**：迁移链清理历史遗留字段 `valuePerEfficiencyDay` / `dailyOutputValue` / `defaultThreshold`；`repairPlan` 简化为空对象占位。
+
 **日期**: 2026-07-29
 **说明**: ORG 任务面板持续迭代：完成挂单与任务解耦（阶段 4）、自动关联合同时间窗预筛与权威匹配、发布流程重构为模态对话框、任务列表实时刷新、`XIT ORG` 快捷键重绑、安全加固与多项修复
 
