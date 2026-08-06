@@ -34,15 +34,15 @@ const sites = computed(() => {
 
 // 严格照搬 PRUNplanner:从 productionStore 找该建筑对应的 ProductionLine,
 // 计算 per-line per-day net productionRevenue 作为 sweep 输入。
-// 注意:仅 PRODUCTION 类型建筑有 production line;RESOURCES(extractor/colony) 没有,
-// 该类建筑本特性不支持自动读取(需要外部 recipe 数据)。
+// 注意:RESOURCES(extractor/colony) 与 PRODUCTION 都有 production line 数据
+// (PrUn 统一通过 PRODUCTION_PRODUCTION_LINES 消息推送),只是没有 active orders,
+// output 来自 productionTemplates。
 // 沿用 core/production.ts 的 reactorName ↔ line.type 1:1 匹配。
 function resolveBuildingDailyRevenue(
   building: PrunApi.Platform,
   site: PrunApi.Site,
 ): number | undefined {
-  // RESOURCES 建筑不在 production line 体系里,无法自动读取。
-  if (building.module.type !== 'PRODUCTION') {
+  if (building.module.type !== 'PRODUCTION' && building.module.type !== 'RESOURCES') {
     return undefined;
   }
   const lines = productionStore.getBySiteId(site.siteId);
@@ -55,11 +55,22 @@ function resolveBuildingDailyRevenue(
     console.warn('[REPP] No production line for', building.module.reactorName, '@', site.siteId);
     return undefined;
   }
-  const result = calculateProductionRevenue(line);
-  if (result === undefined) {
-    console.warn('[REPP] No active order for', building.module.reactorName, '@', site.siteId);
+  const perLineRevenue = calculateProductionRevenue(line);
+  if (perLineRevenue === undefined) {
+    console.warn(
+      '[REPP] No queued orders / templates for',
+      building.module.reactorName,
+      '@',
+      site.siteId,
+    );
+    return undefined;
   }
-  return result;
+  // calculateProductionRevenue 返回 per-line 产值(含 line.capacity 个并行槽位)。
+  // 拆成 per-building:若 capacity=0(异常),跳过。
+  if (line.capacity <= 0) {
+    return undefined;
+  }
+  return perLineRevenue / line.capacity;
 }
 
 const predictions = computed(() => {
@@ -73,20 +84,22 @@ const isMultiSite = computed(() => (sites.value?.length ?? 0) > 1);
 // 折叠状态:按 (naturalId, ticker) 索引展开/折叠。true = 展开。
 const expanded = ref<Record<string, boolean>>({});
 
-function groupKey(naturalId: string, ticker: string): string {
-  return `${naturalId}\u0000${ticker}`;
+function siteGroupKey(naturalId: string): string {
+  return naturalId;
 }
 
 interface RepairGroup {
   naturalId: string;
   target: string;
-  ticker: string;
+  // 该基地下所有 tickers(汇总后保留类型集合便于 UI 显示)。
+  tickers: string[];
   members: NonNullable<typeof predictions.value>[number][];
-  // 共享的 per-line sweep 结果(per-member 一致,取首)。
-  dailyRevenue: number | undefined;
+  // 加权累加后的整组数据(全站所有建筑求和)。
+  // 当所有成员都缺数据时,值为 0;UI 通过对比 g.count 与 g.members.length 检查。
+  dailyRevenue: number;
   optimalDay: number | undefined;
-  optimalDailyProfit: number | undefined;
-  optimalRepairCost: number | undefined;
+  optimalDailyProfit: number;
+  optimalRepairCost: number;
   // 聚合统计。
   count: number;
   ageMin: number;
@@ -101,18 +114,20 @@ const groups = computed<RepairGroup[]>(() => {
   const list = predictions.value ?? [];
   const map = new Map<string, RepairGroup>();
   for (const p of list) {
-    const key = groupKey(p.naturalId, p.ticker);
+    const key = siteGroupKey(p.naturalId);
     let g = map.get(key);
     if (!g) {
       g = {
         naturalId: p.naturalId,
         target: p.target,
-        ticker: p.ticker,
+        tickers: [],
         members: [],
-        dailyRevenue: p.dailyRevenue,
+        // 累加所有成员的 per-building 数字,反映"整组作为一个 sweep 整体"的视角。
+        // 与 PRUNplanner 的 dailyRevenue × building.amount 语义一致(后者也是把整组看作整体)。
+        dailyRevenue: 0,
         optimalDay: p.optimalDay,
-        optimalDailyProfit: p.optimalDailyProfit,
-        optimalRepairCost: p.optimalRepairCost,
+        optimalDailyProfit: 0,
+        optimalRepairCost: 0,
         count: 0,
         ageMin: Infinity,
         ageMax: -Infinity,
@@ -122,10 +137,27 @@ const groups = computed<RepairGroup[]>(() => {
       };
       map.set(key, g);
     }
+    if (!g.tickers.includes(p.ticker)) {
+      g.tickers.push(p.ticker);
+    }
     g.members.push(p);
     g.count++;
     g.ageMin = Math.min(g.ageMin, p.ageDays);
     g.ageMax = Math.max(g.ageMax, p.ageDays);
+    // 加权累加:全站每建筑的真实数据相加。
+    if (p.dailyRevenue !== undefined) {
+      g.dailyRevenue = (g.dailyRevenue ?? 0) + p.dailyRevenue;
+    }
+    if (p.optimalDailyProfit !== undefined) {
+      g.optimalDailyProfit = (g.optimalDailyProfit ?? 0) + p.optimalDailyProfit;
+    }
+    if (p.optimalRepairCost !== undefined) {
+      g.optimalRepairCost = (g.optimalRepairCost ?? 0) + p.optimalRepairCost;
+    }
+    // optimalDay 共享(同 line 同 ticker,所有建筑 sweep 起点相同)。
+    if (p.optimalDay !== undefined) {
+      g.optimalDay = p.optimalDay;
+    }
     if (p.triggerTimestamp < g.triggerTimestamp) {
       g.triggerTimestamp = p.triggerTimestamp;
       g.daysUntilTrigger = p.daysUntilTrigger;
@@ -180,19 +212,25 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
 }
 
 function ageRangeText(g: RepairGroup): string {
-  if (g.count === 1) {
+  // 当所有建筑 age 相同时不显示范围(即使是 count > 1 的同基地聚合)。
+  if (g.count === 1 || g.ageMin === g.ageMax) {
     return `${fixed1(g.ageMin)} 天`;
   }
   return `${fixed1(g.ageMin)}–${fixed1(g.ageMax)} 天`;
 }
 
 function isExpanded(g: RepairGroup): boolean {
-  return expanded.value[groupKey(g.naturalId, g.ticker)] === true;
+  return expanded.value[g.naturalId] === true;
 }
 
 function toggle(g: RepairGroup) {
-  const key = groupKey(g.naturalId, g.ticker);
-  expanded.value[key] = !isExpanded(g);
+  expanded.value[g.naturalId] = !isExpanded(g);
+}
+
+// 组内是否至少有一个成员有日产估值(用于 UI 决定显示数字还是 --)。
+// 不能简单看 g.dailyRevenue > 0,因为全 0 时也是 0(语义不明确)。
+function hasGroupData(g: RepairGroup): boolean {
+  return g.members.some(m => m.dailyRevenue !== undefined);
 }
 </script>
 
@@ -204,7 +242,7 @@ function toggle(g: RepairGroup) {
       <div>
         最早触发:
         <span v-if="earliest && earliest.optimalDay !== undefined" :class="urgencyClass(earliest)">
-          {{ earliest.ticker }} @ {{ earliest.target }} —
+          {{ earliest.tickers.join(' + ') }} @ {{ earliest.target }} —
           {{ triggerText(earliest) }}
         </span>
         <span v-else>暂无预测</span>
@@ -245,7 +283,7 @@ function toggle(g: RepairGroup) {
             无可维修建筑
           </td>
         </tr>
-        <template v-for="g in groups" :key="g.naturalId + ':' + g.ticker">
+        <template v-for="g in groups" :key="g.naturalId">
           <tr :class="$style.groupRow">
             <td>
               <button
@@ -257,7 +295,7 @@ function toggle(g: RepairGroup) {
               </button>
             </td>
             <td
-              ><strong>{{ g.ticker }}</strong></td
+              ><strong>{{ g.tickers.join(' + ') }}</strong></td
             >
             <td v-if="isMultiSite">
               <PrunLink :command="`XIT REPP ${g.naturalId}`">{{ g.target }}</PrunLink>
@@ -270,11 +308,11 @@ function toggle(g: RepairGroup) {
             </td>
             <td>
               <span
-                v-if="g.dailyRevenue !== undefined"
+                v-if="hasGroupData(g)"
                 :data-tooltip="
                   g.count > 1
-                    ? `${g.count} 座共享同一 production line,dailyRevenue 为该 line 的总和`
-                    : 'PRUNplanner 算法:outputs×Bid − inputs×Ask × maxDailyRuns'
+                    ? `${g.count} 座建筑 per-day 总产值加权求和`
+                    : 'PRUNplanner 算法:outputs×Bid − inputs×Ask × maxDailyRuns − 劳动力 − 建造成本/180'
                 "
                 data-tooltip-position="left"
                 >{{ formatCurrency(g.dailyRevenue, fixed1) }}</span

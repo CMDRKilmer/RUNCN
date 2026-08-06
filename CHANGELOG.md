@@ -1,5 +1,24 @@
 # 更新日志
 
+**日期**: 2026-08-06
+**说明**: `XIT REPP` 维修预测面板算法对齐 PRUNplanner 后端核心公式并升级为整站统一 sweep：新增 RESOURCES 建筑（extractor / colony / rig）支持、整站加权 sweep、按基地区分聚合展示
+
+### ✨ Features
+
+- **`XIT/REPP`**：支持 RESOURCES 建筑（EXT / COL / RIG）—— 通过 PrUn ProductionLine 的 `productionTemplates.outputFactors.factor × line.efficiency × msInDay / duration` 计算 per-day 净产值，extractor / colony / rig 现在与 PRODUCTION 建筑一样显示 sweep 结果。
+- **`XIT/REPP`**：整站统一 sweep —— 同一基地所有可维修建筑（不限 ticker、不限 age）共享一次 `D∈[0,180]` 的 sweep，返回整体最优维修间隔与全站加权和的日均净利润；与 PRUNplanner 的边际最优日语义一致。
+- **`XIT/REPP`**：按基地聚合展示 —— 同一基地的不同 ticker / 不同 age 建筑合并为一行，列表头部展示「PHF + SD + INC」式 ticker 集合，全站加权和的日产估值 / 修满成本 / 日均净利润；展开后查看每个建筑的 per-day 详情。
+- **`XIT/REPP`**：精准劳动力成本（per-building）—— 利用 `BuildOption.workforceCapacities × WORKFORCE_CONSUMPTION_MAP` 计算每座建筑的劳动力货币成本，避免按建筑数均摊的旧行为；缺失 BuildOption 时回退到站点按劳动力建筑数均摊。
+
+### 🐛 Bug Fixes
+
+- **`XIT/REPP`**：建筑摊销符号错误 —— 建筑建设成本是「折旧」成本，应在 `dailyRevenue` 中减去（`raw − workforcePortion − constructionCost/180`），之前错误地作为收益加进日产值，导致最优维修日被推向更晚；与 PRUNplanner `usePlanCalculation.ts` L428-432 语义对齐。
+- **`XIT/REPP`**：condition 因子双重折扣 —— 旧 sweep 把 `template.outputFactors.factor × line.efficiency × msInDay / duration` 中的 `factor` 当成 base 产出量，而它实际已被 line.efficiency（condition+experts+COGC）折算过；改用 FINPR 的 `order.amount × capacity × msInDay / totalDuration` 公式直接读活跃订单，与 PRUNplanner 满 condition 起点语义一致。
+- **`XIT/REPP`**：劳动力成本分摊基数错误 —— 旧实现按 `productionBuildingCount` 均摊，导致资源建筑替生产建筑背锅；改按 `workforceBuildingCount`（PRODUCTION + RESOURCES）均摊，对齐 FINPR / PRUNplanner per-building 语义。
+- **`XIT/REPP`**：价格缺失时劳动力成本被部分累加 —— `calcSiteWorkforceCost` 旧逻辑仅标记 `hasAllPrices = false` 并继续累加已知的部分值，造成系统性低估；改为缺失价格时直接 `return undefined` 让 caller 完整跳过该建筑。
+- **`XIT/REPP`**：`revenueFromOrders` 在任一 queued order 无 `duration.millis` 时 `totalDuration` 变 `Infinity`，`perDayAmount` 被算成 0；改为 `filter(o => o.duration?.millis != null)` 跳过无 duration 的 queued orders。
+- **`XIT/REPP`**：`revenueFromOrders` 错误包含正在跑的 orders（`started != null`）—— 这与 FINPR 的 `getRecurringOrders`（排除 started）相反；改为照搬 FINPR 行为，避免正在跑的 batch duration 被反复累加。
+
 **日期**: 2026-08-05
 **说明**: 新增 `XIT REPP` 维修预测面板，照搬 PRUNplanner 日均利润最大化模型从 PrUn ProductionLine 自动读取 per-day 净产出，扫描最优维修触发间隔
 

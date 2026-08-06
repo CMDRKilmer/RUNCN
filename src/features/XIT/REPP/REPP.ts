@@ -6,7 +6,7 @@ xit.add({
   command: ['REPP', 'REPAIR_PLAN'],
   name: '维修预测',
   description:
-    '照搬 PRUNplanner 模型:从 PrUn ProductionLine 读取每座建筑的 per-day 净产出,扫描 D∈[0,180] 天寻找日均利润最大化(avgRevenue − amortizedRepair)的最优维修触发间隔。仅 PRODUCTION 建筑自动读取;RESOURCES(extractor) 因无 production line 数据需手动配置。',
+    '照搬 PRUNplanner 模型:从 PrUn ProductionLine / productionTemplates 读取每座建筑的 per-day 净产出,对整站所有可维修建筑统一跑一次 D∈[0,180] 的 sweep,寻找日均利润最大化(avgRevenue − amortizedRepair)的最优维修触发间隔。支持 PRODUCTION 与 RESOURCES(extractor/colony/rig)建筑。',
   optionalParameters: '星球标识符',
   contextItems: parameters => {
     if (parameters.length === 0) {
