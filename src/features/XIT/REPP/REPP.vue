@@ -11,7 +11,7 @@ import { calculateProductionRevenue } from '@src/core/production-revenue';
 import { diffDays } from '@src/utils/time-diff';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { ddmm, fixed1, formatCurrency, hhmm } from '@src/utils/format';
-import { objectId } from '@src/utils/object-id';
+import { computed } from 'vue';
 
 const parameters = useXitParameters();
 
@@ -81,56 +81,70 @@ const predictions = computed(() => {
 
 const isMultiSite = computed(() => (sites.value?.length ?? 0) > 1);
 
-// 折叠状态:按 (naturalId, ticker) 索引展开/折叠。true = 展开。
-const expanded = ref<Record<string, boolean>>({});
+// 主面板聚合(多站) vs 详情视图(单站)的判别:
+// 多站 → 聚合行;单站 → 逐建筑行。
+const isAggregateView = computed(() => isMultiSite.value);
 
-function siteGroupKey(naturalId: string): string {
-  return naturalId;
-}
-
-interface RepairGroup {
+// 主面板聚合:每行 = 一个 naturalId(整站)的所有 ticker 多建筑求和视图。
+// 多站模式下按基地聚合(一行 = 一个基地的所有 ticker × 所有建筑);
+// 单站模式下同 naturalId 也只有一行(同基地跨 ticker 合并)。
+// sweep 的整站最优日(optimalDay / optimalRepairCost)由
+// core/repair-plan.calculateRepairPredictions 在内部按基地聚合后下发到每栋建筑,
+// 这里取该 naturalId 内任一建筑的共享值(同基地 sweep 边际最优日一致)。
+interface AggregateRow {
   naturalId: string;
   target: string;
-  // 该基地下所有 tickers(汇总后保留类型集合便于 UI 显示)。
-  tickers: string[];
-  members: NonNullable<typeof predictions.value>[number][];
-  // 加权累加后的整组数据(全站所有建筑求和)。
-  // 当所有成员都缺数据时,值为 0;UI 通过对比 g.count 与 g.members.length 检查。
-  dailyRevenue: number;
-  optimalDay: number | undefined;
-  optimalDailyProfit: number;
-  optimalRepairCost: number;
-  // 聚合统计。
+  tickers: string[]; // 该基地下所有 ticker 集合(去重保序)
   count: number;
   ageMin: number;
   ageMax: number;
-  // 触发时间:取最早的。
+  dailyRevenue: number; // 全站所有建筑 per-day 总产值
+  currentRepairCost: number; // 全站所有建筑修满成本之和
+  optimalDay: number | undefined;
+  optimalRepairCost: number; // 全站所有建筑最优日修满成本之和
   triggerTimestamp: number;
   daysUntilTrigger: number;
-  dueCount: number; // 组内已到期成员数
+  dueCount: number;
 }
 
-const groups = computed<RepairGroup[]>(() => {
+// 详情视图:每行 = 一栋建筑的真实 per-day 数据,无聚合。
+// 单站 detail buffer 中展示,使用户能看到每个建筑的具体情况。
+interface DetailRow {
+  naturalId: string;
+  target: string;
+  ticker: string;
+  ageDays: number;
+  dailyRevenue: number | undefined;
+  currentRepairCost: number | undefined;
+  optimalDay: number | undefined;
+  optimalRepairCost: number | undefined;
+  triggerTimestamp: number;
+  daysUntilTrigger: number;
+}
+
+function aggregateKey(p: NonNullable<typeof predictions.value>[number]): string {
+  // 按整站聚合(不区分 ticker):同基地的所有 ticker 建筑合并为一行。
+  return p.naturalId;
+}
+
+const aggregateRows = computed<AggregateRow[]>(() => {
   const list = predictions.value ?? [];
-  const map = new Map<string, RepairGroup>();
+  const map = new Map<string, AggregateRow>();
   for (const p of list) {
-    const key = siteGroupKey(p.naturalId);
+    const key = aggregateKey(p);
     let g = map.get(key);
     if (!g) {
       g = {
         naturalId: p.naturalId,
         target: p.target,
         tickers: [],
-        members: [],
-        // 累加所有成员的 per-building 数字,反映"整组作为一个 sweep 整体"的视角。
-        // 与 PRUNplanner 的 dailyRevenue × building.amount 语义一致(后者也是把整组看作整体)。
-        dailyRevenue: 0,
-        optimalDay: p.optimalDay,
-        optimalDailyProfit: 0,
-        optimalRepairCost: 0,
         count: 0,
         ageMin: Infinity,
         ageMax: -Infinity,
+        dailyRevenue: 0,
+        currentRepairCost: 0,
+        optimalDay: p.optimalDay,
+        optimalRepairCost: p.optimalRepairCost ?? 0,
         triggerTimestamp: p.triggerTimestamp,
         daysUntilTrigger: p.daysUntilTrigger,
         dueCount: 0,
@@ -140,21 +154,18 @@ const groups = computed<RepairGroup[]>(() => {
     if (!g.tickers.includes(p.ticker)) {
       g.tickers.push(p.ticker);
     }
-    g.members.push(p);
     g.count++;
     g.ageMin = Math.min(g.ageMin, p.ageDays);
     g.ageMax = Math.max(g.ageMax, p.ageDays);
-    // 加权累加:全站每建筑的真实数据相加。
     if (p.dailyRevenue !== undefined) {
-      g.dailyRevenue = (g.dailyRevenue ?? 0) + p.dailyRevenue;
+      g.dailyRevenue += p.dailyRevenue;
     }
-    if (p.optimalDailyProfit !== undefined) {
-      g.optimalDailyProfit = (g.optimalDailyProfit ?? 0) + p.optimalDailyProfit;
+    if (p.currentRepairCost !== undefined) {
+      g.currentRepairCost += p.currentRepairCost;
     }
     if (p.optimalRepairCost !== undefined) {
-      g.optimalRepairCost = (g.optimalRepairCost ?? 0) + p.optimalRepairCost;
+      g.optimalRepairCost += p.optimalRepairCost;
     }
-    // optimalDay 共享(同 line 同 ticker,所有建筑 sweep 起点相同)。
     if (p.optimalDay !== undefined) {
       g.optimalDay = p.optimalDay;
     }
@@ -166,20 +177,46 @@ const groups = computed<RepairGroup[]>(() => {
       g.dueCount++;
     }
   }
-  // 组内按 ageDays 升序(最该修的在上),按 triggerTimestamp 升序排序组。
-  for (const g of map.values()) {
-    g.members.sort((a, b) => a.ageDays - b.ageDays);
-  }
   return [...map.values()].sort((a, b) => a.triggerTimestamp - b.triggerTimestamp);
 });
 
-const totalMembers = computed(() => groups.value.reduce((s, g) => s + g.count, 0));
-const totalDue = computed(() => groups.value.reduce((s, g) => s + g.dueCount, 0));
+const detailRows = computed<DetailRow[]>(() => {
+  const list = predictions.value ?? [];
+  return list.map(p => ({
+    naturalId: p.naturalId,
+    target: p.target,
+    ticker: p.ticker,
+    ageDays: p.ageDays,
+    dailyRevenue: p.dailyRevenue,
+    currentRepairCost: p.currentRepairCost,
+    optimalDay: p.optimalDay,
+    optimalRepairCost: p.optimalRepairCost,
+    triggerTimestamp: p.triggerTimestamp,
+    daysUntilTrigger: p.daysUntilTrigger,
+  }));
+});
 
-// 用于倒计时区显示最早触发的"组"。
-const earliest = computed(() => groups.value[0]);
+// 模板实际使用的行:
+//   - 多站主面板(无参数 / 多参数):聚合视图,每行 = (基地,ticker)
+//   - 单站 detail buffer(已传 naturalId):逐建筑视图,每行 = 1 栋
+const rows = computed(() => (isAggregateView.value ? aggregateRows.value : detailRows.value));
 
-// 数据就绪统计(基于 members 粒度)。
+// 总览统计:在聚合视图下对 (count, dueCount) 求和;在详情视图下取长度 / due 计数。
+const totalMembers = computed(() =>
+  isAggregateView.value
+    ? aggregateRows.value.reduce((s, g) => s + g.count, 0)
+    : detailRows.value.length,
+);
+const totalDue = computed(() =>
+  isAggregateView.value
+    ? aggregateRows.value.reduce((s, g) => s + g.dueCount, 0)
+    : detailRows.value.filter(r => r.daysUntilTrigger <= 0).length,
+);
+
+// 用于倒计时区显示最早触发的"行"。
+const earliest = computed(() => rows.value[0]);
+
+// 数据就绪统计(基于建筑粒度)。
 const stats = computed(() => {
   const list = predictions.value ?? [];
   const total = list.length;
@@ -211,26 +248,37 @@ function urgencyClass(p: { daysUntilTrigger: number }): string {
   return '';
 }
 
-function ageRangeText(g: RepairGroup): string {
-  // 当所有建筑 age 相同时不显示范围(即使是 count > 1 的同基地聚合)。
+function ageRangeText(g: AggregateRow): string {
+  // 聚合视图:当所有建筑 age 相同时不显示范围(即使是 count > 1 的同 ticker 聚合)。
   if (g.count === 1 || g.ageMin === g.ageMax) {
     return `${fixed1(g.ageMin)} 天`;
   }
   return `${fixed1(g.ageMin)}–${fixed1(g.ageMax)} 天`;
 }
 
-function isExpanded(g: RepairGroup): boolean {
-  return expanded.value[g.naturalId] === true;
+// 把 "最早触发" 行的 ticker 列表渲染成 "SD + SE + SL" 形式。
+// 聚合视图 → 用 tickers 数组;详情视图 → 单 ticker。
+function formatTickers(row: AggregateRow | DetailRow | undefined): string {
+  if (!row) {
+    return '';
+  }
+  if ('tickers' in row) {
+    return row.tickers.join(' + ');
+  }
+  return row.ticker;
 }
 
-function toggle(g: RepairGroup) {
-  expanded.value[g.naturalId] = !isExpanded(g);
+function hasAggregateData(g: AggregateRow): boolean {
+  // 不能简单看 g.dailyRevenue > 0,因为全 0 时也是 0(语义不明确)。
+  return g.count > 0;
 }
 
-// 组内是否至少有一个成员有日产估值(用于 UI 决定显示数字还是 --)。
-// 不能简单看 g.dailyRevenue > 0,因为全 0 时也是 0(语义不明确)。
-function hasGroupData(g: RepairGroup): boolean {
-  return g.members.some(m => m.dailyRevenue !== undefined);
+function hasDetailData(r: DetailRow): boolean {
+  return r.dailyRevenue !== undefined;
+}
+
+function detailAgeText(r: DetailRow): string {
+  return `${fixed1(r.ageDays)} 天`;
 }
 </script>
 
@@ -242,7 +290,7 @@ function hasGroupData(g: RepairGroup): boolean {
       <div>
         最早触发:
         <span v-if="earliest && earliest.optimalDay !== undefined" :class="urgencyClass(earliest)">
-          {{ earliest.tickers.join(' + ') }} @ {{ earliest.target }} —
+          {{ formatTickers(earliest) }} @ {{ earliest.target }} —
           {{ triggerText(earliest) }}
         </span>
         <span v-else>暂无预测</span>
@@ -250,7 +298,7 @@ function hasGroupData(g: RepairGroup): boolean {
       <div>
         待维修建筑数:
         <span :class="totalDue > 0 ? C.ColoredValue.negative : ''">{{ totalDue }}</span>
-        / {{ totalMembers }}（{{ groups.length }} 组）
+        / {{ totalMembers }}（{{ rows.length }} 行）
       </div>
       <div :class="$style.hint">
         数据就绪: 日产 {{ stats.withDailyRevenue }}/{{ stats.total }}, 修满
@@ -259,108 +307,112 @@ function hasGroupData(g: RepairGroup): boolean {
       </div>
     </div>
 
-    <SectionHeader>逐建筑(按基地 + 类型聚合)</SectionHeader>
+    <SectionHeader>{{ isAggregateView ? '建筑聚合(按基地)' : '逐建筑详情' }}</SectionHeader>
     <table>
       <thead>
         <tr>
-          <th></th>
           <th>代码</th>
           <th v-if="isMultiSite">目标</th>
-          <th>数量</th>
+          <th v-if="isAggregateView">数量</th>
           <th>年龄</th>
           <th>日产估值</th>
           <th>当前修满成本</th>
           <th>最优间隔</th>
           <th>触发时间</th>
-          <th>日均净利润</th>
         </tr>
       </thead>
       <tbody>
-        <tr v-if="groups.length === 0">
+        <tr v-if="rows.length === 0">
           <td
-            :colspan="isMultiSite ? 10 : 9"
+            :colspan="isMultiSite ? (isAggregateView ? 8 : 7) : isAggregateView ? 7 : 6"
             style="text-align: center; opacity: 0.5; padding: 12px">
             无可维修建筑
           </td>
         </tr>
-        <template v-for="g in groups" :key="g.naturalId">
-          <tr :class="$style.groupRow">
-            <td>
-              <button
-                type="button"
-                :class="$style.foldBtn"
-                :aria-label="isExpanded(g) ? '折叠' : '展开'"
-                @click="toggle(g)">
-                {{ isExpanded(g) ? '▼' : '▶' }}
-              </button>
-            </td>
+        <!-- 聚合视图:多站主面板,每行 = (基地, ticker) -->
+        <template v-if="isAggregateView">
+          <tr v-for="r in aggregateRows" :key="`agg::${r.naturalId}`">
             <td
-              ><strong>{{ g.tickers.join(' + ') }}</strong></td
+              ><strong>{{ r.tickers.join(' + ') }}</strong></td
             >
             <td v-if="isMultiSite">
-              <PrunLink :command="`XIT REPP ${g.naturalId}`">{{ g.target }}</PrunLink>
+              <PrunLink :command="`XIT REPP ${r.naturalId}`">{{ r.target }}</PrunLink>
             </td>
-            <td>{{ g.count }}</td>
-            <td>
-              <span :class="g.daysUntilTrigger <= 0 ? C.ColoredValue.negative : ''">
-                {{ ageRangeText(g) }}
-              </span>
-            </td>
+            <td>{{ r.count }}</td>
+            <td :class="urgencyClass(r)">{{ ageRangeText(r) }}</td>
             <td>
               <span
-                v-if="hasGroupData(g)"
+                v-if="hasAggregateData(r)"
                 :data-tooltip="
-                  g.count > 1
-                    ? `${g.count} 座建筑 per-day 总产值加权求和`
+                  r.count > 1
+                    ? `${r.count} 座建筑 per-day 总产值加权求和`
                     : 'PRUNplanner 算法:outputs×Bid − inputs×Ask × maxDailyRuns − 劳动力 − 建造成本/180'
                 "
                 data-tooltip-position="left"
-                >{{ formatCurrency(g.dailyRevenue, fixed1) }}</span
+                >{{ formatCurrency(r.dailyRevenue, fixed1) }}</span
               >
               <span v-else data-tooltip="无活跃生产订单">--</span>
             </td>
             <td>
               <span
-                :data-tooltip="g.count > 1 ? `${g.count} 座建筑修满成本的总和` : undefined"
+                :data-tooltip="r.count > 1 ? `${r.count} 座建筑修满成本的总和` : undefined"
                 data-tooltip-position="left"
-                >{{
-                  formatCurrency(
-                    g.members.reduce((s, m) => s + (m.currentRepairCost ?? 0), 0),
-                    fixed1,
-                  )
-                }}</span
+                >{{ formatCurrency(r.currentRepairCost, fixed1) }}</span
               >
             </td>
             <td>
               <span
-                v-if="g.optimalDay !== undefined"
+                v-if="r.optimalDay !== undefined"
                 :data-tooltip="
-                  '按 PRUNplanner 模型,每 ' + g.optimalDay + ' 天维修一次的日均利润最大'
+                  '按 PRUNplanner 模型,每 ' + r.optimalDay + ' 天维修一次的日均利润最大'
                 "
                 data-tooltip-position="left"
-                >{{ g.optimalDay }} 天</span
+                >{{ r.optimalDay }} 天</span
               >
               <span v-else data-tooltip="无日产估值或全建材料">--</span>
             </td>
-            <td :class="urgencyClass(g)">
-              <span v-if="g.optimalDay !== undefined">{{ triggerText(g) }}</span>
+            <td :class="urgencyClass(r)">
+              <span v-if="r.optimalDay !== undefined">{{ triggerText(r) }}</span>
               <span v-else>--</span>
             </td>
-            <td>{{ formatCurrency(g.optimalDailyProfit, fixed1) }}</td>
           </tr>
-          <template v-if="isExpanded(g)">
-            <tr v-for="m in g.members" :key="objectId(m)" :class="$style.memberRow">
-              <td></td>
-              <td colspan="2" style="text-align: right; opacity: 0.7">↳ {{ m.ticker }}</td>
-              <td></td>
-              <td :class="m.daysUntilTrigger <= 0 ? C.ColoredValue.negative : ''">
-                {{ fixed1(m.ageDays) }} 天
-              </td>
-              <td></td>
-              <td>{{ formatCurrency(m.currentRepairCost, fixed1) }}</td>
-              <td colspan="3"></td>
-            </tr>
-          </template>
+        </template>
+        <!-- 详情视图:单站 buffer,每行 = 1 栋建筑 -->
+        <template v-else>
+          <tr v-for="r in detailRows" :key="`det::${r.naturalId}::${r.ticker}::${r.ageDays}`">
+            <td
+              ><strong>{{ r.ticker }}</strong></td
+            >
+            <td v-if="isMultiSite">
+              <PrunLink :command="`XIT REPP ${r.naturalId}`">{{ r.target }}</PrunLink>
+            </td>
+            <td :class="urgencyClass(r)">{{ detailAgeText(r) }}</td>
+            <td>
+              <span
+                v-if="hasDetailData(r)"
+                data-tooltip="PRUNplanner 算法:outputs×Bid − inputs×Ask × maxDailyRuns − 劳动力 − 建造成本/180"
+                data-tooltip-position="left"
+                >{{ formatCurrency(r.dailyRevenue, fixed1) }}</span
+              >
+              <span v-else data-tooltip="无活跃生产订单">--</span>
+            </td>
+            <td>{{ formatCurrency(r.currentRepairCost, fixed1) }}</td>
+            <td>
+              <span
+                v-if="r.optimalDay !== undefined"
+                :data-tooltip="
+                  '按 PRUNplanner 模型,每 ' + r.optimalDay + ' 天维修一次的日均利润最大'
+                "
+                data-tooltip-position="left"
+                >{{ r.optimalDay }} 天</span
+              >
+              <span v-else data-tooltip="无日产估值或全建材料">--</span>
+            </td>
+            <td :class="urgencyClass(r)">
+              <span v-if="r.optimalDay !== undefined">{{ triggerText(r) }}</span>
+              <span v-else>--</span>
+            </td>
+          </tr>
         </template>
       </tbody>
     </table>

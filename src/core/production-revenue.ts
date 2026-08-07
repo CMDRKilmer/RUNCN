@@ -5,31 +5,22 @@
 //   - productionTemplates(每个建筑最多2个,executor 等无 orders 的建筑用 templates)
 //     → 用 template.outputFactors/inputs 的 factor × line.efficiency × msInDay / duration
 //
-// 价格读取:产出用 Bid,投入用 Ask;照搬 PRUNplanner 的 SELL/BUY 约定。
+// 价格读取:统一走 userData.settings.pricing.method,与 FINPR / XIT FIN RP 对齐,
+// 默认 VWAP7D(可选 ASK / BID / AVG / VWAP7D / VWAP30D)。旧版硬编码 Bid/Ask spread
+// 会把买卖价差全算成亏损,与用户期望的"实际成交均价"语义不一致——已修正。
 //
 // 返回 per-line(含 capacity 个并行槽位)的日产值;调用方按 building 数拆分时需除以 line.capacity。
 
-import { cxStore } from '@src/infrastructure/fio/cx';
-import { userData } from '@src/store/user-data';
+import { getPrice } from '@src/infrastructure/fio/cx';
 import { sumBy } from '@src/utils/sum-by';
 import { getRecurringOrders } from '@src/core/orders';
 
 const MS_PER_DAY = 86400000;
 
-function getAskPrice(ticker: string): number {
-  if (!cxStore.fetched) {
-    return 0;
-  }
-  const exchange = cxStore.prices.get(userData.settings.pricing.exchange);
-  return exchange?.get(ticker)?.Ask ?? 0;
-}
-
-function getBidPrice(ticker: string): number {
-  if (!cxStore.fetched) {
-    return 0;
-  }
-  const exchange = cxStore.prices.get(userData.settings.pricing.exchange);
-  return exchange?.get(ticker)?.Bid ?? 0;
+// 按用户定价方法(pricing.method)读 ticker 单价。
+// 缺失价格(忽略列表 / 未上市)返回 0,与 getPrice 自身行为一致。
+function getMaterialPrice(ticker: string): number {
+  return getPrice(ticker) ?? 0;
 }
 
 // 从 order 的 amount/duration 算 per-line per-day 净产值(照搬 FINPR 算法)。
@@ -51,11 +42,11 @@ function revenueFromOrders(line: PrunApi.ProductionLine): number | undefined {
     }
     for (const mat of order.outputs) {
       const perDayAmount = (mat.amount * line.capacity * MS_PER_DAY) / totalDuration;
-      dailyIncome += perDayAmount * getBidPrice(mat.material.ticker);
+      dailyIncome += perDayAmount * getMaterialPrice(mat.material.ticker);
     }
     for (const mat of order.inputs) {
       const perDayAmount = (mat.amount * line.capacity * MS_PER_DAY) / totalDuration;
-      dailyCost += perDayAmount * getAskPrice(mat.material.ticker);
+      dailyCost += perDayAmount * getMaterialPrice(mat.material.ticker);
     }
   }
   return dailyIncome - dailyCost;
@@ -63,7 +54,7 @@ function revenueFromOrders(line: PrunApi.ProductionLine): number | undefined {
 
 // 从 productionTemplates 算 per-line per-day 净产值(RESOURCES 建筑无 orders,用 templates)。
 // 公式(PRUNplanner usePlanCalculation.ts):
-//   per-template per-ms rate = (Σ outputs×Bid − Σ inputs×Ask) × line.efficiency / template.duration
+//   per-template per-ms rate = (Σ outputs×price − Σ inputs×price) × line.efficiency / template.duration
 //   其中 template.outputFactors.factor 是不含 efficiency 的绝对产出量
 //   (experts.ts L22 证实:order.outputs.amount / factor = orderSize,即 factor 不含 efficiency)
 //   line.efficiency 是当前建筑 totalEfficiency(condition+experts+COGC),与 sweep 起点的
@@ -83,10 +74,10 @@ function revenueFromTemplates(line: PrunApi.ProductionLine): number | undefined 
     let perTemplateIncome = 0;
     let perTemplateCost = 0;
     for (const f of template.outputFactors) {
-      perTemplateIncome += f.factor * getBidPrice(f.material.ticker);
+      perTemplateIncome += f.factor * getMaterialPrice(f.material.ticker);
     }
     for (const f of template.inputFactors) {
-      perTemplateCost += f.factor * getAskPrice(f.material.ticker);
+      perTemplateCost += f.factor * getMaterialPrice(f.material.ticker);
     }
     const perMs = ((perTemplateIncome - perTemplateCost) * line.efficiency) / durationMs;
     total += perMs * line.capacity * MS_PER_DAY;
