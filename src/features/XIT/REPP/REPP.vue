@@ -319,12 +319,13 @@ function detailAgeText(r: DetailRow): string {
           <th>当前修满成本</th>
           <th>最优间隔</th>
           <th>触发时间</th>
+          <th>BRA</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="rows.length === 0">
           <td
-            :colspan="isMultiSite ? (isAggregateView ? 8 : 7) : isAggregateView ? 7 : 6"
+            :colspan="isMultiSite ? (isAggregateView ? 9 : 8) : isAggregateView ? 8 : 7"
             style="text-align: center; opacity: 0.5; padding: 12px">
             无可维修建筑
           </td>
@@ -375,6 +376,11 @@ function detailAgeText(r: DetailRow): string {
               <span v-if="r.optimalDay !== undefined">{{ triggerText(r) }}</span>
               <span v-else>--</span>
             </td>
+            <td>
+              <PrunLink inline :command="`BRA ${r.naturalId}`">
+                <span :class="$style.braBtn">BRA</span>
+              </PrunLink>
+            </td>
           </tr>
         </template>
         <!-- 详情视图:单站 buffer,每行 = 1 栋建筑 -->
@@ -412,6 +418,11 @@ function detailAgeText(r: DetailRow): string {
               <span v-if="r.optimalDay !== undefined">{{ triggerText(r) }}</span>
               <span v-else>--</span>
             </td>
+            <td>
+              <PrunLink inline :command="`BRA ${r.naturalId}`">
+                <span :class="$style.braBtn">BRA</span>
+              </PrunLink>
+            </td>
           </tr>
         </template>
       </tbody>
@@ -441,6 +452,23 @@ function detailAgeText(r: DetailRow): string {
   padding: 2px 6px;
   font-size: 0.92em;
   opacity: 0.85;
+}
+
+.braBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 0.85em;
+  line-height: 1;
+  opacity: 0.85;
+}
+
+.braBtn:hover {
+  opacity: 1;
 }
 
 .foldBtn {
