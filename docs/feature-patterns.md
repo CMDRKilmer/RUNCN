@@ -154,9 +154,12 @@ await sleep(50);
 //    onChange listens for. Do NOT add `beforeinput` — it suppresses
 //    AddressSelector's server search.
 changeInputValue(input, value);
-// 3. Wait briefly for PrUn's debounced server search (AddressSelector)
-//    or local filter (MaterialSelector) to populate the listbox.
-await sleep(500);
+// 3. Wait for the search to actually return before picking: for an
+//    AddressSelector the pacing factor is the server round-trip —
+//    wait for a listbox item matching the search term rather than a
+//    fixed 500ms sleep (fast searches shouldn't waste time, slow
+//    ones shouldn't race into clicking a stale suggestion). See
+//    fillAddress in src/features/basic/contd-auto-fill.ts.
 // 4. Click the listbox item using the NATIVE .click() (not a full
 //    pointer/mouse event sequence). React-Autowhatever's
 //    onSuggestionSelected listens for the trusted click that
@@ -164,6 +167,8 @@ await sleep(500);
 //    sequences are filtered out.
 await selectListboxItem(input, value);
 ```
+
+Prefer adaptive waits over fixed sleeps: fixed sleeps both waste time on fast connections and race slow ones. The real completion signals are the listbox portal unmounting (react-autosuggest removes it on selection) or the input value being replaced by the committed suggestion. `selectListboxItem` in `src/features/basic/contd-auto-fill.ts` waits for either and throws a clear error on timeout instead of silently continuing with an uncommitted value.
 
 ### Click recipe
 
@@ -185,6 +190,8 @@ PrUn's modal dialogs (template selection, contract conditions) read their state 
 ### Selecting from listbox
 
 See `selectListboxItem` in `src/features/basic/contd-auto-fill.ts` for a working universal selector that handles both flat MaterialSelector lists and nested AddressSelector sections.
+
+Only one listbox can be open at a time — react-autosuggest closes the focused input's listbox when another input takes focus, so listbox interactions in a multi-row form must run one row at a time. Plain value writes (amount, price) are safe to run in parallel, but a write can land on a node React swapped under a concurrent re-render. Follow parallel writes with a sequential verify-and-fixup pass that re-writes mismatches, so races become retries instead of silent corruption — see the two-wave fill in `contd-auto-fill.ts`.
 
 ---
 

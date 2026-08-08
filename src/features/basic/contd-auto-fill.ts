@@ -41,6 +41,21 @@ interface DraftConfig {
 
 const MARKER = 'data-rprun-auto-fill';
 
+// Per-panel id for the injected textarea. The label's `for` must
+// point at a real element id so the browser associates them — the
+// DevTools accessibility check flags unassociated form fields. A
+// counter keeps ids unique across panel rebuilds and tiles.
+let nextPanelInputId = 0;
+
+// Preserves the JSON across React-driven panel rebuilds, keyed by the
+// tile command (e.g. "CONTD CD-NRHS-7461"). A fresh draft's header
+// re-renders several times as server data arrives, replacing the
+// panel — a pasted config would vanish and the "填写" click would
+// silently do nothing on an empty textarea. Cache entries are dropped
+// once the fill completes ("Done"); per-draft entries that are never
+// filled are few and harmless.
+const panelJsonCache = new Map<string, string>();
+
 // Hard-coded location aliases. PrUn's AddressSelector searches by
 // naturalId and by station name. Tickers like `HRT` are CX-exchange
 // codes derived from the station naturalId — but PrUn's search index
@@ -163,6 +178,23 @@ async function waitForValue<T>(
   }
 }
 
+// Polls `predicate` every 16ms until it turns true or the deadline
+// elapses. Returns whether it succeeded. Used for listbox-selection
+// commits, which land within a few frames of the click — the 50ms
+// waitFor poll would waste most of a frame per row.
+async function waitForCommit(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await sleep(16);
+  }
+}
+
 // Picks the closest-matching <option> in a <select> for a user-supplied
 // value. Accepts ticker, localized name, or partial matches.
 function selectByValueOrLabel(select: HTMLSelectElement, value: string): void {
@@ -229,19 +261,26 @@ function resolveMaterial(input: string): ResolvedMaterial | undefined {
   return undefined;
 }
 
-async function selectListboxItem(input: HTMLInputElement, expectedText: string) {
-  // The listbox lives in a React-Autosuggest / Autowhatever portal under
-  // document.body, not inside the input's row. Find it by the
-  // aria-controls attribute on the combobox wrapper.
+// The listbox lives in a React-Autosuggest / Autowhatever portal under
+// document.body, not inside the input's row. Find it by the
+// aria-controls attribute on the combobox wrapper, falling back to
+// the first open listbox in the document. Returns null when the
+// input has no open listbox (e.g. after a selection committed and
+// the portal unmounted).
+function findListbox(input: HTMLInputElement): HTMLElement | null {
   const combobox = input.closest('[role="combobox"]') as HTMLElement | null;
   const controlsId = combobox?.getAttribute('aria-controls') ?? input.getAttribute('aria-controls');
-  let listbox: HTMLElement | null = null;
   if (controlsId) {
-    listbox = document.getElementById(controlsId) as HTMLElement | null;
+    return document.getElementById(controlsId) as HTMLElement | null;
   }
-  if (!listbox) {
-    listbox = document.querySelector('ul[role="listbox"]') as HTMLElement | null;
-  }
+  return document.querySelector('ul[role="listbox"]') as HTMLElement | null;
+}
+
+async function selectListboxItem(input: HTMLInputElement, expectedText: string) {
+  // Snapshot the typed value so we can detect when the suggestion
+  // click / Enter replaces it with the committed display text.
+  const typedValue = input.value;
+  const listbox = findListbox(input);
   if (!listbox) {
     throw new Error('Listbox not found after typing search term');
   }
@@ -290,30 +329,48 @@ async function selectListboxItem(input: HTMLInputElement, expectedText: string) 
   // Native HTMLElement.click() — synthesizes a click that
   // react-autosuggest's onClick handler picks up reliably.
   (target as HTMLElement).click();
-  await sleep(150);
-  // Fallback: drive selection via keyboard on the input. Re-focus
-  // first because clicking the <li> may have blurred the input.
-  input.focus();
-  await sleep(50);
-  input.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'ArrowDown',
-      code: 'ArrowDown',
-      keyCode: 40,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
-  input.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      bubbles: true,
-      cancelable: true,
-    }),
-  );
-  await sleep(150);
+  // The commit predicate: the listbox portal unmounts on close, or
+  // the input value is replaced by the committed suggestion.
+  const commitPredicate = () => {
+    const value = input.value;
+    // A transient empty value means the commit is still in flight.
+    return value !== '' && (value !== typedValue || findListbox(input) === null);
+  };
+  // The click normally commits within a few frames — only run the
+  // keyboard fallback if it didn't. Re-focusing unconditionally
+  // reopens the listbox and re-commits the first suggestion on every
+  // row, which is what the old fixed-sleep version did.
+  let committed = await waitForCommit(commitPredicate, 300);
+  if (!committed) {
+    // Fallback: drive selection via keyboard on the input. Re-focus
+    // first because clicking the <li> may have blurred the input.
+    input.focus();
+    await sleep(50);
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ArrowDown',
+        code: 'ArrowDown',
+        keyCode: 40,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    committed = await waitForCommit(commitPredicate, 3000);
+  }
+  if (!committed) {
+    // Throw rather than silently filling the row with an uncommitted
+    // search term.
+    throw new Error(`Timed out waiting for selection of "${expectedText}" to commit`);
+  }
 }
 
 async function findConditionsForm(tile: PrunTile): Promise<HTMLElement> {
@@ -330,8 +387,25 @@ async function findConditionsForm(tile: PrunTile): Promise<HTMLElement> {
   const all = _$$(tile.anchor, C.Draft.form);
   return await $(tile.anchor, C.Draft.form).then(() => all[1] ?? all[0]);
 }
+function isContractNotesLabel(label: Element): boolean {
+  const text = label.textContent?.trim() ?? '';
+  return text === '合同注解' || text === getI18nValue('Contract.notes', 'Contract Notes');
+}
 
-async function applyConfig(tile: PrunTile, config: DraftConfig) {
+function findNotesRow(headerForm: HTMLElement): HTMLElement | undefined {
+  for (const label of _$$(headerForm, C.FormComponent.label)) {
+    if (!isContractNotesLabel(label)) {
+      continue;
+    }
+    const row = label.closest(`.${C.FormComponent.containerPassive}`);
+    if (row) {
+      return row as HTMLElement;
+    }
+  }
+  return undefined;
+}
+
+async function applyConfig(tile: PrunTile, config: DraftConfig): Promise<void> {
   // 0. Optional header fields (合同名称, 截止时间, etc.). We only
   //    touch name/deadline here; the template modal handles its own
   //    per-template form fields further down. Both header inputs
@@ -397,7 +471,8 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
       throw new Error('选择模板 button not found in conditions form');
     }
     await clickElement(selectButton);
-    await sleep(200);
+    // The $ gate below blocks until the modal mounts — no fixed
+    // sleep needed here.
   }
 
   // Wait for the template modal to render. It lives inside the tile anchor
@@ -597,61 +672,52 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     await waitFor(() => rowCount() > target, `commodity row #${target} to render`);
   }
 
-  // 4. Fill each row. Re-resolve the form before every read so React's
-  // re-renders (which may swap <form> elements) don't leave us
-  // querying a detached node.
+  // 4. Fill each row. Amount and price writes are plain controlled
+  // inputs — run all rows in parallel and let React batch the
+  // re-renders. Material selection is different: react-autosuggest
+  // only keeps the focused input's listbox open, and focusing row B
+  // blurs row A and closes A's listbox — two concurrent material
+  // selections would steal each other's listboxes, so materials are
+  // filled one row at a time. A verification pass below repairs any
+  // row whose parallel write landed on a node React swapped under a
+  // concurrent re-render — races surface as a retry, never as a
+  // silently wrong contract.
   const currentForm = (): HTMLFormElement | null =>
     _$(tsContainer, 'form') as HTMLFormElement | null;
-  for (let i = 0; i < config.items.length; i++) {
-    const item = notNullish(config.items[i], `Item ${i} missing in config`);
-
-    await waitFor(
-      () => currentForm() !== null && findRowInput(currentForm()!, i, 'amount') !== null,
-      `row #${i} amount input to render`,
-    );
-    const formForRow = notNullish(currentForm(), `Modal <form> missing for row ${i}`);
-
-    const amountInput = notNullish(
-      findRowInput(formForRow, i, 'amount'),
-      `Amount input for item ${i} not found`,
-    );
-    changeInputValue(amountInput, String(item.amount));
-    await sleep(50);
-
+  const rowInput = (i: number, suffix: string): HTMLInputElement | null =>
+    currentForm() === null ? null : findRowInput(currentForm()!, i, suffix);
+  const rowMaterialInput = (i: number): HTMLInputElement | null => {
+    const form = currentForm();
+    if (form === null) {
+      return null;
+    }
     // The material input has no `name` attribute — the name is on its
     // parent wrapper div. Locate via the row's `material` or `cargo`
     // label (BUY/SELL use `.material`, SHIP uses `.cargo`) and pick
     // the MaterialSelector input inside the label's container row.
-    const materialLabel = notNullish(
-      findRowLabel(formForRow, i, 'material') ?? findRowLabel(formForRow, i, 'cargo'),
-      `Material/cargo label for item ${i} not found`,
-    );
-    const materialRow = materialLabel.parentElement!;
-    const materialInput = notNullish(
-      (materialRow.querySelector(`input.${C.MaterialSelector.input}`) ??
-        materialRow.querySelector('input')) as HTMLInputElement | null,
-      `Material input for item ${i} not found`,
-    );
-    focusElement(materialInput);
-    await sleep(50);
-    const resolved = resolveMaterial(item.commodity);
-    const searchText = resolved?.ticker ?? item.commodity;
-    changeInputValue(materialInput, searchText);
-    // Wait for the listbox to actually populate with results before
-    // trying to pick — older code assumed 150ms was enough and silently
-    // hit a stale DOM under slow loads.
-    await selectListboxItem(materialInput, resolved?.name ?? item.commodity);
-    await sleep(50);
+    const materialLabel = findRowLabel(form, i, 'material') ?? findRowLabel(form, i, 'cargo');
+    if (materialLabel === null) {
+      return null;
+    }
+    return (materialLabel.parentElement!.querySelector(`input.${C.MaterialSelector.input}`) ??
+      materialLabel.parentElement!.querySelector('input')) as HTMLInputElement | null;
+  };
 
+  const fillAmountAndPrice = async (i: number, item: DraftItem) => {
+    await waitFor(() => rowInput(i, 'amount') !== null, `row #${i} amount input to render`);
+    changeInputValue(
+      notNullish(rowInput(i, 'amount'), `Amount input for item ${i} not found`),
+      String(item.amount),
+    );
+    await sleep(50);
     // Per-row price only exists in BUY/SELL (each row has its own
     // pricePerUnit). SHIP has a single global `price` field outside
-    // the shipments array — handled separately below for the first
-    // row only.
-    // Per-row price falls back to top-level `config.price` when the
-    // item itself omits it — validateConfig guarantees one of the
-    // two is present for BUY/SELL.
+    // the shipments array — handled separately for the first row
+    // only. Per-row price falls back to top-level `config.price`
+    // when the item itself omits it — validateConfig guarantees one
+    // of the two is present for BUY/SELL.
     const rowPrice = item.price ?? config.price;
-    const priceInput = findRowInput(formForRow, i, 'pricePerUnit');
+    const priceInput = rowInput(i, 'pricePerUnit');
     if (priceInput !== null && rowPrice !== undefined) {
       changeInputValue(priceInput, String(rowPrice));
       await sleep(50);
@@ -659,12 +725,79 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
       // SHIP template: write the single contract price to the global
       // `price` input. `config.price` is the top-level price for SHIP;
       // it is required by validateConfig when template === 'SHIP'.
-      const globalPrice = formForRow.querySelector(
+      const globalPrice = currentForm()?.querySelector(
         'input[name="price"]',
       ) as HTMLInputElement | null;
       if (globalPrice !== null) {
         changeInputValue(globalPrice, String(config.price));
         await sleep(50);
+      }
+    }
+  };
+
+  const fillMaterial = async (i: number, commodity: string) => {
+    const materialInput = notNullish(rowMaterialInput(i), `Material input for item ${i} not found`);
+    focusElement(materialInput);
+    await sleep(50);
+    const resolved = resolveMaterial(commodity);
+    const searchText = resolved?.ticker ?? commodity;
+    changeInputValue(materialInput, searchText);
+    // Wait for the listbox to actually populate with results before
+    // trying to pick — older code assumed 150ms was enough and silently
+    // hit a stale DOM under slow loads.
+    await selectListboxItem(materialInput, resolved?.name ?? commodity);
+  };
+
+  // Wave 1: amounts + prices, all rows in parallel. Errors are
+  // swallowed — a write lost to a concurrent re-render is detected
+  // and repaired by the verification pass below.
+  await Promise.all(
+    config.items.map((item, i) => fillAmountAndPrice(i, item).catch(() => undefined)),
+  );
+
+  // Wave 2: materials, one row at a time — the listbox-focus
+  // constraint serializes them anyway. Each fillMaterial either
+  // commits (selectListboxItem throws otherwise), so no verification
+  // is needed — a failed selection aborts loudly. The post-select
+  // settle sleep is dropped: the next row's focus sleep (and the
+  // address fill's own focus sleep) absorb the commit render.
+  for (let i = 0; i < config.items.length; i++) {
+    const item = notNullish(config.items[i], `Item ${i} missing in config`);
+    await fillMaterial(i, item.commodity);
+  }
+
+  // 4b. Verify every row against the config and repair stragglers.
+  for (let i = 0; i < config.items.length; i++) {
+    const item = notNullish(config.items[i], `Item ${i} missing in config`);
+    const amount = rowInput(i, 'amount');
+    if (amount !== null && Number(amount.value) !== item.amount) {
+      await fillAmountAndPrice(i, item);
+      if (Number(rowInput(i, 'amount')?.value) !== item.amount) {
+        throw new Error(`Row ${i}: amount could not be filled (expected ${item.amount})`);
+      }
+    }
+    const rowPrice = item.price ?? config.price;
+    const priceInput = rowInput(i, 'pricePerUnit');
+    if (priceInput !== null && rowPrice !== undefined && Number(priceInput.value) !== rowPrice) {
+      changeInputValue(priceInput, String(rowPrice));
+      await sleep(50);
+      if (Number(rowInput(i, 'pricePerUnit')?.value) !== rowPrice) {
+        throw new Error(`Row ${i}: price could not be filled (expected ${rowPrice})`);
+      }
+    }
+  }
+  if (config.template === 'SHIP') {
+    const globalPrice = currentForm()?.querySelector(
+      'input[name="price"]',
+    ) as HTMLInputElement | null;
+    if (globalPrice !== null && Number(globalPrice.value) !== config.price) {
+      changeInputValue(globalPrice, String(config.price));
+      await sleep(50);
+      const globalCheck = currentForm()?.querySelector(
+        'input[name="price"]',
+      ) as HTMLInputElement | null;
+      if (globalCheck === null || Number(globalCheck.value) !== config.price) {
+        throw new Error(`Price could not be filled (expected ${config.price})`);
       }
     }
   }
@@ -683,17 +816,31 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
   }
   const fillAddress = async (input: HTMLInputElement, raw: string) => {
     // The template's "位置" / "location" field is an AddressSelector
-    // backed by PrUn's server search. We just focus, set the value,
-    // wait briefly for PrUn's debounce + server round-trip to
-    // populate the listbox, then let selectAddressListboxItem pick
-    // the matching item. The 500ms wait was the key bit that the
-    // bb9720ce working version used; removing it caused the
-    // subsequent fillAddress experiments to fail.
+    // backed by PrUn's server search. We focus, set the value, and
+    // wait for a listbox item matching our needle to appear — that
+    // is the real "search results are in" signal. The bb9720ce
+    // working version used a fixed 500ms sleep, which raced slow
+    // servers into clicking stale suggestions. Fast searches now
+    // proceed as fast as the server allows; a matchless search fails
+    // loudly instead of silently picking a wrong location.
     input.focus();
     await sleep(50);
     const expanded = expandLocationAlias(raw).trim();
     changeInputValue(input, expanded);
-    await sleep(500);
+    const needle = expanded.toUpperCase();
+    await waitFor(
+      () => {
+        const box = findListbox(input);
+        return (
+          box !== null &&
+          Array.from(box.querySelectorAll('li')).some(li =>
+            (li.textContent ?? '').toUpperCase().includes(needle),
+          )
+        );
+      },
+      `search results for "${expanded}"`,
+      5000,
+    );
     await selectListboxItem(input, expanded);
   };
   if (config.template.toUpperCase() === 'SHIP') {
@@ -730,8 +877,13 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
   }
 
   // 6. Apply template → modal closes, conditions form refreshes.
+  // Re-resolve the container fresh: the node captured at the top of
+  // the fill may have been replaced by an intermediate re-render,
+  // and dispatching events on a detached node never reaches React's
+  // root listener — the apply click would be silently dropped.
+  const modal = _$(tile.anchor, C.TemplateSelection.container);
   const applyForm = notNullish(
-    _$(tsContainer, 'form') as HTMLFormElement | null,
+    modal === undefined ? null : (_$(modal, 'form') as HTMLFormElement | null),
     'Modal <form> missing when looking for Apply button',
   );
   const applyButton = notNullish(
@@ -739,20 +891,22 @@ async function applyConfig(tile: PrunTile, config: DraftConfig) {
     'Apply Template button not found',
   );
   await clickElement(applyButton);
-  await sleep(500);
-
-  // 7. The conditions form now has a "保存" button. Click it.
-  const conditionsForm = await findConditionsForm(tile);
-  const saveButton = notNullish(
-    _$$(conditionsForm, 'button').find(b => /^save$|^保存$/i.test(b.textContent ?? '')),
-    'Save button not found in conditions form',
+  // The modal unmounts once PrUn's PATCH round-trips. Check the
+  // CURRENT container (not the captured node — the apply re-render
+  // replaces it, so a stale node reports "closed" before the PATCH
+  // lands and the 保存 click below would race it, losing the draft).
+  await waitFor(
+    () => _$(tile.anchor, C.TemplateSelection.container) === undefined,
+    'template modal to close after applying',
+    8000,
   );
-  await clickElement(saveButton);
-}
 
-function isContractNotesLabel(label: Element): boolean {
-  const text = label.textContent?.trim() ?? '';
-  return text === '合同注解' || text === getI18nValue('Contract.notes', 'Contract Notes');
+  // Applying the template IS the save: PrUn PATCHes the draft on
+  // apply, so the conditions land on the server with no extra save
+  // click. Clicking the conditions-form 保存 afterwards would
+  // re-submit the draft's stale object and overwrite what apply just
+  // saved (the "form shows 7 rows but the contract saved 21"
+  // symptom) — so there is deliberately no save step here.
 }
 
 // Walks every FormComponent label inside `root`, returns the first
@@ -795,19 +949,6 @@ function findLabeledInput(root: HTMLElement, labelText: string): HTMLInputElemen
   return null;
 }
 
-function findNotesRow(headerForm: HTMLElement): HTMLElement | undefined {
-  for (const label of _$$(headerForm, C.FormComponent.label)) {
-    if (!isContractNotesLabel(label)) {
-      continue;
-    }
-    const row = label.closest(`.${C.FormComponent.containerPassive}`);
-    if (row) {
-      return row as HTMLElement;
-    }
-  }
-  return undefined;
-}
-
 function buildPanel(tile: PrunTile) {
   // Build a native FormComponent row: label on the left, input column on
   // the right. This mirrors the 合同注解 / 周期重复 rows above so the
@@ -816,8 +957,10 @@ function buildPanel(tile: PrunTile) {
   row.className = `${C.FormComponent.containerPassive} ${C.forms.passive} ${C.forms.formComponent}`;
   row.setAttribute(MARKER, 'true');
 
+  const inputId = `rprun-contd-json-${nextPanelInputId++}`;
   const label = document.createElement('label');
   label.className = `${C.FormComponent.label} ${C.fonts.fontRegular} ${C.type.typeRegular}`;
+  label.htmlFor = inputId;
   label.textContent = 'JSON 配置';
   row.appendChild(label);
 
@@ -825,19 +968,31 @@ function buildPanel(tile: PrunTile) {
   inputWrap.className = `${C.FormComponent.input} ${C.forms.input} ${$style.input}`;
 
   const textarea = document.createElement('textarea');
+  textarea.id = inputId;
   textarea.className = $style.textarea;
   textarea.placeholder = 'Enter contract configuration as JSON';
   textarea.spellcheck = false;
   inputWrap.appendChild(textarea);
 
+  // Keep the panel's textarea value in sync with the cache so a React
+  // rebuild of the header (which replaces this panel wholesale) can
+  // restore what the user typed / CONTGEN wrote.
+  const jsonCacheKey = tile.command;
+  textarea.value = panelJsonCache.get(jsonCacheKey) ?? '';
+  textarea.addEventListener('input', () => {
+    panelJsonCache.set(jsonCacheKey, textarea.value);
+  });
+
   // Consume pending CONTGEN output. CONTGEN's "Send to CONTD" button
   // writes the generated JSON to this workspace key; we read it once
   // on panel mount and pre-fill the textarea, then clear the key so
-  // a stale value doesn't refill on every re-mount.
+  // a stale value doesn't refill on every re-mount. The value also
+  // goes into the panel cache so a mid-fill rebuild doesn't lose it.
   const pendingContgen = getTileState<{ json?: string }>('contgen-output');
   let autoFilledFromContgen = false;
   if (typeof pendingContgen.json === 'string' && pendingContgen.json.length > 0) {
     textarea.value = pendingContgen.json;
+    panelJsonCache.set(jsonCacheKey, pendingContgen.json);
     delete pendingContgen.json;
     // CONTGEN-driven mounts should not require the user to press the
     // "填写" button manually. The user just hit "新建合同并填充" /
@@ -966,6 +1121,10 @@ function buildPanel(tile: PrunTile) {
   button.addEventListener('click', async () => {
     const raw = textarea.value.trim();
     if (!raw) {
+      // Loud instead of silent: an empty textarea here used to mean a
+      // mid-fill panel rebuild wiped the config, and silently ignoring
+      // the click left the user with no feedback at all.
+      setStatus('JSON is empty', true);
       return;
     }
     button.setAttribute('disabled', '');
@@ -973,21 +1132,27 @@ function buildPanel(tile: PrunTile) {
     try {
       const parsed = JSON.parse(raw);
       const config = validateConfig(parsed);
+      // Applying the template PATCHes the draft — the conditions are
+      // saved as part of the apply itself, with no separate save
+      // click. When the template modal is gone, the fill is done.
       await applyConfig(tile, config);
       setStatus('Done');
+      // The fill consumed the config — a later rebuild of this draft's
+      // panel should start fresh, not resurrect a stale JSON.
+      panelJsonCache.delete(jsonCacheKey);
     } catch (e) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`, true);
-      // console.warn('Auto-fill failed', e);
     } finally {
       button.removeAttribute('disabled');
     }
   });
 
-  // Mount directly after the 合同注解 row inside the first (header) form,
-  // so the JSON panel sits right below the contract notes field rather
-  // than at the top of the tile. Falls back to the header form, then the
-  // tile frame, if the notes row isn't present yet.
-  const headerForm = _$$(tile.anchor, C.Draft.form)[0];
+  // Mount the panel right after the 合同注解 (Contract Notes) row of
+  // the header form, matching the original placement. React re-renders
+  // the header on server pushes, which destroys injected DOM inside
+  // it; onTileReady re-mounts the panel when that happens, and the
+  // textarea content survives via panelJsonCache.
+  const headerForm = _$(tile.anchor, C.Draft.form);
   const notesRow = headerForm !== undefined ? findNotesRow(headerForm) : undefined;
   if (notesRow !== undefined && notesRow.parentElement !== null) {
     notesRow.after(row);
@@ -997,27 +1162,44 @@ function buildPanel(tile: PrunTile) {
     tile.frame.prepend(row);
   }
 
-  // Auto-click "填写" when CONTGEN wrote the JSON for us. We capture
-  // the button reference now (it's mounted and reachable via the
-  // listener) and dispatch the click asynchronously so React's
-  // hydration / panel layout has time to settle before applyConfig
-  // starts walking the form. The click is also routed through
-  // clickElement so it fires pointerdown+mousedown first — same as
-  // the real user press, which PrUn's React handlers expect.
+  // Auto-click "填写" when CONTGEN wrote the JSON for us. The click is
+  // routed through clickElement so it fires pointerdown+mousedown
+  // first — same as a real user press, which PrUn's React handlers
+  // expect. Deferring it lets React's hydration / panel layout settle
+  // before applyConfig starts walking the form.
   //
-  // If the panel was rebuilt between scheduling and the click landing
-  // (e.g. React re-rendered the header), `button.isConnected` will be
-  // false and we silently bail — the new buildPanel instance owns the
-  // JSON now and will run its own auto-click (or fall through to
-  // manual, depending on whether contgen-output was repopulated).
+  // We must NOT capture the button and click it once: a fresh draft's
+  // header re-renders several times as server data arrives, replacing
+  // the panel (and its button) — a click on the old, detached node
+  // is silently dropped and the fill never happens, leaving an empty
+  // status bar with no fill and no save. Instead we poll the live
+  // DOM for the current button and click it, using `disabled` (set by
+  // the click handler) as the "already running/done" signal so a
+  // rebuild between poll and click doesn't double-fire.
   if (autoFilledFromContgen) {
     setStatus('Auto-filling…');
-    void sleep(100).then(() => {
-      if (!button.isConnected) {
-        return;
+    void (async () => {
+      const deadline = Date.now() + 8000;
+      for (;;) {
+        const liveButton = tile.anchor
+          .querySelector(`[${MARKER}]`)
+          ?.querySelector<HTMLButtonElement>('button');
+        if (liveButton !== null && liveButton !== undefined && liveButton.isConnected) {
+          if (liveButton.disabled) {
+            return;
+          }
+          await clickElement(liveButton);
+          await sleep(300);
+          if (liveButton.disabled) {
+            return;
+          }
+        }
+        if (Date.now() >= deadline) {
+          return;
+        }
+        await sleep(100);
       }
-      clickElement(button);
-    });
+    })();
   }
 }
 
@@ -1029,9 +1211,10 @@ function onTileReady(tile: PrunTile) {
     if (sectionHeader.closest(`.${C.Overlay.overlay}`) !== null) {
       return;
     }
-    // The header form may have been rebuilt by the game — if a previous
-    // panel still exists in the DOM, leave it alone. Otherwise (or if the
-    // previous panel was orphaned outside the header form) re-mount.
+    // The panel lives inside the header form, which React rebuilds on
+    // server pushes — the injected DOM is destroyed with it. When that
+    // happens (existing !== null but detached), drop the stale node and
+    // re-mount; otherwise just mount once.
     const existing = tile.anchor.querySelector(`[${MARKER}]`);
     if (existing !== null) {
       if (existing.parentElement !== null) {
