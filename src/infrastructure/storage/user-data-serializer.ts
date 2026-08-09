@@ -9,6 +9,8 @@ import { isEncryptedApiKeyValue, postSaveSecretKeys, resolveApiKey } from './api
 
 const fileType = 'rp-user-data';
 
+export { fileType };
+
 export function loadUserData() {
   let loaded = false;
   let userDataToLoad = config.userData;
