@@ -221,12 +221,23 @@ declare namespace UserData {
     id: string;
     name: string;
     commands: LinkedBuffersCommand[];
+    lastBufferSize?: [number, number];
+    controlPosition?: [number, number];
+    childLayouts?: LinkedBuffersChildLayout[];
   }
 
   interface LinkedBuffersCommand {
     id: string;
     label: string;
     template: string;
+  }
+
+  interface LinkedBuffersChildLayout {
+    commandId: string;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
   }
 
   interface GovBurnContrib {
