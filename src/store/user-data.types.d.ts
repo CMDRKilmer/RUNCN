@@ -73,6 +73,7 @@ declare namespace UserData {
     consumablesOnly?: boolean;
     includeConsumables?: boolean;
     includeInputs?: boolean;
+    materialFilter?: string;
   }
 
   type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'CONT Ship' | 'CONT Trade' | 'GovBurn Data';
@@ -214,5 +215,55 @@ declare namespace UserData {
     id: string;
     label: string;
     template: string;
+  }
+
+  interface GovBurnContrib {
+    own?: number;
+    any?: number;
+  }
+
+  interface GovBurnUpkeep {
+    ticker: string;
+    stored: number;
+    amount: number;
+    duration: number;
+    nextTick: number;
+  }
+
+  interface GovBurnBuilding {
+    ticker: string;
+    type: string;
+    projectId: string;
+    level: number;
+    upkeeps?: GovBurnUpkeep[];
+    upkeepsCapturedAt?: number;
+    contribHistory?: Record<string, GovBurnContrib>;
+  }
+
+  interface GovBurnCogc {
+    dueDate: number;
+    materials: { ticker: string; amount: number; currentAmount: number }[];
+  }
+
+  interface GovBurnPlanet {
+    naturalId: string;
+    name: string;
+    capturedAt: number;
+    buildings: GovBurnBuilding[];
+    cogc?: GovBurnCogc;
+  }
+
+  interface GovBurnSettings {
+    planets: Record<string, GovBurnPlanet>;
+  }
+
+  interface GovBurnPlanetConfig {
+    rankSlots: number;
+    buildingTicker: string;
+    overrides: { rankSlots?: number };
+  }
+
+  interface GovBurnConfig {
+    planets: Record<string, GovBurnPlanetConfig>;
   }
 }

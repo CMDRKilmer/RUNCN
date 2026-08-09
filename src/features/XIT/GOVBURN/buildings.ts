@@ -1,11 +1,26 @@
-// GOVBURN/buildings 占位。
-// 真正的 GOVBURN 命令（15 文件、6 个 userData 类型）需独立 PR 迁移。
-// 此文件被 ACT/actions/govburn-data/govburn-data.ts 引用以满足类型检查。
-export const getPlanetGovBurn = (_planetNaturalId: string) => undefined;
-export const updatePlanetGovBurn = (_planetNaturalId: string, _data: unknown) => {};
 export interface PopiBuilding {
   ticker: string;
   type: string;
   projectName: string;
 }
-export const popiBuildings: PopiBuilding[] = [];
+
+export const popiBuildings: PopiBuilding[] = [
+  { ticker: 'SST', type: 'SAFETY_STATION', projectName: 'planetaryProjectSafetySmall' },
+  { ticker: 'SDP', type: 'SECURITY_DRONE_POST', projectName: 'planetaryProjectSafetyBig' },
+  { ticker: 'EMC', type: 'EMERGENCY_CENTER', projectName: 'planetaryProjectSafetyHealth' },
+  { ticker: 'INF', type: 'INFIRMARY', projectName: 'planetaryProjectHealthSmall' },
+  { ticker: 'HOS', type: 'HOSPITAL', projectName: 'planetaryProjectHealthBig' },
+  { ticker: 'WCE', type: 'WELLNESS_CENTER', projectName: 'planetaryProjectHealthComfort' },
+  { ticker: 'PAR', type: 'WILDLIFE_PARK', projectName: 'planetaryProjectComfortSmall' },
+  { ticker: '4DA', type: 'ARCADES', projectName: 'planetaryProjectComfortBig' },
+  { ticker: 'ACA', type: 'ART_CAFE', projectName: 'planetaryProjectComfortCulture' },
+  { ticker: 'ART', type: 'ART_GALLERY', projectName: 'planetaryProjectCultureSmall' },
+  { ticker: 'VRT', type: 'THEATER', projectName: 'planetaryProjectCultureBig' },
+  {
+    ticker: 'PBH',
+    type: 'PLANETARY_BROADCASTING_HUB',
+    projectName: 'planetaryProjectCultureEducation',
+  },
+  { ticker: 'LIB', type: 'LIBRARY', projectName: 'planetaryProjectEducationSmall' },
+  { ticker: 'UNI', type: 'UNIVERSITY', projectName: 'planetaryProjectEducationBig' },
+];

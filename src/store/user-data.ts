@@ -106,6 +106,8 @@ export const initialUserData = deepFreeze({
     locked: [] as string[],
   },
   commandLists: [] as UserData.CommandList[],
+  govburn: { planets: {} as Record<string, UserData.GovBurnPlanet> },
+  govburnConfig: { planets: {} as Record<string, UserData.GovBurnPlanetConfig> },
 
   // 在 user-data-migrations.ts 中使用
   migrations: undefined,
