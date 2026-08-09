@@ -99,6 +99,7 @@ export const initialUserData = deepFreeze({
     exchange: '',
     items: [] as UserData.CartItem[],
   },
+  linkedBuffersPresets: [] as UserData.LinkedBuffersPreset[],
   tabs: {
     order: [] as string[],
     hidden: [] as string[],

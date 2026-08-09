@@ -189,4 +189,16 @@ declare namespace UserData {
     sepia: number;
     grayscale: number;
   }
+
+  interface LinkedBuffersPreset {
+    id: string;
+    name: string;
+    commands: LinkedBuffersCommand[];
+  }
+
+  interface LinkedBuffersCommand {
+    id: string;
+    label: string;
+    template: string;
+  }
 }

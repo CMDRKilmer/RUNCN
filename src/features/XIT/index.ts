@@ -32,6 +32,7 @@ import './HAUL/HAUL';
 import './HELP';
 import './HQUC';
 import './INV/INV';
+import './LINKEDBUFFERS/LINKEDBUFFERS';
 import './MATS';
 import './NOBUY/NOBUY';
 import './NOTE/NOTE';
