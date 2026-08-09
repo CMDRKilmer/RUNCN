@@ -22,6 +22,10 @@ export function implementRequestHooks(newHooks: RequestHooks) {
   hooks = newHooks;
 }
 
+export function isRequestTransportAvailable() {
+  return hooks !== undefined;
+}
+
 export const request = {
   production(siteId?: string | null): void {
     getHooks().production(siteId);

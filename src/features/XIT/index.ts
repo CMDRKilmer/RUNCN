@@ -48,6 +48,7 @@ import './REPP/REPP';
 import './SET/SET';
 import './START';
 import './STO/STO';
+import './DATA/DATA';
 import './TODO/TODO';
 import './WEB/WEB';
 import './xit-commands';
