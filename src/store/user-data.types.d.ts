@@ -276,17 +276,5 @@ declare namespace UserData {
     cogc?: GovBurnCogc;
   }
 
-  interface GovBurnSettings {
-    planets: Record<string, GovBurnPlanet>;
-  }
-
-  interface GovBurnPlanetConfig {
-    rankSlots: number;
-    buildingTicker: string;
-    overrides: { rankSlots?: number };
-  }
-
-  interface GovBurnConfig {
-    planets: Record<string, GovBurnPlanetConfig>;
-  }
+  type GovBurnPlanetConfig = Record<string, number>;
 }

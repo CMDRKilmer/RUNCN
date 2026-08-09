@@ -17,6 +17,23 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '09.08.2026 Merge GOVBURN config into govburn field',
+    userData => {
+      // 旧结构：govburn: { planets } + 顶层 govburnConfig: { planets }
+      // 新结构：govburn: { planets, config: { planets, resupplyDays, red, yellow } }
+      const oldConfig = userData.govburnConfig;
+      const govburn = userData.govburn ?? {};
+      govburn.planets ??= {};
+      govburn.config = {
+        planets: oldConfig?.planets ?? govburn.config?.planets ?? {},
+        resupplyDays: govburn.config?.resupplyDays ?? 30,
+        red: govburn.config?.red ?? 3,
+        yellow: govburn.config?.yellow ?? 7,
+      };
+      delete userData.govburnConfig;
+    },
+  ],
+  [
     '29.07.2026 Rebind 琉璃 sidebar entry to XIT ORG',
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;
