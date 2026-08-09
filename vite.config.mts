@@ -54,6 +54,7 @@ export default defineConfig({
         { name: 'default', as: 'config', from: '@src/infrastructure/shell/config' },
         { name: 'createFragmentApp', from: '@src/utils/vue-fragment-app' },
         { name: 'applyCssRule', from: '@src/infrastructure/prun-ui/refined-prun-css' },
+        { name: 'sumBy', from: '@src/utils/sum-by' },
       ],
       //dts: 'src/types/unimport.d.ts',
       addons: {

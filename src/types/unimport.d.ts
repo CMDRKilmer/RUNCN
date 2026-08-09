@@ -49,6 +49,7 @@ declare global {
   const shallowReadonly: typeof import('vue')['shallowReadonly'];
   const shallowRef: typeof import('vue')['shallowRef'];
   const subscribe: typeof import('@src/utils/subscribe-async-generator')['subscribe'];
+  const sumBy: typeof import('@src/utils/sum-by')['sumBy'];
   const tiles: typeof import('@src/infrastructure/prun-ui/tiles')['default'];
   const toRaw: typeof import('vue')['toRaw'];
   const toRef: typeof import('vue')['toRef'];
@@ -144,6 +145,7 @@ declare module 'vue' {
     readonly shallowReadonly: UnwrapRef<typeof import('vue')['shallowReadonly']>;
     readonly shallowRef: UnwrapRef<typeof import('vue')['shallowRef']>;
     readonly subscribe: UnwrapRef<typeof import('@src/utils/subscribe-async-generator')['subscribe']>;
+    readonly sumBy: UnwrapRef<typeof import('@src/utils/sum-by')['sumBy']>;
     readonly tiles: UnwrapRef<typeof import('@src/infrastructure/prun-ui/tiles')['default']>;
     readonly toRaw: UnwrapRef<typeof import('vue')['toRaw']>;
     readonly toRef: UnwrapRef<typeof import('vue')['toRef']>;
