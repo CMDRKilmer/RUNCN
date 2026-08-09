@@ -78,12 +78,12 @@ export class ActionRunner {
         }
       }
       const ticker = (step as ActionStep & { ticker?: string }).ticker;
-      if (!ticker) continue;
+      if (!ticker && step.type !== 'MTRA_BATCH') continue;
       if (stepInfo.weight !== undefined) {
         const w = stepInfo.weight(step) ?? 0;
         if (step.type === 'CXPO_BUY') {
           buyWeight += w;
-        } else if (step.type === 'MTRA_TRANSFER') {
+        } else if (step.type === 'MTRA_TRANSFER' || step.type === 'MTRA_BATCH') {
           transferWeight += w;
         }
       }
@@ -91,7 +91,7 @@ export class ActionRunner {
         const v = stepInfo.volume(step) ?? 0;
         if (step.type === 'CXPO_BUY') {
           buyVolume += v;
-        } else if (step.type === 'MTRA_TRANSFER') {
+        } else if (step.type === 'MTRA_TRANSFER' || step.type === 'MTRA_BATCH') {
           transferVolume += v;
         }
       }

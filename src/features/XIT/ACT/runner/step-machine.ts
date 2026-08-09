@@ -22,6 +22,8 @@ const AssertionError = new Error('Assertion failed');
 export class StepMachine {
   private next?: ActionStep;
   private nextAct?: () => void;
+  private waitActReject?: (e: unknown) => void;
+  private stopped = false;
 
   constructor(
     private steps: ActionStep[],
@@ -37,6 +39,7 @@ export class StepMachine {
   }
 
   start() {
+    this.stopped = false;
     this.options.onStart();
     this.startNext();
   }
@@ -47,6 +50,7 @@ export class StepMachine {
     }
     const nextAct = this.nextAct;
     this.nextAct = undefined;
+    this.waitActReject = undefined;
     nextAct?.();
   }
 
@@ -61,6 +65,7 @@ export class StepMachine {
     const info = act.getActionStepInfo(next.type);
     this.log.skip(info.description(next));
     this.nextAct = undefined;
+    this.waitActReject = undefined;
     this.startNext();
   }
 
@@ -73,12 +78,20 @@ export class StepMachine {
   }
 
   stop() {
+    this.stopped = true;
     this.next = undefined;
+    const reject = this.waitActReject;
     this.nextAct = undefined;
+    this.waitActReject = undefined;
+    // 拒绝挂起的 waitAct，让步骤的 execute 走清理路径（如关闭打开的窗口）。
+    reject?.(new Error('ACT_CANCELLED'));
     this.options.onEnd();
   }
 
   private startNext() {
+    if (this.stopped) {
+      return;
+    }
     if (this.steps.length === 0) {
       this.log.success('操作包执行完成');
       this.stop();
@@ -135,9 +148,10 @@ export class StepMachine {
           }
         },
         requestTile: async command => await this.requestTile(command),
+        isCancelled: () => this.stopped,
       })
       .catch(e => {
-        if (e !== AssertionError) {
+        if (e !== AssertionError && !(e instanceof Error && e.message === 'ACT_CANCELLED')) {
           log.runtimeError(e);
         }
         this.stop();
@@ -167,7 +181,10 @@ export class StepMachine {
     }
     this.options.onStatusChanged(status);
     this.options.onActReady();
-    await new Promise<void>(resolve => (this.nextAct = resolve));
+    await new Promise<void>((resolve, reject) => {
+      this.nextAct = resolve;
+      this.waitActReject = reject;
+    });
   }
 
   private ensureRunning() {
@@ -178,7 +195,7 @@ export class StepMachine {
   }
 }
 
-async function waitActionFeedback(tile: PrunTile) {
+export async function waitActionFeedback(tile: PrunTile) {
   const overlay = await $(tile.frame, C.ActionFeedback.overlay);
   await waitActionProgress(overlay);
   if (overlay.classList.contains(C.ActionConfirmationOverlay.container)) {

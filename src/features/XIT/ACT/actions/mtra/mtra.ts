@@ -1,7 +1,7 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
 import Edit from '@src/features/XIT/ACT/actions/mtra/Edit.vue';
 import Configure from '@src/features/XIT/ACT/actions/mtra/Configure.vue';
-import { MTRA_TRANSFER } from '@src/features/XIT/ACT/action-steps/MTRA_TRANSFER';
+import { MTRA_BATCH } from '@src/features/XIT/ACT/action-steps/MTRA_BATCH';
 import { atSameLocation, deserializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { Config } from '@src/features/XIT/ACT/actions/mtra/config';
 import { AssertFn, configurableValue } from '@src/features/XIT/ACT/shared-types';
@@ -48,15 +48,12 @@ act.addAction<Config>({
     const isSameLocation = atSameLocation(origin, dest);
     assert(isSameLocation, '出发点和目的地不在同一位置');
 
-    for (const ticker of Object.keys(materials)) {
-      emitStep(
-        MTRA_TRANSFER({
-          from: origin.id,
-          to: dest.id,
-          ticker,
-          amount: materials[ticker],
-        }),
-      );
-    }
+    emitStep(
+      MTRA_BATCH({
+        from: origin.id,
+        to: dest.id,
+        materials: Object.entries(materials).map(([ticker, amount]) => ({ ticker, amount })),
+      }),
+    );
   },
 });
