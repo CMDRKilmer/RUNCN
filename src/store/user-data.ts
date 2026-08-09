@@ -59,6 +59,7 @@ export const initialUserData = deepFreeze({
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
     mutedDesktopNotifications: [] as string[],
+    noBuy: [] as string[],
     translation: {
       enabled: true,
       provider: 'MICROSOFT',

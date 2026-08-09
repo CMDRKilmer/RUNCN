@@ -33,6 +33,7 @@ import './HELP';
 import './HQUC';
 import './INV/INV';
 import './MATS';
+import './NOBUY/NOBUY';
 import './NOTE/NOTE';
 import './ORG/ORG';
 import './PLAN/PLAN';
