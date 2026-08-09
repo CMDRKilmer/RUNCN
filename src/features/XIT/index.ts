@@ -37,6 +37,7 @@ import './NOBUY/NOBUY';
 import './NOTE/NOTE';
 import './ORG/ORG';
 import './PLAN/PLAN';
+import './PLANETS/PLANETS';
 import './WFOR/WFOR';
 import './PLAN/JH';
 import './PROD/PROD';
