@@ -54,6 +54,7 @@ import './PLAN/JH';
 import './PROD/PROD';
 import './PWARN/PWARN';
 import './REP/REP';
+import './REP/REPAIRACT';
 import './REPP/REPP';
 import './SET/SET';
 import './START';
