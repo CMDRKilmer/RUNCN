@@ -37,6 +37,8 @@ export class StepGenerator {
           data: action,
           config: actionConfig,
           globalOptions: config.globalOptions ?? {},
+          packageName: pkg.global.name,
+          preview: false,
           log,
           fail: message => {
             if (message) {
@@ -50,8 +52,13 @@ export class StepGenerator {
               throw AssertionError;
             }
           },
-          emitStep: step => steps.push(step),
+          emitStep: step => {
+            steps.push(step);
+            return steps.length;
+          },
           getMaterialGroup: async name => await this.getMaterialGroup(pkg, config, name),
+          getMaterialGroupPrices: () => undefined,
+          getMaterialGroupPlanet: () => undefined,
           state,
         });
       } catch (e) {
@@ -100,6 +107,7 @@ export class StepGenerator {
       globalOptions: config.globalOptions ?? {},
       log: new Logger((tag, message) => this.log.logMessage(tag, `[${group.name}] ${message}`)),
       setStatus: status => this.options.onStatusChanged(status),
+      setPrices: () => {},
     });
   }
 }
@@ -123,5 +131,6 @@ function generateState() {
   }
   return {
     WAR: war,
+    reservedAgentIds: new Set<string>(),
   };
 }

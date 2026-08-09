@@ -7,6 +7,7 @@ import {
 
 interface MaterialGroupInfo<TConfig> {
   type: UserData.MaterialGroupType;
+  shortDescription?: string;
   description: (data: UserData.MaterialGroupData, config?: TConfig) => string;
   editComponent: Component;
   configureComponent?: Component;
@@ -33,6 +34,7 @@ function getMaterialGroupTypes() {
 
 interface ActionInfo<TConfig> {
   type: UserData.ActionType;
+  shortDescription?: string;
   description: (data: UserData.ActionData, config?: TConfig) => string;
   editComponent: Component;
   configureComponent?: Component;
@@ -62,6 +64,7 @@ interface ActionStepInfo<T> {
   cost?: (data: T) => number | undefined;
   weight?: (data: T) => number | undefined;
   volume?: (data: T) => number | undefined;
+  totalMaterials?: (data: T) => Record<string, number>;
   execute: (ctx: ActionStepExecuteContext<T>) => Promise<void>;
 }
 
@@ -78,7 +81,8 @@ function addActionStep<T>(info: ActionStepInfo<T>) {
 }
 
 function getActionStepInfo(type: string) {
-  // 所有操作步骤都有对应的类型（参见 addActionStep），运行时保证非空
+  // Use ! operator here because there is a runtime guarantee
+  // that all action steps have existing type (see addActionStep).
   return actionSteps.find(x => x.type === type)!;
 }
 

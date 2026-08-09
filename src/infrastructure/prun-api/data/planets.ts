@@ -6,6 +6,7 @@ interface Planet {
   naturalId: string;
   name: string;
   cogcProgramType?: string | null;
+  populationId?: string;
 }
 
 const store = createEntityStore<Planet>({

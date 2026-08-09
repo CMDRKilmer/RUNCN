@@ -59,7 +59,7 @@ declare namespace UserData {
     items: CartItem[];
   }
 
-  type MaterialGroupType = 'Manual' | 'Resupply' | 'Repair';
+  type MaterialGroupType = 'Manual' | 'Resupply' | 'Repair' | 'Paste';
 
   interface MaterialGroupData {
     type: MaterialGroupType;
@@ -75,11 +75,12 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'CONT Ship' | 'CONT Trade' | 'GovBurn Data';
 
   interface ActionData {
     type: ActionType;
 
+    deleted?: boolean;
     name?: string;
     group?: string;
 
@@ -93,6 +94,19 @@ declare namespace UserData {
     dest?: string;
 
     buyMissingFuel?: boolean;
+
+    contOrigin?: string;
+    contDest?: string;
+    paymentPerTon?: number;
+    autoProvision?: boolean;
+    autoTrade?: boolean;
+    durationDays?: number;
+    daysToFulfill?: number;
+    currency?: string;
+    contractNote?: string;
+    contLocation?: string;
+    contTradeType?: string;
+    planet?: string;
   }
 
   interface TaskList {
