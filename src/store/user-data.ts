@@ -26,6 +26,7 @@ export const initialUserData = deepFreeze({
       red: 3,
       yellow: 7,
       resupply: 16,
+      planetResupply: {} as Record<string, number>,
     },
     repair: {
       threshold: 60,
