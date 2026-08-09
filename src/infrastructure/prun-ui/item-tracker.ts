@@ -68,6 +68,12 @@ export function sanitizeCategoryName(name: string) {
   return name.replaceAll(' ', '-').replaceAll('(', '').replaceAll(')', '');
 }
 
+export const CATEGORY_CSS_PREFIX = 'rp-category-';
+
+export function getMaterialCategoryCssClass(category: PrunApi.MaterialCategory) {
+  return CATEGORY_CSS_PREFIX + sanitizeCategoryName(category.name);
+}
+
 // 从 PrUn js 包中复制的。
 const categoryColors = {
   'agricultural products': {

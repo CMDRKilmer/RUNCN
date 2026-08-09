@@ -31,6 +31,7 @@ export const initialUserData = deepFreeze({
     repair: {
       threshold: 60,
       offset: 10,
+      planetOverrides: {} as Record<string, { threshold?: number; offset?: number }>,
     },
     repairPlan: {},
     sidebar: [
