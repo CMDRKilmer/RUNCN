@@ -30,6 +30,7 @@ import './LOAN/LOAN';
 import './HAUL/HAUL';
 import './HELP';
 import './HQUC';
+import './INV/INV';
 import './MATS';
 import './NOTE/NOTE';
 import './ORG/ORG';

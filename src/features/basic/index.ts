@@ -2,6 +2,7 @@ import './adm-hide-inactive-buttons';
 import './align-chat-delete-button';
 import './audio-volume-slider/audio-volume-slider';
 import './auto-resize-buffers';
+import '@src/features/XIT/planet-context-menu';
 import './zh-locale/zh-locale';
 import './bbc-building-count';
 import './bbl-condition-progress-bar';
