@@ -1,6 +1,7 @@
 import './ACT/ACT';
 import './ARB/ARB';
 import './BPC/BPC';
+import './BS/BS';
 import './BURN/BURN';
 import './BURN/BURN_GEN';
 import './CALC';
