@@ -84,6 +84,7 @@ declare namespace UserData {
     deleted?: boolean;
     name?: string;
     group?: string;
+    skippable?: boolean;
 
     allowUnfilled?: boolean;
     buyPartial?: boolean;
@@ -95,6 +96,17 @@ declare namespace UserData {
     dest?: string;
 
     buyMissingFuel?: boolean;
+
+    // MTRA specific
+    postToAgent?: boolean;
+    noSfc?: boolean;
+    sfcDestination?: string;
+    printOffloadJson?: boolean;
+    offloadGroups?: string[];
+    agentGroups?: string[];
+    finishOnly?: boolean;
+    repairGroups?: string[];
+    braPlanet?: string;
 
     contOrigin?: string;
     contDest?: string;
