@@ -20,6 +20,7 @@ import './DEV/DEV';
 import './ELEC/ELEC';
 import './EXP/EXP';
 import './FIN/FIN';
+import './FLT/FLT';
 import './FIN/FINPR';
 import './FINBS/FINBS';
 import './FINCH/FINCH';
