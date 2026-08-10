@@ -167,7 +167,6 @@ async function onUnload() {
 async function runSingleMtra(window: HTMLElement, plan: UnloadPlan) {
   const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
   await clickElement(tileElement);
-  window.getSelection()?.removeAllRanges();
 
   const container = await $(tileElement, C.MaterialSelector.container);
   const input = (await $(container, 'input')) as HTMLInputElement;
@@ -180,7 +179,6 @@ async function runSingleMtra(window: HTMLElement, plan: UnloadPlan) {
     focusElement(input);
     input.focus();
     changeInputValue(input, plan.ticker);
-    window.getSelection()?.removeAllRanges();
     for (let i = 0; i < 6; i++) {
       const list = _$(container, C.MaterialSelector.suggestionsList);
       if (
@@ -237,7 +235,6 @@ async function runSingleMtra(window: HTMLElement, plan: UnloadPlan) {
     return;
   }
   changeInputValue(amountInput, String(maxAmount));
-  window.getSelection()?.removeAllRanges();
 
   const transferButton = (await $(tileElement, C.Button.btn)) as HTMLElement;
   await clickElement(transferButton);
