@@ -34,46 +34,32 @@ const posData = computed(() => {
   return {
     name: getEntityNameFromAddress(address) ?? address?.lines[0]?.entity?.naturalId ?? '',
     command: `${prefix} ${location?.entity.naturalId}`,
-    invCommand: `INV ${location?.entity.naturalId}`,
   };
 });
 </script>
 
 <template>
   <div :class="$style.container">
-    <div :class="$style.icons">
-      <span
-        :class="[C.Link.link, $style.link]"
-        data-tooltip="打开库存"
-        data-tooltip-position="top"
-        @click.stop="showBuffer(posData.invCommand)"
-        >☒</span
-      >
-      <span
-        :class="$style.link"
-        data-tooltip="打开飞行控制"
-        data-tooltip-position="right"
-        @click.stop="showBuffer(`SFC ${ship?.registration}`)"
-        >{{ statusIcon }}</span
-      >
-    </div>
-    <div :class="[C.Link.link, $style.link]" @click.stop="showBuffer(posData.command)">
+    <span
+      :class="$style.link"
+      data-tooltip="打开飞行控制"
+      data-tooltip-position="right"
+      @click.stop="showBuffer(`SFC ${ship?.registration}`)"
+      >{{ statusIcon }}</span
+    >
+    <span :class="[C.Link.link, $style.link]" @click.stop="showBuffer(posData.command)">
       {{ posData.name }}
-    </div>
+    </span>
   </div>
 </template>
 
 <style module>
 .container {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  cursor: pointer;
-}
-
-.icons {
-  display: flex;
+  flex-direction: row;
+  align-items: center;
   gap: 4px;
+  cursor: pointer;
 }
 
 .link {

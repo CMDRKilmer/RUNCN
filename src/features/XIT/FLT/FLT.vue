@@ -1426,7 +1426,7 @@ function getCargoState(cargoRatio: number) {
 }
 
 .colStatus {
-  min-width: 110px;
+  min-width: 80px;
   border-right: none;
 }
 
