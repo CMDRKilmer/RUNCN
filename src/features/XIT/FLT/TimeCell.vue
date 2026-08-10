@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
-import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { displaytimeBetween, hhmm } from '@src/utils/format';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -62,70 +61,41 @@ function onRefuel() {
 
 const isUnloading = ref(false);
 
-async function onUnload() {
+function onUnload() {
   if (!ship.value || ship.value.flightId || isUnloading.value) {
     return;
   }
 
   isUnloading.value = true;
-  const closeWhen = ref(false);
   try {
-    // 静默打开 SHPI 面板（窗口全程 display:none，玩家不可见），
-    // 让 PrUn 自己渲染货舱 UI；面板内有「卸货」主按钮可触发完整卸货流程。
-    const bufferWindow = await showBuffer(`SHPI ${ship.value.registration}`, {
-      force: true,
-      autoSubmit: true,
-      autoClose: true,
-      closeWhen,
-    });
-    if (bufferWindow === undefined) {
+    // 通过 ship.id 匹配原生 FLT 行（data-prun-id 与 ship.id 一致），
+    // 复用 PrUn 原生卸货按钮触发完整流程。
+    const nativeRow = document.querySelector<HTMLTableRowElement>(
+      `tr[data-prun-id="${ship.value.id}"]`,
+    );
+    if (nativeRow === null) {
+      // 原生 FLT 未开 → 静默不响应（用户需打开原生 FLT 面板）。
       return;
     }
-    // 等 SHPI 面板 React 控件初始化完毕（processWindow 后 selector 出现），
-    // 然后同步查询卸货按钮（隐藏窗口内 DOM 交互仍生效）。
-    const selector = await $(bufferWindow, C.Tile.selector);
-    void selector;
-    const tileEl = bufferWindow.querySelector<HTMLElement>(`.${C.Tile.tile}`);
-    if (!tileEl) {
+    const buttonsContainer = nativeRow.querySelector<HTMLElement>(`.${C.Fleet.buttons}`);
+    if (buttonsContainer === null) {
       return;
     }
-    const storeView = await $(tileEl, C.StoreView.container);
-    const centered = await $(storeView, C.StoreView.centered);
-    const unloadButton = centered.querySelector<HTMLButtonElement>('button');
-    if (unloadButton === null || unloadButton.disabled) {
+    // 原生按钮按"航行/查看 - 货物 - 燃料 - 卸货 - 加油"顺序排列，定位「卸货」按钮。
+    const unloadButton = Array.from(buttonsContainer.querySelectorAll('button')).find(
+      x => x.textContent?.trim() === '卸货',
+    );
+    if (unloadButton === undefined || unloadButton.disabled) {
       return;
     }
     unloadButton.click();
-
-    // 等卸货完成：观察 shipStore 的 items 数量降到 0（卸货前 > 0）。
-    // STORAGE_CHANGE 会触发 shipStore 替换实体，shipStore.state.all 重新计算。
-    const shipId = ship.value.idShipStore;
-    const startLen = storagesStore.getById(shipId)?.items.length ?? 0;
-    if (startLen > 0) {
-      await new Promise<void>(resolve => {
-        const stop = watch(
-          () => storagesStore.all.value?.length,
-          () => {
-            const len = storagesStore.getById(shipId)?.items.length ?? 0;
-            if (len === 0) {
-              stop();
-              resolve();
-            }
-          },
-          { immediate: true },
-        );
-        // 兜底超时 5s（多物品/多 MTRA 串行）
-        setTimeout(() => {
-          stop();
-          resolve();
-        }, 5000);
-      });
-    }
-  } catch {
-    // 静默模式吞错；任何失败都不影响后续点击重试。
   } finally {
-    closeWhen.value = true;
-    isUnloading.value = false;
+    // PrUn 自身处理卸货流程（弹出确认 dialog → MTRA 转移 → 完成）。
+    // 卸货完成通过原生 FLT 行的 STORAGE_CHANGE 自然反映在 XIT FLT 上，
+    // 这里只需解锁按钮，无需自己监听。
+    setTimeout(() => {
+      isUnloading.value = false;
+    }, 1000);
   }
 }
 </script>
