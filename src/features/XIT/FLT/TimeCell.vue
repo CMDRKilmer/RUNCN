@@ -59,33 +59,43 @@ function onRefuel() {
   fragmentApp.appendTo(container);
 }
 
-function onUnload() {
-  if (!ship.value || ship.value.flightId) {
+const isUnloading = ref(false);
+
+async function onUnload() {
+  if (!ship.value || ship.value.flightId || isUnloading.value) {
     return;
   }
 
-  // 通过 ship.id 匹配原生 FLT 行（data-prun-id 与 ship.id 一致），
-  // 复用 PrUn 原生卸货按钮触发完整流程，避免打开 SHPI 面板。
-  const nativeRow = document.querySelector<HTMLTableRowElement>(
-    `tr[data-prun-id="${ship.value.id}"]`,
-  );
-  if (!nativeRow) {
-    // 原生 FLT 未开 → 兜底打开 SHPI（用户可手动卸货）
-    showBuffer(`SHPI ${ship.value.registration}`);
-    return;
+  isUnloading.value = true;
+  const closeWhen = ref(false);
+  try {
+    // 静默打开 SHPI 面板（窗口全程 display:none，玩家不可见），
+    // 让 PrUn 自己渲染货舱 UI；面板内有「卸货」主按钮可触发完整卸货流程。
+    const window = await showBuffer(`SHPI ${ship.value.registration}`, {
+      force: true,
+      autoSubmit: true,
+      autoClose: true,
+      closeWhen,
+    });
+    if (window === undefined) {
+      return;
+    }
+    const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
+    const storeView = await $(tileElement, C.StoreView.container);
+    const centered = await $(storeView, C.StoreView.centered);
+    const unloadButton = _$(centered, 'button');
+    if (unloadButton === undefined) {
+      return;
+    }
+    (unloadButton as HTMLButtonElement).click();
+    // 等 PrUn 卸货流程结束（StateChange 完成后 StoreView 内的卸货按钮会重新出现）。
+    await sleep(500);
+  } catch {
+    // 静默模式吞错；任何失败都不影响后续点击重试。
+  } finally {
+    closeWhen.value = true;
+    isUnloading.value = false;
   }
-  const buttonsContainer = nativeRow.querySelector<HTMLElement>(`.${C.Fleet.buttons}`);
-  if (!buttonsContainer) {
-    return;
-  }
-  // 原生按钮按"航行/查看 - 货物 - 燃料 - 卸货 - 加油"顺序排列，定位「卸货」按钮。
-  const unloadButton = Array.from(buttonsContainer.querySelectorAll('button')).find(
-    x => x.textContent?.trim() === '卸货',
-  );
-  if (!unloadButton || unloadButton.disabled) {
-    return;
-  }
-  unloadButton.click();
 }
 </script>
 
@@ -100,7 +110,7 @@ function onUnload() {
     <template v-else>
       <div :class="$style.actions">
         <span
-          :class="[$style.actionBtn, $style.bgOrange]"
+          :class="[$style.actionBtn, $style.bgOrange, isUnloading && $style.disabled]"
           :style="{ paddingRight: '5px' }"
           @click.stop="onUnload">
           ⭳
