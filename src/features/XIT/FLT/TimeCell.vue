@@ -9,6 +9,7 @@ import { getInvStore } from '@src/core/store-id';
 import { useTile } from '@src/hooks/use-tile';
 import QuickRefuelDialog from '@src/features/basic/shpf-quick-refuel/QuickRefuelDialog.vue';
 import { createFragmentApp } from '@src/utils/vue-fragment-app';
+import fa from '@src/utils/font-awesome.module.css';
 
 const props = defineProps<{
   shipId: string;
@@ -85,11 +86,11 @@ function onRefuel() {
           ✈
         </span>
         <span
-          :class="[$style.actionBtn, $style.bgFuel, isRefueling && $style.disabled]"
+          :class="[$style.actionBtn, $style.bgFuel, fa.solid, isRefueling && $style.disabled]"
           data-tooltip="加油"
           data-tooltip-position="left"
           @click.stop="onRefuel"
-          >⛽</span
+          >&#xf365;</span
         >
       </div>
     </template>
