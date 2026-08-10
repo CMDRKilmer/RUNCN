@@ -72,12 +72,27 @@ interface UnloadPlan {
 }
 
 async function onUnload() {
-  if (!ship.value || ship.value.flightId || isUnloading.value) {
+  if (!ship.value) {
+    console.warn('[XIT/FLT] onUnload: ship data not loaded');
+    return;
+  }
+  if (ship.value.flightId) {
+    console.warn('[XIT/FLT] onUnload: ship is in flight');
+    return;
+  }
+  if (isUnloading.value) {
     return;
   }
 
   const shipStore = storagesStore.getById(ship.value.idShipStore);
-  if (shipStore === undefined || shipStore.items.length === 0) {
+  if (shipStore === undefined) {
+    console.warn('[XIT/FLT] onUnload: ship store not loaded', {
+      idShipStore: ship.value.idShipStore,
+    });
+    return;
+  }
+  if (shipStore.items.length === 0) {
+    console.warn('[XIT/FLT] onUnload: ship cargo empty');
     return;
   }
 
@@ -86,6 +101,7 @@ async function onUnload() {
     .filter(s => atSameLocation(s, shipStore) && s.id !== shipStore.id)
     .sort(storageSort);
   if (destinations.length === 0) {
+    console.warn('[XIT/FLT] onUnload: no destination store at ship location');
     return;
   }
   const destination = destinations[0];
@@ -107,10 +123,18 @@ async function onUnload() {
     .map(([ticker, amount]) => ({ ticker, amount }))
     .filter(p => p.amount > 0);
   if (plans.length === 0) {
+    console.warn('[XIT/FLT] onUnload: no transferrable items');
     return;
   }
 
+  console.info(
+    `[XIT/FLT] onUnload: ${plans.length} tickers → ${destination.name} (${destination.type})`,
+    plans,
+  );
+
   isUnloading.value = true;
+  // 同步解锁让玩家立刻看到变灰（异步 try 中不再重复设置）。
+  await Promise.resolve();
   const closeWhen = ref(false);
   try {
     // 单条 MTRA 命令按船仓与目标库存拼接；每种 ticker 跑一次。
@@ -122,15 +146,18 @@ async function onUnload() {
       closeWhen,
     });
     if (window === undefined) {
+      console.warn('[XIT/FLT] onUnload: showBuffer returned undefined');
       return;
     }
 
     // 串行 setup + 串行 submit：display:none 窗口下避免并行状态干扰。
     for (const plan of plans) {
+      console.info(`[XIT/FLT] onUnload: transferring ${plan.ticker}`);
       await runSingleMtra(window, plan);
     }
-  } catch {
-    // 静默吞错，玩家可重试。
+    console.info('[XIT/FLT] onUnload: all transfers complete');
+  } catch (error) {
+    console.error('[XIT/FLT] onUnload failed', error);
   } finally {
     closeWhen.value = true;
     isUnloading.value = false;
