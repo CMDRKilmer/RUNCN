@@ -5,7 +5,6 @@ import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { displaytimeBetween, hhmm } from '@src/utils/format';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { getInvStore } from '@src/core/store-id';
 import { useTile } from '@src/hooks/use-tile';
 import QuickRefuelDialog from '@src/features/basic/shpf-quick-refuel/QuickRefuelDialog.vue';
 import { createFragmentApp } from '@src/utils/vue-fragment-app';
@@ -16,7 +15,6 @@ const props = defineProps<{
 
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
-const inventory = computed(() => getInvStore(ship.value?.idShipStore));
 const tile = useTile();
 
 const timeData = computed(() => {
@@ -30,7 +28,6 @@ const timeData = computed(() => {
   };
 });
 
-const hasItems = computed(() => (inventory.value?.items.length ?? 0) > 0);
 const isRefueling = ref(false);
 
 function onRefuel() {
@@ -74,10 +71,10 @@ function onRefuel() {
     <template v-else>
       <div :class="$style.actions">
         <span
-          :class="[$style.actionBtn, hasItems ? $style.bgOrange : $style.bgBlue]"
+          :class="[$style.actionBtn, $style.bgOrange]"
           :style="{ paddingRight: '5px' }"
           @click.stop="showBuffer(`SHPI ${ship?.registration}`)">
-          {{ hasItems ? '⭱' : '⭳' }}
+          ⭳
         </span>
         <span
           :class="[$style.actionBtn, $style.bgGreen]"
@@ -141,10 +138,6 @@ function onRefuel() {
 
 .bgOrange {
   background-color: #f7a600;
-}
-
-.bgBlue {
-  background-color: #43a4df;
 }
 
 .bgGreen {
