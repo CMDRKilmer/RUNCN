@@ -4,7 +4,6 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import Active from '@src/components/forms/Active.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import ExchangeSelector from '@src/components/forms/ExchangeSelector.vue';
-import SelectInput from '@src/components/forms/SelectInput.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { userData } from '@src/store/user-data';
@@ -16,7 +15,6 @@ import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed2 } from '@src/utils/format';
 import { persistedRef } from '@src/utils/persisted-ref';
@@ -66,61 +64,21 @@ const exchange = persistedRef('genact-burn-exchange', exchanges[0]);
 // Auto-derive warehouse name from selected exchange.
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 
-// ── 飞船容量填满 ──────────────────────────────────────────────
-const selectedShip = persistedRef('genact-burn-ship', '不限制');
-const customWeightCapacity = persistedRef<number | undefined>(
-  'genact-burn-custom-weight',
-  undefined,
-);
-const customVolumeCapacity = persistedRef<number | undefined>(
-  'genact-burn-custom-volume',
-  undefined,
-);
+// ── 标准货箱填满 ──────────────────────────────────────────────
+// 标准货箱容量（重量t / 体积m³），从小到大：SCB → WCB → LCB → HCB
+const boxSizes: Record<string, { weight: number; volume: number }> = {
+  SCB: { weight: 500, volume: 500 },
+  WCB: { weight: 3000, volume: 1000 },
+  LCB: { weight: 2000, volume: 2000 },
+  HCB: { weight: 5000, volume: 5000 },
+};
+const boxSizeOptions = Object.keys(boxSizes);
+const boxSize = persistedRef<string | undefined>('genact-burn-box', undefined);
 
 interface LoadResult {
   loadAmounts: Record<string, number>;
   weight: number;
   volume: number;
-}
-
-const shipSelectOptions = computed(() => {
-  const ships = shipsStore.all.value;
-  if (!ships) return ['不限制', '自定义容量'];
-  const opts = ['不限制', '自定义容量'];
-  for (const ship of ships) {
-    const store = storagesStore.getById(ship.idShipStore);
-    const wCap = store?.weightCapacity ?? 0;
-    const vCap = store?.volumeCapacity ?? 0;
-    const label = ship.name
-      ? `${ship.registration} (${ship.name}) ${fixed2(wCap)}t/${fixed2(vCap)}m³`
-      : `${ship.registration} ${fixed2(wCap)}t/${fixed2(vCap)}m³`;
-    opts.push(label);
-  }
-  return opts;
-});
-
-// 上次选择的飞船可能已不存在或数据未加载，回退到「不限制」
-watchEffect(() => {
-  if (!shipSelectOptions.value.includes(selectedShip.value)) {
-    selectedShip.value = '不限制';
-  }
-});
-
-function getSelectedShip(): PrunApi.Ship | undefined {
-  if (!selectedShip.value || selectedShip.value === '不限制') return undefined;
-  if (selectedShip.value === '自定义容量') return undefined;
-  const reg = selectedShip.value.split(' ')[0];
-  return shipsStore.getByRegistration(reg);
-}
-
-function isCustomCapacity() {
-  return selectedShip.value === '自定义容量';
-}
-
-function isCustomCapacityInvalid() {
-  const w = customWeightCapacity.value ?? 0;
-  const v = customVolumeCapacity.value ?? 0;
-  return !Number.isFinite(w) || !Number.isFinite(v) || w <= 0 || v <= 0;
 }
 
 function getFilteredBurnData(): Record<string, MaterialBurn> {
@@ -174,116 +132,96 @@ function calcLoadAmounts(targetDays: number): LoadResult {
   return { loadAmounts, weight: totalWeight, volume: totalVolume };
 }
 
-// 选中飞船时自动计算最大天数（平衡天数）。
-watch(
-  [
-    selectedShip,
-    includeConsumables,
-    includeInputs,
-    useBaseInv,
-    customWeightCapacity,
-    customVolumeCapacity,
-  ],
-  () => {
-    let wCap: number;
-    let vCap: number;
+// 选中标准货箱时自动计算最大天数（平衡天数）。
+watch([boxSize, includeConsumables, includeInputs, useBaseInv], () => {
+  const box = boxSize.value ? boxSizes[boxSize.value] : undefined;
+  if (!box) return;
+  const wCap = box.weight;
+  const vCap = box.volume;
 
-    if (isCustomCapacity()) {
-      wCap = customWeightCapacity.value ?? 0;
-      vCap = customVolumeCapacity.value ?? 0;
+  if (wCap <= 0 || vCap <= 0) return;
+
+  // 二分搜索最大平衡天数（支持小数）
+  let lo = 1;
+  let hi = 9999;
+  let best = 1;
+  let bestWeight = 0;
+  let bestVolume = 0;
+
+  // 进行小数精度的二分搜索
+  for (let iter = 0; iter < 100; iter++) {
+    const mid = (lo + hi) / 2;
+    const { weight, volume } = calcLoadAmounts(mid);
+    if (weight <= wCap && volume <= vCap) {
+      best = mid;
+      bestWeight = weight;
+      bestVolume = volume;
+      lo = mid;
     } else {
-      const ship = getSelectedShip();
-      if (!ship) return;
-      const store = storagesStore.getById(ship.idShipStore);
-      if (!store) return;
-      wCap = store.weightCapacity;
-      vCap = store.volumeCapacity;
+      hi = mid;
     }
+  }
 
-    if (wCap <= 0 || vCap <= 0) return;
+  // 尝试增加小数天数，找到更接近填满的组合
+  let optimalDays = best;
+  let optimalWeight = bestWeight;
+  let optimalVolume = bestVolume;
 
-    // 二分搜索最大平衡天数（支持小数）
-    let lo = 1;
-    let hi = 9999;
-    let best = 1;
-    let bestWeight = 0;
-    let bestVolume = 0;
+  // 测试不同的小数增量，确保不超容
+  const increments = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+  for (const inc of increments) {
+    const testDays = best + inc;
+    const { weight, volume } = calcLoadAmounts(testDays);
+    if (weight <= wCap && volume <= vCap) {
+      const weightUtil = weight / wCap;
+      const volumeUtil = volume / vCap;
+      const totalUtil = (weightUtil + volumeUtil) / 2;
 
-    // 进行小数精度的二分搜索
-    for (let iter = 0; iter < 100; iter++) {
-      const mid = (lo + hi) / 2;
-      const { weight, volume } = calcLoadAmounts(mid);
-      if (weight <= wCap && volume <= vCap) {
-        best = mid;
-        bestWeight = weight;
-        bestVolume = volume;
-        lo = mid;
-      } else {
-        hi = mid;
+      const currentUtil = (optimalWeight / wCap + optimalVolume / vCap) / 2;
+
+      if (totalUtil > currentUtil) {
+        optimalDays = testDays;
+        optimalWeight = weight;
+        optimalVolume = volume;
       }
     }
+  }
 
-    // 尝试增加小数天数，找到更接近填满的组合
-    let optimalDays = best;
-    let optimalWeight = bestWeight;
-    let optimalVolume = bestVolume;
+  // 最后验证一次，确保不超容
+  let finalDays = optimalDays;
+  let finalResult = calcLoadAmounts(finalDays);
 
-    // 测试不同的小数增量，确保不超容
-    const increments = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
-    for (const inc of increments) {
-      const testDays = best + inc;
-      const { weight, volume } = calcLoadAmounts(testDays);
-      if (weight <= wCap && volume <= vCap) {
-        const weightUtil = weight / wCap;
-        const volumeUtil = volume / vCap;
-        const totalUtil = (weightUtil + volumeUtil) / 2;
+  // 如果超容，逐步减少天数直到不超容
+  while (finalResult.weight > wCap || finalResult.volume > vCap) {
+    finalDays -= 0.1;
+    if (finalDays < 1) break;
+    finalResult = calcLoadAmounts(finalDays);
+  }
 
-        const currentUtil = (optimalWeight / wCap + optimalVolume / vCap) / 2;
+  // 全面搜索最优解，尽可能填满容量
+  let bestDays = finalDays;
+  let bestUtilization = (finalResult.weight / wCap + finalResult.volume / vCap) / 2;
 
-        if (totalUtil > currentUtil) {
-          optimalDays = testDays;
-          optimalWeight = weight;
-          optimalVolume = volume;
-        }
+  // 搜索范围：从当前天数的0.9倍到1.1倍
+  const searchStart = Math.max(1, finalDays * 0.9);
+  const searchEnd = finalDays * 1.1;
+
+  // 以0.001为步长进行全面搜索
+  for (let testDays = searchStart; testDays <= searchEnd; testDays += 0.001) {
+    const testResult = calcLoadAmounts(testDays);
+    if (testResult.weight <= wCap && testResult.volume <= vCap) {
+      const utilization = (testResult.weight / wCap + testResult.volume / vCap) / 2;
+      if (utilization > bestUtilization) {
+        bestDays = testDays;
+        bestUtilization = utilization;
       }
     }
+  }
 
-    // 最后验证一次，确保不超容
-    let finalDays = optimalDays;
-    let finalResult = calcLoadAmounts(finalDays);
-
-    // 如果超容，逐步减少天数直到不超容
-    while (finalResult.weight > wCap || finalResult.volume > vCap) {
-      finalDays -= 0.1;
-      if (finalDays < 1) break;
-      finalResult = calcLoadAmounts(finalDays);
-    }
-
-    // 全面搜索最优解，尽可能填满容量
-    let bestDays = finalDays;
-    let bestUtilization = (finalResult.weight / wCap + finalResult.volume / vCap) / 2;
-
-    // 搜索范围：从当前天数的0.9倍到1.1倍
-    const searchStart = Math.max(1, finalDays * 0.9);
-    const searchEnd = finalDays * 1.1;
-
-    // 以0.001为步长进行全面搜索
-    for (let testDays = searchStart; testDays <= searchEnd; testDays += 0.001) {
-      const testResult = calcLoadAmounts(testDays);
-      if (testResult.weight <= wCap && testResult.volume <= vCap) {
-        const utilization = (testResult.weight / wCap + testResult.volume / vCap) / 2;
-        if (utilization > bestUtilization) {
-          bestDays = testDays;
-          bestUtilization = utilization;
-        }
-      }
-    }
-
-    // 直接使用最佳天数，不进行四舍五入
-    // 这样可以更精确地填满容量
-    days.value = bestDays;
-  },
-);
+  // 直接使用最佳天数，不进行四舍五入
+  // 这样可以更精确地填满容量
+  days.value = bestDays;
+});
 
 const packageName = computed(() => {
   const name = burn.value?.planetName ?? planetName.value;
@@ -412,14 +350,10 @@ function onGenerateClick() {
       <Active label="交易所" tooltip="选择交易所，仓库自动绑定对应空间站。">
         <ExchangeSelector v-model="exchange" :options="exchanges" />
       </Active>
-      <Active label="飞船填满" tooltip="选择飞船后自动计算能装多少天补给，填满飞船。">
-        <SelectInput v-model="selectedShip" :options="shipSelectOptions" />
-      </Active>
-      <Active v-if="isCustomCapacity()" label="自定义重量(t)" :error="isCustomCapacityInvalid()">
-        <NumberInput v-model="customWeightCapacity" />
-      </Active>
-      <Active v-if="isCustomCapacity()" label="自定义体积(m³)" :error="isCustomCapacityInvalid()">
-        <NumberInput v-model="customVolumeCapacity" />
+      <Active
+        label="标准货箱"
+        tooltip="选择标准货箱，按容量自动计算能装多少天补给，填满飞船；再次点击取消选择。">
+        <ExchangeSelector v-model="boxSize" :options="boxSizeOptions" deselectable />
       </Active>
       <Active label="仓库">
         <span>{{ warehouseName }}</span>

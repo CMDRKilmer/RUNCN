@@ -19,6 +19,8 @@ interface Data {
   buyPartial: boolean;
   allowUnfilled: boolean;
   skipMissing?: boolean;
+  /** 并行组标识：自动模式下同一组的连续步骤并发执行（多窗口同时购买）。 */
+  parallelGroup?: string;
 }
 
 function getHistoricalComparison(

@@ -24,6 +24,9 @@ export class StepMachine {
   private nextAct?: () => void;
   private waitActReject?: (e: unknown) => void;
   private stopped = false;
+  // 并行组：自动模式下同一组的连续步骤同时启动（如多窗口并发购买），
+  // 组内全部完成（activeParallelRunning 归零）后才推进到下一步。
+  private activeParallelRunning = 0;
 
   constructor(
     private steps: ActionStep[],
@@ -92,12 +95,38 @@ export class StepMachine {
     if (this.stopped) {
       return;
     }
+    // 并行组未排空时等待组内步骤完成
+    if (this.activeParallelRunning > 0) {
+      return;
+    }
     if (this.steps.length === 0) {
       this.log.success('操作包执行完成');
       this.stop();
       return;
     }
     const next = this.steps.shift()!;
+    this.next = undefined;
+    const group = next.parallelGroup;
+    if (group && this.options.isAutoAct()) {
+      // 自动模式：同一并行组的连续步骤同时启动（多窗口并发）
+      this.startStep(next);
+      while (this.steps.length > 0) {
+        const candidate = this.steps[0];
+        if (candidate.parallelGroup !== group) {
+          break;
+        }
+        this.steps.shift();
+        this.startStep(candidate);
+      }
+      return;
+    }
+    this.startStep(next);
+  }
+
+  private startStep(next: ActionStep) {
+    if (next.parallelGroup) {
+      this.activeParallelRunning++;
+    }
     this.next = next;
     const info = act.getActionStepInfo(next.type);
     let description: string | undefined;
@@ -130,6 +159,10 @@ export class StepMachine {
           // 等待片刻以便数据更新。
           await sleep(0);
           log.success(description ?? info.description(next));
+          if (next.parallelGroup) {
+            this.activeParallelRunning--;
+          }
+          this.next = undefined;
           this.startNext();
         },
         skip: () => this.skip(),

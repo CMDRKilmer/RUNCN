@@ -96,6 +96,7 @@ act.addAction({
         }
       }
 
+      // parallelGroup 让同一动作的连续购买步骤在自动模式下并发执行（多窗口同时购买）
       emitStep(
         CXPO_BUY({
           exchange,
@@ -105,6 +106,7 @@ act.addAction({
           buyPartial: buyPartial,
           allowUnfilled: allowUnfilled,
           skipMissing: ctx.globalOptions?.skipMissingMaterials,
+          parallelGroup: 'cx-buy',
         }),
       );
     }

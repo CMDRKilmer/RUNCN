@@ -8,6 +8,8 @@ export interface ActionPackageConfig {
 
 export interface ActionStep {
   type: string;
+  /** 并行组标识：自动模式下同一组的连续步骤并发执行（如多窗口并发购买）。 */
+  parallelGroup?: string;
 }
 
 export interface ActionRunnerContext<T> {
