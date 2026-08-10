@@ -5,6 +5,7 @@ import {
   getEntityNaturalIdFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { getBuildingBuildMaterials, isRepairableBuilding } from '@src/core/buildings';
+import { diffDays } from '@src/utils/time-diff';
 import { isEmpty } from 'ts-extras';
 
 export interface RepairEntry {
@@ -92,4 +93,23 @@ export function calculateShipEntries(ships?: PrunApi.Ship[]) {
 function isShipParameter(parameter: string) {
   const upper = parameter.toUpperCase();
   return upper === 'SHIP' || upper === 'SHIPS';
+}
+
+export function getPlanetRepairAge(siteId: string, now: number) {
+  const site = sitesStore.getById(siteId);
+  if (!site) {
+    return undefined;
+  }
+  const buildings = site.platforms.filter(isRepairableBuilding);
+  if (buildings.length === 0) {
+    return undefined;
+  }
+  let maxAge = 0;
+  for (const building of buildings) {
+    const age = diffDays(getBuildingLastRepair(building), now, true);
+    if (age > maxAge) {
+      maxAge = age;
+    }
+  }
+  return maxAge;
 }

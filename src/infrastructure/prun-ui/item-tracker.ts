@@ -43,7 +43,7 @@ function appendStylesheet() {
   const gradientEnd = defaultColor.brighten(10).toHexString();
   const fontColor = defaultColor.brighten(40).toHexString();
   const defaultStyle =
-    `.${C.ColoredIcon.container} {\n` +
+    `.${C.ColoredIcon.container}, .rp-category-none {\n` +
     `  background: linear-gradient(135deg, ${gradientStart}, ${gradientEnd});\n` +
     `  color: ${fontColor};\n` +
     '}\n\n';
@@ -66,6 +66,12 @@ function createCssRule<T extends keyof typeof categoryColors>(category: T) {
 
 export function sanitizeCategoryName(name: string) {
   return name.replaceAll(' ', '-').replaceAll('(', '').replaceAll(')', '');
+}
+
+const CATEGORY_CSS_PREFIX = 'rp-category-';
+
+export function getMaterialCategoryCssClass(category: PrunApi.MaterialCategory) {
+  return CATEGORY_CSS_PREFIX + sanitizeCategoryName(category.name);
 }
 
 // 从 PrUn js 包中复制的。
