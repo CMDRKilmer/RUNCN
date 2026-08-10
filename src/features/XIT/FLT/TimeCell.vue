@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { displaytimeBetween, hhmm } from '@src/utils/format';
@@ -8,7 +8,7 @@ import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getInvStore } from '@src/core/store-id';
 import { useTile } from '@src/hooks/use-tile';
 import QuickRefuelDialog from '@src/features/basic/shpf-quick-refuel/QuickRefuelDialog.vue';
-import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { createFragmentApp } from '@src/utils/vue-fragment-app';
 
 const props = defineProps<{
   shipId: string;
@@ -31,15 +31,35 @@ const timeData = computed(() => {
 });
 
 const hasItems = computed(() => (inventory.value?.items.length ?? 0) > 0);
+const isRefueling = ref(false);
 
-function onRefuel(ev: MouseEvent) {
-  if (!ship.value) {
+function onRefuel() {
+  if (!ship.value || isRefueling.value) {
     return;
   }
-  showTileOverlay(ev, QuickRefuelDialog, {
+
+  isRefueling.value = true;
+  const container = document.createElement('div');
+  container.style.display = 'none';
+  document.body.appendChild(container);
+
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) {
+      return;
+    }
+    cleanedUp = true;
+    isRefueling.value = false;
+    fragmentApp.unmount();
+    container.remove();
+  };
+  const fragmentApp = createFragmentApp(QuickRefuelDialog, {
+    onDone: cleanup,
     registration: ship.value.registration,
+    silent: true,
     tile,
   });
+  fragmentApp.appendTo(container);
 }
 </script>
 
@@ -54,13 +74,6 @@ function onRefuel(ev: MouseEvent) {
     <template v-else>
       <div :class="$style.actions">
         <span
-          :class="[$style.actionBtn, $style.bgFuel]"
-          data-tooltip="加油"
-          data-tooltip-position="left"
-          @click.stop="onRefuel"
-          >⛽</span
-        >
-        <span
           :class="[$style.actionBtn, hasItems ? $style.bgOrange : $style.bgBlue]"
           :style="{ paddingRight: '5px' }"
           @click.stop="showBuffer(`SHPI ${ship?.registration}`)">
@@ -71,6 +84,13 @@ function onRefuel(ev: MouseEvent) {
           @click.stop="showBuffer(`SFC ${ship?.registration}`)">
           ✈
         </span>
+        <span
+          :class="[$style.actionBtn, $style.bgFuel, isRefueling && $style.disabled]"
+          data-tooltip="加油"
+          data-tooltip-position="left"
+          @click.stop="onRefuel"
+          >⛽</span
+        >
       </div>
     </template>
   </div>
@@ -121,5 +141,10 @@ function onRefuel(ev: MouseEvent) {
 
 .bgFuel {
   background-color: #8a6d3b;
+}
+
+.disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 </style>
