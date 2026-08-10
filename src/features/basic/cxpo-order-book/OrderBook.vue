@@ -5,6 +5,7 @@ import { fixed2 } from '@src/utils/format';
 import { isEmpty } from 'ts-extras';
 import { OrderHoverData } from '@src/features/basic/cxpo-order-book/order-hover-data';
 import { isFiniteOrder } from '@src/core/orders';
+import { quickPriceEnabled } from './quick-price';
 
 const { ticker, onOrderClick } = defineProps<{
   ticker?: string;
@@ -13,8 +14,62 @@ const { ticker, onOrderClick } = defineProps<{
 
 const orderBook = computed(() => cxobStore.getByTicker(ticker));
 
-const offers = computed(() => orderBook.value?.sellingOrders.toReversed() ?? []);
-const requests = computed(() => orderBook.value?.buyingOrders ?? []);
+const getSigFigIncrement = (num: number, n: number = 3): number => {
+  if (num === 0) {
+    return 0;
+  }
+  const exponent = Math.floor(Math.log10(Math.abs(num)));
+  return Math.pow(10, exponent - (n - 1));
+};
+
+const undercutOffer = computed(() => {
+  if (!quickPriceEnabled.value) {
+    return null;
+  }
+  const ask = orderBook.value?.ask?.price.amount;
+  if (ask === undefined) {
+    return null;
+  }
+  return {
+    id: 'undrcut',
+    limit: { amount: ask - getSigFigIncrement(ask) },
+    amount: 0,
+    trader: { id: 'ghost' },
+  } as PrunApi.CXBrokerOrder;
+});
+
+const outbidRequest = computed(() => {
+  if (!quickPriceEnabled.value) {
+    return null;
+  }
+  const bid = orderBook.value?.bid?.price.amount;
+  if (bid === undefined) {
+    return null;
+  }
+  return {
+    id: 'outbid',
+    limit: { amount: bid + getSigFigIncrement(bid) },
+    amount: 0,
+    trader: { id: 'ghost' },
+  } as PrunApi.CXBrokerOrder;
+});
+
+const offers = computed(() => {
+  const list = [...(orderBook.value?.sellingOrders.toReversed() ?? [])];
+  if (undercutOffer.value) {
+    list.push(undercutOffer.value);
+  }
+  return list;
+});
+
+const requests = computed(() => {
+  const list = [...(orderBook.value?.buyingOrders ?? [])];
+  if (outbidRequest.value) {
+    list.unshift(outbidRequest.value);
+  }
+  return list;
+});
+
 const spread = computed(() => {
   const ask = orderBook.value?.ask?.price.amount;
   const bid = orderBook.value?.bid?.price.amount;
@@ -47,6 +102,10 @@ function onClick(data: OrderHoverData) {
   }
 
   const order = data.order;
+  if (order.trader.id === 'ghost') {
+    onOrderClick(order.limit.amount);
+    return;
+  }
   if (!data.cumulative) {
     onOrderClick(order.limit.amount);
     return;
@@ -118,6 +177,7 @@ function getCumulativeOrders(targetOrder: PrunApi.CXBrokerOrder) {
             v-for="order in offers"
             :key="order.id"
             :order="order"
+            :class="{ [$style.ghost]: order.trader.id === 'ghost' }"
             :highlight-amount="isAmountHighlighted(order)"
             :highlight-price="isPriceHighlighted(order)"
             :on-hover="onHover"
@@ -141,6 +201,7 @@ function getCumulativeOrders(targetOrder: PrunApi.CXBrokerOrder) {
             :key="order.id"
             request
             :order="order"
+            :class="{ [$style.ghost]: order.trader.id === 'ghost' }"
             :highlight-amount="isAmountHighlighted(order)"
             :highlight-price="isPriceHighlighted(order)"
             :on-hover="onHover"
@@ -163,5 +224,10 @@ function getCumulativeOrders(targetOrder: PrunApi.CXBrokerOrder) {
 
 .spread {
   text-align: center;
+}
+
+.ghost {
+  opacity: 0.5;
+  font-style: italic;
 }
 </style>

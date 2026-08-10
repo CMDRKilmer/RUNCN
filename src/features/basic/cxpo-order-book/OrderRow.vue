@@ -19,7 +19,13 @@ const $style = useCssModule();
 const isOwnOrder = computed(
   () => (order.amount ?? 0) > 0 && order.trader.id === companyStore.value?.id,
 );
-const amount = computed(() => ((order.amount ?? 0) > 0 ? fixed0(order.amount!) : '∞'));
+const amount = computed(() => {
+  const qty = order.amount ?? 0;
+  if (qty <= 0) {
+    return order.trader.id === 'ghost' ? order.id : '∞';
+  }
+  return fixed0(order.amount!);
+});
 const amountClass = computed(() => ({
   [$style.valueHighlight]: highlightAmount,
   [link.link]: isOwnOrder.value,
