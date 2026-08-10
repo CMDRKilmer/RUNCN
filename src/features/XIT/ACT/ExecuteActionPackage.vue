@@ -28,20 +28,8 @@ const isRunning = ref(false);
 const status = ref(undefined as string | undefined);
 const actReady = ref(false);
 const autoAct = ref(false);
-let autoActTimer: ReturnType<typeof setTimeout> | undefined;
 
 watch(config, clearLog, { deep: true });
-
-watch([actReady, autoAct], ([ready, auto]) => {
-  clearTimeout(autoActTimer);
-  if (ready && auto) {
-    autoActTimer = setTimeout(() => {
-      if (actReady.value && autoAct.value) {
-        onActClick();
-      }
-    }, 100);
-  }
-});
 
 watchEffect(() => {
   for (const name of pkg.groups.map(x => x.name!)) {
@@ -106,7 +94,7 @@ const runner = new ActionRunner({
   onEnd: () => {
     isRunning.value = false;
     status.value = undefined;
-    clearTimeout(autoActTimer);
+    autoAct.value = false;
   },
   onStatusChanged: (title, keepReady) => {
     status.value = title;
@@ -147,13 +135,41 @@ function onExecuteClick() {
 function onCancelClick() {
   actReady.value = false;
   autoAct.value = false;
-  clearTimeout(autoActTimer);
   runner.cancel();
 }
 
 function onActClick() {
   actReady.value = false;
   runner.act();
+}
+
+// 运行中切换自动模式：开启后从当前步骤起自动继续；若正停在手动等待处立即继续
+function onToggleAutoMidRun() {
+  autoAct.value = !autoAct.value;
+  if (autoAct.value && actReady.value) {
+    onActClick();
+  }
+}
+
+// 触发式自动执行：点击后先预览（生成步骤+汇总），预览通过后自动执行
+async function onAutoClick() {
+  if (isRunning.value) {
+    return;
+  }
+  autoAct.value = true;
+  logScrolling.value = false;
+  clearLog();
+  isPreviewing.value = true;
+  const ok = await runner.preview(pkg, config.value);
+  isPreviewing.value = false;
+  if (!ok) {
+    autoAct.value = false;
+    status.value = undefined;
+    return;
+  }
+  logScrolling.value = true;
+  actReady.value = false;
+  runner.execute(pkg, config.value);
 }
 
 function onSkipClick() {
@@ -206,9 +222,7 @@ function clearLog() {
           <PrunButton primary :class="$style.executeButton" @click="onExecuteClick">
             执行
           </PrunButton>
-          <PrunButton :primary="autoAct" :neutral="!autoAct" @click="autoAct = !autoAct">
-            {{ autoAct ? '🟢 自动' : '自动' }}
-          </PrunButton>
+          <PrunButton danger :disabled="!isValidConfig" @click="onAutoClick">自动</PrunButton>
           <label :class="$style.skipCheckbox">
             <input
               v-model="config.globalOptions!.skipMissingMaterials"
@@ -229,7 +243,7 @@ function clearLog() {
           </PrunButton>
           <PrunButton primary :disabled="!actReady" @click="onActClick">执行步骤</PrunButton>
           <PrunButton neutral :disabled="!actReady" @click="onSkipClick">跳过</PrunButton>
-          <PrunButton :primary="autoAct" :neutral="!autoAct" @click="autoAct = !autoAct">
+          <PrunButton danger @click="onToggleAutoMidRun">
             {{ autoAct ? '🟢 自动' : '自动' }}
           </PrunButton>
           <label :class="$style.skipCheckbox">

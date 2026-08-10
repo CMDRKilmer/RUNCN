@@ -45,13 +45,13 @@ export class ActionRunner {
   async preview(pkg: UserData.ActionPackageData, config: ActionPackageConfig) {
     if (this.isRunning) {
       this.log.error('操作包已在运行中');
-      return;
+      return false;
     }
     // 创建副本以防止执行期间的修改。
     const copy = structuredClone(deepToRaw(pkg));
     const { steps, fail } = await this.stepGenerator.generateSteps(copy, config);
     if (steps.length === 0) {
-      return;
+      return false;
     }
     if (fail) {
       this.log.info('已为有效操作生成步骤：');
@@ -136,6 +136,7 @@ export class ActionRunner {
       const stepInfo = act.getActionStepInfo(step.type);
       this.log.action(stepInfo.description(step));
     }
+    return !fail;
   }
 
   async execute(pkg: UserData.ActionPackageData, config: ActionPackageConfig) {
