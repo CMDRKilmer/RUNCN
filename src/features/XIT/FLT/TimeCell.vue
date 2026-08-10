@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { displaytimeBetween, hhmm } from '@src/utils/format';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -71,25 +72,55 @@ async function onUnload() {
   try {
     // 静默打开 SHPI 面板（窗口全程 display:none，玩家不可见），
     // 让 PrUn 自己渲染货舱 UI；面板内有「卸货」主按钮可触发完整卸货流程。
-    const window = await showBuffer(`SHPI ${ship.value.registration}`, {
+    const bufferWindow = await showBuffer(`SHPI ${ship.value.registration}`, {
       force: true,
       autoSubmit: true,
       autoClose: true,
       closeWhen,
     });
-    if (window === undefined) {
+    if (bufferWindow === undefined) {
       return;
     }
-    const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
-    const storeView = await $(tileElement, C.StoreView.container);
+    // 等 SHPI 面板 React 控件初始化完毕（processWindow 后 selector 出现），
+    // 然后同步查询卸货按钮（隐藏窗口内 DOM 交互仍生效）。
+    const selector = await $(bufferWindow, C.Tile.selector);
+    void selector;
+    const tileEl = bufferWindow.querySelector<HTMLElement>(`.${C.Tile.tile}`);
+    if (!tileEl) {
+      return;
+    }
+    const storeView = await $(tileEl, C.StoreView.container);
     const centered = await $(storeView, C.StoreView.centered);
-    const unloadButton = _$(centered, 'button');
-    if (unloadButton === undefined) {
+    const unloadButton = centered.querySelector<HTMLButtonElement>('button');
+    if (unloadButton === null || unloadButton.disabled) {
       return;
     }
-    (unloadButton as HTMLButtonElement).click();
-    // 等 PrUn 卸货流程结束（StateChange 完成后 StoreView 内的卸货按钮会重新出现）。
-    await sleep(500);
+    unloadButton.click();
+
+    // 等卸货完成：观察 shipStore 的 items 数量降到 0（卸货前 > 0）。
+    // STORAGE_CHANGE 会触发 shipStore 替换实体，shipStore.state.all 重新计算。
+    const shipId = ship.value.idShipStore;
+    const startLen = storagesStore.getById(shipId)?.items.length ?? 0;
+    if (startLen > 0) {
+      await new Promise<void>(resolve => {
+        const stop = watch(
+          () => storagesStore.all.value?.length,
+          () => {
+            const len = storagesStore.getById(shipId)?.items.length ?? 0;
+            if (len === 0) {
+              stop();
+              resolve();
+            }
+          },
+          { immediate: true },
+        );
+        // 兜底超时 5s（多物品/多 MTRA 串行）
+        setTimeout(() => {
+          stop();
+          resolve();
+        }, 5000);
+      });
+    }
   } catch {
     // 静默模式吞错；任何失败都不影响后续点击重试。
   } finally {
