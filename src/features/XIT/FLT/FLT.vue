@@ -124,9 +124,9 @@ const problemFuelThreshold = useTileState<FuelAlertFilter>(
   DEFAULTS.problemFuelThreshold,
 );
 
-const conditionOptions = ['100-90', '90-80', '80-0'];
-const etaOptions = ['DOCKED', '<1H', '1-6H', '6-12H', '12-24H', '>24H'];
-const cargoStateOptions = ['EMPTY', 'PARTIAL', 'FULL'];
+const conditionOptions = ['≥90%', '80-90%', '<80%'];
+const etaOptions = ['已对接', '<1小时', '1-6小时', '6-12小时', '12-24小时', '>24小时'];
+const cargoStateOptions = ['空载', '部分装载', '满载'];
 const fuelAlertOptions: FuelAlertThreshold[] = ['75', '50', '35', '25', '10'];
 const fuelAlertThresholdMap: Record<FuelAlertFilter, number> = {
   any: 1,
@@ -136,6 +136,22 @@ const fuelAlertThresholdMap: Record<FuelAlertFilter, number> = {
   '25': 0.25,
   '10': 0.1,
 };
+
+const SORT_KEY_LABEL: Record<SortKey, string> = {
+  none: '无',
+  name: '舰名',
+  shipClass: '等级',
+  cargo: '货物',
+  status: '状态',
+  eta: 'ETA',
+  repair: '维修',
+  size: '容量',
+  fuel: '燃料',
+};
+
+function sortKeyLabel(key: SortKey) {
+  return SORT_KEY_LABEL[key];
+}
 
 const rawRows = computed<FlightRow[] | undefined>(() => {
   const ships = shipsStore.all.value;
@@ -430,35 +446,35 @@ const filterSymbol = computed(() => (showFilters.value ? '-' : '+'));
 const optionFilterGroups = computed<MultiOptionFilterGroup[]>(() => [
   {
     key: 'ship-class',
-    title: 'Ship class',
+    title: '舰船等级',
     options: shipClassOptions.value,
     selected: shipClassFilters.value,
     onToggle: onShipClassClick,
   },
   {
     key: 'eta-bucket',
-    title: 'ETA bucket',
+    title: 'ETA 区间',
     options: etaOptions,
     selected: etaFilters.value,
     onToggle: onEtaClick,
   },
   {
     key: 'inventory-size',
-    title: 'Inventory size',
+    title: '货仓容量',
     options: inventorySizeOptions.value,
     selected: inventorySizeFilters.value,
     onToggle: onInventorySizeClick,
   },
   {
     key: 'cargo-state',
-    title: 'Cargo state',
+    title: '装载状态',
     options: cargoStateOptions,
     selected: cargoStateFilters.value,
     onToggle: onCargoStateClick,
   },
   {
     key: 'condition',
-    title: 'Condition',
+    title: '舰船状态',
     options: conditionOptions,
     selected: conditionFilters.value,
     onToggle: onConditionClick,
@@ -757,43 +773,43 @@ function getShipClass(ship: PrunApi.Ship) {
 
 function getConditionBand(condition: number) {
   if (condition >= 90) {
-    return '100-90';
+    return '≥90%';
   }
   if (condition >= 80) {
-    return '90-80';
+    return '80-90%';
   }
-  return '80-0';
+  return '<80%';
 }
 
 function getEtaBucket(inFlight: boolean, statusSortValue: number) {
   if (!inFlight) {
-    return 'DOCKED';
+    return '已对接';
   }
 
   const hour = 3600000;
   if (statusSortValue < hour) {
-    return '<1H';
+    return '<1小时';
   }
   if (statusSortValue < 6 * hour) {
-    return '1-6H';
+    return '1-6小时';
   }
   if (statusSortValue < 12 * hour) {
-    return '6-12H';
+    return '6-12小时';
   }
   if (statusSortValue < 24 * hour) {
-    return '12-24H';
+    return '12-24小时';
   }
-  return '>24H';
+  return '>24小时';
 }
 
 function getCargoState(cargoRatio: number) {
   if (cargoRatio <= 0.0001) {
-    return 'EMPTY';
+    return '空载';
   }
   if (cargoRatio > 0.95) {
-    return 'FULL';
+    return '满载';
   }
-  return 'PARTIAL';
+  return '部分装载';
 }
 </script>
 
@@ -802,7 +818,7 @@ function getCargoState(cargoRatio: number) {
   <div v-else :class="$style.content">
     <div :class="[C.FormComponent.containerPassive, C.forms.passive, C.forms.formComponent]">
       <label :class="[C.FormComponent.label, C.fonts.fontRegular, C.type.typeRegular]">
-        Minimize
+        收起
       </label>
       <div :class="[C.FormComponent.input, C.forms.input]">
         <div>
@@ -814,29 +830,29 @@ function getCargoState(cargoRatio: number) {
     <div v-if="showFilters" :class="$style.filterPanel">
       <div :class="$style.filterMeta">
         <span v-if="activeFilterCount > 0" :class="$style.activeCount">
-          {{ activeFilterCount }} active
+          {{ activeFilterCount }} 个已启用
         </span>
         <span
           v-if="activeFilterCount > 0"
           :class="[C.Link.link, $style.clearFilters]"
           @click="clearFilters">
-          reset
+          重置
         </span>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Ship list</div>
+        <div :class="$style.filterTitle">舰船类型</div>
         <div :class="C.ComExOrdersPanel.filter">
-          <RadioItem v-model="showStlShips" horizontal>STL</RadioItem>
-          <RadioItem v-model="showFtlShips" horizontal>FTL</RadioItem>
+          <RadioItem v-model="showStlShips" horizontal>亚光速 (STL)</RadioItem>
+          <RadioItem v-model="showFtlShips" horizontal>超光速 (FTL)</RadioItem>
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Flight state</div>
+        <div :class="$style.filterTitle">航行状态</div>
         <div :class="C.ComExOrdersPanel.filter">
-          <RadioItem v-model="showInFlightShips" horizontal>IN FLIGHT</RadioItem>
-          <RadioItem v-model="showNotInFlightShips" horizontal>DOCKED</RadioItem>
+          <RadioItem v-model="showInFlightShips" horizontal>航行中</RadioItem>
+          <RadioItem v-model="showNotInFlightShips" horizontal>已对接</RadioItem>
         </div>
       </div>
 
@@ -855,31 +871,31 @@ function getCargoState(cargoRatio: number) {
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Columns</div>
+        <div :class="$style.filterTitle">显示列</div>
         <div :class="C.ComExOrdersPanel.filter">
-          <RadioItem v-model="showColName" horizontal>NAME</RadioItem>
-          <RadioItem v-model="showColShipClass" horizontal>CLASS</RadioItem>
-          <RadioItem v-model="showColSize" horizontal>SIZE</RadioItem>
-          <RadioItem v-model="showColCargo" horizontal>CARGO</RadioItem>
-          <RadioItem v-model="showColCargoSize" horizontal>CARGO/SIZE</RadioItem>
+          <RadioItem v-model="showColName" horizontal>舰名</RadioItem>
+          <RadioItem v-model="showColShipClass" horizontal>等级</RadioItem>
+          <RadioItem v-model="showColSize" horizontal>容量</RadioItem>
+          <RadioItem v-model="showColCargo" horizontal>货物</RadioItem>
+          <RadioItem v-model="showColCargoSize" horizontal>货物/容量</RadioItem>
           <RadioItem v-model="showColTime" horizontal>ETA</RadioItem>
-          <RadioItem v-model="showColRepair" horizontal>REPAIR</RadioItem>
-          <RadioItem v-model="showColFuel" horizontal>FUEL</RadioItem>
-          <RadioItem v-model="showColProblems" horizontal>PROBLEMS</RadioItem>
+          <RadioItem v-model="showColRepair" horizontal>维修</RadioItem>
+          <RadioItem v-model="showColFuel" horizontal>燃料</RadioItem>
+          <RadioItem v-model="showColProblems" horizontal>问题</RadioItem>
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Reset</div>
+        <div :class="$style.filterTitle">重置</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem :model-value="false" horizontal @update:model-value="clearFilters"
-            >RESET ALL FILTERS</RadioItem
+            >重置所有筛选</RadioItem
           >
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Primary sort</div>
+        <div :class="$style.filterTitle">主排序</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem
             v-for="key in [
@@ -897,14 +913,14 @@ function getCargoState(cargoRatio: number) {
             :model-value="primarySortKey === key"
             horizontal
             @update:model-value="setPrimarySort(key as SortKey)">
-            {{ key.toUpperCase() }}
+            {{ sortKeyLabel(key as SortKey) }}
             {{ primarySortKey === key && key !== 'none' ? getSortIndicator(key as SortKey) : '' }}
           </RadioItem>
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Secondary sort</div>
+        <div :class="$style.filterTitle">副排序</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem
             v-for="key in [
@@ -922,51 +938,51 @@ function getCargoState(cargoRatio: number) {
             :model-value="secondarySortKey === key"
             horizontal
             @update:model-value="setSecondarySort(key as SortKey)">
-            {{ key.toUpperCase() }}
+            {{ sortKeyLabel(key as SortKey) }}
             {{ secondarySortKey === key && key !== 'none' ? getSortIndicator(key as SortKey) : '' }}
           </RadioItem>
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Layout</div>
+        <div :class="$style.filterTitle">布局</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem
             :model-value="layoutMode === 'compact'"
             horizontal
             @update:model-value="layoutMode = 'compact'"
-            >COMPACT</RadioItem
+            >紧凑</RadioItem
           >
           <RadioItem
             :model-value="layoutMode === 'whitespace'"
             horizontal
             @update:model-value="layoutMode = 'whitespace'"
-            >WHITESPACE</RadioItem
+            >宽松</RadioItem
           >
           <RadioItem
             :model-value="layoutMode === 'cargo'"
             horizontal
             @update:model-value="layoutMode = 'cargo'"
-            >CARGO</RadioItem
+            >货物</RadioItem
           >
           <RadioItem
             :model-value="layoutMode === 'legacy'"
             horizontal
             @update:model-value="layoutMode = 'legacy'"
-            >LEGACY</RadioItem
+            >经典</RadioItem
           >
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Route</div>
+        <div :class="$style.filterTitle">航线</div>
         <div :class="C.ComExOrdersPanel.filter">
-          <RadioItem v-model="hideReturningToCx" horizontal>HIDE CX RETURNS</RadioItem>
+          <RadioItem v-model="hideReturningToCx" horizontal>隐藏回 CX 的航行</RadioItem>
         </div>
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Fuel</div>
+        <div :class="$style.filterTitle">燃料预警</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem
             v-for="threshold in fuelAlertOptions"
@@ -980,7 +996,7 @@ function getCargoState(cargoRatio: number) {
       </div>
 
       <div :class="$style.filterGroup">
-        <div :class="$style.filterTitle">Problematic fuel level</div>
+        <div :class="$style.filterTitle">问题燃料阈值</div>
         <div :class="C.ComExOrdersPanel.filter">
           <RadioItem
             v-for="threshold in fuelAlertOptions"
@@ -1002,7 +1018,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColName"
           :class="[$style.headerCell, $style.sortable]"
           @click="setSort('name')">
-          Name
+          舰名
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('name'),
@@ -1016,7 +1032,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColShipClass"
           :class="[$style.headerCell, $style.sortable, $style.colShipClass]"
           @click="setSort('shipClass')">
-          Class
+          等级
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('shipClass'),
@@ -1030,7 +1046,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColSize"
           :class="[$style.headerCell, $style.sortable, $style.colSize]"
           @click="setSort('size')">
-          Size
+          容量
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('size'),
@@ -1044,7 +1060,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColCargo"
           :class="[$style.headerCell, $style.sortable]"
           @click="setSort('cargo')">
-          Cargo
+          货物
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('cargo'),
@@ -1058,7 +1074,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColCargoSize"
           :class="[$style.headerCell, $style.sortable]"
           @click="setSort('cargo')">
-          Cargo/Size
+          货物/容量
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('cargo'),
@@ -1071,7 +1087,7 @@ function getCargoState(cargoRatio: number) {
           :is="headerCellTag"
           :class="[$style.headerCell, $style.sortable, $style.colStatus]"
           @click="setSort('status')">
-          Status
+          状态
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('status'),
@@ -1099,7 +1115,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColRepair"
           :class="[$style.headerCell, $style.sortable, $style.colRepair]"
           @click="setSort('repair')">
-          Repair
+          维修
           <span
             :class="{
               [$style.sortPrimary]: isPrimarySort('repair'),
@@ -1114,7 +1130,7 @@ function getCargoState(cargoRatio: number) {
           :class="[$style.headerCell, $style.sortable, $style.colFuel]"
           @click="setSort('fuel')">
           <FleetRefuelHeader @refuel="onRefuelAllExchanges">
-            Fuel
+            燃料
             <span
               :class="{
                 [$style.sortPrimary]: isPrimarySort('fuel'),
@@ -1129,7 +1145,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColProblems && hasAnyProblems"
           :class="[$style.headerCell, $style.colProblems]">
           <FleetRefuelHeader :show-button="hasDockedFuelProblem" @refuel="onRefuelAllExchanges">
-            Problems
+            问题
           </FleetRefuelHeader>
         </component>
       </component>

@@ -81,10 +81,10 @@ const cargoBar = computed<CargoBarData>(() => {
     const value = useVolume ? summary.shipments.volume : summary.shipments.weight;
     const percentage = (value * 100) / divisor;
     segments.push({
-      name: 'shipments',
+      name: '运输中',
       class: `rp-category-none`,
       width: `${percentage}%`,
-      title: formatTitle('shipments', summary.shipments.weight, summary.shipments.volume),
+      title: formatTitle('运输中', summary.shipments.weight, summary.shipments.volume),
     });
   }
 

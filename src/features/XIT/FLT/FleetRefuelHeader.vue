@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import PrunButton from '@src/components/PrunButton.vue';
 
-// Gap kept between the column label and the REFUEL button.
+// Gap kept between the column label and the 加注燃料 button.
 const buttonGap = 6;
 
 const { showButton = true } = defineProps<{ showButton?: boolean }>();
@@ -45,7 +45,7 @@ function measure() {
   <span ref="root" :class="$style.container">
     <span ref="label" :class="$style.label"><slot /></span>
     <span ref="button" :class="[$style.button, { [$style.hiddenButton]: !showButton || !fits }]">
-      <PrunButton dark inline @click.stop="emit('refuel')">REFUEL</PrunButton>
+      <PrunButton dark inline @click.stop="emit('refuel')">加注燃料</PrunButton>
     </span>
   </span>
 </template>

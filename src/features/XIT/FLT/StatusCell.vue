@@ -44,14 +44,14 @@ const posData = computed(() => {
     <div :class="$style.icons">
       <span
         :class="[C.Link.link, $style.link]"
-        data-tooltip="Open inventory"
+        data-tooltip="打开库存"
         data-tooltip-position="top"
         @click.stop="showBuffer(posData.invCommand)"
         >☒</span
       >
       <span
         :class="$style.link"
-        data-tooltip="Open flight control"
+        data-tooltip="打开飞行控制"
         data-tooltip-position="right"
         @click.stop="showBuffer(`SFC ${ship?.registration}`)"
         >{{ statusIcon }}</span
