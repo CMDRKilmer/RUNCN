@@ -159,6 +159,17 @@ export class StepMachine {
   }
 
   private async requestTile(command: string) {
+    if (this.options.isAutoAct()) {
+      // 自动模式：独立窗口执行（复用预开窗口），不使用右侧 companion 小窗
+      this.options.onStatusChanged(`正在打开 ${command}...`);
+      const tile = await this.options.tileAllocator.requestWindow(command);
+      if (tile === undefined) {
+        this.log.error(`无法打开 ${command}`);
+        this.stop();
+      }
+      return tile;
+    }
+    // 手动模式：优先复用已开窗口，否则在右侧 companion 小窗中执行
     let tile = tiles.find(command, true)[0];
     if (tile !== undefined) {
       return tile;

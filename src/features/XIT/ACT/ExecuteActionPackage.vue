@@ -12,6 +12,11 @@ import { act } from '@src/features/XIT/ACT/act-registry';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
+// 模块级自动标志：ACT 窗口从独立小窗打开时 TileAllocator 会触发缓冲区拆分，
+// 组件卸载重挂载后组件内 ref 会被重置（导致自动运行退化为手动等待），
+// 提升到模块级让自动标志跨重挂载保持。
+const autoAct = ref(false);
+
 const tile = useTile();
 let goingToSplit = ref(false);
 
@@ -27,7 +32,6 @@ const isPreviewing = ref(false);
 const isRunning = ref(false);
 const status = ref(undefined as string | undefined);
 const actReady = ref(false);
-const autoAct = ref(false);
 
 watch(config, clearLog, { deep: true });
 

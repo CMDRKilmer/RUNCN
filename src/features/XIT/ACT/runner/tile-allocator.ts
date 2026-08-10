@@ -32,6 +32,25 @@ export class TileAllocator {
     }
     return tiles.findByContainer(this.allocatedTile?.parentElement)[0];
   }
+
+  // 是否右侧 companion 小窗（仅手动模式使用）
+  isCompanion(tile: PrunTile) {
+    return this.allocatedTile !== undefined && tile.container === this.allocatedTile;
+  }
+
+  // 自动模式用：优先复用已开窗口（含预开窗口），绝不使用 companion 小窗。
+  // showBuffer 无 force 时可能命中 companion 所在的窗口，命中则强制开独立窗口。
+  async requestWindow(command: string) {
+    const existing = tiles.find(command, true).find(x => !this.isCompanion(x));
+    if (existing !== undefined) {
+      return existing;
+    }
+    const window = await showBuffer(command, { force: true, autoSubmit: true });
+    await sleep(0);
+    const body = _$(window, C.Window.body);
+    const tileEl = body ? _$(body, C.Tile.tile) : undefined;
+    return tiles.findByContainer(tileEl?.parentElement)[0];
+  }
 }
 
 function getCompanionTile(tile: PrunTile) {
