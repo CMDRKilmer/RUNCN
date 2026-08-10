@@ -58,6 +58,35 @@ function onRefuel() {
   });
   fragmentApp.appendTo(container);
 }
+
+function onUnload() {
+  if (!ship.value || ship.value.flightId) {
+    return;
+  }
+
+  // 通过 ship.id 匹配原生 FLT 行（data-prun-id 与 ship.id 一致），
+  // 复用 PrUn 原生卸货按钮触发完整流程，避免打开 SHPI 面板。
+  const nativeRow = document.querySelector<HTMLTableRowElement>(
+    `tr[data-prun-id="${ship.value.id}"]`,
+  );
+  if (!nativeRow) {
+    // 原生 FLT 未开 → 兜底打开 SHPI（用户可手动卸货）
+    showBuffer(`SHPI ${ship.value.registration}`);
+    return;
+  }
+  const buttonsContainer = nativeRow.querySelector<HTMLElement>(`.${C.Fleet.buttons}`);
+  if (!buttonsContainer) {
+    return;
+  }
+  // 原生按钮按"航行/查看 - 货物 - 燃料 - 卸货 - 加油"顺序排列，定位「卸货」按钮。
+  const unloadButton = Array.from(buttonsContainer.querySelectorAll('button')).find(
+    x => x.textContent?.trim() === '卸货',
+  );
+  if (!unloadButton || unloadButton.disabled) {
+    return;
+  }
+  unloadButton.click();
+}
 </script>
 
 <template>
@@ -73,7 +102,7 @@ function onRefuel() {
         <span
           :class="[$style.actionBtn, $style.bgOrange]"
           :style="{ paddingRight: '5px' }"
-          @click.stop="showBuffer(`SHPI ${ship?.registration}`)">
+          @click.stop="onUnload">
           ⭳
         </span>
         <span
