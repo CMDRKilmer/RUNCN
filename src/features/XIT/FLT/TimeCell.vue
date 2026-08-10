@@ -2,9 +2,14 @@
 import { computed, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { atSameLocation, storageSort } from '@src/features/XIT/ACT/actions/utils';
 import { displaytimeBetween, hhmm } from '@src/utils/format';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { changeInputValue, clickElement, focusElement } from '@src/util';
+import { sleep } from '@src/utils/sleep';
 import { useTile } from '@src/hooks/use-tile';
 import QuickRefuelDialog from '@src/features/basic/shpf-quick-refuel/QuickRefuelDialog.vue';
 import { createFragmentApp } from '@src/utils/vue-fragment-app';
@@ -61,42 +66,185 @@ function onRefuel() {
 
 const isUnloading = ref(false);
 
-function onUnload() {
+interface UnloadPlan {
+  ticker: string;
+  amount: number;
+}
+
+async function onUnload() {
   if (!ship.value || ship.value.flightId || isUnloading.value) {
     return;
   }
 
-  isUnloading.value = true;
-  try {
-    // 通过 ship.id 匹配原生 FLT 行（data-prun-id 与 ship.id 一致），
-    // 复用 PrUn 原生卸货按钮触发完整流程。
-    const nativeRow = document.querySelector<HTMLTableRowElement>(
-      `tr[data-prun-id="${ship.value.id}"]`,
-    );
-    if (nativeRow === null) {
-      // 原生 FLT 未开 → 静默不响应（用户需打开原生 FLT 面板）。
-      return;
-    }
-    const buttonsContainer = nativeRow.querySelector<HTMLElement>(`.${C.Fleet.buttons}`);
-    if (buttonsContainer === null) {
-      return;
-    }
-    // 原生按钮按"航行/查看 - 货物 - 燃料 - 卸货 - 加油"顺序排列，定位「卸货」按钮。
-    const unloadButton = Array.from(buttonsContainer.querySelectorAll('button')).find(
-      x => x.textContent?.trim() === '卸货',
-    );
-    if (unloadButton === undefined || unloadButton.disabled) {
-      return;
-    }
-    unloadButton.click();
-  } finally {
-    // PrUn 自身处理卸货流程（弹出确认 dialog → MTRA 转移 → 完成）。
-    // 卸货完成通过原生 FLT 行的 STORAGE_CHANGE 自然反映在 XIT FLT 上，
-    // 这里只需解锁按钮，无需自己监听。
-    setTimeout(() => {
-      isUnloading.value = false;
-    }, 1000);
+  const shipStore = storagesStore.getById(ship.value.idShipStore);
+  if (shipStore === undefined || shipStore.items.length === 0) {
+    return;
   }
+
+  // 找同地址、按优先级排序的目标库存（仓库 > 基地 > 货舱，跳过船仓自身）。
+  const destinations = (storagesStore.nonFuelStores.value ?? [])
+    .filter(s => atSameLocation(s, shipStore) && s.id !== shipStore.id)
+    .sort(storageSort);
+  if (destinations.length === 0) {
+    return;
+  }
+  const destination = destinations[0];
+
+  // 按 ticker 汇总当前船仓内的物料（聚合同 ticker 多 item）。
+  const aggregated = new Map<string, number>();
+  for (const item of shipStore.items) {
+    const ticker = item.quantity?.material.ticker;
+    if (ticker === undefined) {
+      continue;
+    }
+    const material = materialsStore.getByTicker(ticker);
+    if (material === undefined) {
+      continue;
+    }
+    aggregated.set(ticker, (aggregated.get(ticker) ?? 0) + item.quantity.amount);
+  }
+  const plans: UnloadPlan[] = Array.from(aggregated.entries())
+    .map(([ticker, amount]) => ({ ticker, amount }))
+    .filter(p => p.amount > 0);
+  if (plans.length === 0) {
+    return;
+  }
+
+  isUnloading.value = true;
+  const closeWhen = ref(false);
+  try {
+    // 单条 MTRA 命令按船仓与目标库存拼接；每种 ticker 跑一次。
+    const mtraCommand = `MTRA from-${shipStore.id.substring(0, 8)} to-${destination.id.substring(0, 8)}`;
+    const window = await showBuffer(mtraCommand, {
+      force: true,
+      autoSubmit: true,
+      autoClose: true,
+      closeWhen,
+    });
+    if (window === undefined) {
+      return;
+    }
+
+    // 串行 setup + 串行 submit：display:none 窗口下避免并行状态干扰。
+    for (const plan of plans) {
+      await runSingleMtra(window, plan);
+    }
+  } catch {
+    // 静默吞错，玩家可重试。
+  } finally {
+    closeWhen.value = true;
+    isUnloading.value = false;
+  }
+}
+
+async function runSingleMtra(window: HTMLElement, plan: UnloadPlan) {
+  const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
+  await clickElement(tileElement);
+  window.getSelection()?.removeAllRanges();
+
+  const container = await $(tileElement, C.MaterialSelector.container);
+  const input = (await $(container, 'input')) as HTMLInputElement;
+  const suggestionsContainer = await $(container, C.MaterialSelector.suggestionsContainer);
+
+  // 等待建议列表渲染出该 ticker 的条目（参见 feature-patterns.md 自动化 PrUn 输入）。
+  let suggestionsList: Element | undefined;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await clickElement(input);
+    focusElement(input);
+    input.focus();
+    changeInputValue(input, plan.ticker);
+    window.getSelection()?.removeAllRanges();
+    for (let i = 0; i < 6; i++) {
+      const list = _$(container, C.MaterialSelector.suggestionsList);
+      if (
+        list &&
+        _$$(list, C.MaterialSelector.suggestionEntry).some(
+          x => _$(x, C.ColoredIcon.label)?.textContent === plan.ticker,
+        )
+      ) {
+        suggestionsList = list;
+        break;
+      }
+      await sleep(25);
+    }
+    if (suggestionsList !== undefined) {
+      break;
+    }
+    await sleep(150);
+  }
+  if (suggestionsList === undefined) {
+    throw new Error(`MTRA_NO_SUGGESTIONS: ${plan.ticker}`);
+  }
+
+  // 选择条目 → 隐藏容器 → 读滑块 → 写最大可转移量。
+  suggestionsContainer.style.display = 'none';
+  const match = _$$(suggestionsList, C.MaterialSelector.suggestionEntry).find(
+    x => _$(x, C.ColoredIcon.label)?.textContent === plan.ticker,
+  );
+  if (match === undefined) {
+    suggestionsContainer.style.display = '';
+    throw new Error(`MTRA_NO_SUGGESTIONS: ${plan.ticker}`);
+  }
+  await clickElement(match as HTMLElement);
+  suggestionsContainer.style.display = '';
+
+  // 等数量滑块异步渲染（参见 QuickRefuelDialog.prepareTransfer 与 mtra-common.waitSliderMaxAmount）。
+  let sliderNumbers: number[] = [];
+  for (let attempt = 0; attempt < 15; attempt++) {
+    sliderNumbers = _$$(tileElement, 'rc-slider-mark-text')
+      .map(x => Number(x.textContent ?? 0))
+      .filter(n => Number.isFinite(n));
+    if (sliderNumbers.length > 0) {
+      break;
+    }
+    await sleep(25);
+  }
+  const maxAmount = sliderNumbers.length > 0 ? Math.max(...sliderNumbers) : 0;
+  if (maxAmount <= 0) {
+    return; // 该 ticker 在 MTRA 窗口中不可转移（容量为 0 或不存在）
+  }
+
+  const allInputs = _$$(tileElement, 'input');
+  const amountInput = allInputs[1] as HTMLInputElement | undefined;
+  if (amountInput === undefined) {
+    return;
+  }
+  changeInputValue(amountInput, String(maxAmount));
+  window.getSelection()?.removeAllRanges();
+
+  const transferButton = (await $(tileElement, C.Button.btn)) as HTMLElement;
+  await clickElement(transferButton);
+
+  // 等 ActionFeedback overlay 完成。
+  const frame = (await $(tileElement, C.TileFrame.frame)) as HTMLElement;
+  const overlay = (await $(frame, C.ActionFeedback.overlay)) as HTMLElement;
+  await waitActionProgress(overlay);
+  if (overlay.classList.contains(C.ActionConfirmationOverlay.container)) {
+    const buttons = _$$(overlay, C.Button.btn);
+    const confirm = buttons[1] as HTMLElement | undefined;
+    if (confirm !== undefined) {
+      await clickElement(confirm);
+      await waitActionProgress(overlay);
+    }
+  }
+  if (overlay.classList.contains(C.ActionFeedback.success)) {
+    await clickElement(overlay);
+  }
+}
+
+async function waitActionProgress(overlay: HTMLElement) {
+  if (!overlay.classList.contains(C.ActionFeedback.progress)) {
+    return;
+  }
+  await new Promise<void>(resolve => {
+    const observer = new MutationObserver(() => {
+      if (!overlay.classList.contains(C.ActionFeedback.progress)) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+    observer.observe(overlay, { attributes: true });
+  });
 }
 </script>
 
