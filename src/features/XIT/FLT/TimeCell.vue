@@ -90,7 +90,7 @@ function onRefuel() {
           data-tooltip="加油"
           data-tooltip-position="left"
           @click.stop="onRefuel"
-          >&#xf365;</span
+          >&#xf043;</span
         >
       </div>
     </template>
