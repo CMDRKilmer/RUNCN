@@ -6,6 +6,9 @@ import { displaytimeBetween, hhmm } from '@src/utils/format';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getInvStore } from '@src/core/store-id';
+import { useTile } from '@src/hooks/use-tile';
+import QuickRefuelDialog from '@src/features/basic/shpf-quick-refuel/QuickRefuelDialog.vue';
+import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 
 const props = defineProps<{
   shipId: string;
@@ -14,6 +17,7 @@ const props = defineProps<{
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
 const inventory = computed(() => getInvStore(ship.value?.idShipStore));
+const tile = useTile();
 
 const timeData = computed(() => {
   const arrival = flight.value?.arrival.timestamp;
@@ -27,6 +31,16 @@ const timeData = computed(() => {
 });
 
 const hasItems = computed(() => (inventory.value?.items.length ?? 0) > 0);
+
+function onRefuel(ev: MouseEvent) {
+  if (!ship.value) {
+    return;
+  }
+  showTileOverlay(ev, QuickRefuelDialog, {
+    registration: ship.value.registration,
+    tile,
+  });
+}
 </script>
 
 <template>
@@ -39,6 +53,13 @@ const hasItems = computed(() => (inventory.value?.items.length ?? 0) > 0);
     </template>
     <template v-else>
       <div :class="$style.actions">
+        <span
+          :class="[$style.actionBtn, $style.bgFuel]"
+          data-tooltip="加油"
+          data-tooltip-position="left"
+          @click.stop="onRefuel"
+          >⛽</span
+        >
         <span
           :class="[$style.actionBtn, hasItems ? $style.bgOrange : $style.bgBlue]"
           :style="{ paddingRight: '5px' }"
@@ -96,5 +117,9 @@ const hasItems = computed(() => (inventory.value?.items.length ?? 0) > 0);
 
 .bgGreen {
   background-color: #5cb85c;
+}
+
+.bgFuel {
+  background-color: #8a6d3b;
 }
 </style>
