@@ -89,9 +89,9 @@ function onRefuel() {
           data-tooltip="加油"
           data-tooltip-position="left"
           @click.stop="onRefuel">
-          <svg :class="$style.iconSvg" viewBox="0 0 640 640" fill="currentColor" aria-hidden="true">
+          <svg :class="$style.iconSvg" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
             <path
-              d="M64 96c0-17.7 14.3-32 32-32l160 0c17.7 0 32 14.3 32 32l0 384c0 17.7-14.3 32-32 32L96 512c-17.7 0-32-14.3-32-32L64 96zm160 64c0-8.8-7.2-16-16-16l-64 0c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l64 0c8.8 0 16-7.2 16-16l0-32zm0 128c0-8.8-7.2-16-16-16l-64 0c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l64 0c8.8 0 16-7.2 16-16l0-32zm0 128c0-8.8-7.2-16-16-16l-64 0c-8.8 0-16 7.2-16 16l0 32c0 8.8 7.2 16 16 16l64 0c8.8 0 16-7.2 16-16l0-32zM352 128l96 0c35.3 0 64 28.7 64 64l0 176c0 8.8 7.2 16 16 16s16-7.2 16-16l0-176c0-35.3 28.7-64 64-64l0 64c-17.7 0-32 14.3-32 32l0 144c0 44.2-35.8 80-80 80s-80-35.8-80-80l0-176z" />
+              d="M5 1a1 1 0 0 0-1 1v2H3a1 1 0 0 0-1 1v6.5L1 11.5a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5v-1l-1.013-1.013A1.5 1.5 0 0 1 7.5 8.5V7l-.79-.79A1.5 1.5 0 0 1 6 4.96V3a1 1 0 0 0-1-1zm9 0a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1v3.5a1.5 1.5 0 0 1-3 0V8.5a3 3 0 0 0-1-2.22V3.5a2.5 2.5 0 0 1 5 0V8a.5.5 0 0 0 1 0V3a3 3 0 0 0-3-3zM4 3h2v1H4zm0 2h2v1H4zm0 3h2v1H4z" />
           </svg>
         </span>
       </div>
@@ -145,14 +145,14 @@ function onRefuel() {
 }
 
 .bgFuel {
-  background-color: #8a6d3b;
+  background-color: #c0392b;
   font-size: 14px;
   padding-top: 3px;
 }
 
 .iconSvg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   display: block;
   color: white;
 }
