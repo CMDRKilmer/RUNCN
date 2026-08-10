@@ -3,12 +3,12 @@ import PrunButton from '@src/components/PrunButton.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import Active from '@src/components/forms/Active.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import SelectInput from '@src/components/forms/SelectInput.vue';
+import ExchangeSelector from '@src/components/forms/ExchangeSelector.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { userData } from '@src/store/user-data';
-import { configurableValue } from '@src/features/XIT/ACT/shared-types';
+import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
 const { registration } = defineProps<{ registration?: string }>();
@@ -25,8 +25,8 @@ const exchangeStationMap: Record<string, string> = {
 };
 
 const exchanges = Object.keys(exchangeStationMap);
-const exchange = ref(exchanges[0]);
-const useShipInv = ref(true);
+const exchange = persistedRef('genact-ship-exchange', exchanges[0]);
+const useShipInv = persistedRef('genact-ship-use-inv', true);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'FEICHUANWEIXIU';
@@ -79,13 +79,6 @@ function onGenerateClick() {
         allowUnfilled: false,
         useCXInv: true,
       },
-      {
-        type: 'MTRA',
-        name: 'Transfer to Ship',
-        group: groupName,
-        origin: warehouseName.value,
-        dest: configurableValue,
-      },
     ],
   };
 
@@ -114,7 +107,7 @@ function onGenerateClick() {
       </Active>
 
       <Active label="交易所">
-        <SelectInput v-model="exchange" :options="exchanges" />
+        <ExchangeSelector v-model="exchange" :options="exchanges" />
       </Active>
       <Active label="仓库">
         <span>{{ warehouseName }}</span>

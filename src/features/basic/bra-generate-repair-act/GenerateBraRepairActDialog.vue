@@ -3,6 +3,7 @@ import PrunButton from '@src/components/PrunButton.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import Active from '@src/components/forms/Active.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import ExchangeSelector from '@src/components/forms/ExchangeSelector.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
@@ -10,6 +11,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { userData } from '@src/store/user-data';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { persistedRef } from '@src/utils/persisted-ref';
 
 const { planetNaturalId } = defineProps<{ planetNaturalId?: string }>();
 
@@ -25,9 +27,9 @@ const exchangeStationMap: Record<string, string> = {
 };
 
 const exchanges = Object.keys(exchangeStationMap);
-const exchange = ref(exchanges[0]);
-const useBaseInv = ref(true);
-const timeOffset = ref<'now' | '24' | '48'>('now');
+const exchange = persistedRef('genact-bra-exchange', exchanges[0]);
+const useBaseInv = persistedRef('genact-bra-use-inv', true);
+const timeOffset = persistedRef<'now' | '24' | '48'>('genact-bra-time-offset', 'now');
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'JIANZHUWEIXIU';
@@ -137,7 +139,7 @@ function onGenerateClick() {
       </Active>
 
       <Active label="交易所">
-        <SelectInput v-model="exchange" :options="exchanges" />
+        <ExchangeSelector v-model="exchange" :options="exchanges" />
       </Active>
       <Active label="仓库">
         <span>{{ warehouseName }}</span>

@@ -103,8 +103,8 @@ async function loadUserData() {
       const { userData } = e.data as { userData: unknown };
       try {
         await chrome.storage.local.set({ [userDataKey]: userData });
-      } catch {
-        console.warn('refined-prun: Failed to save user data to storage');
+      } catch (error) {
+        console.warn('refined-prun: Failed to save user data to storage', error);
       }
       window.postMessage({ type: 'rp-user-data-saved' }, location.origin);
       return;

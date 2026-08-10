@@ -3,6 +3,7 @@ import PrunButton from '@src/components/PrunButton.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import Active from '@src/components/forms/Active.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
+import ExchangeSelector from '@src/components/forms/ExchangeSelector.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import Commands from '@src/components/forms/Commands.vue';
@@ -18,6 +19,7 @@ import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed2 } from '@src/utils/format';
+import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
 const parameters = useXitParameters();
@@ -42,11 +44,11 @@ const burn = computed(() => {
   };
 });
 
-const days = ref(7);
+const days = persistedRef('genact-burn-days', 7);
 const daysError = ref(false);
-const includeConsumables = ref(true);
-const includeInputs = ref(false);
-const useBaseInv = ref(true);
+const includeConsumables = persistedRef('genact-burn-consumables', true);
+const includeInputs = persistedRef('genact-burn-inputs', true);
+const useBaseInv = persistedRef('genact-burn-base-inv', true);
 
 // Exchange code to station name mapping.
 const exchangeStationMap: Record<string, string> = {
@@ -59,15 +61,21 @@ const exchangeStationMap: Record<string, string> = {
 };
 
 const exchanges = Object.keys(exchangeStationMap);
-const exchange = ref(exchanges[0]);
+const exchange = persistedRef('genact-burn-exchange', exchanges[0]);
 
 // Auto-derive warehouse name from selected exchange.
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 
 // ── 飞船容量填满 ──────────────────────────────────────────────
-const selectedShip = ref('不限制');
-const customWeightCapacity = ref<number | undefined>(undefined);
-const customVolumeCapacity = ref<number | undefined>(undefined);
+const selectedShip = persistedRef('genact-burn-ship', '不限制');
+const customWeightCapacity = persistedRef<number | undefined>(
+  'genact-burn-custom-weight',
+  undefined,
+);
+const customVolumeCapacity = persistedRef<number | undefined>(
+  'genact-burn-custom-volume',
+  undefined,
+);
 
 interface LoadResult {
   loadAmounts: Record<string, number>;
@@ -89,6 +97,13 @@ const shipSelectOptions = computed(() => {
     opts.push(label);
   }
   return opts;
+});
+
+// 上次选择的飞船可能已不存在或数据未加载，回退到「不限制」
+watchEffect(() => {
+  if (!shipSelectOptions.value.includes(selectedShip.value)) {
+    selectedShip.value = '不限制';
+  }
 });
 
 function getSelectedShip(): PrunApi.Ship | undefined {
@@ -395,7 +410,7 @@ function onGenerateClick() {
         <RadioItem v-model="useBaseInv">使用基地库存</RadioItem>
       </Active>
       <Active label="交易所" tooltip="选择交易所，仓库自动绑定对应空间站。">
-        <SelectInput v-model="exchange" :options="exchanges" />
+        <ExchangeSelector v-model="exchange" :options="exchanges" />
       </Active>
       <Active label="飞船填满" tooltip="选择飞船后自动计算能装多少天补给，填满飞船。">
         <SelectInput v-model="selectedShip" :options="shipSelectOptions" />
