@@ -1129,7 +1129,7 @@ function getCargoState(cargoRatio: number) {
           v-if="showColFuel"
           :class="[$style.headerCell, $style.sortable, $style.colFuel]"
           @click="setSort('fuel')">
-          <FleetRefuelHeader @refuel="onRefuelAllExchanges">
+          <FleetRefuelHeader :show-button="!isLegacy" @refuel="onRefuelAllExchanges">
             燃料
             <span
               :class="{
@@ -1144,7 +1144,9 @@ function getCargoState(cargoRatio: number) {
           :is="headerCellTag"
           v-if="showColProblems && hasAnyProblems"
           :class="[$style.headerCell, $style.colProblems]">
-          <FleetRefuelHeader :show-button="hasDockedFuelProblem" @refuel="onRefuelAllExchanges">
+          <FleetRefuelHeader
+            :show-button="!isLegacy && hasDockedFuelProblem"
+            @refuel="onRefuelAllExchanges">
             问题
           </FleetRefuelHeader>
         </component>
@@ -1463,9 +1465,9 @@ function getCargoState(cargoRatio: number) {
 
 .fuelBars {
   display: flex;
-  flex-flow: row wrap;
+  flex-direction: column;
   align-items: stretch;
-  justify-content: space-around;
+  gap: 1px;
   width: 100%;
 }
 
