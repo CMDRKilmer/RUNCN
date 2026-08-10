@@ -96,6 +96,7 @@ import './rprun-version-label';
 import './screen-layout-lock';
 import './screen-tab-bar/screen-tab-bar';
 import './search-auto-focus';
+import './sfc-exchange-destinations/sfc-exchange-destinations';
 import './sfc-flight-eta';
 import './shp-generate-repair-act/shp-generate-repair-act';
 import './shpi-base-inv-button';
