@@ -123,9 +123,11 @@ function onRefuel() {
   width: 20px;
   padding: 2px;
   cursor: pointer;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   color: white;
+  line-height: 1;
 }
 
 .bgOrange {
@@ -142,6 +144,8 @@ function onRefuel() {
 
 .bgFuel {
   background-color: #8a6d3b;
+  font-size: 14px;
+  padding-top: 3px;
 }
 
 .disabled {
