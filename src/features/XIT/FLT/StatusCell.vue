@@ -33,8 +33,16 @@ const posData = computed(() => {
   const location = getLocationLineFromAddress(address);
   const naturalId = getEntityNaturalIdFromAddress(address) ?? '';
   const isStation = isStationLine(location);
+  const isOrbit = address?.lines?.some(line => line.type === 'ORBIT') ?? false;
   const prefix = isStation ? 'STNS' : 'PLI';
-  const name = isStation ? naturalId : naturalId ? `${naturalId} (环绕轨道)` : '';
+  let name: string;
+  if (isStation) {
+    name = naturalId;
+  } else if (!naturalId) {
+    name = '';
+  } else {
+    name = `${naturalId} ${isOrbit ? '(环绕轨道)' : '(着陆)'}`;
+  }
   return {
     name,
     command: `${prefix} ${naturalId}`,
