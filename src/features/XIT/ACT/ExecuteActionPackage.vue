@@ -9,6 +9,7 @@ import LogWindow from '@src/features/XIT/ACT/LogWindow.vue';
 import ConfigWindow from '@src/features/XIT/ACT/ConfigureWindow.vue';
 import { ActionPackageConfig } from '@src/features/XIT/ACT/shared-types';
 import { act } from '@src/features/XIT/ACT/act-registry';
+import { userData } from '@src/store/user-data';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -95,10 +96,17 @@ const runner = new ActionRunner({
   log: new Logger(logMessage),
   onBufferSplit: () => (goingToSplit.value = true),
   onStart: () => (isRunning.value = true),
-  onEnd: () => {
+  onEnd: (success: boolean) => {
     isRunning.value = false;
     status.value = undefined;
     autoAct.value = false;
+    // 一次性操作包（BURNGEN 生成）执行成功后自动删除。
+    if (success && pkg.autoDelete) {
+      const idx = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
+      if (idx >= 0) {
+        userData.actionPackages.splice(idx, 1);
+      }
+    }
   },
   onStatusChanged: (title, keepReady) => {
     status.value = title;

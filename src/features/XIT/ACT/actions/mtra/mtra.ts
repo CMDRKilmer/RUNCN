@@ -2,7 +2,11 @@ import { act } from '@src/features/XIT/ACT/act-registry';
 import Edit from '@src/features/XIT/ACT/actions/mtra/Edit.vue';
 import Configure from '@src/features/XIT/ACT/actions/mtra/Configure.vue';
 import { MTRA_BATCH } from '@src/features/XIT/ACT/action-steps/MTRA_BATCH';
-import { atSameLocation, deserializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import {
+  atSameLocation,
+  deserializeStorage,
+  storageDisplayName,
+} from '@src/features/XIT/ACT/actions/utils';
 import { Config } from '@src/features/XIT/ACT/actions/mtra/config';
 import { AssertFn, configurableValue } from '@src/features/XIT/ACT/shared-types';
 
@@ -13,10 +17,12 @@ act.addAction<Config>({
       return '--';
     }
 
-    const origin =
-      action.origin == configurableValue ? (config?.origin ?? '已配置位置') : action.origin;
-    const dest =
-      action.dest == configurableValue ? (config?.destination ?? '已配置位置') : action.dest;
+    const origin = storageDisplayName(
+      action.origin == configurableValue ? (config?.origin ?? '已配置位置') : action.origin,
+    );
+    const dest = storageDisplayName(
+      action.dest == configurableValue ? (config?.destination ?? '已配置位置') : action.dest,
+    );
     return `转移组 [${action.group}] 从 ${origin} 到 ${dest}`;
   },
   editComponent: Edit,

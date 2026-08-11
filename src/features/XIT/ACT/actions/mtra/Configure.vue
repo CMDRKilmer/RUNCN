@@ -8,6 +8,7 @@ import {
   atSameLocation,
   deserializeStorage,
   serializeStorage,
+  storageDisplayName,
   storageSort,
 } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
@@ -23,6 +24,10 @@ const originStorages = computed(() => {
     if (destination) {
       storages = storages.filter(x => atSameLocation(x, destination) && x !== destination);
     }
+  }
+  // 仅飞船模式（如卸货包）：从只列出飞船货舱，不出现基地/仓库。
+  if (data.originType === 'SHIP_STORE') {
+    storages = storages.filter(x => x.type === 'SHIP_STORE');
   }
   return storages.sort(storageSort);
 });
@@ -103,13 +108,13 @@ function getOptions(storages: PrunApi.Store[]) {
       <SelectInput v-model="config.origin" :options="originOptions" />
     </Active>
     <Passive v-else label="从">
-      <span>{{ data.origin }}</span>
+      <span>{{ storageDisplayName(data.origin) }}</span>
     </Passive>
     <Active v-if="data.dest === configurableValue" label="到">
       <SelectInput v-model="config.destination" :options="destinationOptions" />
     </Active>
     <Passive v-else label="到">
-      <span>{{ data.dest }}</span>
+      <span>{{ storageDisplayName(data.dest) }}</span>
     </Passive>
   </form>
 </template>

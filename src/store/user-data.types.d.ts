@@ -46,6 +46,8 @@ declare namespace UserData {
     global: {
       name: string;
     };
+    // 一次性操作包：执行成功后自动从列表删除。
+    autoDelete?: boolean;
   }
 
   interface CartItem {
@@ -91,6 +93,8 @@ declare namespace UserData {
 
     origin?: string;
     dest?: string;
+    // 从选择器仅列出飞船货舱（如卸货包的「从」）。
+    originType?: 'SHIP_STORE';
 
     buyMissingFuel?: boolean;
 

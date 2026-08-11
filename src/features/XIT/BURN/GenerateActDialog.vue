@@ -75,6 +75,7 @@ const boxSizes: Record<string, { weight: number; volume: number }> = {
 const boxSizeOptions = Object.keys(boxSizes);
 const boxSize = persistedRef<string | undefined>('genact-burn-box', undefined);
 const openSfc = persistedRef('genact-burn-sfc', false);
+const genUnload = persistedRef('genact-burn-unload', true);
 
 interface LoadResult {
   loadAmounts: Record<string, number>;
@@ -132,6 +133,9 @@ function calcLoadAmounts(targetDays: number): LoadResult {
 
   return { loadAmounts, weight: totalWeight, volume: totalVolume };
 }
+
+// 卸货目标：星球基地仓库，锁定为 <星球名> Base（执行时不再配置）。
+const unloadDest = computed(() => `${burn.value?.planetName ?? planetName.value} Base`);
 
 // 选中标准货箱时自动计算最大天数（平衡天数）。
 watch([boxSize, includeConsumables, includeInputs, useBaseInv], () => {
@@ -278,6 +282,7 @@ function onGenerateClick() {
 
   const pkg: UserData.ActionPackageData = {
     global: { name: packageName.value },
+    autoDelete: true,
     groups: [
       {
         type: 'Resupply',
@@ -311,7 +316,7 @@ function onGenerateClick() {
       ...(openSfc.value
         ? [
             {
-              type: 'OPEN SFC',
+              type: 'OPEN SFC' as const,
               name: 'Open Flight Controls',
               destination: burn.value?.planetName ?? planetName.value,
               shipSourceAction: 'Transfer to Ship',
@@ -332,6 +337,44 @@ function onGenerateClick() {
 
   // Auto-open the generated ACT execution window.
   showBuffer(`XIT ACT_${packageName.value.split(' ').join('_')}`);
+
+  // 同时生成同名 Unload 卸货包：飞船到达星球后，把本次登船的物品
+  // 从船上转移到星球仓库。物品清单用 Manual 组冻结生成时的账单，
+  // 执行时 MTRA 会按船上实际载货量钳制。
+  if (genUnload.value) {
+    const unloadName = `${name} Unload`;
+    // 卸货目标锁定为星球基地仓库 <星球名> Base（STORE 类型）；
+    // 「从」执行时配置，且只列出飞船货舱（originType: SHIP_STORE）。
+    const unloadPkg: UserData.ActionPackageData = {
+      global: { name: unloadName },
+      autoDelete: true,
+      groups: [
+        {
+          type: 'Manual',
+          name: 'Unload',
+          materials: calcLoadAmounts(days.value).loadAmounts,
+        },
+      ],
+      actions: [
+        {
+          type: 'MTRA',
+          name: 'Unload',
+          group: 'Unload',
+          origin: configurableValue,
+          dest: `${name} Base`,
+          originType: 'SHIP_STORE',
+        },
+      ],
+    };
+    // 卸货包不自动打开执行窗口，只在 ACT 列表中等待执行。
+    const existingUnload = userData.actionPackages.find(x => x.global.name === unloadName);
+    if (existingUnload) {
+      const index = userData.actionPackages.indexOf(existingUnload);
+      userData.actionPackages[index] = unloadPkg;
+    } else {
+      userData.actionPackages.push(unloadPkg);
+    }
+  }
 }
 </script>
 
@@ -368,6 +411,14 @@ function onGenerateClick() {
       </Active>
       <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
         <RadioItem v-model="openSfc">打开航行控制</RadioItem>
+      </Active>
+      <Active
+        label="卸货包"
+        tooltip="同时生成同名 Unload 包：飞船到达后把本次登船物品从船上转移到星球仓库。">
+        <RadioItem v-model="genUnload">同时生成卸货包</RadioItem>
+      </Active>
+      <Active label="卸货目的地" tooltip="锁定为星球基地仓库（星球名 + Base）。">
+        <span>{{ unloadDest }}</span>
       </Active>
       <Active label="仓库">
         <span>{{ warehouseName }}</span>

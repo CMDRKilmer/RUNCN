@@ -8,6 +8,7 @@ import {
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 
 export function serializeStorage(storage: PrunApi.Store) {
   switch (storage.type) {
@@ -33,6 +34,12 @@ export function serializeStorage(storage: PrunApi.Store) {
 export function deserializeStorage(serializedName: string | undefined) {
   if (!serializedName) {
     return undefined;
+  }
+  // 优先按 store ID 直解析：仓库/飞船等目标以 store ID 标识时，
+  // 不受实体重命名影响（与 INV <store-id> 同一套权威标识）。
+  const byId = storagesStore.getById(serializedName);
+  if (byId) {
+    return byId;
   }
   let name: string | undefined;
   name = extractName(serializedName, 'Base');
@@ -65,6 +72,15 @@ export function deserializeStorage(serializedName: string | undefined) {
 
 function extractName(name: string, suffix: string) {
   return name.endsWith(suffix) ? name.replace(' ' + suffix, '') : undefined;
+}
+
+// 序列化存储名的可读显示：store ID 形式时反解为名称形式。
+export function storageDisplayName(name: string | undefined) {
+  if (!name || name === configurableValue) {
+    return name;
+  }
+  const store = deserializeStorage(name);
+  return store ? serializeStorage(store) : name;
 }
 
 // 根据类型对存储进行排序

@@ -17,7 +17,7 @@ interface ActionRunnerOptions {
   log: Logger;
   onBufferSplit: () => void;
   onStart: () => void;
-  onEnd: () => void;
+  onEnd: (success: boolean) => void;
   onStatusChanged: (status: string, keepReady?: boolean) => void;
   onActReady: () => void;
   isAutoAct: () => boolean;
@@ -158,9 +158,9 @@ export class ActionRunner {
     this.stepMachine = new StepMachine(steps, {
       ...this.options,
       tileAllocator: this.tileAllocator,
-      onEnd: () => {
+      onEnd: (success: boolean) => {
         this.closePreOpenedWindows();
-        this.options.onEnd();
+        this.options.onEnd(success);
       },
     });
     this.stepMachine.start();

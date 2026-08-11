@@ -11,7 +11,7 @@ interface StepMachineOptions {
   tileAllocator: TileAllocator;
   onBufferSplit: () => void;
   onStart: () => void;
-  onEnd: () => void;
+  onEnd: (success: boolean) => void;
   onStatusChanged: (status: string, keepReady?: boolean) => void;
   onActReady: () => void;
   isAutoAct: () => boolean;
@@ -80,7 +80,7 @@ export class StepMachine {
     this.stop();
   }
 
-  stop() {
+  stop(success = false) {
     this.stopped = true;
     this.next = undefined;
     const reject = this.waitActReject;
@@ -88,7 +88,7 @@ export class StepMachine {
     this.waitActReject = undefined;
     // 拒绝挂起的 waitAct，让步骤的 execute 走清理路径（如关闭打开的窗口）。
     reject?.(new Error('ACT_CANCELLED'));
-    this.options.onEnd();
+    this.options.onEnd(success);
   }
 
   private startNext() {
@@ -101,7 +101,7 @@ export class StepMachine {
     }
     if (this.steps.length === 0) {
       this.log.success('操作包执行完成');
-      this.stop();
+      this.stop(true);
       return;
     }
     const next = this.steps.shift()!;
