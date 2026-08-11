@@ -91,6 +91,7 @@ const defaultBufferSizes: Record<string, [number, number]> = {
   PROD: [400, 500],
   PRODCO: [415, 600],
   PRODQ: [650, 300],
+  SFC: [421, 535],
   SHP: [450, 450],
   SHY: [450, 450],
   STEAM: [300, 450],
