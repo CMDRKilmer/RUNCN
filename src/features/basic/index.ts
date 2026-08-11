@@ -27,7 +27,6 @@ import './cogcu-generate-supply-act/cogcu-generate-supply-act';
 import './cont-confirm-all';
 import './contd-auto-fill';
 import './contd-condition-address-placeholder';
-import './contd-generate-purchase-draft/contd-generate-purchase-draft';
 import './contd-upward-search-results';
 import './contribution-bulk-controls';
 import './contribution-maxed';
