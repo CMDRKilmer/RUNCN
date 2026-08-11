@@ -14,7 +14,7 @@ export const OPEN_SFC = act.addActionStep<Data>({
   type: 'OPEN_SFC',
   description: data => `打开 ${data.registration} 的航行控制，目的地 ${data.destination}`,
   execute: async ctx => {
-    const { data, log, setStatus, requestTile, waitAct, complete, fail } = ctx;
+    const { data, log, setStatus, requestTile, waitAct, complete } = ctx;
     const assert: AssertFn = ctx.assert;
     const { registration, destination } = data;
 

@@ -5,6 +5,7 @@ import {
   fioBuildingsStore,
   loadFioBuildings,
   FioBuilding,
+  FioRecipe,
   FioRecipeIO,
 } from '@src/features/XIT/PLAN/fio-buildings';
 import { workforceNeedsStore, loadWorkforceNeeds } from '@src/features/XIT/PLAN/workforce-needs';

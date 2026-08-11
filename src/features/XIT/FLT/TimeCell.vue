@@ -101,7 +101,7 @@ async function onUnload() {
     if (material === undefined) {
       continue;
     }
-    aggregated.set(ticker, (aggregated.get(ticker) ?? 0) + item.quantity.amount);
+    aggregated.set(ticker, (aggregated.get(ticker) ?? 0) + (item.quantity?.amount ?? 0));
   }
   const plans: UnloadPlan[] = Array.from(aggregated.entries())
     .map(([ticker, amount]) => ({ ticker, amount }))
@@ -137,7 +137,7 @@ async function onUnload() {
   }
 }
 
-async function runSingleMtra(window: HTMLElement, plan: UnloadPlan) {
+async function runSingleMtra(window: Element, plan: UnloadPlan) {
   const tileElement = (await $(window, C.Tile.tile)) as HTMLElement;
   await clickElement(tileElement);
 

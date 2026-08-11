@@ -22,10 +22,10 @@ const typeOptions = act.getMaterialGroupTypes();
 const type = ref(group.type);
 
 const editFormComponent = computed(() => act.getMaterialGroupInfo(type.value)?.editComponent);
-const editForm = useTemplateRef('editForm');
+const editForm = useTemplateRef<{ validate: () => boolean; save: () => void }>('editForm');
 
 function onSaveClick() {
-  let isValid = editForm.value.validate();
+  let isValid = editForm.value?.validate() ?? false;
   nameError.value = name.value.length === 0;
   isValid &&= !nameError.value;
   if (!isValid) {
@@ -34,7 +34,7 @@ function onSaveClick() {
   for (const key of Object.keys(group)) {
     delete group[key];
   }
-  editForm.value.save();
+  editForm.value?.save();
   group.name = name.value;
   group.type = type.value;
   onSave?.();

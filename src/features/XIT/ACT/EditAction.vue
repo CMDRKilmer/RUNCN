@@ -23,10 +23,10 @@ const typeOptions = act.getActionTypes();
 const type = ref(action.type);
 
 const editFormComponent = computed(() => act.getActionInfo(type.value)?.editComponent);
-const editForm = useTemplateRef('editForm');
+const editForm = useTemplateRef<{ validate: () => boolean; save: () => void }>('editForm');
 
 function onSaveClick() {
-  let isValid = editForm.value.validate();
+  let isValid = editForm.value?.validate() ?? false;
   nameError.value = name.value.length === 0;
   isValid &&= !nameError.value;
   if (!isValid) {
@@ -35,7 +35,7 @@ function onSaveClick() {
   for (const key of Object.keys(action)) {
     delete action[key];
   }
-  editForm.value.save();
+  editForm.value?.save();
   action.name = name.value;
   action.type = type.value;
   onSave?.();

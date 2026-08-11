@@ -36,7 +36,7 @@ onMounted(() => {
     :class="$style.container">
     <template v-for="id in userData.tabs.order" :key="id">
       <a v-show="!userData.tabs.hidden.includes(id)" :href="`#screen=${id}`" :class="$style.item">
-        <HeadItem :label="getScreen(id).name" :active="current === getScreen(id)" />
+        <HeadItem :label="getScreen(id)?.name ?? ''" :active="current === getScreen(id)" />
       </a>
     </template>
   </div>

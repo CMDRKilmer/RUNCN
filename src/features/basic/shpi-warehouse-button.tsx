@@ -28,7 +28,7 @@ async function onTileReady(tile: PrunTile) {
     if (!war || !id) {
       return null;
     }
-    return <ContextControlsItem cmd={`INV ${war.id.substring(0, 8)}`} cmdText={`WAR ${id}`} />;
+    return <ContextControlsItem cmd={`INV ${war.id.substring(0, 8)}`} label={`WAR ${id}`} />;
   }).prependTo(contextBar);
 }
 

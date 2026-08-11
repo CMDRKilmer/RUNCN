@@ -35,7 +35,7 @@ async function onTileReady(tile: PrunTile) {
     }
     const storageId = warehouse.value?.id.substring(0, 8);
     const cmd = storageId ? `INV ${storageId}` : `WAR ${naturalId}`;
-    return <ContextControlsItem cmd={cmd} cmdText={`WAR ${naturalId}`} />;
+    return <ContextControlsItem cmd={cmd} label={`WAR ${naturalId}`} />;
   }).prependTo(contextBar);
 }
 

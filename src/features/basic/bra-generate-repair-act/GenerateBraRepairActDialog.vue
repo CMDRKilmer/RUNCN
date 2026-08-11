@@ -115,7 +115,7 @@ function onGenerateClick() {
       ...(openSfc.value
         ? [
             {
-              type: 'OPEN SFC',
+              type: 'OPEN SFC' as const,
               name: 'Open Flight Controls',
               destination: planetNaturalId ?? '',
               shipSourceAction: 'Transfer to Base',

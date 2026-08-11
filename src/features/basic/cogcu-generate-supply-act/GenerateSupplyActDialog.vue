@@ -91,7 +91,7 @@ function onGenerateClick() {
       ...(openSfc.value
         ? [
             {
-              type: 'OPEN SFC',
+              type: 'OPEN SFC' as const,
               name: 'Open Flight Controls',
               destination: naturalId.value ?? '',
               shipSourceAction: 'Transfer to Ship',

@@ -3,7 +3,6 @@ import Edit from '@src/features/XIT/ACT/actions/open-sfc/Edit.vue';
 import { OPEN_SFC } from '@src/features/XIT/ACT/action-steps/OPEN_SFC';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { deserializeStorage } from '@src/features/XIT/ACT/actions/utils';
-import { AssertFn } from '@src/features/XIT/ACT/shared-types';
 
 act.addAction({
   type: 'OPEN SFC',
@@ -16,7 +15,6 @@ act.addAction({
   editComponent: Edit,
   generateSteps: async ctx => {
     const { data, actionsConfig, log, fail, emitStep } = ctx;
-    const assert: AssertFn = ctx.assert;
 
     // 飞船来自同包「转移」动作的执行配置（dest 配置为飞船）
     const sourceName = data.shipSourceAction;

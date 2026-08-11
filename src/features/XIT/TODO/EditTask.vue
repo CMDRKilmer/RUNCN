@@ -49,10 +49,14 @@ function formatDateForInput(date: number | undefined) {
 }
 
 const planets = computed(() => {
-  return (sitesStore.all.value ?? []).map(x => ({
-    label: getEntityNameFromAddress(x.address),
-    value: getEntityNaturalIdFromAddress(x.address),
-  }));
+  return (sitesStore.all.value ?? [])
+    .map(x => ({
+      label: getEntityNameFromAddress(x.address),
+      value: getEntityNaturalIdFromAddress(x.address),
+    }))
+    .filter(
+      (x): x is { label: string; value: string } => x.label !== undefined && x.value !== undefined,
+    );
 });
 
 const planet = ref(
