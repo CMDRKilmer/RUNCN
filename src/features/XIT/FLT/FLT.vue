@@ -65,7 +65,7 @@ const DEFAULT_SORT_DIRECTION_BY_KEY: Record<SortKey, SortDirection> = {
 };
 
 const DEFAULTS = {
-  primarySortKey: 'shipClass' as SortKey,
+  primarySortKey: 'none' as SortKey,
   secondarySortKey: 'eta' as SortKey,
   showStlShips: true,
   showFtlShips: true,
@@ -73,16 +73,16 @@ const DEFAULTS = {
   showNotInFlightShips: true,
   hideReturningToCx: false,
   fuelAlertFilter: 'any' as FuelAlertFilter,
-  layoutMode: 'compact' as LayoutMode,
-  showColName: false,
-  showColShipClass: true,
+  layoutMode: 'cargo' as LayoutMode,
+  showColName: true,
+  showColShipClass: false,
   showColSize: false,
-  showColCargo: true,
-  showColCargoSize: false,
+  showColCargo: false,
+  showColCargoSize: true,
   showColTime: true,
-  showColRepair: false,
-  showColFuel: false,
-  showColProblems: true,
+  showColRepair: true,
+  showColFuel: true,
+  showColProblems: false,
   problemFuelThreshold: '50' as FuelAlertFilter,
 };
 
@@ -1155,7 +1155,7 @@ function getCargoState(cargoRatio: number) {
       <!-- Body rows -->
       <component :is="rowTag" v-for="x in rows" :key="x.ship.id" :class="$style.row">
         <component :is="cellTag" v-if="showColName" :class="[$style.bodyCell]">
-          <span :class="C.Link.link" @click="showBuffer(`SFC ${x.ship.registration}`)">
+          <span :class="C.Link.link" @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}
           </span>
         </component>
@@ -1202,7 +1202,11 @@ function getCargoState(cargoRatio: number) {
         </component>
 
         <component :is="cellTag" v-if="showColRepair" :class="[$style.bodyCell, $style.colRepair]">
-          <span :class="x.conditionClass">{{ x.conditionText }}</span>
+          <span
+            :class="[x.conditionClass, C.Link.link]"
+            @click="showBuffer(`SHP ${x.ship.registration}`)">
+            {{ x.conditionText }}
+          </span>
         </component>
 
         <component :is="cellTag" v-if="showColFuel" :class="[$style.bodyCell, $style.colFuel]">
@@ -1232,7 +1236,10 @@ function getCargoState(cargoRatio: number) {
           :is="cellTag"
           v-if="showColProblems && hasAnyProblems"
           :class="[$style.bodyCell, $style.colProblems]">
-          <span v-if="x.conditionClass === C.ColoredValue.negative" :class="x.conditionClass">
+          <span
+            v-if="x.conditionClass === C.ColoredValue.negative"
+            :class="[x.conditionClass, C.Link.link]"
+            @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.conditionText }}
           </span>
           <div
