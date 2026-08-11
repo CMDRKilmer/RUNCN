@@ -16,6 +16,8 @@ import { useTileState } from '@src/store/user-data-tiles';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
+import { calculateRepairPredictions } from '@src/core/repair-plan';
+import { resolveBuildingDailyRevenue } from '@src/features/XIT/shared/repair-plan-revenue';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { findWithQuery } from '@src/utils/find-with-query';
@@ -68,7 +70,34 @@ interface BaseEntry {
   storeId: string;
   days: number | undefined;
   repairDays: number | undefined;
+  // REPP 整站 sweep 算出的最优维修间隔天数;数据缺失(CX 价格未加载、
+  // 无活跃订单 / 模板、无 build options 等)时为 undefined。
+  // 与 XIT REPP 面板的"最优间隔"列同源。
+  optimalDay: number | undefined;
 }
+
+// 一次性 sweep 所有基地,产出 naturalId → optimalDay 的映射。
+// 与 XIT REPP 共用 calculateRepairPredictions + resolveBuildingDailyRevenue,
+// 避免在 BS 内重复实现 sweep 逻辑。
+const optimalDaysByNaturalId = computed<Map<string, number | undefined>>(() => {
+  const allSites = sitesStore.all.value;
+  if (!allSites) {
+    return new Map();
+  }
+  const predictions = calculateRepairPredictions(allSites, {
+    resolveBuildingDailyRevenue,
+  });
+  const map = new Map<string, number | undefined>();
+  if (predictions) {
+    // 同基地所有建筑共享同一个 optimalDay(整站统一 sweep),取第一条即可。
+    for (const p of predictions) {
+      if (!map.has(p.naturalId)) {
+        map.set(p.naturalId, p.optimalDay);
+      }
+    }
+  }
+  return map;
+});
 
 const bases = computed<BaseEntry[] | undefined>(() => {
   const sites = sitesStore.all.value;
@@ -77,16 +106,19 @@ const bases = computed<BaseEntry[] | undefined>(() => {
   }
 
   const now = timestampEachMinute.value;
+  const optimalMap = optimalDaysByNaturalId.value;
   const entries = sites
     .map(site => {
       const burn = getPlanetBurn(site.siteId);
+      const naturalId = getEntityNaturalIdFromAddress(site.address) ?? '';
       return {
         siteId: site.siteId,
-        naturalId: getEntityNaturalIdFromAddress(site.address) ?? '',
+        naturalId,
         planetName: getEntityNameFromAddress(site.address) ?? '',
         storeId: storagesStore.getByAddressableId(site.siteId)?.[0]?.id ?? '',
         days: burn ? countDays(burn.burn) : undefined,
         repairDays: getPlanetRepairAge(site.siteId, now),
+        optimalDay: naturalId ? optimalMap.get(naturalId) : undefined,
       };
     })
     .filter(x => x.naturalId);
@@ -209,6 +241,7 @@ const filteredBases = computed(() => {
           :natural-id="base.naturalId"
           :planet-name="base.planetName"
           :store-id="base.storeId"
+          :optimal-day="base.optimalDay"
           :show-cmds="showCmds"
           :show-burn="showBurn"
           :show-prod="showProd"

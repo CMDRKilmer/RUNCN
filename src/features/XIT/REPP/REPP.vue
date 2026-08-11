@@ -4,10 +4,9 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
-import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { cxStore } from '@src/infrastructure/fio/cx';
 import { calculateRepairPredictions } from '@src/core/repair-plan';
-import { calculateProductionRevenue } from '@src/core/production-revenue';
+import { resolveBuildingDailyRevenue } from '@src/features/XIT/shared/repair-plan-revenue';
 import { diffDays } from '@src/utils/time-diff';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { ddmm, fixed1, formatCurrency, hhmm } from '@src/utils/format';
@@ -32,47 +31,7 @@ const sites = computed(() => {
   return list;
 });
 
-// 严格照搬 PRUNplanner:从 productionStore 找该建筑对应的 ProductionLine,
-// 计算 per-line per-day net productionRevenue 作为 sweep 输入。
-// 注意:RESOURCES(extractor/colony) 与 PRODUCTION 都有 production line 数据
-// (PrUn 统一通过 PRODUCTION_PRODUCTION_LINES 消息推送),只是没有 active orders,
-// output 来自 productionTemplates。
-// 沿用 core/production.ts 的 reactorName ↔ line.type 1:1 匹配。
-function resolveBuildingDailyRevenue(
-  building: PrunApi.Platform,
-  site: PrunApi.Site,
-): number | undefined {
-  if (building.module.type !== 'PRODUCTION' && building.module.type !== 'RESOURCES') {
-    return undefined;
-  }
-  const lines = productionStore.getBySiteId(site.siteId);
-  if (!lines) {
-    // store 还没拉数据。getBySiteId 内部会触发 request.production,数据到达后会重新计算。
-    return undefined;
-  }
-  const line = lines.find(l => l.type === building.module.reactorName);
-  if (!line) {
-    console.warn('[REPP] No production line for', building.module.reactorName, '@', site.siteId);
-    return undefined;
-  }
-  const perLineRevenue = calculateProductionRevenue(line);
-  if (perLineRevenue === undefined) {
-    console.warn(
-      '[REPP] No queued orders / templates for',
-      building.module.reactorName,
-      '@',
-      site.siteId,
-    );
-    return undefined;
-  }
-  // calculateProductionRevenue 返回 per-line 产值(含 line.capacity 个并行槽位)。
-  // 拆成 per-building:若 capacity=0(异常),跳过。
-  if (line.capacity <= 0) {
-    return undefined;
-  }
-  return perLineRevenue / line.capacity;
-}
-
+// Sweep 输入求解器见 shared/repair-plan-revenue.ts,这里直接复用。
 const predictions = computed(() => {
   return calculateRepairPredictions(sites.value, {
     resolveBuildingDailyRevenue,
