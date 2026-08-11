@@ -17,6 +17,55 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    // 玩家已自定义侧边栏时，仅补齐 initialUserData 中存在但用户侧边栏
+    // 里没有的命令。已存在的条目（顺序、标签）一律保留，不覆盖玩家手改。
+    // 每个缺失项尽量插入到 default 中前驱命令之后，便于扩展。
+    '11.08.2026 Merge missing sidebar defaults',
+    userData => {
+      const sidebar: [string, string][] = userData.settings.sidebar;
+      const defaults: [string, string][] = [
+        ['基地', 'BS'],
+        ['总部', 'XIT HQUC'],
+        ['合同', 'XIT CONTS'],
+        ['通讯', 'COM'],
+        ['集团', 'CORP'],
+        ['交易所', 'CXL'],
+        ['财务', 'XIT FIN'],
+        ['舰队', 'FLT'],
+        ['库存', 'INV'],
+        ['星图', 'MU'],
+        ['生产线', 'PROD'],
+        ['排行', 'LEAD'],
+        ['指令集', 'CMDS'],
+        ['脚本', 'XIT ACT'],
+        ['消耗', 'XIT BURN'],
+        ['维护', 'XIT REP'],
+        ['设置', 'XIT SET'],
+        ['帮助', 'XIT HELP'],
+        ['计划', 'XIT JH'],
+        ['琉璃', 'XIT ORG'],
+        ['购物车', 'XIT CART'],
+      ];
+      for (const entry of defaults) {
+        if (sidebar.some(([, cmd]: [string, string]) => cmd === entry[1])) {
+          continue;
+        }
+        // 找到 default 中该命令之前的最近一个已存在于玩家侧边栏的命令，
+        // 插入到它之后；找不到就追加到末尾。
+        const entryIdx = defaults.findIndex(([, cmd]: [string, string]) => cmd === entry[1]);
+        let insertAt = sidebar.length;
+        for (let i = entryIdx - 1; i >= 0; i--) {
+          const prevIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === defaults[i][1]);
+          if (prevIdx >= 0) {
+            insertAt = prevIdx + 1;
+            break;
+          }
+        }
+        sidebar.splice(insertAt, 0, [entry[0], entry[1]]);
+      }
+    },
+  ],
+  [
     '29.07.2026 Rebind 琉璃 sidebar entry to XIT ORG',
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;

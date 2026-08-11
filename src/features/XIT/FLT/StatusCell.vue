@@ -5,8 +5,9 @@ import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getShipStatusIcon, stationaryShipStatusIcon } from '@src/core/ship-status-icons';
 import {
-  getEntityNameFromAddress,
+  getEntityNaturalIdFromAddress,
   getLocationLineFromAddress,
+  isStationLine,
 } from '@src/infrastructure/prun-api/data/addresses';
 
 const props = defineProps<{
@@ -30,10 +31,13 @@ const statusIcon = computed(() => {
 const posData = computed(() => {
   const address = flight.value?.destination ?? ship.value?.address ?? undefined;
   const location = getLocationLineFromAddress(address);
-  const prefix = location?.type === 'STATION' ? 'STNS' : 'PLI';
+  const naturalId = getEntityNaturalIdFromAddress(address) ?? '';
+  const isStation = isStationLine(location);
+  const prefix = isStation ? 'STNS' : 'PLI';
+  const name = isStation ? naturalId : naturalId ? `${naturalId} (环绕轨道)` : '';
   return {
-    name: getEntityNameFromAddress(address) ?? address?.lines[0]?.entity?.naturalId ?? '',
-    command: `${prefix} ${location?.entity.naturalId}`,
+    name,
+    command: `${prefix} ${naturalId}`,
   };
 });
 </script>
