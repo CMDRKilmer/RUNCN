@@ -27,6 +27,7 @@ const exchangeStationMap: Record<string, string> = {
 const exchanges = Object.keys(exchangeStationMap);
 const exchange = persistedRef('genact-cogc-exchange', exchanges[0]);
 const multiplier = persistedRef('genact-cogc-multiplier', 1);
+const openSfc = persistedRef('genact-cogc-sfc', false);
 
 const naturalId = computed(() => planetsStore.find(planet)?.naturalId ?? planet);
 const cogc = computed(() => cogcsStore.getByPlanetNaturalId(naturalId.value));
@@ -87,6 +88,16 @@ function onGenerateClick() {
         origin: warehouseName.value,
         dest: configurableValue,
       },
+      ...(openSfc.value
+        ? [
+            {
+              type: 'OPEN SFC',
+              name: 'Open Flight Controls',
+              destination: naturalId.value ?? '',
+              shipSourceAction: 'Transfer to Ship',
+            },
+          ]
+        : []),
     ],
   };
 
@@ -119,6 +130,9 @@ function onGenerateClick() {
       <Active label="材料倍数">
         <NumberInput v-model="multiplier" :min="0" />
         <span>倍（默认 1 倍）</span>
+      </Active>
+      <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
+        <RadioItem v-model="openSfc">打开航行控制</RadioItem>
       </Active>
 
       <Active v-if="!materials" label="材料">

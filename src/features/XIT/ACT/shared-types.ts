@@ -2,8 +2,8 @@ import { Logger } from '@src/features/XIT/ACT/runner/logger';
 
 export interface ActionPackageConfig {
   globalOptions?: { skipMissingMaterials?: boolean };
-  materialGroups: Record<string, unknown>[];
-  actions: Record<string, unknown>[];
+  materialGroups: Record<string, unknown>;
+  actions: Record<string, unknown>;
 }
 
 export interface ActionStep {
@@ -32,6 +32,8 @@ export interface ActionStepGenerateContext<
   TConfig,
 > extends ActionRunnerContext<UserData.ActionData> {
   config: TConfig;
+  /** 全部动作的执行配置（按动作名索引），用于读取其它动作的配置（如转移动作配置的飞船目的地）。 */
+  actionsConfig: Record<string, unknown>;
   globalOptions: { skipMissingMaterials?: boolean };
   fail: (message?: string) => void;
   assert: AssertFn;

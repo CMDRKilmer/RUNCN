@@ -36,6 +36,7 @@ export class StepGenerator {
         await info.generateSteps({
           data: action,
           config: actionConfig,
+          actionsConfig: config.actions,
           globalOptions: config.globalOptions ?? {},
           log,
           fail: message => {

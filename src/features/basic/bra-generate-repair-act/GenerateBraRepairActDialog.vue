@@ -30,6 +30,7 @@ const exchanges = Object.keys(exchangeStationMap);
 const exchange = persistedRef('genact-bra-exchange', exchanges[0]);
 const useBaseInv = persistedRef('genact-bra-use-inv', true);
 const timeOffset = persistedRef<'now' | '24' | '48'>('genact-bra-time-offset', 'now');
+const openSfc = persistedRef('genact-bra-sfc', false);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'JIANZHUWEIXIU';
@@ -111,6 +112,16 @@ function onGenerateClick() {
         origin: warehouseName.value,
         dest: configurableValue,
       },
+      ...(openSfc.value
+        ? [
+            {
+              type: 'OPEN SFC',
+              name: 'Open Flight Controls',
+              destination: planetNaturalId ?? '',
+              shipSourceAction: 'Transfer to Base',
+            },
+          ]
+        : []),
     ],
   };
 
@@ -155,6 +166,9 @@ function onGenerateClick() {
             { label: '+24h', value: '24' },
             { label: '+48h', value: '48' },
           ]" />
+      </Active>
+      <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
+        <RadioItem v-model="openSfc">打开航行控制</RadioItem>
       </Active>
       <Commands>
         <PrunButton primary @click="onGenerateClick">生成</PrunButton>

@@ -74,6 +74,7 @@ const boxSizes: Record<string, { weight: number; volume: number }> = {
 };
 const boxSizeOptions = Object.keys(boxSizes);
 const boxSize = persistedRef<string | undefined>('genact-burn-box', undefined);
+const openSfc = persistedRef('genact-burn-sfc', false);
 
 interface LoadResult {
   loadAmounts: Record<string, number>;
@@ -307,6 +308,16 @@ function onGenerateClick() {
         origin: warehouseName.value,
         dest: configurableValue,
       },
+      ...(openSfc.value
+        ? [
+            {
+              type: 'OPEN SFC',
+              name: 'Open Flight Controls',
+              destination: burn.value?.planetName ?? planetName.value,
+              shipSourceAction: 'Transfer to Ship',
+            },
+          ]
+        : []),
     ],
   };
 
@@ -354,6 +365,9 @@ function onGenerateClick() {
         label="标准货箱"
         tooltip="选择标准货箱，按容量自动计算能装多少天补给，填满飞船；再次点击取消选择。">
         <ExchangeSelector v-model="boxSize" :options="boxSizeOptions" deselectable />
+      </Active>
+      <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
+        <RadioItem v-model="openSfc">打开航行控制</RadioItem>
       </Active>
       <Active label="仓库">
         <span>{{ warehouseName }}</span>
