@@ -21,6 +21,7 @@ const {
   naturalId,
   planetName,
   storeId,
+  optimalDay,
   showCmds,
   showBurn,
   showProd,
@@ -32,6 +33,10 @@ const {
   naturalId: string;
   planetName: string;
   storeId: string;
+  // REPP 整站 sweep 算出的最优维修间隔天数。数据缺失(CX 价格未加载、
+  // 无活跃订单 / 模板、无 build options 等)时为 undefined,显示 "-"
+  // 并回退到 userData.settings.repair 的阈值做颜色提示。
+  optimalDay: number | undefined;
   showCmds: boolean;
   showBurn: boolean;
   showProd: boolean;
@@ -93,6 +98,17 @@ const prodText = computed(() => {
   return totals.orders >= totals.capacity ? '✓' : '∅';
 });
 
+// 维修列展示 REPP sweep 出的最优间隔天数(语义:"每 N 天修一次"),
+// 颜色按"当前 age vs optimalDay"判断:
+//
+//   age >= optimalDay → 红(已过最优触发日,应立即维修)
+//   age >= optimalDay - userData.settings.repair.offset → 黄(进入预警区)
+//   else → 绿(还在最优周期内)
+//
+// 与 XIT REPP 表格的 `urgencyClass` 语义一致;offset 与原 REP 阈值共用
+// userData.settings.repair.offset,保持统一的预警宽度。
+// 当 REPP 算不出 optimalDay(CX 价格未加载、无活跃订单等)时回退到
+// userData.settings.repair.threshold,沿用旧 BS 列的颜色行为,避免显示黑洞。
 const repairAge = computed(() => getPlanetRepairAge(siteId, timestampEachMinute.value));
 
 const repairBgClass = computed(() => {
@@ -100,9 +116,17 @@ const repairBgClass = computed(() => {
   if (age === undefined) {
     return {};
   }
+  const d = Math.floor(age);
+  if (optimalDay !== undefined) {
+    const offset = getRepairOffset(naturalId);
+    return {
+      [C.Workforces.daysMissing]: d >= optimalDay,
+      [C.Workforces.daysWarning]: d >= optimalDay - offset,
+      [C.Workforces.daysSupplied]: d < optimalDay - offset,
+    };
+  }
   const threshold = getRepairThreshold(naturalId);
   const offset = getRepairOffset(naturalId);
-  const d = Math.floor(age);
   return {
     [C.Workforces.daysMissing]: d >= threshold,
     [C.Workforces.daysWarning]: d >= threshold - offset,
@@ -110,12 +134,31 @@ const repairBgClass = computed(() => {
   };
 });
 
+// 维修列文案优先显示 REPP 的最优间隔天数(语义:"每 N 天修一次"),
+// REPP 算不出时回退到当前 maxAge(兼容旧展示)。
 const repairDaysText = computed(() => {
+  if (optimalDay !== undefined) {
+    return String(optimalDay);
+  }
   const age = repairAge.value;
   if (age === undefined) {
     return undefined;
   }
   return String(Math.floor(age));
+});
+
+const repairDaysTooltip = computed(() => {
+  if (optimalDay !== undefined) {
+    const age = repairAge.value;
+    if (age !== undefined) {
+      const d = Math.floor(age);
+      return d >= optimalDay
+        ? `REPP: 每 ${optimalDay} 天维修一次最优。当前 age ${d} 天已超过触发日,建议立即维修。`
+        : `REPP: 每 ${optimalDay} 天维修一次最优(PRUNplanner 算法)。当前 age ${d} 天。`;
+    }
+    return `REPP: 每 ${optimalDay} 天维修一次最优(PRUNplanner 算法)。`;
+  }
+  return undefined;
 });
 
 const storageAlarm = computed(() => getStorageAlarmLevel(siteId));
@@ -173,9 +216,13 @@ const warehouseStore = computed(() =>
     </td>
     <td v-if="showRepair" :class="$style.statusCell">
       <div :class="[$style.statusContent, repairBgClass]">
-        <span :class="$style.statusNum" @click="showBuffer(`XIT REP ${naturalId}`)">{{
-          repairDaysText ?? '-'
-        }}</span>
+        <span
+          :class="$style.statusNum"
+          :data-tooltip="repairDaysTooltip"
+          data-tooltip-position="top"
+          @click="showBuffer(`XIT REP ${naturalId}`)"
+          >{{ repairDaysText ?? '-' }}</span
+        >
         <PrunButton dark inline @click="showBuffer(`BRA ${naturalId}`)">{{ '修' }}</PrunButton>
       </div>
     </td>

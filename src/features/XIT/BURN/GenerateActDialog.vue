@@ -65,12 +65,17 @@ const exchange = persistedRef('genact-burn-exchange', exchanges[0]);
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 
 // ── 标准货箱填满 ──────────────────────────────────────────────
-// 标准货箱容量（重量t / 体积m³），从小到大：SCB → WCB → LCB → HCB
+// 标准货箱容量（重量t / 体积m³），从大到小：
+// LCB → WCB → HCB → VCB → MCB → SCB → VSC → TCB
 const boxSizes: Record<string, { weight: number; volume: number }> = {
-  SCB: { weight: 500, volume: 500 },
-  WCB: { weight: 3000, volume: 1000 },
   LCB: { weight: 2000, volume: 2000 },
+  WCB: { weight: 3000, volume: 1000 },
   HCB: { weight: 5000, volume: 5000 },
+  VCB: { weight: 1000, volume: 3000 },
+  MCB: { weight: 1000, volume: 1000 },
+  SCB: { weight: 500, volume: 500 },
+  VSC: { weight: 250, volume: 250 },
+  TCB: { weight: 100, volume: 100 },
 };
 const boxSizeOptions = Object.keys(boxSizes);
 const boxSize = persistedRef<string | undefined>('genact-burn-box', undefined);
