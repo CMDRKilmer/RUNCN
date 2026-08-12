@@ -15,10 +15,16 @@ import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import {
+  getEntityNameFromAddress,
+  getEntityNaturalIdFromAddress,
+} from '@src/infrastructure/prun-api/data/addresses';
 import { fixed2 } from '@src/utils/format';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 
 const parameters = useXitParameters();
 const planetName = computed(() => parameters.join(' '));
@@ -141,6 +147,70 @@ function calcLoadAmounts(targetDays: number): LoadResult {
 
 // 卸货目标：星球基地仓库，锁定为 <星球名> Base（执行时不再配置）。
 const unloadDest = computed(() => `${burn.value?.planetName ?? planetName.value} Base`);
+
+// ── 飞船筛选 ──────────────────────────────────────────────
+// 筛选条件：
+//   1. 当前交易所对应的空间站 naturalId == 飞船 address naturalId
+//   2. 飞船 SHIP_STORE 的总容量严格 == 所选标准货箱容量
+interface ShipOption {
+  id: string;
+  registration: string;
+  name: string;
+  storeId: string;
+}
+
+function findShipCargoStore(ship: PrunApi.Ship): PrunApi.Store | undefined {
+  const store = storagesStore.getById(ship.idShipStore);
+  return store?.type === 'SHIP_STORE' ? store : undefined;
+}
+
+// 当前交易所对应的空间站 naturalId。
+const exchangeStationNaturalId = computed(() =>
+  exchangesStore.getNaturalIdFromCode(exchange.value),
+);
+
+// 根据交易所 + 标准货箱筛选飞船。任一前置条件缺失返回空。
+const eligibleShips = computed<ShipOption[]>(() => {
+  const box = boxSize.value ? boxSizes[boxSize.value] : undefined;
+  if (!box) return [];
+  const stationId = exchangeStationNaturalId.value;
+  if (!stationId) return [];
+
+  const ships = shipsStore.all.value ?? [];
+  const result: ShipOption[] = [];
+  for (const ship of ships) {
+    if (!ship.address) continue;
+    const shipStationId = getEntityNaturalIdFromAddress(ship.address);
+    if (shipStationId !== stationId) continue;
+
+    const cargoStore = findShipCargoStore(ship);
+    if (!cargoStore) continue;
+
+    if (cargoStore.weightCapacity !== box.weight) continue;
+    if (cargoStore.volumeCapacity !== box.volume) continue;
+
+    result.push({
+      id: ship.id,
+      registration: ship.registration,
+      name: ship.name,
+      storeId: ship.idShipStore,
+    });
+  }
+  return result;
+});
+
+// 用户选中的飞船 id。值变更不持久化（每次重新打开面板临时选择）。
+const selectedShipId = ref('');
+const selectedShip = computed(
+  () => eligibleShips.value.find(s => s.id === selectedShipId.value) ?? null,
+);
+
+// 切换交易所或标准货箱时清空飞船选择，避免指向已不满足条件的飞船。
+watch([exchange, boxSize], () => {
+  if (selectedShipId.value && !eligibleShips.value.some(s => s.id === selectedShipId.value)) {
+    selectedShipId.value = '';
+  }
+});
 
 // 选中标准货箱时自动计算最大天数（平衡天数）。
 watch([boxSize, includeConsumables, includeInputs, useBaseInv], () => {
@@ -285,6 +355,15 @@ function onGenerateClick() {
   const groupName = 'Resupply';
   const consumablesOnly = includeConsumables.value && !includeInputs.value;
 
+  // 选中飞船时把 MTRA 终点预填为该飞船货仓；否则保留 configurableValue 由执行时配置。
+  let transferDest: string = configurableValue;
+  if (selectedShip.value) {
+    const shipStore = storagesStore.getById(selectedShip.value.storeId);
+    if (shipStore) {
+      transferDest = serializeStorage(shipStore);
+    }
+  }
+
   const pkg: UserData.ActionPackageData = {
     global: { name: packageName.value },
     autoDelete: true,
@@ -316,7 +395,7 @@ function onGenerateClick() {
         name: 'Transfer to Ship',
         group: groupName,
         origin: warehouseName.value,
-        dest: configurableValue,
+        dest: transferDest,
       },
       ...(openSfc.value
         ? [
@@ -414,6 +493,24 @@ function onGenerateClick() {
         tooltip="选择标准货箱，按容量自动计算能装多少天补给，填满飞船；再次点击取消选择。">
         <ExchangeSelector v-model="boxSize" :options="boxSizeOptions" deselectable />
       </Active>
+      <Active
+        v-if="boxSize"
+        label="飞船"
+        tooltip="自动筛选：位于所选交易所空间站且总容量严格等于所选标准货箱容量的飞船。">
+        <select
+          id="genact-ship"
+          v-model="selectedShipId"
+          name="genact-ship"
+          :class="$style.shipSelect">
+          <option value="">不选飞船（执行时再选）</option>
+          <option v-for="s in eligibleShips" :key="s.id" :value="s.id">
+            {{ s.registration }} {{ s.name }}
+          </option>
+        </select>
+        <span v-if="boxSize && eligibleShips.length === 0" :class="$style.shipHint">
+          没有符合条件的飞船
+        </span>
+      </Active>
       <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
         <RadioItem v-model="openSfc">打开航行控制</RadioItem>
       </Active>
@@ -463,5 +560,27 @@ function onGenerateClick() {
 
 .preview {
   padding: 4px 0;
+}
+
+.shipSelect {
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+
+.shipSelect:focus {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
+}
+
+.shipHint {
+  padding-left: 8px;
+  color: rgb(167, 176, 183);
+  font-size: 12px;
 }
 </style>

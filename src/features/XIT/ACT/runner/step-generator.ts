@@ -37,6 +37,7 @@ export class StepGenerator {
           data: action,
           config: actionConfig,
           actionsConfig: config.actions,
+          pkg,
           globalOptions: config.globalOptions ?? {},
           log,
           fail: message => {
