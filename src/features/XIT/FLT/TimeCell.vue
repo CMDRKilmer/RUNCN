@@ -268,8 +268,6 @@ async function waitActionProgress(overlay: HTMLElement) {
         </span>
         <span
           :class="[$style.actionBtn, $style.bgFuel, isRefueling && $style.disabled]"
-          data-tooltip="加油"
-          data-tooltip-position="left"
           @click.stop="onRefuel">
           <svg
             :class="$style.iconSvg"
