@@ -78,9 +78,9 @@ const boxSizes: Record<string, { weight: number; volume: number }> = {
   WCB: { weight: 3000, volume: 1000 },
   HCB: { weight: 5000, volume: 5000 },
   VCB: { weight: 1000, volume: 3000 },
-  MCB: { weight: 1000, volume: 1000 },
+  // MCB: { weight: 1000, volume: 1000 },
   SCB: { weight: 500, volume: 500 },
-  VSC: { weight: 250, volume: 250 },
+  // VSC: { weight: 250, volume: 250 },
   TCB: { weight: 100, volume: 100 },
 };
 const boxSizeOptions = Object.keys(boxSizes);
@@ -157,6 +157,8 @@ interface ShipOption {
   registration: string;
   name: string;
   storeId: string;
+  weightCapacity: number;
+  volumeCapacity: number;
 }
 
 function findShipCargoStore(ship: PrunApi.Ship): PrunApi.Store | undefined {
@@ -194,6 +196,8 @@ const eligibleShips = computed<ShipOption[]>(() => {
       registration: ship.registration,
       name: ship.name,
       storeId: ship.idShipStore,
+      weightCapacity: cargoStore.weightCapacity,
+      volumeCapacity: cargoStore.volumeCapacity,
     });
   }
   return result;
@@ -504,7 +508,7 @@ function onGenerateClick() {
           :class="$style.shipSelect">
           <option value="">不选飞船（执行时再选）</option>
           <option v-for="s in eligibleShips" :key="s.id" :value="s.id">
-            {{ s.registration }} {{ s.name }}
+            {{ s.registration }} {{ s.name }} ({{ s.weightCapacity }}t/{{ s.volumeCapacity }}m³)
           </option>
         </select>
         <span v-if="boxSize && eligibleShips.length === 0" :class="$style.shipHint">
