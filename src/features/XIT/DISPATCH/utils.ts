@@ -288,13 +288,9 @@ export function fitDaysForShip(
     }
   }
 
-  let lo = 0;
-  let hi = 999;
-  while (lo < hi) {
-    const mid = lo + Math.ceil((hi - lo) / 2);
+  const fits = (days: number) => {
     let weight = 0;
     let volume = 0;
-    let fits = true;
     for (const base of sharing) {
       if (!base.config.resupply) {
         continue;
@@ -306,23 +302,34 @@ export function fitDaysForShip(
           includeConsumables: base.config.includeConsumables,
         },
         base.naturalId,
-        mid,
+        days,
       )!;
       const totals = billTotals(entries);
       weight += totals.weight;
       volume += totals.volume;
       if (weight > freeWeight || volume > freeVolume) {
-        fits = false;
-        break;
+        return false;
       }
     }
-    if (fits) {
+    return true;
+  };
+
+  if (fits(999)) {
+    return 999;
+  }
+
+  // 二分搜索最大补给天数，支持小数（参考 BURN act 的小数精度搜索）。
+  let lo = 0;
+  let hi = 999;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) {
       lo = mid;
     } else {
-      hi = mid - 1;
+      hi = mid;
     }
   }
-  return lo;
+  return Math.floor(lo * 100) / 100;
 }
 
 export function formatBurnDays(days: number) {
