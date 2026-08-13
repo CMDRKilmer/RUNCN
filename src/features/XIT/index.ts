@@ -17,6 +17,8 @@ import './CONTGEN/CONTGEN';
 import './CXOS/CXOS';
 import './CXTS/CXTS';
 import './DEV/DEV';
+import './DISPATCH/DISPATCH';
+import './DISPATCH/DISPATCHACT';
 import './ELEC/ELEC';
 import './EXP/EXP';
 import './FIN/FIN';

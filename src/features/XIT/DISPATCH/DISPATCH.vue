@@ -1,0 +1,783 @@
+<script setup lang="ts">
+import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import PrunButton from '@src/components/PrunButton.vue';
+import RadioItem from '@src/components/forms/RadioItem.vue';
+import PlanetRow from '@src/features/XIT/DISPATCH/PlanetRow.vue';
+import ShipPool from '@src/features/XIT/DISPATCH/ShipPool.vue';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import {
+  getEntityNameFromAddress,
+  getEntityNaturalIdFromAddress,
+} from '@src/infrastructure/prun-api/data/addresses';
+import { comparePlanets } from '@src/util';
+import { useTileState } from '@src/store/user-data-tiles';
+import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
+import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
+import { countDays } from '@src/features/XIT/BURN/utils';
+import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
+import { vDraggable } from 'vue-draggable-plus';
+import { grip } from '@src/components/grip';
+import GripHeaderCell from '@src/components/grip/GripHeaderCell.vue';
+import { useTile } from '@src/hooks/use-tile';
+import {
+  DispatchBaseConfig,
+  DispatchShip,
+  billTotals,
+  combinedBaseBill,
+  fitDaysForShip,
+  getShipsAtCX,
+  mergeBills,
+  regroupByShip,
+} from '@src/features/XIT/DISPATCH/utils';
+
+interface BaseEntry {
+  siteId: string;
+  naturalId: string;
+  planetName: string;
+  site: PrunApi.Site;
+}
+
+const exchangeFilterOptions: { label: string; code: string }[] = [
+  { label: 'ANT', code: 'AI1' },
+  { label: 'HRT', code: 'IC1' },
+  { label: 'MOR', code: 'NC1' },
+  { label: 'BEN', code: 'CI1' },
+];
+
+const tile = useTile();
+const panesEl = ref<HTMLElement | null>(null);
+const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfigs', {});
+const baseOrder = useTileState<string[]>('baseOrder', []);
+const orderedIds = ref<string[]>([]);
+const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefined);
+const refuel = useTileState<boolean>('refuel', true);
+
+function createBaseConfig(naturalId: string): DispatchBaseConfig {
+  return {
+    resupply: true,
+    repair: false,
+    days: getResupplyDays(naturalId) ?? 10,
+    repThreshold: getRepairThreshold(naturalId) - getRepairOffset(naturalId),
+    repAdvance: 1,
+    consumablesOnly: false,
+    includeConsumables: true,
+    cxBuy: true,
+  };
+}
+
+function burnDaysRemaining(siteId: string) {
+  const burn = getPlanetBurn(siteId);
+  return burn ? countDays(burn.burn) : Infinity;
+}
+
+const bases = computed<BaseEntry[] | undefined>(() => {
+  const sites = sitesStore.all.value;
+  if (!sites) {
+    return undefined;
+  }
+
+  return sites
+    .map(site => ({
+      siteId: site.siteId,
+      naturalId: getEntityNaturalIdFromAddress(site.address) ?? '',
+      planetName: getEntityNameFromAddress(site.address) ?? '',
+      site,
+    }))
+    .filter(x => x.naturalId);
+});
+
+// Fill in missing base configs and patch older persisted configs outside of
+// computeds/render to keep them pure.
+watchEffect(() => {
+  const list = bases.value;
+  if (!list) {
+    return;
+  }
+  let next = baseConfigs.value;
+  let changed = false;
+  for (const base of list) {
+    const existing = next[base.naturalId];
+    if (existing === undefined) {
+      if (!changed) {
+        next = { ...next };
+        changed = true;
+      }
+      next[base.naturalId] = createBaseConfig(base.naturalId);
+      continue;
+    }
+    let patched = existing;
+    if (
+      existing.consumablesOnly === undefined ||
+      existing.includeConsumables === undefined ||
+      existing.cxBuy === undefined ||
+      (existing as Record<string, unknown>).materialFilter !== undefined
+    ) {
+      const legacy = (existing as Record<string, unknown>).materialFilter as string | undefined;
+      patched = {
+        ...patched,
+        consumablesOnly: existing.consumablesOnly ?? legacy === 'Workforce',
+        includeConsumables: existing.includeConsumables ?? legacy !== 'Production',
+        cxBuy: existing.cxBuy ?? true,
+      };
+      delete (patched as Record<string, unknown>).materialFilter;
+    }
+    // One-time migration: old default was plain getRepairThreshold; new default
+    // matches REPAIRACT (threshold − offset). The newDefault check keeps this from
+    // re-firing forever when the offset is 0 (migrated value equals the old default).
+    const oldDefault = getRepairThreshold(base.naturalId);
+    const newDefault = oldDefault - getRepairOffset(base.naturalId);
+    if (existing.repThreshold === oldDefault && newDefault !== oldDefault) {
+      patched = { ...patched, repThreshold: newDefault };
+    }
+    if (patched !== existing) {
+      if (!changed) {
+        next = { ...next };
+        changed = true;
+      }
+      next[base.naturalId] = patched;
+    }
+  }
+  if (changed) {
+    baseConfigs.value = next;
+  }
+});
+
+// Bases paired with their configs; configs are filled by the watcher above.
+const rows = computed(() =>
+  (bases.value ?? [])
+    .map(base => ({ base, config: baseConfigs.value[base.naturalId] }))
+    .filter(x => x.config !== undefined),
+);
+
+// Size the window body to content width after the first data render. The
+// game applies the initial bufferSize asynchronously around tile creation,
+// so a direct style.width write gets clobbered — go through setBufferSize
+// (dispatched after mount, applied last) instead.
+const stopWidthWatch = watch([() => rows.value.length, panesEl], async ([length, panes]) => {
+  if (length === 0 || !panes) {
+    return;
+  }
+  stopWidthWatch();
+  await nextTick();
+  const windowEl = tile.frame.closest(`.${C.Window.window}`) as HTMLElement | null;
+  const bodyEl = windowEl ? (_$(windowEl, C.Window.body) as HTMLElement | null) : null;
+  if (!bodyEl) {
+    return;
+  }
+  let contentWidth = 0;
+  for (const child of panes.children) {
+    contentWidth += (child as HTMLElement).offsetWidth;
+  }
+  if (panes.scrollWidth > panes.clientWidth) {
+    contentWidth = panes.scrollWidth;
+  }
+  const chrome = bodyEl.offsetWidth - panes.clientWidth;
+  const width = Math.min(contentWidth + chrome, window.innerWidth - 60);
+  const parsedHeight = parseInt(bodyEl.style.height, 10);
+  const height = isNaN(parsedHeight) ? 500 : parsedHeight;
+  setBufferSize(tile.id, width, height);
+});
+
+const rowById = computed(() => {
+  const map = new Map<string, { base: BaseEntry; config: DispatchBaseConfig }>();
+  for (const row of rows.value) {
+    map.set(row.base.naturalId, { base: row.base, config: row.config! });
+  }
+  return map;
+});
+
+// Per-base resupply+repair bill, computed once and shared by the row display,
+// the overload check, and execute().
+const billByBase = computed(() => {
+  const map = new Map<string, Record<string, number>>();
+  for (const { base, config } of rows.value) {
+    if (!config.resupply && !config.repair) {
+      continue;
+    }
+    const bill = combinedBaseBill(base.naturalId, config, base.site);
+    if (bill) {
+      map.set(base.naturalId, bill);
+    }
+  }
+  return map;
+});
+
+// Keep orderedIds in sync with bases + baseOrder without clobbering an
+// in-progress drag reorder.
+watchEffect(() => {
+  const list = rows.value;
+  const present = new Map(list.map(x => [x.base.naturalId, x.base]));
+  const ordered: string[] = [];
+  for (const id of baseOrder.value) {
+    if (present.has(id)) {
+      ordered.push(id);
+    }
+  }
+  const orderedSet = new Set(ordered);
+  const remaining = list
+    .filter(x => !orderedSet.has(x.base.naturalId))
+    .map(x => x.base)
+    .sort((a, b) => {
+      const daysA = burnDaysRemaining(a.siteId);
+      const daysB = burnDaysRemaining(b.siteId);
+      if (daysA !== daysB) {
+        return daysA - daysB;
+      }
+      return comparePlanets(a.naturalId, b.naturalId);
+    })
+    .map(x => x.naturalId);
+  const next = [...ordered, ...remaining];
+  if (next.length !== orderedIds.value.length || next.some((id, i) => id !== orderedIds.value[i])) {
+    orderedIds.value = next;
+  }
+});
+
+// Assignment map used to auto-group rows sharing a ship. Only depends on
+// each config's .ship, so it re-runs solely on ship (re)assignment.
+const shipAssignments = computed(() => {
+  const map = new Map<string, string>();
+  for (const row of rows.value) {
+    if (row.config?.ship) {
+      map.set(row.base.naturalId, row.config.ship);
+    }
+  }
+  return map;
+});
+
+// When a ship is assigned to a second (or later) base, move that base's row
+// to sit immediately after the first base already assigned to that ship.
+watch(shipAssignments, map => {
+  const next = regroupByShip(orderedIds.value, map);
+  if (next.some((id, i) => id !== orderedIds.value[i])) {
+    orderedIds.value = next;
+    baseOrder.value = next;
+  }
+});
+
+const dragOptions = {
+  ...grip.draggable,
+  onEnd: (evt: unknown) => {
+    grip.draggable.onEnd?.(evt as never);
+    baseOrder.value = [...orderedIds.value];
+  },
+};
+
+// Built in script to pass the ref itself — the template would auto-unwrap
+// orderedIds, binding the directive to a stale array snapshot after the sync
+// watcher replaces orderedIds.value, which silently breaks drag reordering.
+const dragBinding = [orderedIds, dragOptions];
+
+const cxShips = computed(() => getShipsAtCX() ?? []);
+
+// Pool display only — assignment/execution logic always resolves against the
+// unfiltered cxShips/cxShipById so a filtered-out ship stays assigned.
+const filteredCxShips = computed(() =>
+  exchangeFilter.value
+    ? cxShips.value.filter(x => x.exchangeCode === exchangeFilter.value)
+    : cxShips.value,
+);
+
+const cxShipById = computed(() => {
+  const map = new Map<string, DispatchShip>();
+  for (const entry of cxShips.value) {
+    map.set(entry.ship.id, entry);
+  }
+  return map;
+});
+
+// Ships whose assigned bases' combined bills exceed free cargo capacity.
+const overloadedShips = computed(() => {
+  const totals = new Map<string, { weight: number; volume: number }>();
+  for (const { base, config } of rows.value) {
+    if (!config.ship || (!config.resupply && !config.repair)) {
+      continue;
+    }
+    const bill = billByBase.value.get(base.naturalId);
+    if (!bill) {
+      continue;
+    }
+    const billT = billTotals(bill);
+    const acc = totals.get(config.ship) ?? { weight: 0, volume: 0 };
+    acc.weight += billT.weight;
+    acc.volume += billT.volume;
+    totals.set(config.ship, acc);
+  }
+  const result = new Set<string>();
+  for (const [shipId, t] of totals) {
+    const store = cxShipById.value.get(shipId)?.cargoStore;
+    if (!store) {
+      continue;
+    }
+    // Free capacity net of whatever is already in the cargo hold, matching FIT.
+    if (
+      t.weight > store.weightCapacity - store.weightLoad ||
+      t.volume > store.volumeCapacity - store.volumeLoad
+    ) {
+      result.add(shipId);
+    }
+  }
+  return result;
+});
+
+const hasAssignedShip = computed(() => {
+  const list = bases.value;
+  if (!list) {
+    return false;
+  }
+  for (const base of list) {
+    const config = baseConfigs.value[base.naturalId];
+    if (config?.ship && cxShipById.value.has(config.ship)) {
+      return true;
+    }
+  }
+  return false;
+});
+
+const executeTooltip = computed(() => {
+  if (!hasAssignedShip.value) {
+    return '请先为至少一个基地分配船只';
+  }
+  if (overloadedShips.value.size > 0) {
+    return '有船只装载超过容量';
+  }
+  return undefined;
+});
+
+interface IncludedBase {
+  naturalId: string;
+  planetName: string;
+  site: PrunApi.Site;
+  config: DispatchBaseConfig;
+  dispatchShip: DispatchShip;
+}
+
+const includedBases = computed(() => {
+  // Dispatch LIST order (user-reorderable), not sites order.
+  const result: IncludedBase[] = [];
+  for (const id of orderedIds.value) {
+    const row = rowById.value.get(id);
+    if (!row) {
+      continue;
+    }
+    const { base, config } = row;
+    if (!config.ship || (!config.resupply && !config.repair)) {
+      continue;
+    }
+    const dispatchShip = cxShipById.value.get(config.ship);
+    if (!dispatchShip?.warehouseStore || !dispatchShip.cargoStore) {
+      continue;
+    }
+    result.push({
+      naturalId: base.naturalId,
+      planetName: base.planetName,
+      site: base.site,
+      config,
+      dispatchShip,
+    });
+  }
+  return result;
+});
+
+function fitBase(naturalId: string) {
+  const config = baseConfigs.value[naturalId];
+  if (!config?.ship) {
+    return;
+  }
+  const dispatchShip = cxShipById.value.get(config.ship);
+  if (!dispatchShip?.cargoStore) {
+    return;
+  }
+
+  const sharingBases = rows.value.map(x => ({
+    naturalId: x.base.naturalId,
+    config: x.config!,
+    site: x.base.site,
+  }));
+
+  const days = fitDaysForShip(config.ship, sharingBases, dispatchShip.cargoStore);
+  if (days === undefined) {
+    return;
+  }
+
+  for (const base of sharingBases) {
+    if (base.config.ship === config.ship && base.config.resupply) {
+      base.config.days = days;
+    }
+  }
+}
+
+function execute() {
+  if (includedBases.value.length === 0) {
+    return;
+  }
+  if (overloadedShips.value.size > 0) {
+    return;
+  }
+
+  // Group names are player-facing (status lines, offload package labels); planet stays
+  // a natural id because it feeds SFC/BRA tile commands.
+  const groupNameOf = (base: IncludedBase) => base.planetName || base.naturalId;
+
+  const groups: UserData.MaterialGroupData[] = [];
+  const cxBuyActions: UserData.ActionData[] = [];
+
+  // Per-exchange aggregate of bills for bases with cxBuy on.
+  const exchangeBills = new Map<string, Record<string, number>>();
+  // Bases that actually stage (non-empty bill), in list order.
+  const stagedBases: IncludedBase[] = [];
+
+  for (const base of includedBases.value) {
+    const { naturalId, config, dispatchShip } = base;
+    const bill = billByBase.value.get(naturalId);
+    if (!bill || Object.keys(bill).length === 0) {
+      continue;
+    }
+
+    stagedBases.push(base);
+
+    groups.push({
+      type: 'Manual',
+      name: groupNameOf(base),
+      planet: naturalId,
+      materials: bill,
+    });
+
+    if (config.cxBuy) {
+      const code = dispatchShip.exchangeCode;
+      exchangeBills.set(code, mergeBills(exchangeBills.get(code), bill)!);
+    }
+  }
+
+  if (stagedBases.length === 0) {
+    return;
+  }
+
+  // Group by ship, preserving list order within each group and insertion
+  // order of first-seen ships.
+  const byShip = new Map<string, IncludedBase[]>();
+  for (const base of stagedBases) {
+    const shipId = base.config.ship!;
+    let list = byShip.get(shipId);
+    if (!list) {
+      list = [];
+      byShip.set(shipId, list);
+    }
+    list.push(base);
+  }
+
+  // Multi-base ships first (order of each ship's first base in the list),
+  // then single-base ships.
+  const multiShipGroups: IncludedBase[][] = [];
+  const singleShipBases: IncludedBase[] = [];
+  for (const shipBases of byShip.values()) {
+    if (shipBases.length >= 2) {
+      multiShipGroups.push(shipBases);
+    } else {
+      singleShipBases.push(shipBases[0]!);
+    }
+  }
+
+  const mtraActions: UserData.ActionData[] = [];
+  const sfcActions: UserData.ActionData[] = [];
+
+  // Per ship: one MTRA load action (warehouse → cargo) and one OPEN SFC
+  // action. One material group per ship (sum of base bills).
+  const pushShipMtra = (shipBases: IncludedBase[]) => {
+    const first = shipBases[0]!;
+    const dispatchShip = first.dispatchShip;
+    const shipName = dispatchShip.ship.name ?? dispatchShip.ship.registration;
+    const loadName = `装载 ${shipName}`;
+    const origin = serializeStorage(dispatchShip.warehouseStore!);
+    const dest = serializeStorage(dispatchShip.cargoStore!);
+
+    let materials: Record<string, number> | undefined;
+    for (const base of shipBases) {
+      const group = groups.find(x => x.name === groupNameOf(base));
+      materials = mergeBills(materials, group?.materials);
+    }
+
+    groups.push({
+      type: 'Manual',
+      name: loadName,
+      materials: materials!,
+    });
+
+    mtraActions.push({ type: 'MTRA', name: loadName, group: loadName, origin, dest });
+    sfcActions.push({
+      type: 'OPEN SFC',
+      name: `卸货 ${shipName}`,
+      destination: first.naturalId,
+      shipSourceAction: loadName,
+    });
+  };
+
+  for (const shipBases of multiShipGroups) {
+    pushShipMtra(shipBases);
+  }
+
+  for (const base of singleShipBases) {
+    pushShipMtra([base]);
+  }
+
+  for (const [code, materials] of exchangeBills) {
+    if (Object.keys(materials).length === 0) {
+      continue;
+    }
+    const groupName = `购买 ${code}`;
+    groups.push({
+      type: 'Manual',
+      name: groupName,
+      materials,
+    });
+    cxBuyActions.push({
+      type: 'CX Buy',
+      name: groupName,
+      group: groupName,
+      exchange: code,
+      useCXInv: true,
+    });
+  }
+
+  const refuelActions: UserData.ActionData[] = [];
+  if (refuel.value) {
+    const seen = new Set<string>();
+    for (const entry of cxShips.value) {
+      if (entry.warehouseStore && !seen.has(entry.warehouseStore.id)) {
+        seen.add(entry.warehouseStore.id);
+        refuelActions.push({
+          type: 'Refuel',
+          name: '加油',
+          origin: serializeStorage(entry.warehouseStore),
+          buyMissingFuel: true,
+        });
+      }
+    }
+  }
+
+  const pkg: UserData.ActionPackageData = {
+    global: { name: '派遣' },
+    groups,
+    actions: [...refuelActions, ...cxBuyActions, ...mtraActions, ...sfcActions],
+  };
+
+  stagedDispatch.value = {
+    // Deep-clone to detach from tile-state reactivity.
+    pkg: JSON.parse(JSON.stringify(pkg)),
+  };
+  showBuffer('XIT DISPATCHACT');
+}
+
+function reset() {
+  baseConfigs.value = {};
+  baseOrder.value = [];
+}
+
+const dispatchConfigType = 'rp-dispatch-config';
+
+interface DispatchConfigPayload {
+  baseConfigs?: Record<string, DispatchBaseConfig>;
+  baseOrder?: string[];
+  exchangeFilter?: string;
+  refuel?: boolean;
+}
+
+const notice = ref<string | undefined>(undefined);
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+
+function setNotice(text: string) {
+  notice.value = text;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    notice.value = undefined;
+  }, 3000);
+}
+
+function collectDispatchConfig(): DispatchConfigPayload {
+  return {
+    baseConfigs: JSON.parse(JSON.stringify(baseConfigs.value)),
+    baseOrder: [...baseOrder.value],
+    exchangeFilter: exchangeFilter.value,
+    refuel: refuel.value,
+  };
+}
+
+async function exportDispatchConfig() {
+  const json = JSON.stringify({ type: dispatchConfigType, data: collectDispatchConfig() });
+  try {
+    await navigator.clipboard.writeText(json);
+  } catch {
+    setNotice('复制失败');
+    return;
+  }
+  setNotice('配置已复制到剪贴板');
+}
+
+function extractDispatchConfig(parsed: unknown): DispatchConfigPayload | undefined {
+  if (!parsed || typeof parsed !== 'object') {
+    return undefined;
+  }
+  const root = parsed as Record<string, unknown>;
+  if (root.type === dispatchConfigType && root.data && typeof root.data === 'object') {
+    return root.data as DispatchConfigPayload;
+  }
+  if (root.type === 'rp-user-data' && root.data && typeof root.data === 'object') {
+    const userData = root.data as { tileState?: Record<string, unknown> };
+    for (const state of Object.values(userData.tileState ?? {})) {
+      if (state && typeof state === 'object' && 'baseConfigs' in state) {
+        return state as DispatchConfigPayload;
+      }
+    }
+  }
+  return undefined;
+}
+
+async function importDispatchConfig() {
+  let clipText: string;
+  try {
+    clipText = await navigator.clipboard.readText();
+  } catch {
+    setNotice('无法读取剪贴板');
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(clipText);
+  } catch {
+    setNotice('剪贴板内容不是有效的 JSON');
+    return;
+  }
+  const config = extractDispatchConfig(parsed);
+  if (!config) {
+    setNotice('剪贴板内容不是 DISPATCH 配置');
+    return;
+  }
+  baseConfigs.value = config.baseConfigs ?? {};
+  baseOrder.value = config.baseOrder ?? [];
+  exchangeFilter.value = config.exchangeFilter;
+  refuel.value = config.refuel ?? true;
+  setNotice('配置已导入');
+}
+</script>
+
+<template>
+  <LoadingSpinner v-if="bases === undefined" />
+  <div v-else :class="$style.layout">
+    <div :class="C.ComExOrdersPanel.filter">
+      <RadioItem
+        v-for="option in exchangeFilterOptions"
+        :key="option.code"
+        :model-value="exchangeFilter === option.code"
+        horizontal
+        @update:model-value="v => (exchangeFilter = v ? option.code : undefined)">
+        {{ option.label }}
+      </RadioItem>
+      <div :class="$style.separator" />
+      <RadioItem v-model="refuel" horizontal>加油</RadioItem>
+      <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
+      <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
+      <span v-if="notice" :class="$style.notice">{{ notice }}</span>
+      <div :class="$style.spacer" />
+      <PrunButton dark @click="reset">重置</PrunButton>
+      <PrunButton
+        primary
+        :disabled="overloadedShips.size > 0"
+        :data-tooltip="executeTooltip"
+        @click="execute">
+        执行
+      </PrunButton>
+    </div>
+    <div ref="panesEl" :class="$style.panes">
+      <ShipPool :ships="filteredCxShips" :base-configs="baseConfigs" />
+      <div :class="$style.left">
+        <table :class="$style.table">
+          <thead>
+            <tr>
+              <th :class="[$style.narrowCol, $style.centered]">分配</th>
+              <GripHeaderCell />
+              <th :class="[$style.narrowCol, $style.centered]">星球</th>
+              <th :class="[$style.narrowCol, $style.centered]" colspan="2">消耗</th>
+              <th :class="[$style.narrowCol, $style.centered]" colspan="2">维修</th>
+              <th :class="[$style.narrowCol, $style.centered]">装载</th>
+              <th :class="[$style.narrowCol, $style.centered]">物资</th>
+              <th :class="[$style.narrowCol, $style.centered]">适配</th>
+              <th :class="[$style.narrowCol, $style.centered]">天数</th>
+              <th :class="[$style.narrowCol, $style.centered]">维修≥</th>
+              <th :class="[$style.narrowCol, $style.centered]">提前</th>
+              <th :class="[$style.narrowCol, $style.centered]">CX</th>
+            </tr>
+          </thead>
+          <tbody v-draggable="dragBinding">
+            <PlanetRow
+              v-for="id in orderedIds"
+              :key="id"
+              :site-id="rowById.get(id)!.base.siteId"
+              :natural-id="rowById.get(id)!.base.naturalId"
+              :planet-name="rowById.get(id)!.base.planetName"
+              :config="rowById.get(id)!.config"
+              :bill="billByBase.get(id)"
+              :overloaded="
+                !!rowById.get(id)!.config.ship && overloadedShips.has(rowById.get(id)!.config.ship!)
+              "
+              @fit="fitBase(rowById.get(id)!.base.naturalId)" />
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style module>
+.layout {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.separator {
+  width: 1px;
+  align-self: stretch;
+  background-color: #2b485a;
+  margin: 0 0.25rem;
+}
+
+.notice {
+  white-space: nowrap;
+  margin: 0 0.25rem;
+  color: #8a9aa8;
+}
+
+.panes {
+  display: flex;
+  flex-direction: row;
+}
+
+.left {
+  flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
+}
+
+.table {
+  border-collapse: collapse;
+}
+
+.table thead tr {
+  border-bottom: 1px solid #2b485a;
+  box-sizing: border-box;
+}
+
+.narrowCol {
+  width: 0;
+  white-space: nowrap;
+}
+
+.centered {
+  text-align: center;
+}
+</style>
