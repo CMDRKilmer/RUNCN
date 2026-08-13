@@ -14,16 +14,18 @@ act.addAction({
   },
   editComponent: Edit,
   generateSteps: async ctx => {
-    const { data, actionsConfig, log, fail, emitStep } = ctx;
+    const { data, actionsConfig, pkg, log, fail, emitStep } = ctx;
 
-    // 飞船来自同包「转移」动作的执行配置（dest 配置为飞船）
+    // 飞船来自同包「转移」动作的执行配置（dest 配置为飞船）。
+    // 优先读源动作的执行配置；未配置（如源动作 dest 已被生成器预设、未触发 Configure UI）
+    // 时回退到源动作自身 data.dest，避免 OPEN SFC 找不到飞船。
     const sourceName = data.shipSourceAction;
     const sourceConfig = sourceName
       ? (actionsConfig[sourceName] as { destination?: string } | undefined)
       : undefined;
-    const store = sourceConfig?.destination
-      ? deserializeStorage(sourceConfig.destination)
-      : undefined;
+    const sourceAction = sourceName ? pkg.actions.find(a => a.name === sourceName) : undefined;
+    const serializedDest = sourceConfig?.destination ?? sourceAction?.dest;
+    const store = serializedDest ? deserializeStorage(serializedDest) : undefined;
     const ship = store?.type === 'SHIP_STORE' ? shipsStore.getById(store.addressableId) : undefined;
     if (!ship) {
       log.error(`未找到飞船：请先在「${sourceName ?? '转移'}」动作的执行配置中选择飞船作为目的地`);

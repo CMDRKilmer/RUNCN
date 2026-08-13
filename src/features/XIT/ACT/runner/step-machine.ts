@@ -69,6 +69,12 @@ export class StepMachine {
     this.log.skip(info.description(next));
     this.nextAct = undefined;
     this.waitActReject = undefined;
+    // 释放被跳过步骤占用的并行计数。否则 startNext 会因 activeParallelRunning > 0
+    // 提前返回，带 parallelGroup 的步骤（如 CXPO_BUY）跳过后会卡死。
+    if (next.parallelGroup) {
+      this.activeParallelRunning--;
+    }
+    this.next = undefined;
     this.startNext();
   }
 
