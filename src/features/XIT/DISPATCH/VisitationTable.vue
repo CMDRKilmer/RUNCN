@@ -3,7 +3,7 @@ import { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { fixed0 } from '@src/utils/format';
-import { formatDays } from '@src/features/XIT/STO/utils';
+import { formatDays } from '@src/features/XIT/DISPATCH/storage-utils';
 
 const { analysis } = defineProps<{ analysis: BaseStorageAnalysis }>();
 

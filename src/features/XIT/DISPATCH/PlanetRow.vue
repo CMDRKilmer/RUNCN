@@ -4,6 +4,8 @@ import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
+import InvBar from '@src/features/XIT/DISPATCH/InvBar.vue';
+import BaseDetailPanel from '@src/features/XIT/DISPATCH/BaseDetailPanel.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
@@ -11,24 +13,59 @@ import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
-import {
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { getPlanetProduction } from '@src/core/production';
+import { sumBy } from '@src/utils/sum-by';
+import { getStorageAlarmLevel } from '@src/core/storage-analysis';
+import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
+import type {
   DispatchBaseConfig,
+} from '@src/features/XIT/DISPATCH/utils';
+import {
   billTotals,
   burnDaysClass,
   formatBurnDays,
 } from '@src/features/XIT/DISPATCH/utils';
 
-const { siteId, naturalId, planetName, config, overloaded, bill } = defineProps<{
+const {
+  siteId,
+  naturalId,
+  planetName,
+  config,
+  overloaded,
+  bill,
+  showCmds,
+  showProd,
+  showRepair,
+  showInv,
+  showWar,
+  storeId,
+  warehouseStoreId,
+  analysis,
+  expanded,
+  colSpan,
+} = defineProps<{
   siteId: string;
   naturalId: string;
   planetName: string;
   config: DispatchBaseConfig;
   overloaded: boolean;
   bill?: Record<string, number>;
+  showCmds: boolean;
+  showProd: boolean;
+  showRepair: boolean;
+  showInv: boolean;
+  showWar: boolean;
+  storeId: string;
+  warehouseStoreId?: string;
+  analysis?: BaseStorageAnalysis;
+  expanded: boolean;
+  colSpan: number;
 }>();
 
 const emit = defineEmits<{
   fit: [];
+  toggleExpand: [];
 }>();
 
 const canFit = computed(() => !!config.ship);
@@ -84,9 +121,6 @@ const shipLabel = computed(
 
 const dragOver = ref(false);
 
-// Game's top-level dragover handler cancels foreign drops (sets dropEffect
-// to 'none'), which makes the browser animate the drag ghost snap-back.
-// Stop propagation so our dropEffect wins.
 function onDragEnter(event: DragEvent) {
   event.preventDefault();
   event.stopPropagation();
@@ -113,8 +147,6 @@ function onDrop(event: DragEvent) {
   if (!shipId) {
     return;
   }
-  // Mutating state during drop unmounts the drag source before dragend fires,
-  // freezing the drag ghost at the drop point. Defer past the drag operation.
   setTimeout(() => {
     config.ship = shipId;
   }, 0);
@@ -123,6 +155,42 @@ function onDrop(event: DragEvent) {
 function clearShip() {
   config.ship = undefined;
 }
+
+// Production status (from BS)
+const production = computed(() => getPlanetProduction(siteId));
+const prodTotals = computed(() => {
+  const prod = production.value;
+  if (!prod || prod.production.length === 0) {
+    return undefined;
+  }
+  return {
+    orders: sumBy(prod.production, x => x.orders.length),
+    capacity: sumBy(prod.production, x => x.capacity),
+  };
+});
+const prodBgClass = computed(() => {
+  const totals = prodTotals.value;
+  if (!totals) {
+    return {};
+  }
+  return {
+    [C.Workforces.daysMissing]: totals.orders < totals.capacity,
+    [C.Workforces.daysSupplied]: totals.orders >= totals.capacity,
+  };
+});
+const prodText = computed(() => {
+  const totals = prodTotals.value;
+  if (!totals) {
+    return undefined;
+  }
+  return totals.orders >= totals.capacity ? '\u2713' : '\u2205';
+});
+
+// Storage alarm (from BS)
+const storageAlarm = computed(() => getStorageAlarmLevel(siteId));
+const barAlarmReason = computed(() =>
+  storageAlarm.value?.level === 'red' ? storageAlarm.value.reason : undefined,
+);
 </script>
 
 <template>
@@ -138,13 +206,16 @@ function clearShip() {
           <PrunButton primary inline :class="$style.shipButton">
             <span :class="$style.shipLabel">{{ shipLabel }}</span>
           </PrunButton>
-          <PrunButton dark inline :class="$style.clearButton" @click="clearShip">×</PrunButton>
+          <PrunButton dark inline :class="$style.clearButton" @click="clearShip">&times;</PrunButton>
         </div>
       </template>
       <div v-else :class="$style.shipPlaceholder" />
     </td>
     <GripCell />
     <td :class="$style.planetCell">
+      <PrunButton dark inline :class="$style.expandButton" @click="emit('toggleExpand')">
+        {{ expanded ? '\u2212' : '+' }}
+      </PrunButton>
       <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">{{
         planetName
       }}</PrunLink>
@@ -157,10 +228,10 @@ function clearShip() {
         <span :class="$style.statusNum">{{ daysText }}</span>
       </div>
     </td>
-    <td :class="$style.toggleCell">
+    <td v-if="showRepair" :class="$style.toggleCell">
       <RadioItem v-model="config.repair" />
     </td>
-    <td :class="$style.statusCell">
+    <td v-if="showRepair" :class="$style.statusCell">
       <div :class="[$style.statusContent, repairBgClass]">
         <span :class="$style.statusNum">{{ repairDaysText }}</span>
       </div>
@@ -194,6 +265,42 @@ function clearShip() {
     <td :class="$style.advToggleCell">
       <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
     </td>
+    <td v-if="showProd" :class="$style.statusCell">
+      <div :class="[$style.statusContent, prodBgClass]">
+        <span :class="$style.statusNum" @click="showBuffer(`XIT PROD ${naturalId}`)">{{
+          prodText ?? '-'
+        }}</span>
+      </div>
+    </td>
+    <td v-if="showCmds" :class="$style.cmdCell">
+      <PrunButton dark inline>命令▸</PrunButton>
+      <div :class="$style.expandedButtons">
+        <PrunButton dark inline @click="showBuffer(`BBL ${siteId}`)">建筑</PrunButton>
+        <PrunButton dark inline @click="showBuffer(`BBC ${naturalId}`)">建造</PrunButton>
+        <PrunButton dark inline @click="showBuffer(`WF ${siteId}`)">劳动力</PrunButton>
+        <PrunButton dark inline @click="showBuffer(`EXP ${siteId}`)">专家</PrunButton>
+        <PrunButton dark inline @click="showBuffer(`BRA ${naturalId}`)">BRA</PrunButton>
+        <PrunButton dark inline @click="showBuffer('HQ')">HQ</PrunButton>
+      </div>
+    </td>
+    <td v-if="showInv" :class="$style.invCell">
+      <InvBar
+        :store-id="storeId"
+        :natural-id="naturalId"
+        :on-click-cmd="`INV ${storeId.substring(0, 8)}`"
+        :alarm-level="storageAlarm?.level"
+        :alarm-reason="barAlarmReason" />
+    </td>
+    <td v-if="showWar && warehouseStoreId" :class="$style.invCell">
+      <InvBar
+        :store-id="warehouseStoreId"
+        :on-click-cmd="`INV ${warehouseStoreId.substring(0, 8)}`" />
+    </td>
+  </tr>
+  <tr v-if="expanded && analysis" :class="$style.expandRow">
+    <td :colspan="colSpan">
+      <BaseDetailPanel :analysis="analysis" />
+    </td>
   </tr>
 </template>
 
@@ -210,14 +317,27 @@ function clearShip() {
   font-size: 12px;
   padding: 0 4px;
   line-height: 22px;
+  white-space: nowrap;
 }
 
 .planetLink {
-  display: block;
+  display: inline;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: inherit;
+}
+
+.expandButton {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  padding: 0;
+  margin-right: 2px;
+  vertical-align: middle;
 }
 
 .statusCell {
@@ -374,5 +494,43 @@ function clearShip() {
   padding: 0 4px;
   line-height: 22px;
   vertical-align: middle;
+}
+
+.cmdCell {
+  position: relative;
+  overflow: visible;
+  white-space: nowrap;
+  width: 0;
+}
+
+.expandedButtons {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.cmdCell:hover .expandedButtons {
+  display: flex;
+}
+
+.invCell {
+  min-width: 60px;
+  padding: 2px;
+}
+
+.expandRow {
+  border-bottom: 1px solid #2b485a;
+}
+
+.expandRow td {
+  padding: 0;
 }
 </style>
