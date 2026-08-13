@@ -17,6 +17,7 @@ import { countDays } from '@src/features/XIT/BURN/utils';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { userData } from '@src/store/user-data';
 import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
@@ -113,16 +114,17 @@ watchEffect(() => {
       existing.consumablesOnly === undefined ||
       existing.includeConsumables === undefined ||
       existing.cxBuy === undefined ||
-      (existing as Record<string, unknown>).materialFilter !== undefined
+      (existing as unknown as Record<string, unknown>).materialFilter !== undefined
     ) {
-      const legacy = (existing as Record<string, unknown>).materialFilter as string | undefined;
+      const legacy = (existing as unknown as Record<string, unknown>).materialFilter as
+        string | undefined;
       patched = {
         ...patched,
         consumablesOnly: existing.consumablesOnly ?? legacy === 'Workforce',
         includeConsumables: existing.includeConsumables ?? legacy !== 'Production',
         cxBuy: existing.cxBuy ?? true,
       };
-      delete (patched as Record<string, unknown>).materialFilter;
+      delete (patched as unknown as Record<string, unknown>).materialFilter;
     }
     // One-time migration: old default was plain getRepairThreshold; new default
     // matches REPAIRACT (threshold − offset). The newDefault check keeps this from
@@ -168,7 +170,7 @@ const stopWidthWatch = watch([() => rows.value.length, panesEl], async ([length,
     return;
   }
   let contentWidth = 0;
-  for (const child of panes.children) {
+  for (const child of Array.from(panes.children)) {
     contentWidth += (child as HTMLElement).offsetWidth;
   }
   if (panes.scrollWidth > panes.clientWidth) {
