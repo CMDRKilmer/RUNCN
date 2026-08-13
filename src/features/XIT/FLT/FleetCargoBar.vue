@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
-import { getMaterialCategoryCssClass } from '@src/infrastructure/prun-ui/item-tracker';
+import {
+  getMaterialCategoryCssClass,
+  translateCategory,
+} from '@src/infrastructure/prun-ui/item-tracker';
 import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
+import Tooltip from '@src/components/Tooltip.vue';
 import { fixed02 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { ref, watch, computed, onUnmounted } from 'vue';
@@ -73,7 +77,11 @@ const cargoBar = computed<CargoBarData>(() => {
       name: category.name,
       class: getMaterialCategoryCssClass(category),
       width: `${percentage}%`,
-      title: formatTitle(category.name, categorySummary.weight, categorySummary.volume),
+      title: formatTitle(
+        translateCategory(category.name),
+        categorySummary.weight,
+        categorySummary.volume,
+      ),
     });
   }
 
@@ -258,17 +266,18 @@ function onClick() {
     :style="{ '--stripe-color': stripeAlertColor, '--stripe-width': stripeWidth }"
     @click="onClick">
     <div :class="[$style.bar, miniBarClass]">
-      <div
+      <Tooltip
         v-for="segment in cargoBar.segments"
         :key="segment.name"
+        position="top"
+        :tooltip="segment.title"
+        no-icon
         :class="[$style.segment, segment.class, segment.borderClasses]"
-        :style="{ width: segment.width }"
-        :data-tooltip="segment.title"
-        data-tooltip-position="top">
+        :style="{ width: segment.width }">
         <div v-if="segment.load" :class="$style.full">
           {{ segment.load }}
         </div>
-      </div>
+      </Tooltip>
     </div>
   </div>
 </template>
@@ -322,12 +331,11 @@ function onClick() {
   display: flex;
 }
 
-/* The game's global [data-tooltip] rule applies display: inline-block and
-   padding: 0 4px 0. Without this reset every segment renders 8px wider than
-   its percentage share, so the colored fill spills past the right edge of
-   the bar into the next cell. */
+/* Override Tooltip's display: inline-block so flex children keep their
+   width share. !important is required because both rules are single-class
+   selectors and Tooltip's <style> may load after ours. */
 .segment {
-  display: block;
+  display: block !important;
   height: 100%;
   padding: 0;
 }

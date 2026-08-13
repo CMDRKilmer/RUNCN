@@ -15,6 +15,7 @@ import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
 import { vDraggable } from 'vue-draggable-plus';
@@ -567,6 +568,45 @@ function execute() {
     pkg: JSON.parse(JSON.stringify(pkg)),
   };
   showBuffer('XIT DISPATCHACT');
+
+  // 为每个已暂存基地生成独立卸货包：飞船到达后，把该基地的物资从船上转移到
+  // 星球仓库（<星球名> Base）。清单用 Manual 组冻结生成时的账单，执行时 MTRA
+  // 会按船上实际载货量钳制。多基地共船时每个基地各一个卸货包，只卸各自物资。
+  for (const base of stagedBases) {
+    const bill = billByBase.value.get(base.naturalId);
+    if (!bill) {
+      continue;
+    }
+    const unloadName = `${base.planetName} Unload`;
+    const unloadPkg: UserData.ActionPackageData = {
+      global: { name: unloadName },
+      autoDelete: true,
+      groups: [
+        {
+          type: 'Manual',
+          name: 'Unload',
+          materials: bill,
+        },
+      ],
+      actions: [
+        {
+          type: 'MTRA',
+          name: 'Unload',
+          group: 'Unload',
+          origin: configurableValue,
+          dest: `${base.planetName || base.naturalId} Base`,
+          originType: 'SHIP_STORE',
+        },
+      ],
+    };
+    const existingUnload = userData.actionPackages.find(x => x.global.name === unloadName);
+    if (existingUnload) {
+      const index = userData.actionPackages.indexOf(existingUnload);
+      userData.actionPackages[index] = unloadPkg;
+    } else {
+      userData.actionPackages.push(unloadPkg);
+    }
+  }
 }
 
 function reset() {

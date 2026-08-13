@@ -74,6 +74,50 @@ export function getMaterialCategoryCssClass(category: PrunApi.MaterialCategory) 
   return CATEGORY_CSS_PREFIX + sanitizeCategoryName(category.name);
 }
 
+// 材料类别的中文翻译(用于悬浮提示)。
+// 键为 PrUn 返回的英文类别名,值是中文显示。
+const CATEGORY_TRANSLATIONS: Record<string, string> = {
+  'agricultural products': '农产品',
+  alloys: '合金',
+  chemicals: '化工品',
+  'construction materials': '建材',
+  'construction parts': '建筑零件',
+  'construction prefabs': '建筑预制件',
+  'consumable bundles': '消耗品包',
+  'consumables (basic)': '基础消耗品',
+  'consumables (luxury)': '奢侈消耗品',
+  drones: '无人机',
+  'electronic devices': '电子设备',
+  'electronic parts': '电子零件',
+  'electronic pieces': '电子元件',
+  'electronic systems': '电子系统',
+  elements: '元素',
+  'energy systems': '能源系统',
+  fuels: '燃料',
+  gases: '气体',
+  infrastructure: '基础设施',
+  liquids: '液体',
+  'medical equipment': '医疗设备',
+  metals: '金属',
+  minerals: '矿物',
+  ores: '矿石',
+  plastics: '塑料',
+  'ship engines': '船舶引擎',
+  'ship kits': '船舶套件',
+  'ship parts': '船舶零件',
+  'ship shields': '船舶护盾',
+  'software components': '软件组件',
+  'software systems': '软件系统',
+  'software tools': '软件工具',
+  textiles: '纺织品',
+  'unit prefabs': '单元预制件',
+  utility: '杂项',
+};
+
+export function translateCategory(name: string): string {
+  return CATEGORY_TRANSLATIONS[name] ?? name;
+}
+
 // 从 PrUn js 包中复制的。
 const categoryColors = {
   'agricultural products': {
