@@ -19,6 +19,8 @@ import { comparePlanets } from '@src/util';
 import { useTileState } from '@src/store/user-data-tiles';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
+import { calculateRepairPredictions } from '@src/core/repair-plan';
+import { resolveBuildingDailyRevenue } from '@src/features/XIT/shared/repair-plan-revenue';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -110,7 +112,7 @@ function createBaseConfig(naturalId: string): DispatchBaseConfig {
     repair: false,
     days: getResupplyDays(naturalId) ?? 10,
     repAdvance: 'now',
-    consumablesOnly: false,
+    consumablesOnly: true,
     includeConsumables: true,
     cxBuy: true,
   };
@@ -161,6 +163,30 @@ const baseAnalyses = computed<Map<string, BaseStorageAnalysis> | undefined>(() =
     if (analysis) {
       map.set(analysis.naturalId, analysis);
     }
+  }
+  return map;
+});
+
+// REPP 模型的最优维修间隔(PRUNplanner 复制),供 PlanetRow 维护列按
+// age vs optimalDay 三色上色。同基地所有建筑的最优日一致,任意取一即可。
+interface RepairPlanEntry {
+  optimalDay: number | undefined;
+}
+const repairPlanByNaturalId = computed<Map<string, RepairPlanEntry> | undefined>(() => {
+  const sites = sitesStore.all.value;
+  if (!sites) {
+    return undefined;
+  }
+  const predictions = calculateRepairPredictions(sites, { resolveBuildingDailyRevenue });
+  if (!predictions) {
+    return undefined;
+  }
+  const map = new Map<string, RepairPlanEntry>();
+  for (const p of predictions) {
+    if (map.has(p.naturalId)) {
+      continue;
+    }
+    map.set(p.naturalId, { optimalDay: p.optimalDay });
   }
   return map;
 });
@@ -870,6 +896,7 @@ const colSpan = computed(() => {
                 <GripHeaderCell />
                 <th :class="[$style.narrowCol, $style.centered]">星球</th>
                 <th :class="[$style.narrowCol, $style.centered]">补给</th>
+                <th :class="[$style.narrowCol, $style.centered]">天数</th>
                 <th
                   :class="[$style.narrowCol, $style.centered, $style.sortable]"
                   @click="setSort('burn')">
@@ -889,13 +916,12 @@ const colSpan = computed(() => {
                     sortKey === 'repair' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
                   }}</span>
                 </th>
-                <th :class="[$style.narrowCol, $style.centered]">填满</th>
+                <th :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">装载</th>
                 <th :class="[$style.narrowCol, $style.centered]">物资</th>
                 <th :class="[$style.narrowCol, $style.centered]">适配</th>
-                <th :class="[$style.narrowCol, $style.centered]">天数</th>
-                <th :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">CX</th>
+                <th :class="[$style.narrowCol, $style.centered]">填满</th>
                 <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
                 <th v-if="showWar" :class="$style.warHeaderCol">仓储</th>
               </tr>
@@ -916,6 +942,7 @@ const colSpan = computed(() => {
                   :show-repair="showRepair"
                   :show-inv="showInv"
                   :show-war="showWar"
+                  :repair-plan="repairPlanByNaturalId?.get(rowById.get(id)!.base.naturalId)"
                   :overloaded="
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)

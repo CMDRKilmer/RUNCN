@@ -9,7 +9,6 @@ import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import BaseDetailPanel from '@src/features/XIT/FLEET/BaseDetailPanel.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
-import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -21,6 +20,12 @@ import { getStorageAlarmLevel } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
 import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
+
+// 黄色告警提前天数。维修列颜色基于 REPP 模型(optimalDay)三色:
+//   age ≥ optimalDay         → 红色(已到触发,应维修)
+//   optimalDay - 15 ≤ age < optimalDay → 黄色(警告期)
+//   age < optimalDay - 15    → 绿色(健康)
+const repairWarningOffset = 3;
 
 const {
   siteId,
@@ -38,6 +43,7 @@ const {
   analysis,
   expanded,
   colSpan,
+  repairPlan,
 } = defineProps<{
   siteId: string;
   naturalId: string;
@@ -54,6 +60,7 @@ const {
   analysis?: BaseStorageAnalysis;
   expanded: boolean;
   colSpan: number;
+  repairPlan?: { optimalDay: number | undefined };
 }>();
 
 const emit = defineEmits<{
@@ -74,17 +81,18 @@ const repairAge = computed(() => getPlanetRepairAge(siteId, timestampEachMinute.
 
 const repairBgClass = computed(() => {
   const age = repairAge.value;
-  if (age === undefined) {
+  const optimalDay = repairPlan?.optimalDay;
+  if (age === undefined || optimalDay === undefined) {
     return {};
   }
-  const threshold = getRepairThreshold(naturalId);
-  const offset = getRepairOffset(naturalId);
   const d = Math.floor(age);
-  return {
-    [C.Workforces.daysMissing]: d >= threshold,
-    [C.Workforces.daysWarning]: d >= threshold - offset,
-    [C.Workforces.daysSupplied]: d < threshold - offset,
-  };
+  if (d >= optimalDay) {
+    return { [C.Workforces.daysMissing]: true };
+  }
+  if (d >= optimalDay - repairWarningOffset) {
+    return { [C.Workforces.daysWarning]: true };
+  }
+  return { [C.Workforces.daysSupplied]: true };
 });
 
 const repairDaysText = computed(() => {
@@ -198,7 +206,7 @@ const prodText = computed(() => {
   if (!totals) {
     return undefined;
   }
-  return totals.orders >= totals.capacity ? '\u2713' : '\u2205';
+  return `${totals.orders}/${totals.capacity}`;
 });
 
 // Storage alarm (from BS)
@@ -240,6 +248,9 @@ const barAlarmReason = computed(() =>
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />
     </td>
+    <td :class="$style.inputCell">
+      <NumberInput v-model="config.days" :class="$style.faintInput" />
+    </td>
     <td :class="$style.statusCell">
       <div :class="[$style.statusContent, burnBgClass]">
         <span :class="$style.statusNum" @click="showBuffer(`XIT BURN ${naturalId}`)">{{
@@ -249,7 +260,7 @@ const barAlarmReason = computed(() =>
     </td>
     <td v-if="showProd" :class="$style.prodCell">
       <div :class="[$style.statusContent, prodBgClass]">
-        <span :class="$style.statusNum" @click="showBuffer(`XIT BURN ${naturalId}`)">{{
+        <span :class="$style.statusNum" @click="showBuffer(`XIT PROD ${naturalId}`)">{{
           prodText
         }}</span>
       </div>
@@ -264,10 +275,16 @@ const barAlarmReason = computed(() =>
         }}</span>
       </div>
     </td>
-    <td :class="$style.statusCell">
-      <div :class="[$style.statusContent, fillBgClass]">
-        <span :class="$style.statusNum">{{ fillText }}</span>
-      </div>
+    <td :class="$style.inputCell">
+      <SelectInput
+        v-model="config.repAdvance"
+        :width="72"
+        :class="$style.faintSelect"
+        :options="[
+          { label: '现在', value: 'now' },
+          { label: '+24h', value: '24' },
+          { label: '+48h', value: '48' },
+        ]" />
     </td>
     <td
       :class="[
@@ -286,22 +303,13 @@ const barAlarmReason = computed(() =>
     <td :class="$style.fitCell">
       <PrunButton dark inline :disabled="!canFit" @click="emit('fit')">适配</PrunButton>
     </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.days" :class="$style.faintInput" />
-    </td>
-    <td :class="$style.inputCell">
-      <SelectInput
-        v-model="config.repAdvance"
-        :width="72"
-        :class="$style.faintSelect"
-        :options="[
-          { label: '现在', value: 'now' },
-          { label: '+24h', value: '24' },
-          { label: '+48h', value: '48' },
-        ]" />
-    </td>
     <td :class="$style.advToggleCell">
       <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
+    </td>
+    <td :class="$style.statusCell">
+      <div :class="[$style.statusContent, fillBgClass]">
+        <span :class="$style.statusNum">{{ fillText }}</span>
+      </div>
     </td>
     <td v-if="showInv" :class="$style.invCell">
       <InvBar
