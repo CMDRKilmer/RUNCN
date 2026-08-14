@@ -9,15 +9,22 @@ import {
   isStationLine,
 } from '@src/infrastructure/prun-api/data/addresses';
 
-const props = defineProps<{
-  shipId: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    shipId: string;
+    mode?: 'location' | 'destination';
+  }>(),
+  { mode: 'destination' },
+);
 
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
 
 const posData = computed(() => {
-  const address = flight.value?.destination ?? ship.value?.address ?? undefined;
+  const address =
+    props.mode === 'location'
+      ? (ship.value?.address ?? undefined)
+      : (flight.value?.destination ?? ship.value?.address ?? undefined);
   const location = getLocationLineFromAddress(address);
   const naturalId = getEntityNaturalIdFromAddress(address) ?? '';
   const isStation = isStationLine(location);
