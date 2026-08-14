@@ -59,7 +59,7 @@ export interface ActionStepExecuteContext<T> extends ActionRunnerContext<T> {
   skip: () => void;
   fail: (message?: string) => void;
   assert: AssertFn;
-  requestTile: (Command: string) => Promise<PrunTile | undefined>;
+  requestTile: (command: string, silent?: boolean) => Promise<PrunTile | undefined>;
   /** 步骤是否已被取消或失败停止（用于长步骤的清理与提前退出）。 */
   isCancelled: () => boolean;
 }

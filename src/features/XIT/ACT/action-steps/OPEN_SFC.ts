@@ -21,7 +21,8 @@ export const OPEN_SFC = act.addActionStep<Data>({
     const ship = shipsStore.getByRegistration(registration);
     assert(ship, `找不到飞船 ${registration}`);
 
-    const tile = await requestTile(`SFC ${registration}`);
+    // 静默模式不适用：玩家需要在可见的 SFC 面板中确认燃料并提交飞行。
+    const tile = await requestTile(`SFC ${registration}`, false);
     if (!tile) {
       return;
     }

@@ -2,7 +2,11 @@ import { act } from '@src/features/XIT/ACT/act-registry';
 import { C } from '@src/infrastructure/prun-ui/prun-css';
 import { deepToRaw } from '@src/utils/deep-to-raw';
 import { Logger } from '@src/features/XIT/ACT/runner/logger';
-import { TileAllocator } from '@src/features/XIT/ACT/runner/tile-allocator';
+import {
+  TileAllocator,
+  hideWindow,
+  closeWindow,
+} from '@src/features/XIT/ACT/runner/tile-allocator';
 import { StepMachine } from '@src/features/XIT/ACT/runner/step-machine';
 import { StepGenerator } from '@src/features/XIT/ACT/runner/step-generator';
 import { ActionPackageConfig, ActionStep } from '@src/features/XIT/ACT/shared-types';
@@ -160,6 +164,11 @@ export class ActionRunner {
       tileAllocator: this.tileAllocator,
       onEnd: (success: boolean) => {
         this.closePreOpenedWindows();
+        this.tileAllocator.closeTrackedWindows();
+        if (success) {
+          // 执行成功后自动关闭 ACT 执行窗口（失败/取消保留，便于查看日志）。
+          this.closeActWindow();
+        }
         this.options.onEnd(success);
       },
     });
@@ -184,6 +193,7 @@ export class ActionRunner {
     this.stepMachine?.cancel();
     this.stepMachine = undefined;
     this.closePreOpenedWindows();
+    this.tileAllocator.closeTrackedWindows();
   }
 
   private async preloadPriceData(steps: ActionStep[]) {
@@ -212,15 +222,8 @@ export class ActionRunner {
     }
     // close temp windows
     for (const win of opened) {
-      this.closeWindow(win);
+      closeWindow(win);
     }
-  }
-
-  private closeWindow(win: Element) {
-    const buttons = win.getElementsByClassName(C.Window.button);
-    const closeBtn = Array.from(buttons).find(x => x.textContent === 'x') as
-      HTMLElement | undefined;
-    closeBtn?.click();
   }
 
   private async preOpenTiles(steps: ActionStep[]) {
@@ -239,6 +242,8 @@ export class ActionRunner {
       this.options.onStatusChanged(`正在打开 ${command}...`);
       const window = await showBuffer(command, { force: true, autoSubmit: true });
       if (window !== undefined) {
+        // 静默模式：隐藏预开窗口
+        hideWindow(window);
         this.preOpenedWindows.push(window);
       }
     }
@@ -249,8 +254,16 @@ export class ActionRunner {
 
   private closePreOpenedWindows() {
     for (const win of this.preOpenedWindows) {
-      this.closeWindow(win);
+      closeWindow(win);
     }
     this.preOpenedWindows = [];
+  }
+
+  /** 关闭 ACT 执行窗口（承载 ACT 面板的窗口）。 */
+  private closeActWindow() {
+    const win = this.options.tile.frame.closest(`.${C.Window.window}`);
+    if (win) {
+      closeWindow(win);
+    }
   }
 }

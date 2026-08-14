@@ -186,7 +186,7 @@ export class StepMachine {
             throw AssertionError;
           }
         },
-        requestTile: async command => await this.requestTile(command),
+        requestTile: async (command, silent) => await this.requestTile(command, silent),
         isCancelled: () => this.stopped,
       })
       .catch(e => {
@@ -197,11 +197,12 @@ export class StepMachine {
       });
   }
 
-  private async requestTile(command: string) {
+  private async requestTile(command: string, silent = true) {
     if (this.options.isAutoAct()) {
-      // 自动模式：独立窗口执行（复用预开窗口），不使用右侧 companion 小窗
+      // 自动模式：独立窗口执行（复用预开窗口），不使用右侧 companion 小窗。
+      // silent=false 时窗口保持可见（如 OPEN_SFC 需要玩家在面板中手动提交飞行）。
       this.options.onStatusChanged(`正在打开 ${command}...`);
-      const tile = await this.options.tileAllocator.requestWindow(command);
+      const tile = await this.options.tileAllocator.requestWindow(command, silent);
       if (tile === undefined) {
         this.log.error(`无法打开 ${command}`);
         this.stop();
