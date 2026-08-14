@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { getMaterialCategoryCssClass } from '@src/infrastructure/prun-ui/item-tracker';
+import {
+  getMaterialCategoryCssClass,
+  translateCategory,
+} from '@src/infrastructure/prun-ui/item-tracker';
 import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
+import Tooltip from '@src/components/Tooltip.vue';
 import { fixed02 } from '@src/utils/format';
 import { ref, watch, computed, onUnmounted } from 'vue';
 
@@ -80,7 +84,11 @@ const cargoBar = computed<CargoBarData>(() => {
       name: category.name,
       class: getMaterialCategoryCssClass(category),
       width: `${percentage}%`,
-      title: formatTitle(category.name, categorySummary.weight, categorySummary.volume),
+      title: formatTitle(
+        translateCategory(category.name),
+        categorySummary.weight,
+        categorySummary.volume,
+      ),
     });
   }
 
@@ -91,7 +99,7 @@ const cargoBar = computed<CargoBarData>(() => {
       name: 'shipments',
       class: `rp-category-none`,
       width: `${percentage}%`,
-      title: formatTitle('shipments', summary.shipments.weight, summary.shipments.volume),
+      title: formatTitle('运输中', summary.shipments.weight, summary.shipments.volume),
     });
   }
 
@@ -103,7 +111,7 @@ const cargoBar = computed<CargoBarData>(() => {
       name: 'overflow',
       class: $style.overflow,
       width: `${overflowPercent}%`,
-      title: `Over capacity by ${fixed02(overAmount)}${unit}`,
+      title: `超出容量 ${fixed02(overAmount)}${unit}`,
     });
   }
 
@@ -274,17 +282,18 @@ function handleClick() {
     }"
     @click="handleClick">
     <div :class="[$style.bar, miniBarClass]">
-      <div
+      <Tooltip
         v-for="segment in cargoBar.segments"
         :key="segment.name"
+        position="top"
+        :tooltip="segment.title"
+        no-icon
         :class="[$style.segment, segment.class, segment.borderClasses]"
-        :style="{ width: segment.width }"
-        :data-tooltip="segment.title"
-        data-tooltip-position="top">
+        :style="{ width: segment.width }">
         <div v-if="segment.load" :class="$style.full">
           {{ segment.load }}
         </div>
-      </div>
+      </Tooltip>
     </div>
   </div>
 </template>
@@ -336,10 +345,11 @@ function handleClick() {
   display: flex;
 }
 
-/* Override the inline-block applied by [data-tooltip] globally — flex items
-   still respect width, but we need block display for segment sizing. */
+/* Override Tooltip's display: inline-block so flex children keep their
+   width share. !important is required because both rules are single-class
+   selectors and Tooltip's <style> may load after ours. */
 .segment {
-  display: block;
+  display: block !important;
   height: 100%;
   padding: 0;
 }

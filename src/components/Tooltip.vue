@@ -3,9 +3,16 @@ import { onBeforeUnmount, onMounted, ref } from 'vue';
 
 export type TooltipPosition = 'left' | 'right' | 'top' | 'bottom';
 
-const { position = 'right', tooltip } = defineProps<{
+const {
+  position = 'right',
+  tooltip,
+  noIcon = false,
+} = defineProps<{
   position?: TooltipPosition;
   tooltip: string;
+  // 隐藏默认的 ⓘ 图标。当组件包裹了已有视觉的触发元素(如 cargo bar 段)
+  // 时使用,避免图标与触发元素重叠。
+  noIcon?: boolean;
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -192,7 +199,8 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="containerRef" class="rp-tooltip-container" tabindex="0" aria-hidden="false">
-    <span class="rp-tooltip-icon">ⓘ</span>
+    <slot v-if="$slots.default || noIcon" />
+    <span v-else class="rp-tooltip-icon">ⓘ</span>
   </span>
 </template>
 

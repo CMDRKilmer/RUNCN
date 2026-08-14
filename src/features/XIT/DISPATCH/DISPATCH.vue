@@ -15,7 +15,9 @@ import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { userData } from '@src/store/user-data';
 import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
@@ -112,16 +114,17 @@ watchEffect(() => {
       existing.consumablesOnly === undefined ||
       existing.includeConsumables === undefined ||
       existing.cxBuy === undefined ||
-      (existing as Record<string, unknown>).materialFilter !== undefined
+      (existing as unknown as Record<string, unknown>).materialFilter !== undefined
     ) {
-      const legacy = (existing as Record<string, unknown>).materialFilter as string | undefined;
+      const legacy = (existing as unknown as Record<string, unknown>).materialFilter as
+        string | undefined;
       patched = {
         ...patched,
         consumablesOnly: existing.consumablesOnly ?? legacy === 'Workforce',
         includeConsumables: existing.includeConsumables ?? legacy !== 'Production',
         cxBuy: existing.cxBuy ?? true,
       };
-      delete (patched as Record<string, unknown>).materialFilter;
+      delete (patched as unknown as Record<string, unknown>).materialFilter;
     }
     // One-time migration: old default was plain getRepairThreshold; new default
     // matches REPAIRACT (threshold − offset). The newDefault check keeps this from
@@ -167,7 +170,7 @@ const stopWidthWatch = watch([() => rows.value.length, panesEl], async ([length,
     return;
   }
   let contentWidth = 0;
-  for (const child of panes.children) {
+  for (const child of Array.from(panes.children)) {
     contentWidth += (child as HTMLElement).offsetWidth;
   }
   if (panes.scrollWidth > panes.clientWidth) {
@@ -567,6 +570,45 @@ function execute() {
     pkg: JSON.parse(JSON.stringify(pkg)),
   };
   showBuffer('XIT DISPATCHACT');
+
+  // 为每个已暂存基地生成独立卸货包：飞船到达后，把该基地的物资从船上转移到
+  // 星球仓库（<星球名> Base）。清单用 Manual 组冻结生成时的账单，执行时 MTRA
+  // 会按船上实际载货量钳制。多基地共船时每个基地各一个卸货包，只卸各自物资。
+  for (const base of stagedBases) {
+    const bill = billByBase.value.get(base.naturalId);
+    if (!bill) {
+      continue;
+    }
+    const unloadName = `${base.planetName} Unload`;
+    const unloadPkg: UserData.ActionPackageData = {
+      global: { name: unloadName },
+      autoDelete: true,
+      groups: [
+        {
+          type: 'Manual',
+          name: 'Unload',
+          materials: bill,
+        },
+      ],
+      actions: [
+        {
+          type: 'MTRA',
+          name: 'Unload',
+          group: 'Unload',
+          origin: configurableValue,
+          dest: `${base.planetName || base.naturalId} Base`,
+          originType: 'SHIP_STORE',
+        },
+      ],
+    };
+    const existingUnload = userData.actionPackages.find(x => x.global.name === unloadName);
+    if (existingUnload) {
+      const index = userData.actionPackages.indexOf(existingUnload);
+      userData.actionPackages[index] = unloadPkg;
+    } else {
+      userData.actionPackages.push(unloadPkg);
+    }
+  }
 }
 
 function reset() {
