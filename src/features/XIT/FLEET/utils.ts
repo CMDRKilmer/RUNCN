@@ -9,18 +9,19 @@ import {
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { calculatePlanetBurn } from '@src/core/burn';
 import { isRepairableBuilding } from '@src/core/buildings';
-import { getBuildingLastRepair, sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { fixed0, fixed01 } from '@src/utils/format';
 import { userData } from '@src/store/user-data';
 
+export type BraAdvance = 'now' | '24' | '48';
+
 export interface DispatchBaseConfig {
   resupply: boolean;
   repair: boolean;
   days: number;
-  repThreshold: number;
-  repAdvance: number;
+  repAdvance: BraAdvance;
   consumablesOnly: boolean;
   includeConsumables: boolean;
   cxBuy: boolean;
@@ -55,10 +56,14 @@ export function computeResupplyBill(
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
     if (matBurn.dailyAmount >= 0) continue;
-    // Filter by primary demand, mirroring OOG's MaterialFilter semantics:
-    // 'Workforce' → consumablesOnly, 'Production' → includeConsumables=false.
-    if (data.consumablesOnly && matBurn.workforce === 0) continue;
-    if (!data.consumablesOnly && data.includeConsumables === false && matBurn.input === 0) {
+    // 两个独立开关:
+    //   consumablesOnly       → 是否纳入 workforce 消耗的物资(消耗品)
+    //   includeConsumables    → 是否纳入 production 消耗的物资(原料)
+    // 默认两者都开,任何一类有需求就纳入。
+    if (data.consumablesOnly === false && matBurn.workforce > 0 && matBurn.input === 0) {
+      continue;
+    }
+    if (data.includeConsumables === false && matBurn.input > 0 && matBurn.workforce === 0) {
       continue;
     }
     const consumed = days * -matBurn.dailyAmount;
@@ -68,33 +73,20 @@ export function computeResupplyBill(
   return bill;
 }
 
-export function computeRepairBill(
-  site: PrunApi.Site,
-  thresholdDays: number,
-  advanceDays: number,
-): Record<string, number> {
+export function computeRepairBill(site: PrunApi.Site, advance: BraAdvance): Record<string, number> {
+  // 维修材料直接读取 BRA 数据（repairMaterials 系列），不再自行按阈值/提前折算。
+  const key =
+    advance === '24'
+      ? 'repairMaterials24'
+      : advance === '48'
+        ? 'repairMaterials48'
+        : 'repairMaterials';
   const parsedGroup: Record<string, number> = {};
   for (const building of site.platforms) {
     if (!isRepairableBuilding(building)) continue;
-    const lastRepair = getBuildingLastRepair(building);
-    const date = (new Date().getTime() - lastRepair) / 86400000;
-    if (date + advanceDays < thresholdDays) continue;
-    const buildingMaterials: Record<string, number> = {};
-    for (const mat of building.reclaimableMaterials) {
+    for (const mat of building[key] ?? []) {
       const ticker = mat.material.ticker;
-      buildingMaterials[ticker] = (buildingMaterials[ticker] ?? 0) + mat.amount;
-    }
-    for (const mat of building.repairMaterials) {
-      const ticker = mat.material.ticker;
-      buildingMaterials[ticker] = (buildingMaterials[ticker] ?? 0) + mat.amount;
-    }
-    const adjustedDate = date + advanceDays;
-    for (const ticker of Object.keys(buildingMaterials)) {
-      const amount =
-        adjustedDate > 180
-          ? buildingMaterials[ticker]
-          : Math.ceil((buildingMaterials[ticker] * adjustedDate) / 180);
-      parsedGroup[ticker] = (parsedGroup[ticker] ?? 0) + amount;
+      parsedGroup[ticker] = (parsedGroup[ticker] ?? 0) + mat.amount;
     }
   }
   return parsedGroup;
@@ -210,7 +202,7 @@ export function combinedBaseBill(
 
   let repair: Record<string, number> | undefined;
   if (config.repair) {
-    repair = computeRepairBill(site, config.repThreshold, config.repAdvance);
+    repair = computeRepairBill(site, config.repAdvance);
   }
 
   return mergeBills(resupply, repair);
@@ -256,7 +248,7 @@ export function fitDaysForShip(
     if (!base.config.repair) {
       continue;
     }
-    const bill = computeRepairBill(base.site, base.config.repThreshold, base.config.repAdvance);
+    const bill = computeRepairBill(base.site, base.config.repAdvance);
     const totals = billTotals(bill);
     repairWeight += totals.weight;
     repairVolume += totals.volume;

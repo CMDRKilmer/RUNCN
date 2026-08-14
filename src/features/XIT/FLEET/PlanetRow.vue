@@ -3,32 +3,69 @@ import PrunLink from '@src/components/PrunLink.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
+import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
+import BaseDetailPanel from '@src/features/XIT/FLEET/BaseDetailPanel.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
-import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
-import {
-  DispatchBaseConfig,
-  billTotals,
-  burnDaysClass,
-  formatBurnDays,
-} from '@src/features/XIT/DISPATCH/utils';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { getPlanetProduction } from '@src/core/production';
+import { sumBy } from '@src/utils/sum-by';
+import { getStorageAlarmLevel } from '@src/core/storage-analysis';
+import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
+import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
+import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
 
-const { siteId, naturalId, planetName, config, overloaded, bill } = defineProps<{
+// 黄色告警提前天数。维修列颜色基于 REPP 模型(optimalDay)三色:
+//   age ≥ optimalDay         → 红色(已到触发,应维修)
+//   optimalDay - 15 ≤ age < optimalDay → 黄色(警告期)
+//   age < optimalDay - 15    → 绿色(健康)
+const repairWarningOffset = 3;
+
+const {
+  siteId,
+  naturalId,
+  planetName,
+  config,
+  overloaded,
+  bill,
+  showProd,
+  showRepair,
+  showInv,
+  showWar,
+  storeId,
+  warehouseStoreId,
+  analysis,
+  expanded,
+  colSpan,
+  repairPlan,
+} = defineProps<{
   siteId: string;
   naturalId: string;
   planetName: string;
   config: DispatchBaseConfig;
   overloaded: boolean;
   bill?: Record<string, number>;
+  showProd: boolean;
+  showRepair: boolean;
+  showInv: boolean;
+  showWar: boolean;
+  storeId: string;
+  warehouseStoreId?: string;
+  analysis?: BaseStorageAnalysis;
+  expanded: boolean;
+  colSpan: number;
+  repairPlan?: { optimalDay: number | undefined };
 }>();
 
 const emit = defineEmits<{
   fit: [];
+  toggleExpand: [];
 }>();
 
 const canFit = computed(() => !!config.ship);
@@ -44,17 +81,18 @@ const repairAge = computed(() => getPlanetRepairAge(siteId, timestampEachMinute.
 
 const repairBgClass = computed(() => {
   const age = repairAge.value;
-  if (age === undefined) {
+  const optimalDay = repairPlan?.optimalDay;
+  if (age === undefined || optimalDay === undefined) {
     return {};
   }
-  const threshold = getRepairThreshold(naturalId);
-  const offset = getRepairOffset(naturalId);
   const d = Math.floor(age);
-  return {
-    [C.Workforces.daysMissing]: d >= threshold,
-    [C.Workforces.daysWarning]: d >= threshold - offset,
-    [C.Workforces.daysSupplied]: d < threshold - offset,
-  };
+  if (d >= optimalDay) {
+    return { [C.Workforces.daysMissing]: true };
+  }
+  if (d >= optimalDay - repairWarningOffset) {
+    return { [C.Workforces.daysWarning]: true };
+  }
+  return { [C.Workforces.daysSupplied]: true };
 });
 
 const repairDaysText = computed(() => {
@@ -63,6 +101,28 @@ const repairDaysText = computed(() => {
     return '-';
   }
   return String(Math.floor(age));
+});
+
+const fillText = computed(() => {
+  const days = analysis?.daysUntilFull;
+  if (days === undefined || !isFinite(days)) {
+    return '∞';
+  }
+  return formatBurnDays(days);
+});
+
+const fillBgClass = computed(() => {
+  if (!storageAlarm.value) {
+    return {};
+  }
+  switch (storageAlarm.value.level) {
+    case 'red':
+      return { [C.Workforces.daysMissing]: true };
+    case 'yellow':
+      return { [C.Workforces.daysWarning]: true };
+    default:
+      return { [C.Workforces.daysSupplied]: true };
+  }
 });
 
 const loadText = computed(() => {
@@ -84,9 +144,6 @@ const shipLabel = computed(
 
 const dragOver = ref(false);
 
-// Game's top-level dragover handler cancels foreign drops (sets dropEffect
-// to 'none'), which makes the browser animate the drag ghost snap-back.
-// Stop propagation so our dropEffect wins.
 function onDragEnter(event: DragEvent) {
   event.preventDefault();
   event.stopPropagation();
@@ -113,8 +170,6 @@ function onDrop(event: DragEvent) {
   if (!shipId) {
     return;
   }
-  // Mutating state during drop unmounts the drag source before dragend fires,
-  // freezing the drag ghost at the drop point. Defer past the drag operation.
   setTimeout(() => {
     config.ship = shipId;
   }, 0);
@@ -123,6 +178,42 @@ function onDrop(event: DragEvent) {
 function clearShip() {
   config.ship = undefined;
 }
+
+// Production status (from BS)
+const production = computed(() => getPlanetProduction(siteId));
+const prodTotals = computed(() => {
+  const prod = production.value;
+  if (!prod || prod.production.length === 0) {
+    return undefined;
+  }
+  return {
+    orders: sumBy(prod.production, x => x.orders.length),
+    capacity: sumBy(prod.production, x => x.capacity),
+  };
+});
+const prodBgClass = computed(() => {
+  const totals = prodTotals.value;
+  if (!totals) {
+    return {};
+  }
+  return {
+    [C.Workforces.daysMissing]: totals.orders < totals.capacity,
+    [C.Workforces.daysSupplied]: totals.orders >= totals.capacity,
+  };
+});
+const prodText = computed(() => {
+  const totals = prodTotals.value;
+  if (!totals) {
+    return undefined;
+  }
+  return `${totals.orders}/${totals.capacity}`;
+});
+
+// Storage alarm (from BS)
+const storageAlarm = computed(() => getStorageAlarmLevel(siteId));
+const barAlarmReason = computed(() =>
+  storageAlarm.value?.level === 'red' ? storageAlarm.value.reason : undefined,
+);
 </script>
 
 <template>
@@ -138,13 +229,18 @@ function clearShip() {
           <PrunButton primary inline :class="$style.shipButton">
             <span :class="$style.shipLabel">{{ shipLabel }}</span>
           </PrunButton>
-          <PrunButton dark inline :class="$style.clearButton" @click="clearShip">×</PrunButton>
+          <PrunButton dark inline :class="$style.clearButton" @click="clearShip"
+            >&times;</PrunButton
+          >
         </div>
       </template>
       <div v-else :class="$style.shipPlaceholder" />
     </td>
     <GripCell />
     <td :class="$style.planetCell">
+      <PrunButton dark inline :class="$style.expandButton" @click="emit('toggleExpand')">
+        {{ expanded ? '\u2212' : '+' }}
+      </PrunButton>
       <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">{{
         planetName
       }}</PrunLink>
@@ -152,18 +248,43 @@ function clearShip() {
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />
     </td>
+    <td :class="$style.inputCell">
+      <NumberInput v-model="config.days" :class="$style.faintInput" />
+    </td>
     <td :class="$style.statusCell">
       <div :class="[$style.statusContent, burnBgClass]">
-        <span :class="$style.statusNum">{{ daysText }}</span>
+        <span :class="$style.statusNum" @click="showBuffer(`XIT BURN ${naturalId}`)">{{
+          daysText
+        }}</span>
       </div>
     </td>
-    <td :class="$style.toggleCell">
+    <td v-if="showProd" :class="$style.prodCell">
+      <div :class="[$style.statusContent, prodBgClass]">
+        <span :class="$style.statusNum" @click="showBuffer(`XIT PROD ${naturalId}`)">{{
+          prodText
+        }}</span>
+      </div>
+    </td>
+    <td v-if="showRepair" :class="$style.toggleCell">
       <RadioItem v-model="config.repair" />
     </td>
-    <td :class="$style.statusCell">
+    <td v-if="showRepair" :class="$style.statusCell">
       <div :class="[$style.statusContent, repairBgClass]">
-        <span :class="$style.statusNum">{{ repairDaysText }}</span>
+        <span :class="$style.statusNum" @click="showBuffer(`BRA ${naturalId}`)">{{
+          repairDaysText
+        }}</span>
       </div>
+    </td>
+    <td :class="[$style.inputCell, $style.advanceCell]">
+      <SelectInput
+        v-model="config.repAdvance"
+        :width="72"
+        :class="$style.faintSelect"
+        :options="[
+          { label: '现在', value: 'now' },
+          { label: '+24h', value: '24' },
+          { label: '+48h', value: '48' },
+        ]" />
     </td>
     <td
       :class="[
@@ -175,24 +296,38 @@ function clearShip() {
     </td>
     <td :class="$style.selectCell">
       <div :class="$style.selectWrap">
-        <RadioItem v-model="config.consumablesOnly" horizontal>仅消耗品</RadioItem>
-        <RadioItem v-model="config.includeConsumables" horizontal>含消耗品</RadioItem>
+        <RadioItem v-model="config.consumablesOnly" horizontal>消耗品</RadioItem>
+        <RadioItem v-model="config.includeConsumables" horizontal>原料</RadioItem>
       </div>
     </td>
     <td :class="$style.fitCell">
       <PrunButton dark inline :disabled="!canFit" @click="emit('fit')">适配</PrunButton>
     </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.days" :class="$style.faintInput" />
-    </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.repThreshold" :class="$style.faintInput" />
-    </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.repAdvance" :class="$style.faintInput" />
-    </td>
     <td :class="$style.advToggleCell">
       <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
+    </td>
+    <td :class="$style.statusCell">
+      <div :class="[$style.statusContent, fillBgClass]">
+        <span :class="$style.statusNum">{{ fillText }}</span>
+      </div>
+    </td>
+    <td v-if="showInv" :class="$style.invCell">
+      <InvBar
+        :store-id="storeId"
+        :natural-id="naturalId"
+        :on-click-cmd="`INV ${storeId.substring(0, 8)}`"
+        :alarm-level="storageAlarm?.level"
+        :alarm-reason="barAlarmReason" />
+    </td>
+    <td v-if="showWar && warehouseStoreId" :class="$style.invCell">
+      <InvBar
+        :store-id="warehouseStoreId"
+        :on-click-cmd="`INV ${warehouseStoreId.substring(0, 8)}`" />
+    </td>
+  </tr>
+  <tr v-if="expanded && analysis" :class="$style.expandRow">
+    <td :colspan="colSpan">
+      <BaseDetailPanel :analysis="analysis" />
     </td>
   </tr>
 </template>
@@ -210,14 +345,27 @@ function clearShip() {
   font-size: 12px;
   padding: 0 4px;
   line-height: 22px;
+  white-space: nowrap;
 }
 
 .planetLink {
-  display: block;
+  display: inline;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   color: inherit;
+}
+
+.expandButton {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  padding: 0;
+  margin-right: 2px;
+  vertical-align: middle;
 }
 
 .statusCell {
@@ -348,6 +496,42 @@ function clearShip() {
   border-bottom-color: #666;
 }
 
+.faintSelect {
+  margin-right: 0;
+  margin-left: auto;
+}
+
+/* 提前列字体对齐星球列,但去掉粗体、降低色彩饱和,保持柔和。 */
+.advanceCell {
+  font-weight: normal;
+  font-size: 12px;
+  color: inherit;
+}
+.advanceCell :global(select) {
+  font-weight: normal;
+  font-size: 12px;
+  color: inherit;
+  background-color: transparent;
+  border-color: rgba(61, 74, 84, 0.5);
+}
+
+.faintSelect :global(select) {
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+
+.faintSelect :global(select:focus) {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
+}
+
 .selectCell {
   width: 0;
   white-space: nowrap;
@@ -374,5 +558,18 @@ function clearShip() {
   padding: 0 4px;
   line-height: 22px;
   vertical-align: middle;
+}
+
+.invCell {
+  min-width: 60px;
+  padding: 2px;
+}
+
+.expandRow {
+  border-bottom: 1px solid #2b485a;
+}
+
+.expandRow td {
+  padding: 0;
 }
 </style>

@@ -2,27 +2,35 @@
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import PlanetRow from '@src/features/XIT/DISPATCH/PlanetRow.vue';
-import ShipPool from '@src/features/XIT/DISPATCH/ShipPool.vue';
+import TextInput from '@src/components/forms/TextInput.vue';
+import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
+import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
+import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import {
   getEntityNameFromAddress,
   getEntityNaturalIdFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
+import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
+import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { comparePlanets } from '@src/util';
 import { useTileState } from '@src/store/user-data-tiles';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
-import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { countDays } from '@src/features/XIT/BURN/utils';
+import { calculateRepairPredictions } from '@src/core/repair-plan';
+import { resolveBuildingDailyRevenue } from '@src/features/XIT/shared/repair-plan-revenue';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
-import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
+import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
 import GripHeaderCell from '@src/components/grip/GripHeaderCell.vue';
 import { useTile } from '@src/hooks/use-tile';
+import fa from '@src/utils/font-awesome.module.css';
 import {
   DispatchBaseConfig,
   DispatchShip,
@@ -32,13 +40,15 @@ import {
   getShipsAtCX,
   mergeBills,
   regroupByShip,
-} from '@src/features/XIT/DISPATCH/utils';
+} from '@src/features/XIT/FLEET/utils';
 
 interface BaseEntry {
   siteId: string;
   naturalId: string;
   planetName: string;
   site: PrunApi.Site;
+  storeId: string;
+  warehouseStoreId?: string;
 }
 
 const exchangeFilterOptions: { label: string; code: string }[] = [
@@ -50,20 +60,59 @@ const exchangeFilterOptions: { label: string; code: string }[] = [
 
 const tile = useTile();
 const panesEl = ref<HTMLElement | null>(null);
+
+// Mode
+type ViewMode = 'plan' | 'inventory';
+const viewMode = useTileState<ViewMode>('viewMode', 'plan');
+
+// Plan mode state
 const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfigs', {});
 const baseOrder = useTileState<string[]>('baseOrder', []);
 const orderedIds = ref<string[]>([]);
 const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefined);
 const refuel = useTileState<boolean>('refuel', true);
 
+// Column visibility
+const showBurn = useTileState('showBurn', true);
+const showProd = useTileState('showProd', true);
+const showRepair = useTileState('showRepair', true);
+const showInv = useTileState('showInv', true);
+const showWar = useTileState('showWar', true);
+
+// Sort
+type SortKey = 'name' | 'burn' | 'repair';
+type SortDirection = 'asc' | 'desc';
+const sortKey = useTileState<SortKey>('sortKey', 'burn');
+const sortDirection = useTileState<SortDirection>('sortDirection', 'asc');
+const planetFilter = ref('');
+
+// Expanded rows for STO detail
+const expandedRows = useTileState<string[]>('expandedRows', []);
+
+function setSort(key: SortKey) {
+  if (sortKey.value === key) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = key;
+    sortDirection.value = 'asc';
+  }
+}
+
+function toggleExpand(naturalId: string) {
+  if (expandedRows.value.includes(naturalId)) {
+    expandedRows.value = expandedRows.value.filter(x => x !== naturalId);
+  } else {
+    expandedRows.value = [...expandedRows.value, naturalId];
+  }
+}
+
 function createBaseConfig(naturalId: string): DispatchBaseConfig {
   return {
     resupply: true,
     repair: false,
     days: getResupplyDays(naturalId) ?? 10,
-    repThreshold: getRepairThreshold(naturalId) - getRepairOffset(naturalId),
-    repAdvance: 1,
-    consumablesOnly: false,
+    repAdvance: 'now',
+    consumablesOnly: true,
     includeConsumables: true,
     cxBuy: true,
   };
@@ -81,17 +130,68 @@ const bases = computed<BaseEntry[] | undefined>(() => {
   }
 
   return sites
-    .map(site => ({
-      siteId: site.siteId,
-      naturalId: getEntityNaturalIdFromAddress(site.address) ?? '',
-      planetName: getEntityNameFromAddress(site.address) ?? '',
-      site,
-    }))
+    .map(site => {
+      const naturalId = getEntityNaturalIdFromAddress(site.address) ?? '';
+      const baseStore = storagesStore.getByAddressableId(site.siteId)?.[0];
+      const warehouse = warehousesStore.getByEntityNaturalId(naturalId);
+      const warehouseStore = warehouse
+        ? storagesStore
+            .getByAddressableId(warehouse.warehouseId)
+            ?.find(x => x.type === 'WAREHOUSE_STORE')
+        : undefined;
+      return {
+        siteId: site.siteId,
+        naturalId,
+        planetName: getEntityNameFromAddress(site.address) ?? '',
+        site,
+        storeId: baseStore?.id ?? '',
+        warehouseStoreId: warehouseStore?.id,
+      };
+    })
     .filter(x => x.naturalId);
 });
 
-// Fill in missing base configs and patch older persisted configs outside of
-// computeds/render to keep them pure.
+// Storage analyses for expandable detail
+const baseAnalyses = computed<Map<string, BaseStorageAnalysis> | undefined>(() => {
+  const sites = sitesStore.all.value;
+  if (!sites) {
+    return undefined;
+  }
+  const map = new Map<string, BaseStorageAnalysis>();
+  for (const site of sites) {
+    const analysis = getBaseStorageAnalysis(site);
+    if (analysis) {
+      map.set(analysis.naturalId, analysis);
+    }
+  }
+  return map;
+});
+
+// REPP 模型的最优维修间隔(PRUNplanner 复制),供 PlanetRow 维护列按
+// age vs optimalDay 三色上色。同基地所有建筑的最优日一致,任意取一即可。
+interface RepairPlanEntry {
+  optimalDay: number | undefined;
+}
+const repairPlanByNaturalId = computed<Map<string, RepairPlanEntry> | undefined>(() => {
+  const sites = sitesStore.all.value;
+  if (!sites) {
+    return undefined;
+  }
+  const predictions = calculateRepairPredictions(sites, { resolveBuildingDailyRevenue });
+  if (!predictions) {
+    return undefined;
+  }
+  const map = new Map<string, RepairPlanEntry>();
+  for (const p of predictions) {
+    if (map.has(p.naturalId)) {
+      continue;
+    }
+    map.set(p.naturalId, { optimalDay: p.optimalDay });
+  }
+  return map;
+});
+
+// Fill in missing base configs and patch older persisted configs.
 watchEffect(() => {
   const list = bases.value;
   if (!list) {
@@ -126,13 +226,10 @@ watchEffect(() => {
       };
       delete (patched as unknown as Record<string, unknown>).materialFilter;
     }
-    // One-time migration: old default was plain getRepairThreshold; new default
-    // matches REPAIRACT (threshold − offset). The newDefault check keeps this from
-    // re-firing forever when the offset is 0 (migrated value equals the old default).
-    const oldDefault = getRepairThreshold(base.naturalId);
-    const newDefault = oldDefault - getRepairOffset(base.naturalId);
-    if (existing.repThreshold === oldDefault && newDefault !== oldDefault) {
-      patched = { ...patched, repThreshold: newDefault };
+    // repAdvance 曾为数字（提前天数），现改为 BRA 三档；旧值归一到 'now'。
+    const legacyAdvance = (existing as unknown as Record<string, unknown>).repAdvance;
+    if (legacyAdvance !== 'now' && legacyAdvance !== '24' && legacyAdvance !== '48') {
+      patched = { ...patched, repAdvance: 'now' };
     }
     if (patched !== existing) {
       if (!changed) {
@@ -154,34 +251,65 @@ const rows = computed(() =>
     .filter(x => x.config !== undefined),
 );
 
-// Size the window body to content width after the first data render. The
-// game applies the initial bufferSize asynchronously around tile creation,
-// so a direct style.width write gets clobbered — go through setBufferSize
-// (dispatched after mount, applied last) instead.
-const stopWidthWatch = watch([() => rows.value.length, panesEl], async ([length, panes]) => {
-  if (length === 0 || !panes) {
-    return;
+// Filtered and sorted rows
+const filteredRows = computed(() => {
+  let result = rows.value;
+
+  const filter = planetFilter.value.trim().toUpperCase();
+  if (filter) {
+    result = result.filter(
+      x =>
+        x.base.naturalId.toUpperCase().includes(filter) ||
+        x.base.planetName.toUpperCase().includes(filter),
+    );
   }
-  stopWidthWatch();
-  await nextTick();
-  const windowEl = tile.frame.closest(`.${C.Window.window}`) as HTMLElement | null;
-  const bodyEl = windowEl ? (_$(windowEl, C.Window.body) as HTMLElement | null) : null;
-  if (!bodyEl) {
-    return;
-  }
-  let contentWidth = 0;
-  for (const child of Array.from(panes.children)) {
-    contentWidth += (child as HTMLElement).offsetWidth;
-  }
-  if (panes.scrollWidth > panes.clientWidth) {
-    contentWidth = panes.scrollWidth;
-  }
-  const chrome = bodyEl.offsetWidth - panes.clientWidth;
-  const width = Math.min(contentWidth + chrome, window.innerWidth - 60);
-  const parsedHeight = parseInt(bodyEl.style.height, 10);
-  const height = isNaN(parsedHeight) ? 500 : parsedHeight;
-  setBufferSize(tile.id, width, height);
+
+  const dir = sortDirection.value === 'asc' ? 1 : -1;
+  return [...result].sort((a, b) => {
+    if (sortKey.value === 'burn') {
+      const daysA = burnDaysRemaining(a.base.siteId);
+      const daysB = burnDaysRemaining(b.base.siteId);
+      if (daysA !== daysB) {
+        return (daysA - daysB) * dir;
+      }
+    }
+    if (sortKey.value === 'repair') {
+      return comparePlanets(a.base.naturalId, b.base.naturalId) * dir;
+    }
+    return comparePlanets(a.base.naturalId, b.base.naturalId) * dir;
+  });
 });
+
+const filteredNaturalIds = computed(() => new Set(filteredRows.value.map(x => x.base.naturalId)));
+
+// Size the window body to content width after the first data render.
+const stopWidthWatch = watch(
+  [() => filteredRows.value.length, panesEl],
+  async ([length, panes]) => {
+    if (length === 0 || !panes) {
+      return;
+    }
+    stopWidthWatch();
+    await nextTick();
+    const windowEl = tile.frame.closest(`.${C.Window.window}`) as HTMLElement | null;
+    const bodyEl = windowEl ? (_$(windowEl, C.Window.body) as HTMLElement | null) : null;
+    if (!bodyEl) {
+      return;
+    }
+    let contentWidth = 0;
+    for (const child of Array.from(panes.children)) {
+      contentWidth += (child as HTMLElement).offsetWidth;
+    }
+    if (panes.scrollWidth > panes.clientWidth) {
+      contentWidth = panes.scrollWidth;
+    }
+    const chrome = bodyEl.offsetWidth - panes.clientWidth;
+    const width = Math.min(contentWidth + chrome, window.innerWidth - 60);
+    const parsedHeight = parseInt(bodyEl.style.height, 10);
+    const height = isNaN(parsedHeight) ? 500 : parsedHeight;
+    setBufferSize(tile.id, width, height);
+  },
+);
 
 const rowById = computed(() => {
   const map = new Map<string, { base: BaseEntry; config: DispatchBaseConfig }>();
@@ -191,8 +319,7 @@ const rowById = computed(() => {
   return map;
 });
 
-// Per-base resupply+repair bill, computed once and shared by the row display,
-// the overload check, and execute().
+// Per-base resupply+repair bill.
 const billByBase = computed(() => {
   const map = new Map<string, Record<string, number>>();
   for (const { base, config } of rows.value) {
@@ -207,10 +334,9 @@ const billByBase = computed(() => {
   return map;
 });
 
-// Keep orderedIds in sync with bases + baseOrder without clobbering an
-// in-progress drag reorder.
+// Keep orderedIds in sync with bases + baseOrder.
 watchEffect(() => {
-  const list = rows.value;
+  const list = filteredRows.value;
   const present = new Map(list.map(x => [x.base.naturalId, x.base]));
   const ordered: string[] = [];
   for (const id of baseOrder.value) {
@@ -237,8 +363,7 @@ watchEffect(() => {
   }
 });
 
-// Assignment map used to auto-group rows sharing a ship. Only depends on
-// each config's .ship, so it re-runs solely on ship (re)assignment.
+// Ship assignment grouping.
 const shipAssignments = computed(() => {
   const map = new Map<string, string>();
   for (const row of rows.value) {
@@ -249,8 +374,6 @@ const shipAssignments = computed(() => {
   return map;
 });
 
-// When a ship is assigned to a second (or later) base, move that base's row
-// to sit immediately after the first base already assigned to that ship.
 watch(shipAssignments, map => {
   const next = regroupByShip(orderedIds.value, map);
   if (next.some((id, i) => id !== orderedIds.value[i])) {
@@ -267,15 +390,10 @@ const dragOptions = {
   },
 };
 
-// Built in script to pass the ref itself — the template would auto-unwrap
-// orderedIds, binding the directive to a stale array snapshot after the sync
-// watcher replaces orderedIds.value, which silently breaks drag reordering.
 const dragBinding = [orderedIds, dragOptions];
 
 const cxShips = computed(() => getShipsAtCX() ?? []);
 
-// Pool display only — assignment/execution logic always resolves against the
-// unfiltered cxShips/cxShipById so a filtered-out ship stays assigned.
 const filteredCxShips = computed(() =>
   exchangeFilter.value
     ? cxShips.value.filter(x => x.exchangeCode === exchangeFilter.value)
@@ -290,7 +408,6 @@ const cxShipById = computed(() => {
   return map;
 });
 
-// Ships whose assigned bases' combined bills exceed free cargo capacity.
 const overloadedShips = computed(() => {
   const totals = new Map<string, { weight: number; volume: number }>();
   for (const { base, config } of rows.value) {
@@ -313,7 +430,6 @@ const overloadedShips = computed(() => {
     if (!store) {
       continue;
     }
-    // Free capacity net of whatever is already in the cargo hold, matching FIT.
     if (
       t.weight > store.weightCapacity - store.weightLoad ||
       t.volume > store.volumeCapacity - store.volumeLoad
@@ -357,7 +473,6 @@ interface IncludedBase {
 }
 
 const includedBases = computed(() => {
-  // Dispatch LIST order (user-reorderable), not sites order.
   const result: IncludedBase[] = [];
   for (const id of orderedIds.value) {
     const row = rowById.value.get(id);
@@ -419,16 +534,11 @@ function execute() {
     return;
   }
 
-  // Group names are player-facing (status lines, offload package labels); planet stays
-  // a natural id because it feeds SFC/BRA tile commands.
   const groupNameOf = (base: IncludedBase) => base.planetName || base.naturalId;
 
   const groups: UserData.MaterialGroupData[] = [];
   const cxBuyActions: UserData.ActionData[] = [];
-
-  // Per-exchange aggregate of bills for bases with cxBuy on.
   const exchangeBills = new Map<string, Record<string, number>>();
-  // Bases that actually stage (non-empty bill), in list order.
   const stagedBases: IncludedBase[] = [];
 
   for (const base of includedBases.value) {
@@ -457,8 +567,6 @@ function execute() {
     return;
   }
 
-  // Group by ship, preserving list order within each group and insertion
-  // order of first-seen ships.
   const byShip = new Map<string, IncludedBase[]>();
   for (const base of stagedBases) {
     const shipId = base.config.ship!;
@@ -470,8 +578,6 @@ function execute() {
     list.push(base);
   }
 
-  // Multi-base ships first (order of each ship's first base in the list),
-  // then single-base ships.
   const multiShipGroups: IncludedBase[][] = [];
   const singleShipBases: IncludedBase[] = [];
   for (const shipBases of byShip.values()) {
@@ -485,8 +591,6 @@ function execute() {
   const mtraActions: UserData.ActionData[] = [];
   const sfcActions: UserData.ActionData[] = [];
 
-  // Per ship: one MTRA load action (warehouse → cargo) and one OPEN SFC
-  // action. One material group per ship (sum of base bills).
   const pushShipMtra = (shipBases: IncludedBase[]) => {
     const first = shipBases[0]!;
     const dispatchShip = first.dispatchShip;
@@ -566,14 +670,10 @@ function execute() {
   };
 
   stagedDispatch.value = {
-    // Deep-clone to detach from tile-state reactivity.
     pkg: JSON.parse(JSON.stringify(pkg)),
   };
-  showBuffer('XIT DISPATCHACT');
+  showBuffer('XIT FLEETACT');
 
-  // 为每个已暂存基地生成独立卸货包：飞船到达后，把该基地的物资从船上转移到
-  // 星球仓库（<星球名> Base）。清单用 Manual 组冻结生成时的账单，执行时 MTRA
-  // 会按船上实际载货量钳制。多基地共船时每个基地各一个卸货包，只卸各自物资。
   for (const base of stagedBases) {
     const bill = billByBase.value.get(base.naturalId);
     if (!bill) {
@@ -692,7 +792,7 @@ async function importDispatchConfig() {
   }
   const config = extractDispatchConfig(parsed);
   if (!config) {
-    setNotice('剪贴板内容不是 DISPATCH 配置');
+    setNotice('剪贴板内容不是 FLEET 配置');
     return;
   }
   baseConfigs.value = config.baseConfigs ?? {};
@@ -701,72 +801,162 @@ async function importDispatchConfig() {
   refuel.value = config.refuel ?? true;
   setNotice('配置已导入');
 }
+
+// Compute total column count for expand row
+const colSpan = computed(() => {
+  let count = 12; // base: ship, grip, planet, resupply, burn, fill, load, select, fit, days, repAdvance, cxBuy
+  if (showRepair.value) {
+    count += 2; // repair toggle + repair days
+  }
+  if (showProd.value) {
+    count += 1;
+  }
+  if (showInv.value) {
+    count += 1;
+  }
+  if (showWar.value) {
+    count += 1;
+  }
+  return count;
+});
 </script>
 
 <template>
-  <LoadingSpinner v-if="bases === undefined" />
-  <div v-else :class="$style.layout">
-    <div :class="C.ComExOrdersPanel.filter">
+  <div :class="$style.layout">
+    <!-- Mode toggle -->
+    <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
       <RadioItem
-        v-for="option in exchangeFilterOptions"
-        :key="option.code"
-        :model-value="exchangeFilter === option.code"
+        :model-value="viewMode === 'plan'"
         horizontal
-        @update:model-value="v => (exchangeFilter = v ? option.code : undefined)">
-        {{ option.label }}
+        @update:model-value="viewMode = 'plan'">
+        基地规划
+      </RadioItem>
+      <RadioItem
+        :model-value="viewMode === 'inventory'"
+        horizontal
+        @update:model-value="viewMode = 'inventory'">
+        库存总览
       </RadioItem>
       <div :class="$style.separator" />
-      <RadioItem v-model="refuel" horizontal>加油</RadioItem>
-      <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
-      <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
-      <span v-if="notice" :class="$style.notice">{{ notice }}</span>
-      <div :class="$style.spacer" />
-      <PrunButton dark @click="reset">重置</PrunButton>
-      <PrunButton
-        primary
-        :disabled="overloadedShips.size > 0"
-        :data-tooltip="executeTooltip"
-        @click="execute">
-        执行
-      </PrunButton>
+      <template v-if="viewMode === 'plan'">
+        <RadioItem
+          v-for="option in exchangeFilterOptions"
+          :key="option.code"
+          :model-value="exchangeFilter === option.code"
+          horizontal
+          @update:model-value="v => (exchangeFilter = v ? option.code : undefined)">
+          {{ option.label }}
+        </RadioItem>
+        <div :class="$style.separator" />
+        <RadioItem v-model="refuel" horizontal>加油</RadioItem>
+        <div :class="$style.separator" />
+        <RadioItem v-model="showBurn" horizontal>消耗</RadioItem>
+        <RadioItem v-model="showProd" horizontal>生产</RadioItem>
+        <RadioItem v-model="showRepair" horizontal>维修</RadioItem>
+        <RadioItem v-model="showInv" horizontal>库存</RadioItem>
+        <RadioItem v-model="showWar" horizontal>仓储</RadioItem>
+        <div :class="$style.searchContainer">
+          <TextInput v-model="planetFilter" />
+          <PrunButton
+            v-if="planetFilter"
+            dark
+            :class="[fa.solid, $style.clearButton]"
+            @click="planetFilter = ''">
+            {{ '' }}
+          </PrunButton>
+        </div>
+        <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
+        <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
+        <span v-if="notice" :class="$style.notice">{{ notice }}</span>
+        <div :class="$style.spacer" />
+        <PrunButton dark @click="reset">重置</PrunButton>
+        <PrunButton
+          primary
+          :disabled="overloadedShips.size > 0"
+          :data-tooltip="executeTooltip"
+          @click="execute">
+          执行
+        </PrunButton>
+      </template>
     </div>
-    <div ref="panesEl" :class="$style.panes">
-      <ShipPool :ships="filteredCxShips" :base-configs="baseConfigs" />
-      <div :class="$style.left">
-        <table :class="$style.table">
-          <thead>
-            <tr>
-              <th :class="[$style.narrowCol, $style.centered]">分配</th>
-              <GripHeaderCell />
-              <th :class="[$style.narrowCol, $style.centered]">星球</th>
-              <th :class="[$style.narrowCol, $style.centered]" colspan="2">消耗</th>
-              <th :class="[$style.narrowCol, $style.centered]" colspan="2">维修</th>
-              <th :class="[$style.narrowCol, $style.centered]">装载</th>
-              <th :class="[$style.narrowCol, $style.centered]">物资</th>
-              <th :class="[$style.narrowCol, $style.centered]">适配</th>
-              <th :class="[$style.narrowCol, $style.centered]">天数</th>
-              <th :class="[$style.narrowCol, $style.centered]">维修≥</th>
-              <th :class="[$style.narrowCol, $style.centered]">提前</th>
-              <th :class="[$style.narrowCol, $style.centered]">CX</th>
-            </tr>
-          </thead>
-          <tbody v-draggable="dragBinding">
-            <PlanetRow
-              v-for="id in orderedIds"
-              :key="id"
-              :site-id="rowById.get(id)!.base.siteId"
-              :natural-id="rowById.get(id)!.base.naturalId"
-              :planet-name="rowById.get(id)!.base.planetName"
-              :config="rowById.get(id)!.config"
-              :bill="billByBase.get(id)"
-              :overloaded="
-                !!rowById.get(id)!.config.ship && overloadedShips.has(rowById.get(id)!.config.ship!)
-              "
-              @fit="fitBase(rowById.get(id)!.base.naturalId)" />
-          </tbody>
-        </table>
+
+    <!-- Inventory mode -->
+    <InventoryView v-if="viewMode === 'inventory'" />
+
+    <!-- Plan mode -->
+    <template v-else>
+      <LoadingSpinner v-if="bases === undefined" />
+      <div v-else ref="panesEl" :class="$style.panes">
+        <ShipPool :ships="filteredCxShips" :base-configs="baseConfigs" />
+        <div :class="$style.left">
+          <table :class="$style.table">
+            <thead>
+              <tr>
+                <th :class="[$style.narrowCol, $style.centered]">分配</th>
+                <GripHeaderCell />
+                <th :class="[$style.narrowCol, $style.centered]">星球</th>
+                <th :class="[$style.narrowCol, $style.centered]">补给</th>
+                <th :class="[$style.narrowCol, $style.centered]">天数</th>
+                <th
+                  :class="[$style.narrowCol, $style.centered, $style.sortable]"
+                  @click="setSort('burn')">
+                  消耗
+                  <span :class="sortKey === 'burn' ? $style.sortActive : $style.sortInactive">{{
+                    sortKey === 'burn' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
+                  }}</span>
+                </th>
+                <th v-if="showProd" :class="[$style.narrowCol, $style.centered]">生产</th>
+                <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">维修</th>
+                <th
+                  v-if="showRepair"
+                  :class="[$style.narrowCol, $style.centered, $style.sortable]"
+                  @click="setSort('repair')">
+                  维护
+                  <span :class="sortKey === 'repair' ? $style.sortActive : $style.sortInactive">{{
+                    sortKey === 'repair' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
+                  }}</span>
+                </th>
+                <th :class="[$style.narrowCol, $style.centered]">提前</th>
+                <th :class="[$style.narrowCol, $style.centered]">装载</th>
+                <th :class="[$style.narrowCol, $style.centered]">物资</th>
+                <th :class="[$style.narrowCol, $style.centered]">适配</th>
+                <th :class="[$style.narrowCol, $style.centered]">CX</th>
+                <th :class="[$style.narrowCol, $style.centered]">填满</th>
+                <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
+                <th v-if="showWar" :class="$style.warHeaderCol">仓储</th>
+              </tr>
+            </thead>
+            <tbody v-draggable="dragBinding">
+              <template v-for="id in orderedIds" :key="id">
+                <PlanetRow
+                  v-if="filteredNaturalIds.has(id) && rowById.get(id)"
+                  :site-id="rowById.get(id)!.base.siteId"
+                  :natural-id="rowById.get(id)!.base.naturalId"
+                  :planet-name="rowById.get(id)!.base.planetName"
+                  :config="rowById.get(id)!.config"
+                  :bill="billByBase.get(id)"
+                  :store-id="rowById.get(id)!.base.storeId"
+                  :warehouse-store-id="rowById.get(id)!.base.warehouseStoreId"
+                  :analysis="baseAnalyses?.get(rowById.get(id)!.base.naturalId)"
+                  :show-prod="showProd"
+                  :show-repair="showRepair"
+                  :show-inv="showInv"
+                  :show-war="showWar"
+                  :repair-plan="repairPlanByNaturalId?.get(rowById.get(id)!.base.naturalId)"
+                  :overloaded="
+                    !!rowById.get(id)!.config.ship &&
+                    overloadedShips.has(rowById.get(id)!.config.ship!)
+                  "
+                  :expanded="expandedRows.includes(rowById.get(id)!.base.naturalId)"
+                  :col-span="colSpan"
+                  @fit="fitBase(rowById.get(id)!.base.naturalId)"
+                  @toggle-expand="toggleExpand(rowById.get(id)!.base.naturalId)" />
+              </template>
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    </template>
   </div>
 </template>
 
@@ -775,10 +965,17 @@ async function importDispatchConfig() {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
 }
 
 .spacer {
   flex: 1;
+}
+
+.filterBar {
+  flex-wrap: wrap;
 }
 
 .separator {
@@ -794,15 +991,47 @@ async function importDispatchConfig() {
   color: #8a9aa8;
 }
 
+.searchContainer {
+  display: flex;
+  align-items: center;
+}
+
+.searchContainer :global(input) {
+  background-color: #42361d;
+  border-width: 0 0 1px;
+  border-bottom: 1px solid #8d6411;
+  color: #cccccc;
+  padding: 0 5px;
+  width: 80px;
+}
+
+.searchContainer :global(input:focus) {
+  outline: none;
+}
+
+.clearButton {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-left: 2px;
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+}
+
 .panes {
   display: flex;
   flex-direction: row;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
 }
 
 .left {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: visible;
+  overflow: auto;
 }
 
 .table {
@@ -821,5 +1050,27 @@ async function importDispatchConfig() {
 
 .centered {
   text-align: center;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortActive {
+  color: rgb(171, 198, 128);
+  font-weight: bold;
+}
+
+.sortInactive {
+  color: rgb(63, 162, 222);
+}
+
+.invHeaderCol {
+  width: 67%;
+}
+
+.warHeaderCol {
+  width: 33%;
 }
 </style>
