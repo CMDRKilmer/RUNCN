@@ -3,6 +3,7 @@ import PrunLink from '@src/components/PrunLink.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import BaseDetailPanel from '@src/features/XIT/FLEET/BaseDetailPanel.vue';
@@ -54,12 +55,6 @@ const {
   expanded: boolean;
   colSpan: number;
 }>();
-
-const advanceOptions = [
-  { label: '现在', value: 'now' },
-  { label: '+24h', value: '24' },
-  { label: '+48h', value: '48' },
-] as const;
 
 const emit = defineEmits<{
   fit: [];
@@ -294,37 +289,16 @@ const barAlarmReason = computed(() =>
     <td :class="$style.inputCell">
       <NumberInput v-model="config.days" :class="$style.faintInput" />
     </td>
-    <td :class="$style.selectCell">
-      <div :class="$style.selectWrap">
-        <div
-          v-for="opt in advanceOptions"
-          :key="opt.value"
-          :class="[
-            C.RadioItem.container,
-            C.RadioItem.containerHorizontal,
-            {
-              [C.RadioItem.active]: config.repAdvance === opt.value,
-              [C.effects.shadowPrimary]: config.repAdvance === opt.value,
-            },
-          ]"
-          @click="config.repAdvance = opt.value">
-          <div
-            :class="[
-              C.RadioItem.indicator,
-              C.RadioItem.indicatorHorizontal,
-              { [C.RadioItem.active]: config.repAdvance === opt.value },
-            ]" />
-          <div
-            :class="[
-              C.RadioItem.value,
-              C.fonts.fontRegular,
-              C.type.typeSmall,
-              C.RadioItem.valueHorizontal,
-            ]">
-            {{ opt.label }}
-          </div>
-        </div>
-      </div>
+    <td :class="$style.inputCell">
+      <SelectInput
+        v-model="config.repAdvance"
+        :width="72"
+        :class="$style.faintSelect"
+        :options="[
+          { label: '现在', value: 'now' },
+          { label: '+24h', value: '24' },
+          { label: '+48h', value: '48' },
+        ]" />
     </td>
     <td :class="$style.advToggleCell">
       <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
@@ -512,6 +486,28 @@ const barAlarmReason = computed(() =>
   outline: none;
   color: #ccc;
   border-bottom-color: #666;
+}
+
+.faintSelect {
+  margin-right: 0;
+  margin-left: auto;
+}
+
+.faintSelect :global(select) {
+  height: 18px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+
+.faintSelect :global(select:focus) {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
 }
 
 .selectCell {
