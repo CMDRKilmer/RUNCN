@@ -4,8 +4,8 @@ import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
-import InvBar from '@src/features/XIT/DISPATCH/InvBar.vue';
-import BaseDetailPanel from '@src/features/XIT/DISPATCH/BaseDetailPanel.vue';
+import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
+import BaseDetailPanel from '@src/features/XIT/FLEET/BaseDetailPanel.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
@@ -18,14 +18,8 @@ import { getPlanetProduction } from '@src/core/production';
 import { sumBy } from '@src/utils/sum-by';
 import { getStorageAlarmLevel } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
-import type {
-  DispatchBaseConfig,
-} from '@src/features/XIT/DISPATCH/utils';
-import {
-  billTotals,
-  burnDaysClass,
-  formatBurnDays,
-} from '@src/features/XIT/DISPATCH/utils';
+import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
+import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
 
 const {
   siteId,
@@ -34,7 +28,6 @@ const {
   config,
   overloaded,
   bill,
-  showCmds,
   showProd,
   showRepair,
   showInv,
@@ -51,17 +44,22 @@ const {
   config: DispatchBaseConfig;
   overloaded: boolean;
   bill?: Record<string, number>;
-  showCmds: boolean;
   showProd: boolean;
   showRepair: boolean;
   showInv: boolean;
   showWar: boolean;
   storeId: string;
-  warehouseStoreId?: string;
-  analysis?: BaseStorageAnalysis;
+  warehouseStoreId: string;
+  analysis: BaseStorageAnalysis;
   expanded: boolean;
   colSpan: number;
 }>();
+
+const advanceOptions = [
+  { label: '现在', value: 'now' },
+  { label: '+24h', value: '24' },
+  { label: '+48h', value: '48' },
+] as const;
 
 const emit = defineEmits<{
   fit: [];
@@ -100,6 +98,28 @@ const repairDaysText = computed(() => {
     return '-';
   }
   return String(Math.floor(age));
+});
+
+const fillText = computed(() => {
+  const days = analysis?.daysUntilFull;
+  if (days === undefined || !isFinite(days)) {
+    return '∞';
+  }
+  return formatBurnDays(days);
+});
+
+const fillBgClass = computed(() => {
+  if (!storageAlarm.value) {
+    return {};
+  }
+  switch (storageAlarm.value.level) {
+    case 'red':
+      return { [C.Workforces.daysMissing]: true };
+    case 'yellow':
+      return { [C.Workforces.daysWarning]: true };
+    default:
+      return { [C.Workforces.daysSupplied]: true };
+  }
 });
 
 const loadText = computed(() => {
@@ -206,7 +226,9 @@ const barAlarmReason = computed(() =>
           <PrunButton primary inline :class="$style.shipButton">
             <span :class="$style.shipLabel">{{ shipLabel }}</span>
           </PrunButton>
-          <PrunButton dark inline :class="$style.clearButton" @click="clearShip">&times;</PrunButton>
+          <PrunButton dark inline :class="$style.clearButton" @click="clearShip"
+            >&times;</PrunButton
+          >
         </div>
       </template>
       <div v-else :class="$style.shipPlaceholder" />
@@ -225,7 +247,16 @@ const barAlarmReason = computed(() =>
     </td>
     <td :class="$style.statusCell">
       <div :class="[$style.statusContent, burnBgClass]">
-        <span :class="$style.statusNum">{{ daysText }}</span>
+        <span :class="$style.statusNum" @click="showBuffer(`XIT BURN ${naturalId}`)">{{
+          daysText
+        }}</span>
+      </div>
+    </td>
+    <td v-if="showProd" :class="$style.prodCell">
+      <div :class="[$style.statusContent, prodBgClass]">
+        <span :class="$style.statusNum" @click="showBuffer(`XIT BURN ${naturalId}`)">{{
+          prodText
+        }}</span>
       </div>
     </td>
     <td v-if="showRepair" :class="$style.toggleCell">
@@ -233,7 +264,14 @@ const barAlarmReason = computed(() =>
     </td>
     <td v-if="showRepair" :class="$style.statusCell">
       <div :class="[$style.statusContent, repairBgClass]">
-        <span :class="$style.statusNum">{{ repairDaysText }}</span>
+        <span :class="$style.statusNum" @click="showBuffer(`BRA ${naturalId}`)">{{
+          repairDaysText
+        }}</span>
+      </div>
+    </td>
+    <td :class="$style.statusCell">
+      <div :class="[$style.statusContent, fillBgClass]">
+        <span :class="$style.statusNum">{{ fillText }}</span>
       </div>
     </td>
     <td
@@ -246,8 +284,8 @@ const barAlarmReason = computed(() =>
     </td>
     <td :class="$style.selectCell">
       <div :class="$style.selectWrap">
-        <RadioItem v-model="config.consumablesOnly" horizontal>仅消耗品</RadioItem>
-        <RadioItem v-model="config.includeConsumables" horizontal>含消耗品</RadioItem>
+        <RadioItem v-model="config.consumablesOnly" horizontal>消耗品</RadioItem>
+        <RadioItem v-model="config.includeConsumables" horizontal>原料</RadioItem>
       </div>
     </td>
     <td :class="$style.fitCell">
@@ -256,32 +294,40 @@ const barAlarmReason = computed(() =>
     <td :class="$style.inputCell">
       <NumberInput v-model="config.days" :class="$style.faintInput" />
     </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.repThreshold" :class="$style.faintInput" />
-    </td>
-    <td :class="$style.inputCell">
-      <NumberInput v-model="config.repAdvance" :class="$style.faintInput" />
+    <td :class="$style.selectCell">
+      <div :class="$style.selectWrap">
+        <div
+          v-for="opt in advanceOptions"
+          :key="opt.value"
+          :class="[
+            C.RadioItem.container,
+            C.RadioItem.containerHorizontal,
+            {
+              [C.RadioItem.active]: config.repAdvance === opt.value,
+              [C.effects.shadowPrimary]: config.repAdvance === opt.value,
+            },
+          ]"
+          @click="config.repAdvance = opt.value">
+          <div
+            :class="[
+              C.RadioItem.indicator,
+              C.RadioItem.indicatorHorizontal,
+              { [C.RadioItem.active]: config.repAdvance === opt.value },
+            ]" />
+          <div
+            :class="[
+              C.RadioItem.value,
+              C.fonts.fontRegular,
+              C.type.typeSmall,
+              C.RadioItem.valueHorizontal,
+            ]">
+            {{ opt.label }}
+          </div>
+        </div>
+      </div>
     </td>
     <td :class="$style.advToggleCell">
       <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
-    </td>
-    <td v-if="showProd" :class="$style.statusCell">
-      <div :class="[$style.statusContent, prodBgClass]">
-        <span :class="$style.statusNum" @click="showBuffer(`XIT PROD ${naturalId}`)">{{
-          prodText ?? '-'
-        }}</span>
-      </div>
-    </td>
-    <td v-if="showCmds" :class="$style.cmdCell">
-      <PrunButton dark inline>命令▸</PrunButton>
-      <div :class="$style.expandedButtons">
-        <PrunButton dark inline @click="showBuffer(`BBL ${siteId}`)">建筑</PrunButton>
-        <PrunButton dark inline @click="showBuffer(`BBC ${naturalId}`)">建造</PrunButton>
-        <PrunButton dark inline @click="showBuffer(`WF ${siteId}`)">劳动力</PrunButton>
-        <PrunButton dark inline @click="showBuffer(`EXP ${siteId}`)">专家</PrunButton>
-        <PrunButton dark inline @click="showBuffer(`BRA ${naturalId}`)">BRA</PrunButton>
-        <PrunButton dark inline @click="showBuffer('HQ')">HQ</PrunButton>
-      </div>
     </td>
     <td v-if="showInv" :class="$style.invCell">
       <InvBar
@@ -494,31 +540,6 @@ const barAlarmReason = computed(() =>
   padding: 0 4px;
   line-height: 22px;
   vertical-align: middle;
-}
-
-.cmdCell {
-  position: relative;
-  overflow: visible;
-  white-space: nowrap;
-  width: 0;
-}
-
-.expandedButtons {
-  display: none;
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 10;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0 4px;
-  white-space: nowrap;
-}
-
-.cmdCell:hover .expandedButtons {
-  display: flex;
 }
 
 .invCell {

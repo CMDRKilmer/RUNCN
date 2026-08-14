@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import PrunButton from '@src/components/PrunButton.vue';
-import type { DispatchBaseConfig, DispatchShip } from '@src/features/XIT/DISPATCH/utils';
+import type { DispatchBaseConfig, DispatchShip } from '@src/features/XIT/FLEET/utils';
 
 const { ships, baseConfigs } = defineProps<{
   ships: DispatchShip[];

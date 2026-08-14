@@ -10,7 +10,7 @@ import {
   getLocationLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import InvBar from '@src/features/XIT/DISPATCH/InvBar.vue';
+import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { useTileState } from '@src/store/user-data-tiles';

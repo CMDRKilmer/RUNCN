@@ -3,9 +3,9 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
-import PlanetRow from '@src/features/XIT/DISPATCH/PlanetRow.vue';
-import ShipPool from '@src/features/XIT/DISPATCH/ShipPool.vue';
-import InventoryView from '@src/features/XIT/DISPATCH/InventoryView.vue';
+import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
+import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
+import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
@@ -18,13 +18,12 @@ import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { comparePlanets } from '@src/util';
 import { useTileState } from '@src/store/user-data-tiles';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
-import { getRepairOffset, getRepairThreshold } from '@src/core/buildings';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
-import { stagedDispatch } from '@src/features/XIT/DISPATCH/staged';
+import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
 import GripHeaderCell from '@src/components/grip/GripHeaderCell.vue';
@@ -39,7 +38,7 @@ import {
   getShipsAtCX,
   mergeBills,
   regroupByShip,
-} from '@src/features/XIT/DISPATCH/utils';
+} from '@src/features/XIT/FLEET/utils';
 
 interface BaseEntry {
   siteId: string;
@@ -72,7 +71,6 @@ const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefi
 const refuel = useTileState<boolean>('refuel', true);
 
 // Column visibility
-const showCmds = useTileState('showCmds', true);
 const showBurn = useTileState('showBurn', true);
 const showProd = useTileState('showProd', true);
 const showRepair = useTileState('showRepair', true);
@@ -111,8 +109,7 @@ function createBaseConfig(naturalId: string): DispatchBaseConfig {
     resupply: true,
     repair: false,
     days: getResupplyDays(naturalId) ?? 10,
-    repThreshold: getRepairThreshold(naturalId) - getRepairOffset(naturalId),
-    repAdvance: 1,
+    repAdvance: 'now',
     consumablesOnly: false,
     includeConsumables: true,
     cxBuy: true,
@@ -203,10 +200,10 @@ watchEffect(() => {
       };
       delete (patched as unknown as Record<string, unknown>).materialFilter;
     }
-    const oldDefault = getRepairThreshold(base.naturalId);
-    const newDefault = oldDefault - getRepairOffset(base.naturalId);
-    if (existing.repThreshold === oldDefault && newDefault !== oldDefault) {
-      patched = { ...patched, repThreshold: newDefault };
+    // repAdvance 曾为数字（提前天数），现改为 BRA 三档；旧值归一到 'now'。
+    const legacyAdvance = (existing as unknown as Record<string, unknown>).repAdvance;
+    if (legacyAdvance !== 'now' && legacyAdvance !== '24' && legacyAdvance !== '48') {
+      patched = { ...patched, repAdvance: 'now' };
     }
     if (patched !== existing) {
       if (!changed) {
@@ -649,7 +646,7 @@ function execute() {
   stagedDispatch.value = {
     pkg: JSON.parse(JSON.stringify(pkg)),
   };
-  showBuffer('XIT DISPATCHACT');
+  showBuffer('XIT FLEETACT');
 
   for (const base of stagedBases) {
     const bill = billByBase.value.get(base.naturalId);
@@ -769,7 +766,7 @@ async function importDispatchConfig() {
   }
   const config = extractDispatchConfig(parsed);
   if (!config) {
-    setNotice('剪贴板内容不是 DISPATCH 配置');
+    setNotice('剪贴板内容不是 FLEET 配置');
     return;
   }
   baseConfigs.value = config.baseConfigs ?? {};
@@ -781,14 +778,11 @@ async function importDispatchConfig() {
 
 // Compute total column count for expand row
 const colSpan = computed(() => {
-  let count = 15; // base: ship, grip, planet, resupply, burn, load, select, fit, days, repThreshold, repAdvance, cxBuy
+  let count = 12; // base: ship, grip, planet, resupply, burn, fill, load, select, fit, days, repAdvance, cxBuy
   if (showRepair.value) {
     count += 2; // repair toggle + repair days
   }
   if (showProd.value) {
-    count += 1;
-  }
-  if (showCmds.value) {
     count += 1;
   }
   if (showInv.value) {
@@ -804,7 +798,7 @@ const colSpan = computed(() => {
 <template>
   <div :class="$style.layout">
     <!-- Mode toggle -->
-    <div :class="C.ComExOrdersPanel.filter">
+    <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
       <RadioItem
         :model-value="viewMode === 'plan'"
         horizontal
@@ -830,7 +824,6 @@ const colSpan = computed(() => {
         <div :class="$style.separator" />
         <RadioItem v-model="refuel" horizontal>加油</RadioItem>
         <div :class="$style.separator" />
-        <RadioItem v-model="showCmds" horizontal>命令</RadioItem>
         <RadioItem v-model="showBurn" horizontal>消耗</RadioItem>
         <RadioItem v-model="showProd" horizontal>生产</RadioItem>
         <RadioItem v-model="showRepair" horizontal>维修</RadioItem>
@@ -885,26 +878,24 @@ const colSpan = computed(() => {
                     sortKey === 'burn' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
                   }}</span>
                 </th>
+                <th v-if="showProd" :class="[$style.narrowCol, $style.centered]">生产</th>
                 <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">维修</th>
                 <th
                   v-if="showRepair"
                   :class="[$style.narrowCol, $style.centered, $style.sortable]"
                   @click="setSort('repair')">
                   维护
-                  <span
-                    :class="sortKey === 'repair' ? $style.sortActive : $style.sortInactive">{{
-                      sortKey === 'repair' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
-                    }}</span>
+                  <span :class="sortKey === 'repair' ? $style.sortActive : $style.sortInactive">{{
+                    sortKey === 'repair' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
+                  }}</span>
                 </th>
+                <th :class="[$style.narrowCol, $style.centered]">填满</th>
                 <th :class="[$style.narrowCol, $style.centered]">装载</th>
                 <th :class="[$style.narrowCol, $style.centered]">物资</th>
                 <th :class="[$style.narrowCol, $style.centered]">适配</th>
                 <th :class="[$style.narrowCol, $style.centered]">天数</th>
-                <th :class="[$style.narrowCol, $style.centered]">维修≥</th>
                 <th :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">CX</th>
-                <th v-if="showProd" :class="[$style.narrowCol, $style.centered]">生产</th>
-                <th v-if="showCmds" :class="[$style.narrowCol, $style.centered]">命令</th>
                 <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
                 <th v-if="showWar" :class="$style.warHeaderCol">仓储</th>
               </tr>
@@ -920,16 +911,14 @@ const colSpan = computed(() => {
                   :bill="billByBase.get(id)"
                   :store-id="rowById.get(id)!.base.storeId"
                   :warehouse-store-id="rowById.get(id)!.base.warehouseStoreId"
-                  :analysis="
-                    baseAnalyses?.get(rowById.get(id)!.base.naturalId)
-                  "
-                  :show-cmds="showCmds"
+                  :analysis="baseAnalyses?.get(rowById.get(id)!.base.naturalId)"
                   :show-prod="showProd"
                   :show-repair="showRepair"
                   :show-inv="showInv"
                   :show-war="showWar"
                   :overloaded="
-                    !!rowById.get(id)!.config.ship && overloadedShips.has(rowById.get(id)!.config.ship!)
+                    !!rowById.get(id)!.config.ship &&
+                    overloadedShips.has(rowById.get(id)!.config.ship!)
                   "
                   :expanded="expandedRows.includes(rowById.get(id)!.base.naturalId)"
                   :col-span="colSpan"
@@ -949,10 +938,17 @@ const colSpan = computed(() => {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
 }
 
 .spacer {
   flex: 1;
+}
+
+.filterBar {
+  flex-wrap: wrap;
 }
 
 .separator {
@@ -999,12 +995,16 @@ const colSpan = computed(() => {
 .panes {
   display: flex;
   flex-direction: row;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
 }
 
 .left {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: visible;
+  overflow: auto;
 }
 
 .table {
