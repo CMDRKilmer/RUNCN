@@ -501,16 +501,18 @@ const barAlarmReason = computed(() =>
   margin-left: auto;
 }
 
-/* 提前列字体对齐星球列(粗体 + 12px),颜色继承 table 默认。 */
+/* 提前列字体对齐星球列,但去掉粗体、降低色彩饱和,保持柔和。 */
 .advanceCell {
-  font-weight: bold;
+  font-weight: normal;
   font-size: 12px;
   color: inherit;
 }
 .advanceCell :global(select) {
-  font-weight: bold;
+  font-weight: normal;
   font-size: 12px;
   color: inherit;
+  background-color: transparent;
+  border-color: rgba(61, 74, 84, 0.5);
 }
 
 .faintSelect :global(select) {
