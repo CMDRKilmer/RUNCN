@@ -6,7 +6,6 @@ import NumberInput from '@src/components/forms/NumberInput.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
-import BaseDetailPanel from '@src/features/XIT/FLEET/BaseDetailPanel.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
@@ -41,8 +40,6 @@ const {
   storeId,
   warehouseStoreId,
   analysis,
-  expanded,
-  colSpan,
   repairPlan,
 } = defineProps<{
   siteId: string;
@@ -58,17 +55,31 @@ const {
   storeId: string;
   warehouseStoreId?: string;
   analysis?: BaseStorageAnalysis;
-  expanded: boolean;
-  colSpan: number;
   repairPlan?: { optimalDay: number | undefined };
 }>();
 
 const emit = defineEmits<{
   fit: [];
-  toggleExpand: [];
 }>();
 
 const canFit = computed(() => !!config.ship);
+
+// 天数输入不能超过基地「可容纳供应天数」。
+// analysis.daysOfSuppliesFit = 出货后填到 N% 时基地可容纳的总消耗天数;
+// 配置天数超过这个值会导致补给账单超出仓储,在 FLEET 的「适配」与「装载」计算中也按此上限截断。
+// 同时监听 days 与 cap,确保持久化的初始超 cap 值以及 cap 后置变小的情况都能被截断。
+watch(
+  [() => config.days, () => analysis?.daysOfSuppliesFit],
+  ([days, cap]) => {
+    if (cap === undefined || !isFinite(cap)) {
+      return;
+    }
+    if (days > cap) {
+      config.days = cap;
+    }
+  },
+  { immediate: true },
+);
 
 const burn = computed(() => getPlanetBurn(siteId));
 const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
@@ -238,9 +249,6 @@ const barAlarmReason = computed(() =>
     </td>
     <GripCell />
     <td :class="$style.planetCell">
-      <PrunButton dark inline :class="$style.expandButton" @click="emit('toggleExpand')">
-        {{ expanded ? '\u2212' : '+' }}
-      </PrunButton>
       <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">{{
         planetName
       }}</PrunLink>
@@ -325,11 +333,6 @@ const barAlarmReason = computed(() =>
         :on-click-cmd="`INV ${warehouseStoreId.substring(0, 8)}`" />
     </td>
   </tr>
-  <tr v-if="expanded && analysis" :class="$style.expandRow">
-    <td :colspan="colSpan">
-      <BaseDetailPanel :analysis="analysis" />
-    </td>
-  </tr>
 </template>
 
 <style module>
@@ -354,18 +357,6 @@ const barAlarmReason = computed(() =>
   white-space: nowrap;
   text-overflow: ellipsis;
   color: inherit;
-}
-
-.expandButton {
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  width: 18px;
-  height: 18px;
-  font-size: 11px;
-  padding: 0;
-  margin-right: 2px;
-  vertical-align: middle;
 }
 
 .statusCell {
@@ -563,13 +554,5 @@ const barAlarmReason = computed(() =>
 .invCell {
   min-width: 60px;
   padding: 2px;
-}
-
-.expandRow {
-  border-bottom: 1px solid #2b485a;
-}
-
-.expandRow td {
-  padding: 0;
 }
 </style>
