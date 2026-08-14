@@ -86,23 +86,12 @@ const sortKey = useTileState<SortKey>('sortKey', 'burn');
 const sortDirection = useTileState<SortDirection>('sortDirection', 'asc');
 const planetFilter = ref('');
 
-// Expanded rows for STO detail
-const expandedRows = useTileState<string[]>('expandedRows', []);
-
 function setSort(key: SortKey) {
   if (sortKey.value === key) {
     sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
   } else {
     sortKey.value = key;
     sortDirection.value = 'asc';
-  }
-}
-
-function toggleExpand(naturalId: string) {
-  if (expandedRows.value.includes(naturalId)) {
-    expandedRows.value = expandedRows.value.filter(x => x !== naturalId);
-  } else {
-    expandedRows.value = [...expandedRows.value, naturalId];
   }
 }
 
@@ -801,24 +790,6 @@ async function importDispatchConfig() {
   refuel.value = config.refuel ?? true;
   setNotice('配置已导入');
 }
-
-// Compute total column count for expand row
-const colSpan = computed(() => {
-  let count = 12; // base: ship, grip, planet, resupply, burn, fill, load, select, fit, days, repAdvance, cxBuy
-  if (showRepair.value) {
-    count += 2; // repair toggle + repair days
-  }
-  if (showProd.value) {
-    count += 1;
-  }
-  if (showInv.value) {
-    count += 1;
-  }
-  if (showWar.value) {
-    count += 1;
-  }
-  return count;
-});
 </script>
 
 <template>
@@ -947,10 +918,7 @@ const colSpan = computed(() => {
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)
                   "
-                  :expanded="expandedRows.includes(rowById.get(id)!.base.naturalId)"
-                  :col-span="colSpan"
-                  @fit="fitBase(rowById.get(id)!.base.naturalId)"
-                  @toggle-expand="toggleExpand(rowById.get(id)!.base.naturalId)" />
+                  @fit="fitBase(rowById.get(id)!.base.naturalId)" />
               </template>
             </tbody>
           </table>
