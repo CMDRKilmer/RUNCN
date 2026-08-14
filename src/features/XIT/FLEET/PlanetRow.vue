@@ -275,7 +275,7 @@ const barAlarmReason = computed(() =>
         }}</span>
       </div>
     </td>
-    <td :class="$style.inputCell">
+    <td :class="[$style.inputCell, $style.advanceCell]">
       <SelectInput
         v-model="config.repAdvance"
         :width="72"
@@ -499,6 +499,18 @@ const barAlarmReason = computed(() =>
 .faintSelect {
   margin-right: 0;
   margin-left: auto;
+}
+
+/* 提前列字体对齐星球列(粗体 + 12px),颜色继承 table 默认。 */
+.advanceCell {
+  font-weight: bold;
+  font-size: 12px;
+  color: inherit;
+}
+.advanceCell :global(select) {
+  font-weight: bold;
+  font-size: 12px;
+  color: inherit;
 }
 
 .faintSelect :global(select) {

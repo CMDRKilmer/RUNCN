@@ -56,10 +56,14 @@ export function computeResupplyBill(
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
     if (matBurn.dailyAmount >= 0) continue;
-    // Filter by primary demand, mirroring OOG's MaterialFilter semantics:
-    // 'Workforce' → consumablesOnly, 'Production' → includeConsumables=false.
-    if (data.consumablesOnly && matBurn.workforce === 0) continue;
-    if (!data.consumablesOnly && data.includeConsumables === false && matBurn.input === 0) {
+    // 两个独立开关:
+    //   consumablesOnly       → 是否纳入 workforce 消耗的物资(消耗品)
+    //   includeConsumables    → 是否纳入 production 消耗的物资(原料)
+    // 默认两者都开,任何一类有需求就纳入。
+    if (data.consumablesOnly === false && matBurn.workforce > 0 && matBurn.input === 0) {
+      continue;
+    }
+    if (data.includeConsumables === false && matBurn.input > 0 && matBurn.workforce === 0) {
       continue;
     }
     const consumed = days * -matBurn.dailyAmount;
