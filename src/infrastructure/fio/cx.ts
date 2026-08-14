@@ -4,13 +4,34 @@ import { isPresent } from 'ts-extras';
 
 const updateInterval = dayjs.duration(15, 'minutes').asMilliseconds();
 
+// GitHub Pages 有时无法访问（如网络屏蔽），失败时回退到 jsDelivr 镜像。
+const priceUrls = [
+  'https://refined-prun.github.io/refined-prices/all.json',
+  'https://cdn.jsdelivr.net/gh/refined-prun/refined-prices@main/all.json',
+];
+
+async function fetchTickerPrices(): Promise<TickerPriceInfo[]> {
+  let lastError: unknown;
+  for (const url of priceUrls) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const json = await response.json();
+      return json as TickerPriceInfo[];
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 export async function fetchPrices() {
   setTimeout(fetchPrices, updateInterval);
 
   try {
-    const url = 'https://refined-prun.github.io/refined-prices/all.json';
-    const response = await fetch(url);
-    const tickersInfo = (await response.json()) as TickerPriceInfo[];
+    const tickersInfo = await fetchTickerPrices();
 
     const prices = new Map<string, CXPriceInfo>();
     const tickers = new Set<string>();

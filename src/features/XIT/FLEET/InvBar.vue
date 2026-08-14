@@ -241,9 +241,6 @@ const alarmClass = computed(() => ({
 </template>
 
 <style module>
-/* padding: 0 抵消游戏的 [data-tooltip] 规则（padding: 0 4px 0），
-   一旦告警提供 tooltip 该规则就会生效。它会在两侧各缩进 4px，
-   使条纹背景在两端露出，且段落不再呈现为左对齐。 */
 .container {
   position: relative;
   margin: 0;
@@ -289,22 +286,12 @@ const alarmClass = computed(() => ({
   display: flex;
 }
 
-/* 使用 .bar 的专属兄弟元素而非 .container 的 ::after 伪元素：
-   .container 还承载了告警原因的 data-tooltip，而游戏自身的
-   [data-tooltip]::after 规则（用于 tooltip 箭头）在相同样式优先级下
-   会覆盖并清零伪元素。使用真实元素可规避此问题。
-   作为 .bar 的兄弟元素（而非嵌套在内部）可跨 .container 的完整
-   padding-box —— .bar 本身会被 .container 的 padding/border
-   （来自游戏的 C.ProgressBar.progress 类）内缩，否则会在两端留出
-   一道 .container 背景的缝隙。 */
 .alarmOverlay {
   position: absolute;
   pointer-events: none;
   z-index: 2;
 }
 
-/* 红色告警：覆盖整条的黑/红警示条纹 + 黑色描边。仓储已达（或预计超过）容量。
-   黑色条纹完全透明，红色条纹半透明 20%，底层的进度条始终透出。 */
 .isAlarmRed {
   inset: 0;
   background-image: repeating-linear-gradient(

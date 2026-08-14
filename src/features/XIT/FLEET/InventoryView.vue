@@ -10,16 +10,12 @@ import {
   getLocationLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import LoadingSpinner from '@src/components/LoadingSpinner.vue';
-import InvBar from '@src/features/XIT/BS/InvBar.vue';
+import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { useTileState } from './tile-state';
+import { useTileState } from '@src/store/user-data-tiles';
 import fa from '@src/utils/font-awesome.module.css';
 
-// 注意:oog 的原版 INV 还在行右键事件中调用了
-// `@src/features/XIT/planet-context-menu` 弹出的 PLI/COGC/POPR/POPI/ADM 菜单。
-// RUNCN 没有该功能(BS / BURN 也未启用),所以本迁移版本省略右键菜单,保留其余交互。
 type InvType = 'BASE' | 'SHIP' | 'WAREHOUSE' | 'CX';
 
 const TYPE_ORDER: Record<InvType, number> = { CX: 0, BASE: 1, SHIP: 2, WAREHOUSE: 3 };
@@ -39,11 +35,11 @@ interface InvRow {
   onClickCmd: string;
 }
 
-const showBase = useTileState('showBase');
-const showShip = useTileState('showShip');
-const showWarehouse = useTileState('showWarehouse');
-const showCx = useTileState('showCx');
-const showBaseWar = useTileState('showBaseWar');
+const showBase = useTileState('invShowBase', true);
+const showShip = useTileState('invShowShip', true);
+const showWarehouse = useTileState('invShowWarehouse', true);
+const showCx = useTileState('invShowCx', true);
+const showBaseWar = useTileState('invShowBaseWar', true);
 const locationFilter = ref('');
 
 const basePlanetIds = computed(() => {

@@ -2,9 +2,9 @@
 import { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { computeNeed, getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import VisitationTable from '@src/features/XIT/STO/VisitationTable.vue';
+import VisitationTable from '@src/features/XIT/FLEET/VisitationTable.vue';
 import { fixed01, fixed0, percent0 } from '@src/utils/format';
-import { formatDays } from '@src/features/XIT/STO/utils';
+import { formatDays } from '@src/features/XIT/FLEET/storage-utils';
 
 const { analysis } = defineProps<{ analysis: BaseStorageAnalysis }>();
 
