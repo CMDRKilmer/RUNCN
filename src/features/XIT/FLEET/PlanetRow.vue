@@ -50,8 +50,8 @@ const {
   showInv: boolean;
   showWar: boolean;
   storeId: string;
-  warehouseStoreId: string;
-  analysis: BaseStorageAnalysis;
+  warehouseStoreId?: string;
+  analysis?: BaseStorageAnalysis;
   expanded: boolean;
   colSpan: number;
 }>();
