@@ -50,7 +50,15 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
   });
 });
 
-const rows = computed(() => rawRows.value);
+const rows = computed(() => {
+  const source = rawRows.value;
+  if (!source) {
+    return undefined;
+  }
+  return [...source].sort((a, b) =>
+    (a.ship.name || a.ship.registration).localeCompare(b.ship.name || b.ship.registration),
+  );
+});
 
 function getCargoSizeText(inventory: PrunApi.Store | undefined) {
   if (!inventory) {
@@ -98,9 +106,10 @@ function getConditionClass(condition: number) {
       <!-- Header row -->
       <div :class="$style.headerRow">
         <div :class="[$style.headerCell]">舰名</div>
-        <div :class="[$style.headerCell, $style.cargoCombinedCell]">容量货物</div>
+        <div :class="[$style.headerCell, $style.cargoCombinedCell]">货物</div>
         <div :class="[$style.headerCell, $style.colStatus]">状态</div>
         <div :class="[$style.headerCell, $style.colLocation]">位置</div>
+        <div :class="[$style.headerCell, $style.colLocation]">目的地</div>
         <div :class="[$style.headerCell, $style.colTime]">ETA</div>
         <div :class="[$style.headerCell, $style.colRepair]">维修</div>
         <div :class="[$style.headerCell, $style.colFuel]">燃料</div>
@@ -128,7 +137,11 @@ function getConditionClass(condition: number) {
         </div>
 
         <div :class="[$style.bodyCell, $style.colLocation]">
-          <LocationCell :ship-id="x.ship.id" />
+          <LocationCell :ship-id="x.ship.id" mode="location" />
+        </div>
+
+        <div :class="[$style.bodyCell, $style.colLocation]">
+          <LocationCell :ship-id="x.ship.id" mode="destination" />
         </div>
 
         <div :class="[$style.bodyCell, $style.colTime]">
@@ -182,7 +195,7 @@ function getConditionClass(condition: number) {
   container-type: inline-size;
   grid-template-columns:
     minmax(80px, auto) minmax(80px, auto) minmax(80px, auto) minmax(110px, auto)
-    minmax(80px, 1fr) minmax(50px, auto) minmax(50px, auto);
+    minmax(110px, auto) minmax(80px, 1fr) minmax(50px, auto) minmax(50px, auto);
 }
 
 .headerRow {
@@ -209,7 +222,10 @@ function getConditionClass(condition: number) {
   align-items: center;
 }
 
+/* Align header text to the top so a tall body cell (e.g. cargo bar with size
+   label) does not push the header label down inside an oversized row. */
 .headerCell {
+  align-items: flex-start;
   padding: 5px 8px 2px;
   font-weight: normal;
 }
