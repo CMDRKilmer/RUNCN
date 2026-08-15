@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { getShipStatusIcon, stationaryShipStatusIcon } from '@src/core/ship-status-icons';
+import { getShipStatusLabel } from '@src/core/ship-status-icons';
 
 const props = defineProps<{
   shipId: string;
@@ -12,15 +12,15 @@ const props = defineProps<{
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
 
-const statusIcon = computed(() => {
+const statusText = computed(() => {
   if (!ship.value) {
     return '';
   }
   if (!flight.value) {
-    return stationaryShipStatusIcon;
+    return '静止';
   }
   const segment = flight.value.segments[flight.value.currentSegmentIndex];
-  return segment != null ? getShipStatusIcon(segment.type) : stationaryShipStatusIcon;
+  return segment != null ? getShipStatusLabel(segment.type) : '静止';
 });
 </script>
 
@@ -30,7 +30,7 @@ const statusIcon = computed(() => {
     data-tooltip="打开飞行控制"
     data-tooltip-position="right"
     @click.stop="showBuffer(`SFC ${ship?.registration}`)"
-    >{{ statusIcon }}</span
+    >{{ statusText }}</span
   >
 </template>
 

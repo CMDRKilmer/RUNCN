@@ -6,6 +6,7 @@ import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import {
   getEntityNaturalIdFromAddress,
   getLocationLineFromAddress,
+  getSystemLineFromAddress,
   isStationLine,
 } from '@src/infrastructure/prun-api/data/addresses';
 
@@ -20,20 +21,50 @@ const props = withDefaults(
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
 
-// In destination mode, only the active flight's destination counts.
-// A parked/stationary ship has no destination — falling back to the ship's
-// current address caused parked ships to show their location as the "destination".
-const address = computed(() =>
-  props.mode === 'location' ? (ship.value?.address ?? undefined) : flight.value?.destination,
+// The "location" column shows where the ship is RIGHT NOW: for a ship that's
+// actively flying, the SFC tile reports the current segment's origin as the
+// current position. Mid-flight legs like JUMP/CHARGE carry an ORBIT-only
+// origin (no PLANET/STATION line), so we walk a fallback chain — current
+// segment → first segment → flight origin → ship.address — to guarantee the
+// column is never blank.
+const currentSegment = computed(() =>
+  flight.value ? flight.value.segments[flight.value.currentSegmentIndex] : undefined,
 );
+
+const firstSegment = computed(() => flight.value?.segments[0]);
+
+// Destination column matches SFC's header "目的地" field — the FINAL flight
+// destination (LANDING segment), not the current segment.
+const address = computed(() => {
+  if (props.mode === 'destination') {
+    return flight.value?.destination;
+  }
+  return (
+    currentSegment.value?.origin ??
+    firstSegment.value?.origin ??
+    flight.value?.origin ??
+    ship.value?.address ??
+    undefined
+  );
+});
 
 const posData = computed(() => {
   const target = address.value;
   const location = getLocationLineFromAddress(target);
-  const naturalId = getEntityNaturalIdFromAddress(target) ?? '';
+  const systemLine = getSystemLineFromAddress(target);
   const isStation = isStationLine(location);
   const isOrbit = target?.lines?.some(line => line.type === 'ORBIT') ?? false;
-  const prefix = isStation ? 'STNS' : 'PLI';
+
+  // Prefer the PLANET/STATION naturalId when available. If the address is
+  // orbit-only or system-only (e.g. mid-JUMP), fall back to the SYSTEM
+  // naturalId so the column never renders blank.
+  let naturalId = getEntityNaturalIdFromAddress(target) ?? '';
+  let prefix = isStation ? 'STNS' : 'PLI';
+  if (!naturalId) {
+    naturalId = systemLine?.entity.naturalId ?? '';
+    prefix = 'SYS';
+  }
+
   let name: string;
   if (isStation) {
     name = naturalId;
