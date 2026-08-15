@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 基地别名管理面板：列出玩家所有基地，
 // 已设置别名的可在此修改或清除，未设置的可直接填写新别名。
-import { computed } from 'vue';
+import { computed, reactive } from 'vue';
 import { userData } from '@src/store/user-data';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
@@ -50,11 +50,43 @@ const baseRows = computed<BaseRow[]>(() => {
 
 const aliasedCount = computed(() => baseRows.value.filter(x => x.alias.length > 0).length);
 
-function onAliasChange(siteId: string, value: string) {
-  setBaseAlias(siteId, value);
+// 输入草稿：编辑期间只写本地草稿，不立即写回 userData，
+// 避免每次按键触发 baseRows 重排导致列表跳动、输入框失焦。
+const drafts = reactive<Record<string, string>>({});
+
+function draftFor(siteId: string): string {
+  return drafts[siteId] ?? userData.baseAliases[siteId] ?? '';
+}
+
+function onAliasInput(siteId: string, value: string) {
+  drafts[siteId] = value;
+}
+
+function commitAlias(siteId: string) {
+  const draft = drafts[siteId];
+  if (draft === undefined) {
+    return;
+  }
+  setBaseAlias(siteId, draft);
+  delete drafts[siteId];
+}
+
+function onAliasBlur(siteId: string) {
+  commitAlias(siteId);
+}
+
+function onAliasEnter(siteId: string, event: KeyboardEvent) {
+  commitAlias(siteId);
+  (event.target as HTMLInputElement).blur();
+}
+
+function onAliasEscape(siteId: string, event: KeyboardEvent) {
+  delete drafts[siteId];
+  (event.target as HTMLInputElement).blur();
 }
 
 function onClear(siteId: string) {
+  delete drafts[siteId];
   clearBaseAlias(siteId);
 }
 </script>
@@ -74,13 +106,16 @@ function onClear(siteId: string) {
       <tr v-for="row in baseRows" :key="row.siteId">
         <td :class="$style.aliasCell">
           <input
-            :value="row.alias"
+            :value="draftFor(row.siteId)"
             :class="$style.aliasInput"
             type="text"
             autocomplete="off"
             spellcheck="false"
             placeholder="输入别名…"
-            @input="onAliasChange(row.siteId, ($event.target as HTMLInputElement).value)" />
+            @input="onAliasInput(row.siteId, ($event.target as HTMLInputElement).value)"
+            @blur="onAliasBlur(row.siteId)"
+            @keydown.enter.prevent="onAliasEnter(row.siteId, $event)"
+            @keydown.esc="onAliasEscape(row.siteId, $event)" />
         </td>
         <td>{{ row.planetName }}</td>
         <td>
