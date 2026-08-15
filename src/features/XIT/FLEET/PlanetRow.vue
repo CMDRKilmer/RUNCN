@@ -11,6 +11,7 @@ import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { fixed0 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getPlanetProduction } from '@src/core/production';
@@ -181,6 +182,24 @@ function onDrop(event: DragEvent) {
   if (!shipId) {
     return;
   }
+
+  // Validate ship remaining capacity (against this row's bill) before assigning.
+  const ship = shipsStore.getById(shipId);
+  if (ship && ship.idShipStore) {
+    const store = storagesStore.getById(ship.idShipStore);
+    if (store && bill) {
+      const totals = billTotals(bill);
+      const freeWeight = store.weightCapacity - store.weightLoad;
+      const freeVolume = store.volumeCapacity - store.volumeLoad;
+      if (totals.weight > freeWeight || totals.volume > freeVolume) {
+        const msg = `飞船剩余容量不足：需要 ${fixed0(totals.weight)}t / ${fixed0(totals.volume)}m³，剩余 ${fixed0(freeWeight)}t / ${fixed0(freeVolume)}m³`;
+        // Surface a message to the user — open a small buffer with the text so it's visible.
+        void showBuffer(`echo ${msg}`, { autoClose: true, autoSubmit: false });
+        return;
+      }
+    }
+  }
+
   setTimeout(() => {
     config.ship = shipId;
   }, 0);

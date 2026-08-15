@@ -20,15 +20,19 @@ const props = withDefaults(
 const ship = computed(() => shipsStore.getById(props.shipId));
 const flight = computed(() => flightsStore.getById(ship.value?.flightId));
 
+// In destination mode, only the active flight's destination counts.
+// A parked/stationary ship has no destination — falling back to the ship's
+// current address caused parked ships to show their location as the "destination".
+const address = computed(() =>
+  props.mode === 'location' ? (ship.value?.address ?? undefined) : flight.value?.destination,
+);
+
 const posData = computed(() => {
-  const address =
-    props.mode === 'location'
-      ? (ship.value?.address ?? undefined)
-      : (flight.value?.destination ?? ship.value?.address ?? undefined);
-  const location = getLocationLineFromAddress(address);
-  const naturalId = getEntityNaturalIdFromAddress(address) ?? '';
+  const target = address.value;
+  const location = getLocationLineFromAddress(target);
+  const naturalId = getEntityNaturalIdFromAddress(target) ?? '';
   const isStation = isStationLine(location);
-  const isOrbit = address?.lines?.some(line => line.type === 'ORBIT') ?? false;
+  const isOrbit = target?.lines?.some(line => line.type === 'ORBIT') ?? false;
   const prefix = isStation ? 'STNS' : 'PLI';
   let name: string;
   if (isStation) {
@@ -40,13 +44,13 @@ const posData = computed(() => {
   }
   return {
     name,
-    command: `${prefix} ${naturalId}`,
+    command: naturalId ? `${prefix} ${naturalId}` : '',
   };
 });
 </script>
 
 <template>
-  <span :class="[C.Link.link]" @click.stop="showBuffer(posData.command)">
+  <span v-if="posData.command" :class="[C.Link.link]" @click.stop="showBuffer(posData.command)">
     {{ posData.name }}
   </span>
 </template>
