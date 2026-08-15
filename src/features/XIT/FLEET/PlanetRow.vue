@@ -6,6 +6,7 @@ import NumberInput from '@src/components/forms/NumberInput.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
@@ -268,9 +269,10 @@ const barAlarmReason = computed(() =>
     </td>
     <GripCell />
     <td :class="$style.planetCell">
-      <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">{{
-        planetName
-      }}</PrunLink>
+      <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">
+        {{ planetName }}
+        <BaseAlias :site-id="siteId" />
+      </PrunLink>
     </td>
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />

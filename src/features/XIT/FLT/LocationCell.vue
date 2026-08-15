@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import {
   getEntityNaturalIdFromAddress,
   getLocationLineFromAddress,
@@ -76,6 +77,7 @@ const posData = computed(() => {
   return {
     name,
     command: naturalId ? `${prefix} ${naturalId}` : '',
+    naturalId,
   };
 });
 </script>
@@ -83,5 +85,6 @@ const posData = computed(() => {
 <template>
   <span v-if="posData.command" :class="[C.Link.link]" @click.stop="showBuffer(posData.command)">
     {{ posData.name }}
+    <BaseAlias :natural-id="posData.naturalId" />
   </span>
 </template>

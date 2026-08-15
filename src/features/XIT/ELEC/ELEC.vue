@@ -2,6 +2,7 @@
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import {
   getEntityNameFromAddress,
@@ -232,7 +233,10 @@ function getPlanetNaturalIdFromAlert(alert: PrunApi.Alert) {
       <tbody>
         <tr v-for="row in sorted" :key="`${row.planetNaturalId}:${row.type}`">
           <td>
-            <PrunLink inline :command="`PLI ${row.planetNaturalId}`">{{ row.planet }}</PrunLink>
+            <PrunLink inline :command="`PLI ${row.planetNaturalId}`">
+              {{ row.planet }}
+              <BaseAlias :natural-id="row.planetNaturalId" />
+            </PrunLink>
           </td>
           <td>
             <PrunButton dark @click="showBuffer(`${row.type} ${row.planetNaturalId}`)">

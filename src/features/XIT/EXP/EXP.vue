@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunLink from '@src/components/PrunLink.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { expertsStore } from '@src/infrastructure/prun-api/data/experts';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
@@ -126,7 +127,10 @@ const rows = computed<ExpertRow[] | undefined>(() => {
       </tr>
       <tr v-for="row in rows" :key="`${row.naturalId}:${row.category}`">
         <td>
-          <PrunLink inline :command="`EXP ${row.naturalId}`">{{ row.planetName }}</PrunLink>
+          <PrunLink inline :command="`EXP ${row.naturalId}`">
+            {{ row.planetName }}
+            <BaseAlias :natural-id="row.naturalId" />
+          </PrunLink>
         </td>
         <td>{{ row.categoryLabel }}</td>
         <td>{{ percent2(row.progress) }}</td>

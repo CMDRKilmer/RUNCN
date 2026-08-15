@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunLink from '@src/components/PrunLink.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import {
@@ -114,7 +115,10 @@ function unmetText(needs: { ticker: string; satisfaction: number; essential: boo
       </tr>
       <tr v-for="row in rows" :key="`${row.naturalId}:${row.level}`">
         <td>
-          <PrunLink inline :command="`BS ${row.naturalId}`">{{ row.planetName }}</PrunLink>
+          <PrunLink inline :command="`BS ${row.naturalId}`">
+            {{ row.planetName }}
+            <BaseAlias :natural-id="row.naturalId" />
+          </PrunLink>
         </td>
         <td>{{ row.levelLabel }}</td>
         <td>{{ row.population }}/{{ row.required }}</td>
