@@ -11,6 +11,7 @@ import { timestampEachMinute } from '@src/utils/dayjs';
 import { formatEta } from '@src/utils/format';
 import { calcCompletionDate } from '@src/core/production-line';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import BaseAlias from '@src/components/BaseAlias.vue';
 
 interface WarningRow {
   planetName: string;
@@ -160,7 +161,10 @@ function isUrgent(ms: number | undefined): boolean {
         </td>
       </tr>
       <tr v-for="row in rows" :key="row.lineId">
-        <td>{{ row.planetName }}</td>
+        <td>
+          {{ row.planetName }}
+          <BaseAlias :natural-id="row.naturalId" />
+        </td>
         <td>{{ row.reactorTicker }}</td>
         <td :class="statusClass(row.status)">{{ STATUS_LABELS[row.status] }}</td>
         <td>{{ row.active }}/{{ row.capacity }}</td>

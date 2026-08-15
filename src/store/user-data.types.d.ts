@@ -196,4 +196,9 @@ declare namespace UserData {
     sepia: number;
     grayscale: number;
   }
+
+  // 基地别名：siteId → 别名字符串。
+  // 玩家在 SFC 目的地输入框键入别名时，会被替换为该基地的行星 naturalId，
+  // 从而通过 PrUn 原生搜索定位该基地。
+  type BaseAliases = Record<string, string>;
 }

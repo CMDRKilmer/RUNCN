@@ -3,6 +3,7 @@ import DaysCell from '@src/features/XIT/BURN/DaysCell.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import PrunButton from '@src/components/PrunButton.vue';
 import { PlanetBurn } from '@src/core/burn';
+import { getBaseAlias } from '@src/core/base-aliases';
 import { countDays } from '@src/features/XIT/BURN/utils';
 
 const { burn } = defineProps<{
@@ -17,6 +18,9 @@ const days = computed(() => countDays(burn.burn));
 // Only show generate button for real planets (not the overall summary).
 const isRealPlanet = computed(() => burn.naturalId !== '');
 
+// 基地别名（总览行没有 siteId，不显示别名）。
+const alias = computed(() => (burn.siteId ? getBaseAlias(burn.siteId) : undefined));
+
 function onGenerateActClick() {
   showBuffer(`XIT BURNGEN ${burn.planetName}`);
 }
@@ -29,6 +33,7 @@ function onGenerateActClick() {
         {{ minimized ? '+' : '-' }}
       </span>
       <span>{{ burn.planetName }}</span>
+      <span v-if="alias" :class="$style.alias">（{{ alias }}）</span>
     </td>
     <DaysCell :days="days" />
     <td>
@@ -52,6 +57,11 @@ function onGenerateActClick() {
   font-weight: bold;
   font-size: 12px;
   cursor: pointer;
+}
+
+.alias {
+  color: #888;
+  margin-left: 4px;
 }
 
 .minimize {

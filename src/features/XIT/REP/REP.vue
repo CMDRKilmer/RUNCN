@@ -18,6 +18,7 @@ import { userData } from '@src/store/user-data';
 import { mergeMaterialAmounts } from '@src/core/sort-materials';
 import Active from '@src/components/forms/Active.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import PrunLink from '@src/components/PrunLink.vue';
 import { objectId } from '@src/utils/object-id';
@@ -107,7 +108,10 @@ function calculateAge(lastRepair: number) {
         <tr v-for="entry in visibleBuildings" :key="objectId(entry)">
           <td>{{ entry.ticker }}</td>
           <td v-if="isMultiTarget">
-            <PrunLink :command="`XIT REP ${entry.naturalId}`">{{ entry.target }}</PrunLink>
+            <PrunLink :command="`XIT REP ${entry.naturalId}`">
+              {{ entry.target }}
+              <BaseAlias :natural-id="entry.naturalId" />
+            </PrunLink>
           </td>
           <td>{{ fixed1(calculateAge(entry.lastRepair)) }}</td>
           <td>{{ percent1(entry.condition) }}</td>

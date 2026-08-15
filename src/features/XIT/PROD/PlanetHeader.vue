@@ -2,6 +2,7 @@
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import PrunButton from '@src/components/PrunButton.vue';
 import { PlanetProduction } from '@src/core/production';
+import { getBaseAlias } from '@src/core/base-aliases';
 import { sumBy } from '@src/utils/sum-by';
 import FracCell from './FracCell.vue';
 
@@ -15,6 +16,9 @@ const { production } = defineProps<{
 const totalOrders = computed(() => sumBy(production.production, x => x.orders.length));
 
 const totalCapacity = computed(() => sumBy(production.production, x => x.capacity));
+
+// 基地别名（userData.baseAliases 是响应式对象，改名后自动更新）。
+const alias = computed(() => getBaseAlias(production.site.siteId));
 </script>
 
 <template>
@@ -24,6 +28,7 @@ const totalCapacity = computed(() => sumBy(production.production, x => x.capacit
         {{ minimized ? '+' : '-' }}
       </span>
       <span>{{ production.planetName }}</span>
+      <span v-if="alias" :class="$style.alias">（{{ alias }}）</span>
     </td>
     <FracCell :numerator="totalOrders" :denominator="totalCapacity" />
     <td>
@@ -46,6 +51,11 @@ const totalCapacity = computed(() => sumBy(production.production, x => x.capacit
   font-weight: bold;
   font-size: 12px;
   cursor: pointer;
+}
+
+.alias {
+  color: #888;
+  margin-left: 4px;
 }
 
 .minimize {

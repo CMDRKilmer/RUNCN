@@ -2,6 +2,7 @@
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunLink from '@src/components/PrunLink.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { cxStore } from '@src/infrastructure/fio/cx';
@@ -296,7 +297,10 @@ function detailAgeText(r: DetailRow): string {
               ><strong>{{ r.tickers.join(' + ') }}</strong></td
             >
             <td v-if="isMultiSite">
-              <PrunLink :command="`XIT REPP ${r.naturalId}`">{{ r.target }}</PrunLink>
+              <PrunLink :command="`XIT REPP ${r.naturalId}`">
+                {{ r.target }}
+                <BaseAlias :natural-id="r.naturalId" />
+              </PrunLink>
             </td>
             <td>{{ r.count }}</td>
             <td :class="urgencyClass(r)">{{ ageRangeText(r) }}</td>
@@ -349,7 +353,10 @@ function detailAgeText(r: DetailRow): string {
               ><strong>{{ r.ticker }}</strong></td
             >
             <td v-if="isMultiSite">
-              <PrunLink :command="`XIT REPP ${r.naturalId}`">{{ r.target }}</PrunLink>
+              <PrunLink :command="`XIT REPP ${r.naturalId}`">
+                {{ r.target }}
+                <BaseAlias :natural-id="r.naturalId" />
+              </PrunLink>
             </td>
             <td :class="urgencyClass(r)">{{ detailAgeText(r) }}</td>
             <td>

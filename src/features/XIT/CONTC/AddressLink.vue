@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import PrunLink from '@src/components/PrunLink.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { isPlanetLine } from '@src/infrastructure/prun-api/data/addresses';
 
 const { address } = defineProps<{ address: PrunApi.Address }>();
@@ -11,6 +12,9 @@ const name = computed(() => body.value.entity?.name);
 </script>
 
 <template>
-  <PrunLink v-if="isPlanet" inline :command="`PLI ${naturalId}`">{{ name }}</PrunLink>
+  <PrunLink v-if="isPlanet" inline :command="`PLI ${naturalId}`">
+    {{ name }}
+    <BaseAlias :natural-id="naturalId" />
+  </PrunLink>
   <PrunLink v-else inline :command="`STNS ${naturalId}`">{{ name }}</PrunLink>
 </template>

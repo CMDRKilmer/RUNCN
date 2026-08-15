@@ -106,7 +106,13 @@ const planetBurn = computed(() => {
     mat.daysLeft = mat.dailyAmount >= 0 ? Number.POSITIVE_INFINITY : inv / -mat.dailyAmount;
   }
 
-  const overallSection = { burn: overallBurn, planetName: '总览', naturalId: '', storeId: '' };
+  const overallSection = {
+    burn: overallBurn,
+    planetName: '总览',
+    naturalId: '',
+    storeId: '',
+    siteId: '',
+  };
 
   if (queryResult.value.overallOnly) {
     return [overallSection];

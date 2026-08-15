@@ -17,6 +17,14 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '15.08.2026 Add base aliases',
+    userData => {
+      if (!userData.baseAliases || typeof userData.baseAliases !== 'object') {
+        userData.baseAliases = {};
+      }
+    },
+  ],
+  [
     '29.07.2026 Rebind 琉璃 sidebar entry to XIT ORG',
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;
