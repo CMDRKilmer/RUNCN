@@ -1,5 +1,29 @@
 # 更新日志
 
+**日期**: 2026-08-15
+**说明**: 通过 `pnpm.overrides` 强制覆盖 3 个 transitive 依赖、清理 Dependabot 6 条 high 安全漏洞（与 PR #9 / PR #7 模式一致）
+
+### 🔒 Security
+
+- **`brace-expansion`**：升级 5.0.8 → 5.0.9 + per-major pin（`@1`→1.1.18、`@2`→2.1.4）以清除 [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) / CVE-2026-14257（DoS via unbounded expansion length）与 [GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895) / CVE-2026-69152（5.0.8 缓解被绕过的中间数组 DoS）。3 个大版本都受影响：1.x 通过 `eslint → minimatch 3.1.5`、2.x 通过 `@typescript-eslint → minimatch 9.0.9`、5.x 通过 `rimraf → glob → minimatch 10.2.6`；必须按 major 分别 pin 才能让 pnpm dedup 落到补丁版本。
+- **`js-yaml`**：升级 4.3.0 → 4.3.1 以清除 Quadratic CPU consumption in `!!omap` 解析（GHSA-5p4m-2wfm-xmqj）。所有路径经 `@eslint/eslintrc` 引入。
+- **`nanoid`**：升级 3.3.16 → 3.3.18 以清除 CVE-2026-67213（GHSA-2v37-7h3g-55p8，custom generators 在 `size === 0` 时可死循环）。所有路径经 `vue / vite → postcss → nanoid`。
+
+### ✅ Verification
+
+- `pnpm audit --registry https://registry.npmjs.org/` → No known vulnerabilities found
+- `pnpm run compile` → 0 errors
+- `pnpm run lint` → 0 errors
+- `pnpm run build` → 双 vite build + innerHTML patch 全部成功
+
+### 📝 Notes
+
+- `postcss` 在 dep chain 中实际由 pnpm dedup 拉到 8.5.26（>=8.5.18 满足 patched）；保留 `postcss: 8.5.18` 作为最低保证。
+- 沿用 PR #9 已确立的 `pnpm-workspace.yaml#overrides` 模式（pnpm 9.x 不再读 `package.json#pnpm.overrides`）。
+- `pnpm install` 必须 `--no-frozen-lockfile`（删除 `pnpm-lock.yaml` + `node_modules` 后重装）才能触发 re-resolution；增量 `pnpm install` 会把 override 当作「已满足」直接复用旧 snapshot。
+
+---
+
 **日期**: 2026-08-06
 **说明**: `XIT REPP` 维修预测面板算法对齐 PRUNplanner 后端核心公式并升级为整站统一 sweep：新增 RESOURCES 建筑（extractor / colony / rig）支持、整站加权 sweep、按基地区分聚合展示
 

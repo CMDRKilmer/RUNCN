@@ -3,12 +3,26 @@ packages:
 
 overrides:
   picomatch: ^2.3.2
-  # brace-expansion: pin to 5.0.8 to clear Dependabot #38 (DoS via unbounded
-  # expansion length, < 5.0.8 vulnerable). Was ^5.0.6 which resolved to 5.0.7.
-  brace-expansion: 5.0.8
+  # brace-expansion: pin to 5.0.9 to clear Dependabot #39 (CVE-2026-69152 DoS
+  # via unbounded intermediate arrays, bypassing the CVE-2026-14257 / 5.0.8
+  # mitigation). Also pin 1.x and 2.x lines because eslint → minimatch 3.1.5
+  # still resolves to 1.1.16 (vulnerable to both CVEs, needs 1.1.18) and
+  # typescript-eslint → minimatch 9.0.9 to 2.1.3 (needs 2.1.4). Without
+  # per-major pins, pnpm dedup keeps the vulnerable 1.x/2.x copies.
+  brace-expansion: 5.0.9
+  brace-expansion@1: 1.1.18
+  brace-expansion@2: 2.1.4
   # postcss: pin to 8.5.18 to clear Dependabot #37 (path traversal in
   # sourceMappingURL auto-loading, < 8.5.18 vulnerable). Vite 7's transitive
   # ^8.5.17 still resolves to vulnerable versions; this override forces patched.
   postcss: 8.5.18
+  # js-yaml: pin to 4.3.1 to clear Dependabot #40 (Quadratic CPU consumption
+  # in !!omap resolution on 3.x/4.x). All paths via @eslint/eslintrc which
+  # declares ^4.0.0 but resolves to vulnerable 4.3.0.
+  js-yaml: 4.3.1
+  # nanoid: pin to 3.3.18 to clear Dependabot #41 (CVE-2026-67213, custom
+  # generators can loop indefinitely when size is zero). All paths via
+  # postcss → nanoid; vue / vite / plugin-vue-jsx all transitively pin ^3.
+  nanoid: 3.3.18
   ws: 8.21.0
   flatted: 3.4.2
