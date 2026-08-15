@@ -8,7 +8,6 @@ import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addr
 import { setBaseAlias, clearBaseAlias } from '@src/core/base-aliases';
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
-import TextInput from '@src/components/forms/TextInput.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 
 interface BaseRow {
@@ -73,10 +72,15 @@ function onClear(siteId: string) {
     </thead>
     <tbody>
       <tr v-for="row in baseRows" :key="row.siteId">
-        <td>
-          <TextInput
-            :model-value="row.alias"
-            @update:model-value="(v: string) => onAliasChange(row.siteId, v ?? '')" />
+        <td :class="$style.aliasCell">
+          <input
+            :value="row.alias"
+            :class="$style.aliasInput"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="输入别名…"
+            @input="onAliasChange(row.siteId, ($event.target as HTMLInputElement).value)" />
         </td>
         <td>{{ row.planetName }}</td>
         <td>
@@ -95,5 +99,37 @@ function onClear(siteId: string) {
 .empty {
   padding: 10px;
   color: #888;
+}
+
+.aliasCell {
+  width: 140px;
+  padding: 2px;
+}
+
+.aliasInput {
+  width: 100%;
+  box-sizing: border-box;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  color: #e0e0e0;
+  padding: 3px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.aliasInput:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.aliasInput:focus {
+  outline: none;
+  border-color: #66afe9;
+  background-color: rgba(255, 255, 255, 0.09);
+}
+
+.aliasInput::placeholder {
+  color: rgba(255, 255, 255, 0.35);
 }
 </style>
