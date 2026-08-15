@@ -245,6 +245,13 @@ function getConditionClass(condition: number) {
 
 .cargoCombinedCell {
   flex-direction: column;
+}
+
+/* Body-only padding: the cargo column packs a cargo bar plus a size label
+   stacked vertically, so it needs tighter, bottom-zero padding. The header
+   keeps its own standard padding so its label baseline matches the other
+   headers. */
+.bodyCell.cargoCombinedCell {
   padding: 2px;
   padding-bottom: 0;
 }
