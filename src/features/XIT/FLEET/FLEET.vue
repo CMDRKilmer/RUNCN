@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
+import Tooltip from '@src/components/Tooltip.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
 import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
@@ -841,11 +842,12 @@ async function importDispatchConfig() {
         <span v-if="notice" :class="$style.notice">{{ notice }}</span>
         <div :class="$style.spacer" />
         <PrunButton dark @click="reset">重置</PrunButton>
-        <PrunButton
-          primary
-          :disabled="overloadedShips.size > 0"
-          :data-tooltip="executeTooltip"
-          @click="execute">
+        <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
+          <PrunButton primary :disabled="overloadedShips.size > 0" @click="execute">
+            执行
+          </PrunButton>
+        </Tooltip>
+        <PrunButton v-else primary :disabled="overloadedShips.size > 0" @click="execute">
           执行
         </PrunButton>
       </template>
