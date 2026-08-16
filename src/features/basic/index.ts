@@ -98,6 +98,7 @@ import './rprun-version-label';
 import './screen-layout-lock';
 import './screen-tab-bar/screen-tab-bar';
 import './search-auto-focus';
+import './sfc-auto-fuel-settings';
 import './sfc-exchange-destinations/sfc-exchange-destinations';
 import './sfc-flight-eta';
 import './sfc-base-aliases/sfc-base-aliases';
