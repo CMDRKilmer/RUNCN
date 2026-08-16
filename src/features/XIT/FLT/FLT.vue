@@ -10,14 +10,11 @@ import LocationCell from './LocationCell.vue';
 import TimeCell from './TimeCell.vue';
 import FleetCargoBar from './FleetCargoBar.vue';
 import { fixed0 } from '@src/utils/format';
-import coloredValue from '@src/infrastructure/prun-ui/css/colored-value.module.css';
 
 type FlightRow = {
   ship: PrunApi.Ship;
   stlFuelRatio: number | undefined;
   ftlFuelRatio: number | undefined;
-  conditionText: string;
-  conditionClass: string;
   cargoSizeText: string;
   isFtlCapable: boolean;
 };
@@ -35,15 +32,12 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
     const stlFuelRatio = getFuelRatio(stlStore);
     const ftlFuelRatio = getFuelRatio(ftlStore);
 
-    const conditionPercentage = ship.condition * 100;
     const isFtlCapable = (ftlStore?.weightCapacity ?? 0) > 0;
 
     return {
       ship,
       stlFuelRatio,
       ftlFuelRatio,
-      conditionText: `${Math.round(conditionPercentage)}%`,
-      conditionClass: getConditionClass(conditionPercentage),
       cargoSizeText: getCargoSizeText(inventory),
       isFtlCapable,
     };
@@ -88,14 +82,9 @@ function onFuel(registration: string) {
   showBuffer(`SHPF ${registration}`);
 }
 
-function getConditionClass(condition: number) {
-  if (Math.round(condition) <= 79) {
-    return C.ColoredValue.negative;
-  }
-  if (Math.round(condition) <= 81) {
-    return coloredValue.warning;
-  }
-  return C.ColoredValue.positive;
+// Repair fill color: light purple, red at/below 83% condition.
+function repairColor(condition: number) {
+  return condition <= 0.83 ? '#d9534f' : '#9b59b6';
 }
 </script>
 
@@ -111,7 +100,6 @@ function getConditionClass(condition: number) {
         <div :class="[$style.headerCell, $style.colLocation]">位置</div>
         <div :class="[$style.headerCell, $style.colLocation]">目的地</div>
         <div :class="[$style.headerCell, $style.colTime]">ETA</div>
-        <div :class="[$style.headerCell, $style.colRepair]">维修</div>
         <div :class="[$style.headerCell, $style.colFuel]">燃料</div>
       </div>
 
@@ -148,21 +136,21 @@ function getConditionClass(condition: number) {
           <TimeCell :ship-id="x.ship.id" />
         </div>
 
-        <div :class="[$style.bodyCell, $style.colRepair]">
-          <span
-            :class="[x.conditionClass, C.Link.link]"
-            @click="showBuffer(`SHP ${x.ship.registration}`)">
-            {{ x.conditionText }}
-          </span>
-        </div>
-
         <div :class="[$style.bodyCell, $style.colFuel]">
           <div
             :class="[C.ShipFuel.container, C.ShipFuel.pointer, $style.fuelBars]"
             @click="onFuel(x.ship.registration)">
             <div :class="C.ProgressBar.container">
               <progress
-                :class="[C.ProgressBar.primary, C.ProgressBar.progress]"
+                :class="[C.ProgressBar.progress, $style.fuelBar, $style.repairBar]"
+                :style="{ '--bar-color': repairColor(x.ship.condition) }"
+                :value="x.ship.condition"
+                max="1"
+                @click.stop="showBuffer(`SHP ${x.ship.registration}`)" />
+            </div>
+            <div :class="C.ProgressBar.container">
+              <progress
+                :class="[C.ProgressBar.primary, C.ProgressBar.progress, $style.fuelBar]"
                 :value="x.stlFuelRatio ?? 0"
                 max="1" />
             </div>
@@ -172,6 +160,7 @@ function getConditionClass(condition: number) {
                   C.ProgressBar.secondary,
                   C.ProgressBar.progress,
                   !x.isFtlCapable ? C.ProgressBar.warning : undefined,
+                  $style.fuelBar,
                 ]"
                 :value="x.ftlFuelRatio ?? 0"
                 max="1" />
@@ -195,7 +184,7 @@ function getConditionClass(condition: number) {
   container-type: inline-size;
   grid-template-columns:
     minmax(80px, auto) minmax(80px, auto) minmax(80px, auto) minmax(110px, auto)
-    minmax(110px, auto) minmax(80px, 1fr) minmax(50px, auto) minmax(50px, auto);
+    minmax(110px, auto) minmax(80px, 1fr) minmax(50px, auto);
 }
 
 .headerRow {
@@ -260,10 +249,6 @@ function getConditionClass(condition: number) {
   margin-top: 2px;
 }
 
-.colRepair {
-  justify-content: center;
-}
-
 .colStatus {
   border-right: none;
 }
@@ -298,5 +283,22 @@ function getConditionClass(condition: number) {
   align-items: stretch;
   gap: 1px;
   width: 100%;
+}
+
+/* Thin, borderless fuel/repair bars. Doubled class selectors raise specificity
+   above PrUn's .ProgressBar__progress (height: 9px, border 1px). Fuel bars keep
+   PrUn's original primary/secondary colors; only the repair bar supplies its
+   fill via the --bar-color custom property. */
+.fuelBar.fuelBar {
+  height: 4.5px;
+  border: none;
+}
+
+.repairBar.repairBar::-webkit-progress-value {
+  background-color: var(--bar-color);
+}
+
+.repairBar.repairBar::-moz-progress-bar {
+  background: var(--bar-color);
 }
 </style>
