@@ -56,8 +56,8 @@ function getSliderRange(slider: Element) {
 
 // 在滑块轨道上按目标值对应的百分比位置模拟一次点击，
 // rc-slider 的 onMouseDown 会依据 clientX 计算并吸附到最近的步进值。
-// mousedown 与 mouseup 之间必须间隔一次渲染（sleep），
-// 否则 onChangeComplete 会拿到旧值，把刚写入的新值覆盖回去。
+// mousedown 与 mouseup 之间必须间隔一个微任务，让 React 先完成重渲染，
+// 否则 onChangeComplete 会拿到旧值，把刚写入的新值覆盖回去（console 实测验证）。
 async function clickSliderTrack(
   slider: Element,
   value: number,
@@ -76,8 +76,8 @@ async function clickSliderTrack(
       clientY,
     }),
   );
-  // 等 React 重渲染后再补发 mouseup，让 onChangeComplete 携带新值。
-  await sleep(0);
+  // 等 React flush 重渲染后再补发 mouseup，让 onChangeComplete 携带新值。
+  await Promise.resolve();
   document.dispatchEvent(
     new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }),
   );
