@@ -5,7 +5,7 @@ const FUEL_CONSUMPTION = 0.1;
 const REACTOR_USAGE = 1;
 
 // 预留接口：是否自动勾选“使用跃迁点”。默认不勾选。
-const USE_JUMP_POINT = false;
+// const USE_JUMP_POINT = false;
 
 // 预留接口：是否自动勾选“抵达后卸货”。默认勾选。
 const UNLOAD_AFTER_ARRIVAL = true;
@@ -97,7 +97,7 @@ function onTileReady(tile: PrunTile) {
     void configureSlider(slider);
   });
   subscribe($$(tile.anchor, C.RadioItem.container), radio => {
-    void selectRadioItem(radio, '使用跃迁点', USE_JUMP_POINT);
+    // void selectRadioItem(radio, '使用跃迁点', USE_JUMP_POINT);
     void selectRadioItem(radio, '抵达后卸货', UNLOAD_AFTER_ARRIVAL);
   });
 }
