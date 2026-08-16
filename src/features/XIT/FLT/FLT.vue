@@ -183,7 +183,7 @@ function repairColor(condition: number) {
   border-bottom: 1px solid #2b485a;
   container-type: inline-size;
   grid-template-columns:
-    minmax(80px, auto) minmax(80px, auto) minmax(80px, auto) minmax(110px, auto)
+    minmax(80px, auto) minmax(60px, auto) auto minmax(110px, auto)
     minmax(110px, auto) minmax(80px, 1fr) minmax(50px, auto);
 }
 

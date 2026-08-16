@@ -83,8 +83,17 @@ const posData = computed(() => {
 </script>
 
 <template>
-  <span v-if="posData.command" :class="[C.Link.link]" @click.stop="showBuffer(posData.command)">
+  <span
+    v-if="posData.command"
+    :class="[C.Link.link, mode === 'destination' ? $style.destination : undefined]"
+    @click.stop="showBuffer(posData.command)">
     {{ posData.name }}
     <BaseAlias :natural-id="posData.naturalId" />
   </span>
 </template>
+
+<style module>
+.destination {
+  color: #f7a600;
+}
+</style>
