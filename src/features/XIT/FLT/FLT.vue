@@ -100,7 +100,7 @@ function repairColor(condition: number) {
         <div :class="[$style.headerCell, $style.colLocation]">位置</div>
         <div :class="[$style.headerCell, $style.colLocation]">目的地</div>
         <div :class="[$style.headerCell, $style.colTime]">ETA</div>
-        <div :class="[$style.headerCell, $style.colFuel]">燃料</div>
+        <div :class="[$style.headerCell, $style.colFuel]">燃料/维修</div>
       </div>
 
       <!-- Body rows -->
