@@ -323,6 +323,14 @@ subscribe($$(tile.anchor, C.SectionList.section), section => { ... });
 
 ---
 
+## Footer (Bottom Bar) Features
+
+Footer widgets insert into the footer via `subscribe($$(document, C.Frame.foot), onFooterReady)`. Inside `onFooterReady`, wait for `$(footer, C.UsersOnlineCount.container)` and chain inserts relative to it (or relative to other widgets inserted in the same `onFooterReady` call) — see `rprun-version-label.tsx`.
+
+If two footer widgets belong together (e.g. version label + cash balances), keep them in the same `onFooterReady` rather than splitting into two features — the DOM order is then deterministic regardless of `init()` registration order.
+
+---
+
 ## Mounting Vue Components
 
 ```ts
