@@ -78,9 +78,9 @@ const boxSizes: Record<string, { weight: number; volume: number }> = {
   WCB: { weight: 3000, volume: 1000 },
   HCB: { weight: 5000, volume: 5000 },
   VCB: { weight: 1000, volume: 3000 },
-  // MCB: { weight: 1000, volume: 1000 },
+  MCB: { weight: 1000, volume: 1000 },
   SCB: { weight: 500, volume: 500 },
-  // VSC: { weight: 250, volume: 250 },
+  VSC: { weight: 250, volume: 250 },
   TCB: { weight: 100, volume: 100 },
 };
 const boxSizeOptions = Object.keys(boxSizes);
