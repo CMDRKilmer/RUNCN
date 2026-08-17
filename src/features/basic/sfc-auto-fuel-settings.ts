@@ -123,7 +123,10 @@ async function selectRadioItem(radio: Element, label: string, enabled: boolean) 
   }
 }
 
-function onTileReady(tile: PrunTile) {
+// 等目的地行程统计(MissionPlan)加载出来后再开始配置,
+// 此时滑块已基于真实数据渲染,避免在未就绪的骨架节点上写入。
+async function onTileReady(tile: PrunTile) {
+  await $(tile.anchor, C.MissionPlan.stats);
   subscribe($$(tile.anchor, 'rc-slider'), slider => {
     void configureSlider(tile, slider);
   });
@@ -137,4 +140,4 @@ function init() {
   tiles.observe('SFC', onTileReady);
 }
 
-features.add(import.meta.url, init, 'SFC：自动将燃料消耗设为 0.1、反应堆使用量设为 100%。');
+features.add(import.meta.url, init, 'SFC：目的地加载后将燃料消耗设为 0.1、反应堆使用量设为 100%。');

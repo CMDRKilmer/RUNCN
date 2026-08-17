@@ -123,6 +123,16 @@ const fillText = computed(() => {
   return formatBurnDays(days);
 });
 
+// 补给天数输入框悬浮提示:展示 analysis.daysOfSuppliesFit 公式
+// 计算的可容纳供应天数,提示用户该基地理论可补给的最大天数。
+const daysTooltip = computed(() => {
+  const cap = analysis?.daysOfSuppliesFit;
+  if (cap === undefined || !isFinite(cap)) {
+    return undefined;
+  }
+  return `推荐天数: ${formatBurnDays(cap)} 天 (基于仓储可容纳供应天数)`;
+});
+
 const fillBgClass = computed(() => {
   if (!storageAlarm.value) {
     return {};
@@ -259,7 +269,7 @@ const barAlarmReason = computed(() =>
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />
     </td>
-    <td :class="$style.inputCell">
+    <td :class="$style.inputCell" :data-tooltip="daysTooltip" data-tooltip-position="top">
       <NumberInput v-model="config.days" :class="$style.faintInput" />
     </td>
     <td :class="$style.statusCell">
