@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
-import { getMaterialCategoryCssClass } from '@src/infrastructure/prun-ui/item-tracker';
+import {
+  getMaterialCategoryCssClass,
+  translateCategory,
+} from '@src/infrastructure/prun-ui/item-tracker';
 import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
+import Tooltip from '@src/components/Tooltip.vue';
 import { fixed02 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getInboundShipStores } from '@src/core/burn';
@@ -70,7 +74,11 @@ const invBar = computed(() => {
       name: category.name,
       class: getMaterialCategoryCssClass(category),
       width: `${(value * 100) / divisor}%`,
-      title: formatTitle(category.name, categorySummary.weight, categorySummary.volume),
+      title: formatTitle(
+        translateCategory(category.name),
+        categorySummary.weight,
+        categorySummary.volume,
+      ),
     });
   }
 
@@ -80,7 +88,7 @@ const invBar = computed(() => {
       name: 'shipments',
       class: 'rp-category-none',
       width: `${(value * 100) / divisor}%`,
-      title: formatTitle('shipments', summary.shipments.weight, summary.shipments.volume),
+      title: formatTitle('运输中', summary.shipments.weight, summary.shipments.volume),
     });
   }
 
@@ -225,17 +233,23 @@ const alarmClass = computed(() => ({
   <div
     :class="[C.ProgressBar.progress, $style.container, { [$style.isUpdating]: isAnimating }]"
     :style="{ '--stripe-color': stripeAlertColor, '--stripe-width': stripeWidth }"
-    :data-tooltip="alarmReason"
-    :data-tooltip-position="alarmReason ? 'top' : undefined"
     @click="showBuffer(onClickCmd)">
+    <Tooltip
+      v-if="alarmReason"
+      no-icon
+      position="top"
+      :tooltip="alarmReason"
+      :class="$style.alarmTooltip" />
     <div v-if="alarmLevel === 'red'" :class="[$style.alarmOverlay, alarmClass]" />
     <div :class="[$style.bar, miniBarClass]">
-      <div
+      <Tooltip
         v-for="segment in invBar.segments"
         :key="segment.name"
-        :class="[segment.class, segment.borderClasses]"
-        :style="{ width: segment.width }"
-        :title="segment.title" />
+        no-icon
+        position="top"
+        :tooltip="segment.title"
+        :class="[segment.class, segment.borderClasses, $style.segment]"
+        :style="{ width: segment.width }" />
     </div>
   </div>
 </template>
@@ -284,6 +298,24 @@ const alarmClass = computed(() => ({
   width: 100%;
   height: 100%;
   display: flex;
+}
+
+/* Cover the whole container so hovering anywhere over the bar (including
+   between segments) still triggers the alarm tooltip. */
+.alarmTooltip {
+  position: absolute;
+  inset: 0;
+  display: block !important;
+}
+
+/* Override Tooltip's display: inline-block so segments keep their
+   width share inside the flex bar. !important is required because both
+   rules are single-class selectors and Tooltip's <style> may load after
+   ours. */
+.segment {
+  display: block !important;
+  height: 100%;
+  padding: 0;
 }
 
 .alarmOverlay {
