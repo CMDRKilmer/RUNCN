@@ -7,8 +7,10 @@ env:
 name: Release
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'CHANGELOG.md'
   workflow_dispatch:
     inputs:
       keep:
@@ -21,14 +23,47 @@ jobs:
 
   build:
     name: Build
-    outputs:
-      created: ${{ env.DAILY_VERSION_CREATED }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: 'true'
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Parse CHANGELOG version + notes
+        id: parse
+        run: |
+          set -e
+          node <<'NODE'
+          const fs = require('fs');
+          const text = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const unreleasedMatch = text.match(/^## \[Unreleased\][\s\S]*?(?=^## \[|^---$)/m);
+          let body = '';
+          if (unreleasedMatch) {
+            body = unreleasedMatch[0]
+              .replace(/^## \[Unreleased\]\s*\n+/, '')
+              .replace(/^>\s.*\n+/gm, '')
+              .replace(/^---\s*\n+/, '')
+              .trim();
+          }
+          if (!body) {
+            console.log('No Unreleased content; skipping release.');
+            process.exit(78);
+          }
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+          const baseVersion = pkg.version.replace(/-.*$/, '');
+          const version = `${baseVersion}-${date}`;
+          fs.writeFileSync('/tmp/release-notes.md', body);
+          console.log(`VERSION=${version}`);
+          console.log('---notes---');
+          console.log(body);
+          fs.writeFileSync('/tmp/release-version.txt', version);
+          NODE
+          VERSION=$(cat /tmp/release-version.txt)
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -37,38 +72,86 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build
         run: pnpm build
-      - name: Create tag if necessary
-        uses: fregante/daily-version-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Update manifest.json with version ${{ env.DAILY_VERSION }}
-        if: env.DAILY_VERSION_CREATED
-        run: npx dot-json@1 "$DIRECTORY/manifest.json" version "$DAILY_VERSION"
-      - name: Ready for "submit" jobs
-        if: env.DAILY_VERSION_CREATED
+
+      - name: Update manifest.json
+        run: npx dot-json@1 "$DIRECTORY/manifest.json" version "${{ steps.parse.outputs.VERSION }}"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: ${{ env.DIRECTORY }}
+
       - name: Create release
-        if: env.DAILY_VERSION_CREATED
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          FILENAME_ZIP="$PROJECT_NAME-$DAILY_VERSION.zip"
-          FILENAME_CRX="$PROJECT_NAME-$DAILY_VERSION.crx"
-          cd "$DIRECTORY" && zip -r "$FILENAME_ZIP" ./* && npx crx pack . -o "$FILENAME_CRX" && gh release create "$DAILY_VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" --generate-notes
+          VERSION="${{ steps.parse.outputs.VERSION }}"
+          FILENAME_ZIP="$PROJECT_NAME-$VERSION.zip"
+          FILENAME_CRX="$PROJECT_NAME-$VERSION.crx"
+          cd "$DIRECTORY"
+          zip -r "$FILENAME_ZIP" ./*
+          npx crx pack . -o "$FILENAME_CRX"
+          gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" \
+            --title "琉璃小工具 $VERSION" \
+            --notes-file /tmp/release-notes.md
+
+  archive:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Archive Unreleased into versioned section
+        run: |
+          set -e
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'CHANGELOG.md';
+          const text = fs.readFileSync(path, 'utf8');
+          const unreleasedRegex = /^## \[Unreleased\][\s\S]*?(?=^## \[|^---$|\Z)/m;
+          const m = text.match(unreleasedRegex);
+          if (!m) { console.log('No Unreleased section'); process.exit(0); }
+          let body = m[0]
+            .replace(/^## \[Unreleased\]\s*\n+/, '')
+            .replace(/^>\s.*\n+/gm, '')
+            .replace(/^---\s*\n+/, '')
+            .trim();
+          if (!body) { console.log('Empty Unreleased body'); process.exit(0); }
+          const today = new Date().toISOString().slice(0, 10);
+          const version = '${{ needs.build.outputs.VERSION }}';
+          const header = `## [${version}] - ${today}\n`;
+          const newSection = header + body + '\n\n---\n\n';
+          const next = text.replace(unreleasedRegex, '## [Unreleased]\n\n> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。\n\n---\n\n');
+          fs.writeFileSync(path, next.replace(/(## \[Unreleased\][\s\S]*?---\n\n)+/, m => m));
+          const idx = fs.readFileSync(path, 'utf8').indexOf('## [Unreleased]');
+          const before = fs.readFileSync(path, 'utf8').slice(0, idx);
+          const after = fs.readFileSync(path, 'utf8').slice(idx).replace('## [Unreleased]\n\n> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。\n\n---\n\n', '');
+          fs.writeFileSync(path, before + '## [Unreleased]\n\n> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。\n\n---\n\n' + newSection + after);
+          console.log('CHANGELOG.md updated.');
+          NODE
+
+      - name: Commit changelog update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git diff --cached --quiet && echo "No changelog changes" || git commit -m "chore(release): archive Unreleased into ${{ needs.build.outputs.VERSION }}"
+          git push
 
   prune:
-    if: needs.build.outputs.created || github.event_name == 'workflow_dispatch'
     needs: build
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     name: Prune old releases
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           lfs: 'true'
-      - name: Delete old releases (keep latest $KEEP_RELEASES)
+      - name: Delete old releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP: ${{ inputs.keep || env.KEEP_RELEASES }}
@@ -78,19 +161,15 @@ jobs:
           echo "Keeping the latest ${KEEP} releases."
           TAGS=$(gh release list --limit 200 --json tagName --jq '.[].tagName')
           COUNT=$(echo "$TAGS" | wc -l | tr -d ' ')
-          echo "Total releases: ${COUNT}"
           if [ "$COUNT" -le "$KEEP" ]; then
-            echo "Nothing to prune."
             exit 0
           fi
           TO_DELETE=$(echo "$TAGS" | tail -n +$((KEEP + 1)))
           for TAG in $TO_DELETE; do
-            echo "Deleting release: ${TAG}"
             gh release delete "$TAG" --yes --cleanup-tag || echo "Failed to delete ${TAG}"
           done
 
   chrome:
-    if: needs.build.outputs.created
     needs: build
     name: Submit (Chrome)
     environment: Chrome
@@ -110,27 +189,3 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-
-  # firefox:
-  #   if: needs.build.outputs.created
-  #   needs: build
-  #   name: Submit (Firefox)
-  #   environment: Firefox
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #       with:
-  #         lfs: 'true'
-  #     - name: Zip source code
-  #       run: git archive --output source.zip HEAD
-  #
-  #     - uses: actions/download-artifact@v4
-  #       with:
-  #         name: dist
-  #         path: dist
-  #     - name: Upload build and source code
-  #       run: npx web-ext@8 sign --channel listed --upload-source-code ../source.zip
-  #       working-directory: dist
-  #       env:
-  #         WEB_EXT_API_KEY: ${{ secrets.WEB_EXT_API_KEY }}
-  #         WEB_EXT_API_SECRET: ${{ secrets.WEB_EXT_API_SECRET }}
