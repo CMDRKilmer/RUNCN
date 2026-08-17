@@ -100,7 +100,7 @@ function repairColor(condition: number) {
         <div :class="[$style.headerCell, $style.colLocation]">位置</div>
         <div :class="[$style.headerCell, $style.colLocation]">目的地</div>
         <div :class="[$style.headerCell, $style.colTime]">ETA</div>
-        <div :class="[$style.headerCell, $style.colFuel]">燃料/维修</div>
+        <div :class="[$style.headerCell, $style.colFuel]">维护</div>
       </div>
 
       <!-- Body rows -->
@@ -281,17 +281,32 @@ function repairColor(condition: number) {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 1px;
+  margin: 0;
+  min-width: 30px;
   width: 100%;
+  border: 1px solid #2b485a;
 }
 
-/* Thin, borderless fuel/repair bars. Doubled class selectors raise specificity
-   above PrUn's .ProgressBar__progress (height: 9px, border 1px). Fuel bars keep
-   PrUn's original primary/secondary colors; only the repair bar supplies its
-   fill via the --bar-color custom property. */
+/* Collapse the wrappers around each progress bar so the three bars fuse
+   into a single composite bar inside .fuelBars. The wrappers must fill the
+   full width (PrUn's container is inline-block by default). */
+.fuelBars > div {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+/* Thin bars fused into a single stacked bar. Doubled class selectors raise
+   specificity above PrUn's .ProgressBar__progress (height: 9px, margin, padding,
+   inline-block). Bars sit flush against each other and against the outer border. */
 .fuelBar.fuelBar {
-  height: 4.5px;
+  display: block;
+  width: 100%;
+  height: 7.5px;
   border: none;
+  margin: 0;
+  padding: 0;
 }
 
 .repairBar.repairBar::-webkit-progress-value {
