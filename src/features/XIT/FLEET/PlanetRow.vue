@@ -11,8 +11,9 @@ import Tooltip from '@src/components/Tooltip.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
-import { sumMaterialAmountPrice } from '@src/infrastructure/fio/cx';
-import { calculateSiteOptimalDay } from '@src/core/repair-plan';
+import { calculateSiteOptimalDay, calcRepairCostTotal } from '@src/core/repair-plan';
+import { getBuildingBuildMaterials, isRepairableBuilding } from '@src/core/buildings';
+import { getBuildingLastRepair } from '@src/infrastructure/prun-api/data/sites';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -118,18 +119,25 @@ const repairDaysText = computed(() => {
 });
 
 // 维修列悬浮框:只显示整站当前维修价格。
+// 严格照搬 PRUNplanner 公式 RepairAmount(material, age) = input − floor(input × (180 − min(180, age)) / 180),
+// 基于全建材料 × 当前 age 推算需要补充的材料量,再乘以 BUY 价。
+// 旧版用 building.repairMaterials 是 PrUn API 给的"最近一次实际剩余维修量",
+// 与当前 age 应维修量可能不一致(玩家可能从来没修过满)。
 const repairTooltip = computed(() => {
   const site = sitesStore.getById(siteId);
   if (!site) {
     return undefined;
   }
+  const now = timestampEachMinute.value;
   let totalRepairCost = 0;
   let hasPrice = false;
-  for (const building of site.platforms) {
-    if (building.module.type !== 'RESOURCES' && building.module.type !== 'PRODUCTION') {
+  for (const building of site.platforms.filter(isRepairableBuilding)) {
+    const fullMaterials = getBuildingBuildMaterials(building, site);
+    if (fullMaterials.length === 0) {
       continue;
     }
-    const cost = sumMaterialAmountPrice(building.repairMaterials);
+    const ageDays = Math.max(0, (now - getBuildingLastRepair(building)) / 86400000);
+    const cost = calcRepairCostTotal(ageDays, fullMaterials);
     if (cost !== undefined) {
       totalRepairCost += cost;
       hasPrice = true;
