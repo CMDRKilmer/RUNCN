@@ -20,8 +20,6 @@ import { comparePlanets } from '@src/util';
 import { useTileState } from '@src/store/user-data-tiles';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
-import { calculateRepairPredictions } from '@src/core/repair-plan';
-import { resolveBuildingDailyRevenue } from '@src/features/XIT/shared/repair-plan-revenue';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -153,30 +151,6 @@ const baseAnalyses = computed<Map<string, BaseStorageAnalysis> | undefined>(() =
     if (analysis) {
       map.set(analysis.naturalId, analysis);
     }
-  }
-  return map;
-});
-
-// REPP 模型的最优维修间隔(PRUNplanner 复制),供 PlanetRow 维护列按
-// age vs optimalDay 三色上色。同基地所有建筑的最优日一致,任意取一即可。
-interface RepairPlanEntry {
-  optimalDay: number | undefined;
-}
-const repairPlanByNaturalId = computed<Map<string, RepairPlanEntry> | undefined>(() => {
-  const sites = sitesStore.all.value;
-  if (!sites) {
-    return undefined;
-  }
-  const predictions = calculateRepairPredictions(sites, { resolveBuildingDailyRevenue });
-  if (!predictions) {
-    return undefined;
-  }
-  const map = new Map<string, RepairPlanEntry>();
-  for (const p of predictions) {
-    if (map.has(p.naturalId)) {
-      continue;
-    }
-    map.set(p.naturalId, { optimalDay: p.optimalDay });
   }
   return map;
 });
@@ -915,7 +889,6 @@ async function importDispatchConfig() {
                   :show-repair="showRepair"
                   :show-inv="showInv"
                   :show-war="showWar"
-                  :repair-plan="repairPlanByNaturalId?.get(rowById.get(id)!.base.naturalId)"
                   :overloaded="
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)

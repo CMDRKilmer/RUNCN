@@ -11,7 +11,10 @@ import Tooltip from '@src/components/Tooltip.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
+import { sumMaterialAmountPrice } from '@src/infrastructure/fio/cx';
+import { calculateSiteOptimalDay } from '@src/core/repair-plan';
 import { timestampEachMinute } from '@src/utils/dayjs';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -21,12 +24,6 @@ import { getStorageAlarmLevel } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
 import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
-
-// 黄色告警提前天数。维修列颜色基于 REPP 模型(optimalDay)三色:
-//   age ≥ optimalDay         → 红色(已到触发,应维修)
-//   optimalDay - 15 ≤ age < optimalDay → 黄色(警告期)
-//   age < optimalDay - 15    → 绿色(健康)
-const repairWarningOffset = 3;
 
 const {
   siteId,
@@ -42,7 +39,6 @@ const {
   storeId,
   warehouseStoreId,
   analysis,
-  repairPlan,
 } = defineProps<{
   siteId: string;
   naturalId: string;
@@ -57,7 +53,6 @@ const {
   storeId: string;
   warehouseStoreId?: string;
   analysis?: BaseStorageAnalysis;
-  repairPlan?: { optimalDay: number | undefined };
 }>();
 
 const emit = defineEmits<{
@@ -92,17 +87,23 @@ const daysText = computed(() => (days.value === undefined ? '-' : formatBurnDays
 
 const repairAge = computed(() => getPlanetRepairAge(siteId, timestampEachMinute.value));
 
+// 维修列三色:沿用原 REPP 模型语义(基于整站 economic sweep 的 optimalDay)。
+//   age ≥ optimalDay            → 红 (daysMissing,已到触发)
+//   optimalDay − 3 ≤ age < optimalDay → 黄 (daysWarning,警告期)
+//   age < optimalDay − 3        → 绿 (daysSupplied,健康)
+const REPAIR_WARN_OFFSET = 3;
+const optimalDay = computed(() => calculateSiteOptimalDay(siteId));
 const repairBgClass = computed(() => {
   const age = repairAge.value;
-  const optimalDay = repairPlan?.optimalDay;
-  if (age === undefined || optimalDay === undefined) {
+  const od = optimalDay.value;
+  if (age === undefined || od === undefined) {
     return {};
   }
   const d = Math.floor(age);
-  if (d >= optimalDay) {
+  if (d >= od) {
     return { [C.Workforces.daysMissing]: true };
   }
-  if (d >= optimalDay - repairWarningOffset) {
+  if (d >= od - REPAIR_WARN_OFFSET) {
     return { [C.Workforces.daysWarning]: true };
   }
   return { [C.Workforces.daysSupplied]: true };
@@ -114,6 +115,27 @@ const repairDaysText = computed(() => {
     return '-';
   }
   return String(Math.floor(age));
+});
+
+// 维修列悬浮框:只显示整站当前维修价格。
+const repairTooltip = computed(() => {
+  const site = sitesStore.getById(siteId);
+  if (!site) {
+    return undefined;
+  }
+  let totalRepairCost = 0;
+  let hasPrice = false;
+  for (const building of site.platforms) {
+    if (building.module.type !== 'RESOURCES' && building.module.type !== 'PRODUCTION') {
+      continue;
+    }
+    const cost = sumMaterialAmountPrice(building.repairMaterials);
+    if (cost !== undefined) {
+      totalRepairCost += cost;
+      hasPrice = true;
+    }
+  }
+  return hasPrice ? `${fixed0(totalRepairCost)} €` : '--';
 });
 
 const fillText = computed(() => {
@@ -293,11 +315,13 @@ const barAlarmReason = computed(() =>
       <RadioItem v-model="config.repair" />
     </td>
     <td v-if="showRepair" :class="$style.statusCell">
-      <div :class="[$style.statusContent, repairBgClass]">
-        <span :class="$style.statusNum" @click="showBuffer(`BRA ${naturalId}`)">{{
-          repairDaysText
-        }}</span>
-      </div>
+      <Tooltip no-icon position="top" :tooltip="repairTooltip">
+        <div :class="[$style.statusContent, repairBgClass]">
+          <span :class="$style.statusNum" @click="showBuffer(`BRA ${naturalId}`)">{{
+            repairDaysText
+          }}</span>
+        </div>
+      </Tooltip>
     </td>
     <td :class="[$style.inputCell, $style.advanceCell]">
       <SelectInput
