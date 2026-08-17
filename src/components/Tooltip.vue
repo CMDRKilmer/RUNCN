@@ -43,6 +43,7 @@ function createEl() {
 }
 
 function show() {
+  if (!tooltip) return;
   if (!el) createEl();
   if (!el || !containerRef.value) return;
   el.textContent = tooltip;

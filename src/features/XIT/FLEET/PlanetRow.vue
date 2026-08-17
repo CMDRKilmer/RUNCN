@@ -7,6 +7,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
+import Tooltip from '@src/components/Tooltip.vue';
 import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
@@ -269,8 +270,10 @@ const barAlarmReason = computed(() =>
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />
     </td>
-    <td :class="$style.inputCell" :data-tooltip="daysTooltip" data-tooltip-position="top">
-      <NumberInput v-model="config.days" :class="$style.faintInput" />
+    <td :class="$style.inputCell">
+      <Tooltip no-icon position="top" :tooltip="daysTooltip">
+        <NumberInput v-model="config.days" :class="$style.faintInput" />
+      </Tooltip>
     </td>
     <td :class="$style.statusCell">
       <div :class="[$style.statusContent, burnBgClass]">
