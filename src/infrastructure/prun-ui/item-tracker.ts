@@ -106,6 +106,7 @@ const CATEGORY_TRANSLATIONS: Record<string, string> = {
   'ship kits': '船舶套件',
   'ship parts': '船舶零件',
   'ship shields': '船舶护盾',
+  shipments: '运输中',
   'software components': '软件组件',
   'software systems': '软件系统',
   'software tools': '软件工具',

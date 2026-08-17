@@ -88,7 +88,11 @@ const invBar = computed(() => {
       name: 'shipments',
       class: 'rp-category-none',
       width: `${(value * 100) / divisor}%`,
-      title: formatTitle('运输中', summary.shipments.weight, summary.shipments.volume),
+      title: formatTitle(
+        translateCategory('shipments'),
+        summary.shipments.weight,
+        summary.shipments.volume,
+      ),
     });
   }
 

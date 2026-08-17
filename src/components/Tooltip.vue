@@ -9,7 +9,8 @@ const {
   noIcon = false,
 } = defineProps<{
   position?: TooltipPosition;
-  tooltip: string;
+  // 文本为空或 undefined 时不显示气泡;trigger 仍正常工作。
+  tooltip?: string;
   // 隐藏默认的 ⓘ 图标。当组件包裹了已有视觉的触发元素(如 cargo bar 段)
   // 时使用,避免图标与触发元素重叠。
   noIcon?: boolean;

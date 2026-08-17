@@ -92,7 +92,11 @@ const cargoBar = computed<CargoBarData>(() => {
       name: '运输中',
       class: `rp-category-none`,
       width: `${percentage}%`,
-      title: formatTitle('运输中', summary.shipments.weight, summary.shipments.volume),
+      title: formatTitle(
+        translateCategory('shipments'),
+        summary.shipments.weight,
+        summary.shipments.volume,
+      ),
     });
   }
 
