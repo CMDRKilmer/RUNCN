@@ -122,7 +122,7 @@ function deadlineText(ms?: number) {
 
       <!-- 混合货币警告 -->
       <span v-if="totals.hasMixedCurrency" :class="$style.warningText">
-        ⚠️ 检测到不同货币，金额统计可能不准确
+        检测到不同货币，金额统计可能不准确
       </span>
 
       <span v-if="totals.receivable > 0" :class="$style.receivableText">
