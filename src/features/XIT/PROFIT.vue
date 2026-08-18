@@ -3,6 +3,8 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import BuildingIcon from '@src/components/BuildingIcon.vue';
+import IconCell from '@src/features/XIT/PROD/IconCell.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
@@ -17,14 +19,15 @@ interface RecipeProfit {
   planetName: string;
   naturalId: string;
   siteId: string;
-  buildingType: string;
+  buildingTicker: string;
   recipeName: string;
   inputs: { ticker: string; factor: number }[];
   outputs: { ticker: string; factor: number }[];
   inputCost: number;
   outputValue: number;
+  productionFee: number;
   profit: number;
-  roi: number;
+  margin: number;
 }
 
 const rows = computed<RecipeProfit[] | undefined>(() => {
@@ -89,38 +92,48 @@ const rows = computed<RecipeProfit[] | undefined>(() => {
           continue;
         }
 
-        const profit = outputValue - inputCost;
-        const roi = inputCost > 0 ? (profit / inputCost) * 100 : 0;
+        const productionFee = template.productionFeeFactor?.amount ?? 0;
+        const profit = outputValue - inputCost - productionFee;
+        const margin = outputValue > 0 ? (profit / outputValue) * 100 : 0;
+
+        if (profit <= 0) {
+          continue;
+        }
+
+        const buildingTicker =
+          site.platforms.find(x => x.module.reactorName === line.type)?.module.reactorTicker ??
+          line.type;
 
         result.push({
           planetName,
           naturalId,
           siteId: site.siteId,
-          buildingType: line.type,
+          buildingTicker,
           recipeName: template.name,
           inputs,
           outputs,
           inputCost,
           outputValue,
+          productionFee,
           profit,
-          roi,
+          margin,
         });
       }
     }
   }
 
-  return result.sort((a, b) => b.roi - a.roi);
+  return result.sort((a, b) => b.margin - a.margin);
 });
 
 function formatCurrency(value: number) {
   return value.toFixed(2);
 }
 
-function roiClass(roi: number) {
-  if (roi > 50) {
+function marginClass(margin: number) {
+  if (margin > 50) {
     return C.ColoredValue.positive;
   }
-  if (roi > 0) {
+  if (margin > 0) {
     return '';
   }
   return C.ColoredValue.negative;
@@ -129,24 +142,23 @@ function roiClass(roi: number) {
 
 <template>
   <LoadingSpinner v-if="rows === undefined" />
-  <table v-else :style="{ width: '100%' }">
+  <table v-else :class="$style.table" cellspacing="0" cellpadding="0">
     <thead>
       <tr>
-        <th>星球</th>
-        <th>建筑</th>
-        <th>配方</th>
+        <th :class="$style.colPlanet">星球</th>
+        <th :class="$style.colBuilding">建筑</th>
         <th>输入</th>
-        <th>输出</th>
+        <th :class="$style.colOutput">输出</th>
         <th>成本</th>
         <th>收入</th>
         <th>利润</th>
-        <th>利润率</th>
-        <th>操作</th>
+        <th :class="$style.colMargin">利润率</th>
+        <th :class="$style.colAction">操作</th>
       </tr>
     </thead>
     <tbody>
       <tr v-if="rows.length === 0">
-        <td colspan="10" style="text-align: center; opacity: 0.5; padding: 12px">
+        <td colspan="9" style="text-align: center; opacity: 0.5; padding: 12px">
           暂无配方数据 - 请确保已打开 PROD 面板
         </td>
       </tr>
@@ -157,10 +169,11 @@ function roiClass(roi: number) {
             <BaseAlias :natural-id="row.naturalId" />
           </PrunLink>
         </td>
-        <td>{{ row.buildingType }}</td>
-        <td>{{ row.recipeName }}</td>
-        <td>
-          <div :style="{ display: 'flex', gap: '4px', flexWrap: 'wrap' }">
+        <IconCell :class="$style.colBuilding">
+          <BuildingIcon size="inline-table" :ticker="row.buildingTicker" />
+        </IconCell>
+        <td :class="$style.iconColumn">
+          <div :class="$style.iconRow">
             <MaterialIcon
               v-for="input in row.inputs"
               :key="input.ticker"
@@ -170,8 +183,8 @@ function roiClass(roi: number) {
               compact />
           </div>
         </td>
-        <td>
-          <div :style="{ display: 'flex', gap: '4px', flexWrap: 'wrap' }">
+        <td :class="[$style.iconColumn, $style.colOutput]">
+          <div :class="$style.iconRow">
             <MaterialIcon
               v-for="output in row.outputs"
               :key="output.ticker"
@@ -183,9 +196,9 @@ function roiClass(roi: number) {
         </td>
         <td>{{ formatCurrency(row.inputCost) }}</td>
         <td>{{ formatCurrency(row.outputValue) }}</td>
-        <td :class="roiClass(row.roi)">{{ formatCurrency(row.profit) }}</td>
-        <td :class="roiClass(row.roi)">{{ fixed2(row.roi) }}%</td>
-        <td>
+        <td :class="marginClass(row.margin)">{{ formatCurrency(row.profit) }}</td>
+        <td :class="[marginClass(row.margin), $style.colMargin]">{{ fixed2(row.margin) }}%</td>
+        <td :class="$style.colAction">
           <button
             :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
             @click="showBuffer(`PROD ${row.siteId}`)">
@@ -197,11 +210,45 @@ function roiClass(roi: number) {
   </table>
 </template>
 
-<style scoped>
-table {
-  table-layout: auto;
+<style module>
+.table {
+  width: 100%;
+  border-collapse: collapse;
 }
-tr > :not(:first-child) {
+.table tr > :not(:first-child) {
+  text-align: right;
+}
+.iconColumn {
+  vertical-align: middle;
+}
+.iconRow {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.colPlanet {
+  white-space: nowrap;
+}
+.colBuilding {
+  width: 40px;
+}
+.colOutput {
+  width: 100px;
+}
+.colMargin {
+  width: 80px;
+}
+.colAction {
+  width: 70px;
+}
+.table th,
+.table td {
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+.table th:not(:first-child),
+.table td:not(:first-child) {
   text-align: right;
 }
 </style>
