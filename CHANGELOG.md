@@ -4,9 +4,6 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
----
-
-## [] - 2026-08-18
 **日期**: 2026-08-18
 **说明**: 清理大量冗余废弃代码，简化 eslint 配置
 
@@ -16,10 +13,6 @@
 - 移除未使用的 `inboundShipInventoryEnabled` 相关函数、`tslib` 依赖，以及 `buildings.ts` / `storage-analysis.ts` / `org-api tasks` 等模块的废弃导出。
 - 简化 eslint 忽略配置，删除测试/调试专用的重置会话密钥函数。
 - 更新贡献文档，添加死代码清理说明。
-
----
-
----
 
 **日期**: 2026-08-17
 **说明**: 移除 REPP 功能模块并将维修预测逻辑重构进 FLEET；BURN 启用 MCB/VSC 箱型；统一 Tooltip 实现；CI 发布工作流重构
@@ -43,9 +36,6 @@
 - **Tooltip / `PlanetRow` / `InvBar`**：修复 tooltip 显示问题 —— show 方法空值检查、替换原生 `title`/`data-tooltip` 为 Tooltip 组件、修复分段 tooltip 触发区域与告警显示。
 - **运输中分类**：统一三处硬编码「运输中」为 `translateCategory` 国际化调用，保持界面文本一致性。
 - **`XIT/FLT`**：燃料列标题更新为「燃料/维修」以更清晰地反映内容。
-
----
-
 **日期**: 2026-08-16
 **说明**: 新增 SFC 自动燃料设置；FLT 燃料条与维修状态视觉重构；快捷卸货复用 SHPI 一键卸货
 
@@ -64,9 +54,6 @@
 ### 🐛 Bug Fixes
 
 - **`sfc-auto-fuel-settings`**：修复滑块点击后值被覆盖的问题。
-
----
-
 **日期**: 2026-08-15
 **说明**: 新增基地别名功能（命名 / SFC 搜索 / 全局展示）；FLEET 执行按钮 Tooltip；通过 overrides 清理 Dependabot 6 条 high 安全漏洞
 
@@ -103,9 +90,6 @@
 - `postcss` 在 dep chain 中实际由 pnpm dedup 拉到 8.5.26（>=8.5.18 满足 patched）；保留 `postcss: 8.5.18` 作为最低保证。
 - 沿用 PR #9 已确立的 `pnpm-workspace.yaml#overrides` 模式（pnpm 9.x 不再读 `package.json#pnpm.overrides`）。
 - `pnpm install` 必须 `--no-frozen-lockfile`（删除 `pnpm-lock.yaml` + `node_modules` 后重装）才能触发 re-resolution；增量 `pnpm install` 会把 override 当作「已满足」直接复用旧 snapshot。
-
----
-
 **日期**: 2026-08-14
 **说明**: FLEET 维修间隔 REPP 模型提示；ACT 自动模式静默执行；FLT 位置/目的地分列；DISPATCH 整合进 FLEET
 
@@ -122,9 +106,6 @@
 - **`XIT/FLEET`**：移除展开行功能，将存储计算逻辑提取到 `storage-utils.ts` 复用。
 - **`XIT`**：优化舰队相关命令与界面 —— 移除 FLT 的 FLEET 别名命令、重构 FLEET 模块描述为基地管理、PlanetRow 自定义单选替换为 SelectInput 组件。
 - **`XIT/FLEET/PlanetRow`**：两个 props 改为可选类型；advanceCell 样式优化；修复物资补给计算逻辑并添加提前列样式。
-
----
-
 **日期**: 2026-08-13
 **说明**: 新增 DISPATCH 舰队补给维修规划功能；Tooltip 组件重构与物料分类翻译
 
@@ -141,9 +122,6 @@
 ### 🐛 Bug Fixes
 
 - **`step-machine`**：修复跳过并行步骤后卡死的问题。
-
----
-
 **日期**: 2026-08-12
 **说明**: 新增 INV/STO 库存与仓储分析；ACT/FLT/BURN 飞船筛选与自动填转移目的地
 
@@ -159,9 +137,6 @@
 - **`XIT/ACT`**：OPEN_SFC 动作添加同包动作查找能力，修复目的地获取逻辑。
 - **`XIT/FLT`**：状态单元格拆分出独立 `LocationCell` 组件。
 - **`GenerateActDialog`**：调整标准货箱配置与注释顺序；`TimeCell` 移除加油按钮 tooltip 配置。
-
----
-
 **日期**: 2026-08-11
 **说明**: ACT 移植 OPEN SFC 动作；BURNGEN 生成 Unload 卸货包；FLT 位置显示区分空间站/轨道/着陆
 
@@ -181,9 +156,6 @@
 ### 🗑️ Removed
 
 - **`contd-generate-purchase-draft`**：移除 contd 采购草稿功能。
-
----
-
 **日期**: 2026-08-10
 **说明**: 新增 FLT 舰队总览；ACT 自动执行与并行购买；CXPO 快速报价；XIT BS 命令；SFC 交易所快捷按钮；COGCU 补给 ACT
 
@@ -207,9 +179,6 @@
 - **`XIT/PLANETS`**：拾取飞船下拉明确标注重量 vs 体积。
 - **CSS**：解析扩展 CSS 时保留仅 fragment 的 `url()` 原样。
 - **生成面板**：新增 `persisted-ref` 工具记忆上次选择（BURN 生产原料与消耗品默认勾选）；ExchangeSelector 横向按钮组件替换 4 个生成对话框的交易所下拉。
-
----
-
 **日期**: 2026-08-09
 **说明**: 从 refined-prun 大规模迁移基础能力（P0-P4.5）—— 数据源、核心工具、XIT 命令、UI 组件，并补齐基础设施
 
@@ -235,9 +204,6 @@
 ### 📝 Docs
 
 - 新增 refined-prun → RUNCN 迁移文档（按 Basic 基础功能 / Pro XIT 命令区分）。
-
----
-
 **日期**: 2026-08-08
 **说明**: CONT 一键确认全部条款；XIT BS 拾取徽章；XIT WHATSNEW 发布说明弹窗
 
@@ -252,9 +218,6 @@
 
 - **`XIT/ACT`**：SFC/CONTD 目的地字段使用 `selectAddress` helper。
 - **build**：修复 vitest 从 dist 收集编译测试；排除 .test.ts 于 eager feature-glob 构建。
-
----
-
 **日期**: 2026-08-07
 **说明**: REPP 多站聚合视图与价格对齐修复；FX 换汇页修正
 

@@ -24,6 +24,8 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.parse.outputs.VERSION }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -52,9 +54,8 @@ jobs:
             process.exit(78);
           }
           const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
           const baseVersion = pkg.version.replace(/-.*$/, '');
-          const version = `${baseVersion}-${date}`;
+          const version = baseVersion;
           fs.writeFileSync('/tmp/release-notes.md', body);
           console.log(`VERSION=${version}`);
           console.log('---notes---');
