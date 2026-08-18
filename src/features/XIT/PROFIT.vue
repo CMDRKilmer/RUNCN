@@ -201,7 +201,7 @@ function marginClass(margin: number) {
         <td :class="$style.colAction">
           <button
             :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
-            @click="showBuffer(`PROD ${row.siteId}`)">
+            @click="showBuffer(`PROD ${row.siteId.substring(0, 8)}`)">
             PROD
           </button>
         </td>
