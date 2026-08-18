@@ -53,9 +53,28 @@ jobs:
             console.log('No Unreleased content; skipping release.');
             process.exit(78);
           }
-          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          const baseVersion = pkg.version.replace(/-.*$/, '');
-          const version = baseVersion;
+          const { execSync } = require('child_process');
+          const date = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          }).format(new Date());
+          let [y, m, d] = date.slice(2).split('-').map(x => Number(x));
+          const taken = new Set(execSync('git tag', { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean));
+          let version = `${y}.${m}.${d}`;
+          while (taken.has(version)) {
+            d += 1;
+            if (d > 31) {
+              d = 1;
+              m += 1;
+            }
+            if (m > 12) {
+              m = 1;
+              y += 1;
+            }
+            version = `${y}.${m}.${d}`;
+          }
           fs.writeFileSync('/tmp/release-notes.md', body);
           console.log(`VERSION=${version}`);
           console.log('---notes---');
@@ -122,7 +141,7 @@ jobs:
             .replace(/^---\s*\n+/, '')
             .trim();
           if (!body) { console.log('Empty Unreleased body'); process.exit(0); }
-          const today = new Date().toISOString().slice(0, 10);
+          const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(new Date());
           const version = '${{ needs.build.outputs.VERSION }}';
           const header = `## [${version}] - ${today}\n`;
           const newSection = header + body + '\n\n---\n\n';
@@ -133,13 +152,20 @@ jobs:
           const after = fs.readFileSync(path, 'utf8').slice(idx).replace('## [Unreleased]\n\n> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。\n\n---\n\n', '');
           fs.writeFileSync(path, before + '## [Unreleased]\n\n> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。\n\n---\n\n' + newSection + after);
           console.log('CHANGELOG.md updated.');
+          const pkgPath = 'package.json';
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+          if (pkg.version !== version) {
+            pkg.version = version;
+            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+            console.log(`package.json version synced to ${version}.`);
+          }
           NODE
 
       - name: Commit changelog update
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
+          git add CHANGELOG.md package.json
           git diff --cached --quiet && echo "No changelog changes" || git commit -m "chore(release): archive Unreleased into ${{ needs.build.outputs.VERSION }}"
           git push
 
