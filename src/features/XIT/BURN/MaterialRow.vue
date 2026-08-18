@@ -7,6 +7,8 @@ import { useTileState } from '@src/features/XIT/BURN/tile-state';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
+import { timestampEachMinute } from '@src/utils/dayjs';
+import { formatEta } from '@src/utils/format';
 
 const { alwaysVisible, burn, material } = defineProps<{
   alwaysVisible?: boolean;
@@ -96,6 +98,14 @@ const needAmt = computed(() => {
   need = need === 0 ? 0 : need;
   return need;
 });
+
+const depletionDate = computed(() => {
+  if (isInf.value) {
+    return '--';
+  }
+  const ms = timestampEachMinute.value + burn.daysLeft * 24 * 60 * 60 * 1000;
+  return formatEta(timestampEachMinute.value, ms);
+});
 </script>
 
 <template>
@@ -125,7 +135,12 @@ const needAmt = computed(() => {
     <td>
       <span>{{ isNaN(needAmt) ? '0' : fixed0(needAmt) }}</span>
     </td>
-    <DaysCell :days="days" />
+    <td>
+      <DaysCell :days="days" />
+    </td>
+    <td :style="{ color: isRed ? '#d9534f' : isYellow ? '#f0ad4e' : '' }">
+      {{ depletionDate }}
+    </td>
     <td>
       <PrunButton dark inline @click="showBuffer(`CXM ${material.ticker}`)">CXM</PrunButton>
     </td>
