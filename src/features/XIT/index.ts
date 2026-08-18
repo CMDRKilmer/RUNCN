@@ -1,5 +1,4 @@
 import './ACT/ACT';
-import './ALERTS';
 import './ARB/ARB';
 import './BPC/BPC';
 import './BSN/BSN';

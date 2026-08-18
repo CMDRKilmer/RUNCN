@@ -242,7 +242,6 @@ function copyBurnTable() {
             </InlineFlex>
           </th>
           <th>天数</th>
-          <th>枯竭时间</th>
           <th>命令</th>
         </tr>
       </thead>
