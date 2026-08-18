@@ -4,12 +4,83 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+**日期**: 2026-08-18
+**说明**: 清理大量冗余废弃代码，简化 eslint 配置
+
+### 🗑️ Removed
+
+- 删除多个废弃功能模块：SFC 自动关闭、ADM 按钮样式、聊天翻译、FXPO 增强、舰队存储分析、任务卡片、`CargoBar.vue` 等（净删 1300+ 行）。
+- 移除未使用的 `inboundShipInventoryEnabled` 相关函数、`tslib` 依赖，以及 `buildings.ts` / `storage-analysis.ts` / `org-api tasks` 等模块的废弃导出。
+- 简化 eslint 忽略配置，删除测试/调试专用的重置会话密钥函数。
+- 更新贡献文档，添加死代码清理说明。
+
+---
+
+**日期**: 2026-08-17
+**说明**: 移除 REPP 功能模块并将维修预测逻辑重构进 FLEET；BURN 启用 MCB/VSC 箱型；统一 Tooltip 实现；CI 发布工作流重构
+
+### ✨ Features
+
+- **`XIT/BURN`**：启用 MCB 与 VSC 的箱型配置参数，补充可选装箱规格。
+- **footer**：`rprun-version-label` 合并显示现金余额 —— 与余额展示统一在同一个 footer 订阅回调中渲染，保证 DOM 渲染顺序确定。
+- **CI**：release 工作流重构 —— 触发条件改为 CHANGELOG.md 变更（含 Unreleased 归档），恢复 tag push 触发；新增 workflow 清理脚本（GitHub Actions 与 Windows PowerShell 两版）。
+
+### 🔧 Improvements
+
+- **`XIT/FLEET`**：移除 REPP 功能模块，将原 REPP 核心算法整合到 `core/repair-plan`，直接通过 productionStore 获取生产数据计算最优维修间隔，简化维修状态展示逻辑。
+- **`sfc-auto-fuel` / `PlanetRow`**：优化初始化时机与悬浮提示 —— 等待目的地行程统计加载完成后再配置滑块；补给天数输入框添加计算公式悬浮提示。
+- **manifest**：移除不必要的跨域权限域名（workers.dev）。
+- **`XIT/FLT`**：更新表头文本与进度条样式。
+
+### 🐛 Bug Fixes
+
+- **`XIT/FLEET/PlanetRow`**：维修悬浮框价格计算改用 PRUNplanner 标准公式 —— 基于建筑全量材料和实际使用时长计算剩余维修成本，修复未满修时价格不准的问题。
+- **Tooltip / `PlanetRow` / `InvBar`**：修复 tooltip 显示问题 —— show 方法空值检查、替换原生 `title`/`data-tooltip` 为 Tooltip 组件、修复分段 tooltip 触发区域与告警显示。
+- **运输中分类**：统一三处硬编码「运输中」为 `translateCategory` 国际化调用，保持界面文本一致性。
+- **`XIT/FLT`**：燃料列标题更新为「燃料/维修」以更清晰地反映内容。
+
+---
+
+**日期**: 2026-08-16
+**说明**: 新增 SFC 自动燃料设置；FLT 燃料条与维修状态视觉重构；快捷卸货复用 SHPI 一键卸货
+
+### ✨ Features
+
+- **`sfc-auto-fuel-settings`**：新增 SFC 自动设置燃料消耗（默认 0.1）与反应堆使用量（默认 100%）功能，预留自动勾选跃迁点与抵达后卸货的配置接口。
+- **`XIT/FLT`**：燃料条改细并去边框，维修状态改为进度条。
+- **`XIT/FLT`**：快捷卸货按钮改为复用船舱（SHPI）一键卸货按钮。
+
+### 🔧 Improvements
+
+- **`sfc-auto-fuel`**：优化自动燃料设置逻辑 —— 已配置滑块标签缓存防止重复覆盖手动修改、调整滑块点击时序（sleep 确保 onChangeComplete 获取正确值）、完善 `setSliderValue` 返回值与异常处理、启用跃迁点自动勾选配置。
+- **`XIT/FLT`**：调整布局，优化货物栏宽度与位置样式；`LocationCell` 增加目的地样式，改善位置显示。
+- **`XIT/FLEET/PlanetRow`**：移除拖拽分配飞船时的存量存储空间容量校验，简化拖拽分配流程。
+
+### 🐛 Bug Fixes
+
+- **`sfc-auto-fuel-settings`**：修复滑块点击后值被覆盖的问题。
+
 ---
 
 **日期**: 2026-08-15
-**说明**: 通过 `pnpm.overrides` 强制覆盖 3 个 transitive 依赖、清理 Dependabot 6 条 high 安全漏洞（与 PR #9 / PR #7 模式一致）
+**说明**: 新增基地别名功能（命名 / SFC 搜索 / 全局展示）；FLEET 执行按钮 Tooltip；通过 overrides 清理 Dependabot 6 条 high 安全漏洞
 
-### 🔒 Security
+### ✨ Features
+
+- **基地别名**：新增 `userData.baseAliases` 存储与迁移（siteId → 别名）；BS 面板新增「别名」编辑按钮；新增 `XIT BSN` 面板集中管理所有基地别名；XIT 模块（PROD/BURN/FLEET/EXP/WFOR/ELEC/PWARN/REP/REPP/FLT/CONTC）原生渲染别名；PrUn 原生 tile 通过 `base-alias-display` 装饰标题与链接（含仓库库存解析）；SFC 目的地输入框输入别名时自动替换为行星 naturalId。
+- **`XIT/BSN`**：别名输入改为原生输入框，新增草稿管理，优化输入体验。
+- **`XIT/FLEET`**：添加 Tooltip 组件优化执行按钮的提示信息。
+- **`XIT/FLT`**：添加飞船状态文本标签，优化状态显示逻辑；调整货物单元格样式，优化垂直堆叠内边距；优化位置单元格逻辑，确保停靠船只正确显示目的地。
+
+### 🔧 Improvements
+
+- **`XIT/FLEET/PlanetRow`**：补给天数输入框添加悬浮提示（可容纳补给天数计算公式与推荐值）。
+
+### � Bug Fixes
+
+- **CI**：release.yml prune job 添加 checkout，避免 `gh release` 找不到 git 上下文。
+
+### � Security
 
 - **`brace-expansion`**：升级 5.0.8 → 5.0.9 + per-major pin（`@1`→1.1.18、`@2`→2.1.4）以清除 [GHSA-mh99-v99m-4gvg](https://github.com/advisories/GHSA-mh99-v99m-4gvg) / CVE-2026-14257（DoS via unbounded expansion length）与 [GHSA-rgw5-rvv9-x895](https://github.com/advisories/GHSA-rgw5-rvv9-x895) / CVE-2026-69152（5.0.8 缓解被绕过的中间数组 DoS）。3 个大版本都受影响：1.x 通过 `eslint → minimatch 3.1.5`、2.x 通过 `@typescript-eslint → minimatch 9.0.9`、5.x 通过 `rimraf → glob → minimatch 10.2.6`；必须按 major 分别 pin 才能让 pnpm dedup 落到补丁版本。
 - **`js-yaml`**：升级 4.3.0 → 4.3.1 以清除 Quadratic CPU consumption in `!!omap` 解析（GHSA-5p4m-2wfm-xmqj）。所有路径经 `@eslint/eslintrc` 引入。
@@ -27,6 +98,169 @@
 - `postcss` 在 dep chain 中实际由 pnpm dedup 拉到 8.5.26（>=8.5.18 满足 patched）；保留 `postcss: 8.5.18` 作为最低保证。
 - 沿用 PR #9 已确立的 `pnpm-workspace.yaml#overrides` 模式（pnpm 9.x 不再读 `package.json#pnpm.overrides`）。
 - `pnpm install` 必须 `--no-frozen-lockfile`（删除 `pnpm-lock.yaml` + `node_modules` 后重装）才能触发 re-resolution；增量 `pnpm install` 会把 override 当作「已满足」直接复用旧 snapshot。
+
+---
+
+**日期**: 2026-08-14
+**说明**: FLEET 维修间隔 REPP 模型提示；ACT 自动模式静默执行；FLT 位置/目的地分列；DISPATCH 整合进 FLEET
+
+### ✨ Features
+
+- **`XIT/FLEET`**：新增基于 REPP 模型的维修间隔提示 —— 使用 `calculateRepairPredictions` 生成最优维修天数，维修列配色替换为 REPP 模型三色标记，调整表格列顺序与表头文案。
+- **`XIT/ACT`**：自动模式窗口静默执行，成功后自动关闭 ACT 执行窗口（tile 分配器复用预开窗口）。
+- **`XIT/FLT`**：新增位置与目的地分列 —— `LocationCell` 增加 mode 参数，舰船列表按名称/注册码排序，调整表头对齐样式。
+- **CI**：release 工作流新增 prune 任务 —— 自动清理旧 release 仅保留最新 10 个（可手动触发并覆盖保留数量）。
+
+### 🔧 Improvements
+
+- **`XIT/FLEET`**：整合 DISPATCH 模块到 FLEET，统一代码位置与命令。
+- **`XIT/FLEET`**：移除展开行功能，将存储计算逻辑提取到 `storage-utils.ts` 复用。
+- **`XIT`**：优化舰队相关命令与界面 —— 移除 FLT 的 FLEET 别名命令、重构 FLEET 模块描述为基地管理、PlanetRow 自定义单选替换为 SelectInput 组件。
+- **`XIT/FLEET/PlanetRow`**：两个 props 改为可选类型；advanceCell 样式优化；修复物资补给计算逻辑并添加提前列样式。
+
+---
+
+**日期**: 2026-08-13
+**说明**: 新增 DISPATCH 舰队补给维修规划功能；Tooltip 组件重构与物料分类翻译
+
+### ✨ Features
+
+- **`XIT/DISPATCH`**：新增舰队补给维修规划面板 —— 基地补给/维修规划、船只分配（拖拽 + cargo 容量校验）、一键生成执行包（DISPATCHACT），支持配置导出导入与重置。
+- **`XIT/DISPATCH`**：多基地卸货包自动生成逻辑。
+
+### 🔧 Improvements
+
+- **Tooltip**：重构组件 —— 支持隐藏默认图标与自定义插槽内容；新增物料类别中文翻译函数；替换原生 `data-tooltip` 为统一 Tooltip 组件，修复宽度溢出问题。
+- **`XIT/DISPATCH`**：重构 `fitDaysForShip` 函数优化二分搜索逻辑；优化类型转换与遍历方式。
+
+### 🐛 Bug Fixes
+
+- **`step-machine`**：修复跳过并行步骤后卡死的问题。
+
+---
+
+**日期**: 2026-08-12
+**说明**: 新增 INV/STO 库存与仓储分析；ACT/FLT/BURN 飞船筛选与自动填转移目的地
+
+### ✨ Features
+
+- **`XIT/INV`**：库存列表面板 —— 基地/飞船/仓库/CX 过滤、各类库存显示切换（tile-state 管理）。
+- **`XIT/STO`**：仓储分析总览面板 —— BaseDetail/BaseHeader/BaseSection 分段展示、VisitationTable 飞船访问频率、填充率与天数格式化工具。
+- **`XIT/BURN`**：生成补给行动面板新增飞船筛选 —— 自动匹配对应空间站与货箱容量的飞船，选中后自动预填转移动作的目的地为对应货仓。
+- **`XIT/BURN`**：飞船选择项显示载重和容积。
+
+### 🔧 Improvements
+
+- **`XIT/ACT`**：OPEN_SFC 动作添加同包动作查找能力，修复目的地获取逻辑。
+- **`XIT/FLT`**：状态单元格拆分出独立 `LocationCell` 组件。
+- **`GenerateActDialog`**：调整标准货箱配置与注释顺序；`TimeCell` 移除加油按钮 tooltip 配置。
+
+---
+
+**日期**: 2026-08-11
+**说明**: ACT 移植 OPEN SFC 动作；BURNGEN 生成 Unload 卸货包；FLT 位置显示区分空间站/轨道/着陆
+
+### ✨ Features
+
+- **`XIT/ACT`**：移植 OPEN SFC 动作 —— 执行完成后自动打开航行控制并输入目的地，暂停等待玩家提交飞行（自动模式自动继续）；COGC/BRA/BURN 生成面板新增「打开航行控制」勾选（记忆上次选择）。
+- **`XIT/BURN`**：BURNGEN 生成补给包时同步生成同名 `{星球} Unload` 卸货包（可关闭）—— 卸货目标锁定星球基地，`originType: SHIP_STORE`，卸货包执行成功后自动删除（`autoDelete`，取消/失败保留）。
+- **`XIT/FLT`**：位置显示区分空间站（缩写如 HRT）/ 行星轨道（环绕轨道）/ 行星表面（着陆）。
+- **`XIT/BS`**：添加最优维修间隔天数计算，优化维修状态展示。
+
+### 🔧 Improvements
+
+- **`XIT/FLT`**：更新默认排序键与布局模式，调整列显示设置。
+- **prun-ui**：注册 SFC 窗口默认尺寸 421x535，后调整为 600x700。
+- **user-migrations**：移除过期的 sidebar 迁移。
+
+### 🗑️ Removed
+
+- **`contd-generate-purchase-draft`**：移除 contd 采购草稿功能。
+
+---
+
+**日期**: 2026-08-10
+**说明**: 新增 FLT 舰队总览；ACT 自动执行与并行购买；CXPO 快速报价；XIT BS 命令；SFC 交易所快捷按钮；COGCU 补给 ACT
+
+### ✨ Features
+
+- **`XIT/FLT`**：新增舰队总览表功能模块 —— 面板汉化、状态列改为图标+地址单行显示、ETA 列 docked 船加油按钮（自动执行，复用 QuickRefuelDialog）、经典模式隐藏加注燃料按钮、燃料列进度条垂直堆叠。
+- **`XIT/FLT`**：卸货按钮自动 MTRA 批量转移（silent 模式，监听 shipStore.items 等待完成），最终复用原生 FLT 卸货按钮。
+- **`XIT/ACT`**：购买步骤自动模式并发执行（StepMachine 并行组，多窗口并发购买，组内全部完成才推进）；自动按钮改为红色触发式，点击即预览后自动执行；自动执行与手动执行窗口分离（自动走 requestWindow，避免被右侧 companion 小窗卡住）。
+- **`XIT/ACT`**：新增 contd 采购草稿功能（`contd-generate-purchase-draft`）。
+- **`cxpo-order-book`**：添加快速报价单功能，优化空量订单展示。
+- **`XIT/BS`**：新增 XIT BS 命令（基地总览面板）。
+- **`SFC`**：四大交易所目的地快捷按钮（ANT/BEN/HRT/MOR），当前所在站按钮置灰。
+- **`COGCU`**：新增商会补给 ACT 生成 —— 全额账单材料 × 可选倍数生成 CX Buy + MTRA 转移；飞船维修 ACT 移除 MTRA 转移。
+- **`XIT/BURN`**：标准货箱填满 —— 飞船填满改为标准货箱选择（SCB/WCB/LCB/HCB），按容量自动计算最大补给天数；ExchangeSelector 支持取消选择。
+
+### 🔧 Improvements
+
+- **`XIT/ACT`**：MTRA 批量转移并行化与静默执行（MTRA_BATCH 步骤，多窗口并行提交、display:none 静默执行，取消/失败后 execute 后台续跑修复）；CX 库存不足时警告而非失败。
+- **`XIT/ACT`**：SFC/CONTD 目的地字段改用 `selectAddress` helper。
+- **`XIT/BS`**：BS INV 上下文链接重定向到基地存储；`INV <planet>` 直接打开基地存储。
+- **`XIT/PLANETS`**：拾取飞船下拉明确标注重量 vs 体积。
+- **CSS**：解析扩展 CSS 时保留仅 fragment 的 `url()` 原样。
+- **生成面板**：新增 `persisted-ref` 工具记忆上次选择（BURN 生产原料与消耗品默认勾选）；ExchangeSelector 横向按钮组件替换 4 个生成对话框的交易所下拉。
+
+---
+
+**日期**: 2026-08-09
+**说明**: 从 refined-prun 大规模迁移基础能力（P0-P4.5）—— 数据源、核心工具、XIT 命令、UI 组件，并补齐基础设施
+
+### ✨ Features
+
+- **P0 基础**：迁移 zh-locale + companion-buffer + css-proxy。
+- **P1 数据源与核心**：迁移 agent-channel/cogcs/populations/population-projects 数据源、agent-channel-messaging + select-address；补齐 burn/buildings/storage-analysis/repair/planetOverrides 基础设施（`getInboundShipStores` / `getRepairThreshold` / `getBaseStorageAnalysis` / `getPlanetRepairAge` 等）。
+- **P2 命令**：迁移 `XIT/INV` 库存列表 + planet-context-menu、`XIT/BS` 建筑列表、`XIT/NOBUY` 禁止购买列表、`XIT/PLANETS` 行星覆盖设置、`XIT/LINKEDBUFFERS` 关联缓冲区。
+- **P3 面板**：迁移 `XIT/STO` 仓储分析、`XIT/GOVBURN` 政府燃烧规划器、`XIT/DISPATCH` 舰队补给维修规划器、`XIT/AGENT` 代理频道包列表、`XIT/DATA` 数据浏览器。
+- **P4 系统**：迁移 data-query 核心子系统、ACT 动作系统扩展、`SET/FINMERGE` 财务备份合并、NumericInput + EndlessScrollControl 通用组件。
+- **`XIT/FLT`**：迁移舰队视图与 REFUELACT 命令，补齐 displaytimeBetween 工具；迁移 `XIT/BURNACT` 与 `XIT/REPAIRACT` 行星补给/维修执行命令。
+- **`XIT/ACT`**：MTRA 批量转移并行化与静默执行（MTRA_BATCH 步骤，填写阶段自适应等待提速 2-3 倍）。
+- **`XIT/GOVBURN`**：配置面板新增 JSON 计划导入。
+
+### 🐛 Bug Fixes
+
+- 补全 unimport 自动导入配置，修复 BS 库存条运行时 `sumBy is not defined`。
+- 补全 `LinkedBuffersPreset` 类型（lastBufferSize/controlPosition/childLayouts）与 `LinkedBuffersChildLayout` 接口，对齐 RP 定义。
+- GOVBURN 用户数据结构修复（govburn 内嵌 config 而非顶层 govburnConfig）+ 数据迁移。
+- planetsStore 补上 DATA_DATA 监听，修复 GOVBURN 获取数据失败（populationId 未更新导致 OPEN_POPI/POPID 超时）。
+- 补齐 RUNCN 缺失导出，使 pnpm build 通过。
+
+### 📝 Docs
+
+- 新增 refined-prun → RUNCN 迁移文档（按 Basic 基础功能 / Pro XIT 命令区分）。
+
+---
+
+**日期**: 2026-08-08
+**说明**: CONT 一键确认全部条款；XIT BS 拾取徽章；XIT WHATSNEW 发布说明弹窗
+
+### ✨ Features
+
+- **`CONT`**：合同详情页新增「全部确认」按钮 —— 按顺序点击所有「完成」按钮并自动清除「操作成功」toast，无需手动接受合同。
+- **`XIT/PLANETS`**：新增 Pickup 列 —— 按行星选择货运飞船尺寸预设（500/500、1k/3k、2k/2k、3k/1k、5k/5k）。
+- **`XIT/BS`**：就绪拾取徽章 —— 基地累积产出（净燃烧为正的物料库存）达到所选飞船载重/容积时显示绿色火箭徽章并附吨位/容积 tooltip；飞船在途时自动清除，防止重复派船。
+- **`XIT WHATSNEW`**：发布说明弹窗 —— 自动检查版本更新并渲染 CHANGELOG.md（打包进扩展），可手动通过 footer 版本标签打开；恢复 CHANGELOG.md 并接入发布流程。
+
+### 🔧 Improvements
+
+- **`XIT/ACT`**：SFC/CONTD 目的地字段使用 `selectAddress` helper。
+- **build**：修复 vitest 从 dist 收集编译测试；排除 .test.ts 于 eager feature-glob 构建。
+
+---
+
+**日期**: 2026-08-07
+**说明**: REPP 多站聚合视图与价格对齐修复；FX 换汇页修正
+
+### ✨ Features
+
+- **`XIT/REPP`**：新增多站聚合视图与价格对齐修复。
+- **`XIT/REPP`**：每个基地行末添加跳转到对应基地的 BRA 按钮。
+
+### 🐛 Bug Fixes
+
+- **`XIT/FX`**：修正换汇页合同货币参数与逻辑描述。
 
 ---
 
