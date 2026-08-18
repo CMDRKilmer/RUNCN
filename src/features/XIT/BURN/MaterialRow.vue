@@ -125,9 +125,7 @@ const needAmt = computed(() => {
     <td>
       <span>{{ isNaN(needAmt) ? '0' : fixed0(needAmt) }}</span>
     </td>
-    <td>
-      <DaysCell :days="days" />
-    </td>
+    <DaysCell :days="days" />
     <td>
       <PrunButton dark inline @click="showBuffer(`CXM ${material.ticker}`)">CXM</PrunButton>
     </td>
