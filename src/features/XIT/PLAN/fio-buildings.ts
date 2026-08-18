@@ -70,16 +70,3 @@ export async function loadFioBuildings() {
     fioBuildingsStore.loading = false;
   }
 }
-
-// 判断建筑是否为居住建筑：无配方且有员工需求。
-export function isHabitationBuilding(b: FioBuilding): boolean {
-  if (b.Recipes.length > 0) {
-    return false;
-  }
-  return b.Pioneers + b.Settlers + b.Technicians + b.Engineers + b.Scientists > 0;
-}
-
-// 判断建筑是否为生产建筑：有配方。
-export function isProductionBuilding(b: FioBuilding): boolean {
-  return b.Recipes.length > 0;
-}

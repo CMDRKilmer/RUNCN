@@ -168,8 +168,3 @@ function isEnvelope(value: unknown): value is SessionKeyEnvelope {
   const k = (value as { k?: unknown }).k;
   return typeof v === 'number' && typeof k === 'string';
 }
-
-// Used by tests / debug code. Do not call from production paths.
-export function _resetSessionKeyForTests() {
-  sessionKey = null;
-}

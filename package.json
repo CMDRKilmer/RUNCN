@@ -16,8 +16,7 @@
     "fix": "pnpm exec eslint ./ --fix --concurrency auto",
     "lint": "pnpm exec eslint --concurrency auto",
     "prepare": "husky",
-    "prettier": "prettier . --write --ignore-path .prettierignore",
-    "test": "vitest run"
+    "prettier": "prettier . --write --ignore-path .prettierignore"
   },
   "type": "module",
   "dependencies": {
@@ -59,7 +58,6 @@
     "lint-staged": "^17.2.0",
     "prettier": "^3.9.6",
     "rimraf": "^6.0.1",
-    "tslib": "^2.8.1",
     "typescript": "6.0.3",
     "typescript-eslint": "^7.18.0",
     "unimport": "^6.3.0",

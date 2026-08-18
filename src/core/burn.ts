@@ -100,10 +100,6 @@ export function getInboundShipStores(planetNaturalId: string | undefined) {
 
 const inboundShipInventoryEnabled = ref(false);
 
-export function setInboundShipInventoryEnabled(value: boolean) {
-  inboundShipInventoryEnabled.value = value;
-}
-
 export function getPlanetBurn(siteOrId?: PrunApi.Site | string | null) {
   const site = typeof siteOrId === 'string' ? sitesStore.getById(siteOrId) : siteOrId;
   if (!site) {

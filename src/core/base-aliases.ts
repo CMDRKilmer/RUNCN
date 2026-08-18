@@ -59,17 +59,3 @@ export function resolveBaseAliasOrNaturalId(query: string): string | undefined {
 
   return undefined;
 }
-
-/** 返回所有已设置别名的基地条目，按别名小写排序。 */
-export function listBaseAliasEntries(): { siteId: string; alias: string; naturalId: string }[] {
-  const entries: { siteId: string; alias: string; naturalId: string }[] = [];
-  for (const [siteId, alias] of Object.entries(userData.baseAliases)) {
-    const site = sitesStore.getById(siteId);
-    const naturalId = getEntityNaturalIdFromAddress(site?.address);
-    if (naturalId) {
-      entries.push({ siteId, alias, naturalId });
-    }
-  }
-  entries.sort((a, b) => a.alias.toLowerCase().localeCompare(b.alias.toLowerCase()));
-  return entries;
-}

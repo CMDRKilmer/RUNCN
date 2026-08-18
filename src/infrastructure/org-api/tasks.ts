@@ -1,12 +1,5 @@
 // src/infrastructure/org-api/tasks.ts
-import type {
-  ListTasksResult,
-  OrgTask,
-  PollScope,
-  ReleaseTaskResult,
-  TaskContractJson,
-  TaskType,
-} from './types';
+import type { ListTasksResult, OrgTask, PollScope, ReleaseTaskResult, TaskType } from './types';
 import type { ContractFingerprint, ContractMatchResult } from './contract-link';
 import { HttpError, request } from './client';
 import { notifyTaskClaimed, notifyTaskUpdated } from './task-activity';
@@ -33,35 +26,6 @@ export async function listTasks(params: ListTasksParams): Promise<ListTasksResul
   if (params.limit !== undefined) search.set('limit', String(params.limit));
   if (params.cursor) search.set('cursor', params.cursor);
   return request<ListTasksResult>(`/tasks?${search.toString()}`);
-}
-
-export async function getTask(taskId: string): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}`);
-}
-
-export interface CreateTaskParams {
-  type: TaskType;
-  contractJson: TaskContractJson;
-  expiresAt?: string;
-}
-
-export async function createTask(params: CreateTaskParams): Promise<OrgTask> {
-  return request<OrgTask>('/tasks', {
-    method: 'POST',
-    body: params,
-  });
-}
-
-export interface PatchTaskParams {
-  contractJson?: TaskContractJson;
-  expiresAt?: string;
-}
-
-export async function patchTask(taskId: string, params: PatchTaskParams): Promise<OrgTask> {
-  return request<OrgTask>(`/tasks/${taskId}`, {
-    method: 'PATCH',
-    body: params,
-  });
 }
 
 // 老架构 claimTask 已删除——接取走 listings.claimListing（listings.ts）。

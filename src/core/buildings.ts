@@ -1,6 +1,5 @@
 import { mergeMaterialAmounts } from '@src/core/sort-materials';
 import { sumMaterialAmountPrice } from '@src/infrastructure/fio/cx';
-import { userData } from '@src/store/user-data';
 
 export function calcBuildingCondition(age: number) {
   // 这个计算不完全精确，但最多只差 1 个 MCG
@@ -25,28 +24,4 @@ export function getBuildingBuildMaterials(building: PrunApi.Platform, site: Prun
 
 export function calcBuildingMarketValue(building: PrunApi.Platform, site: PrunApi.Site) {
   return sumMaterialAmountPrice(getBuildingBuildMaterials(building, site));
-}
-
-export function getRepairThreshold(planetNaturalId?: string | null) {
-  if (planetNaturalId) {
-    const overrides = (userData.settings.repair as Record<string, unknown>).planetOverrides as
-      Record<string, { threshold?: number; offset?: number }> | undefined;
-    const override = overrides?.[planetNaturalId]?.threshold;
-    if (override !== undefined) {
-      return override;
-    }
-  }
-  return userData.settings.repair.threshold;
-}
-
-export function getRepairOffset(planetNaturalId?: string | null) {
-  if (planetNaturalId) {
-    const overrides = (userData.settings.repair as Record<string, unknown>).planetOverrides as
-      Record<string, { threshold?: number; offset?: number }> | undefined;
-    const override = overrides?.[planetNaturalId]?.offset;
-    if (override !== undefined) {
-      return override;
-    }
-  }
-  return userData.settings.repair.offset;
 }

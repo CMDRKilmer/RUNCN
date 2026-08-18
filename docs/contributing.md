@@ -230,6 +230,15 @@ Before beginning new feature work, run `gh pr list --state open` (or equivalent)
 
 Don't enable auto-import-sorting in your editor. It creates merge conflicts when the same file is touched in two branches. Import sorting should be project-wide (via eslint/prettier), not per-editor.
 
+### Dead Code Cleanup
+
+Tool output (knip, tsc no-unused) needs manual verification before deletion:
+- unimport auto-imports symbols from 9 modules (see architecture.md) — usage without an import statement is normal.
+- Modules mount exports as object properties (e.g. `contractsStore.active`) — check the store object's property accessors, not just named imports.
+- Local same-name implementations can shadow exports (e.g. PLAN.vue defines its own `isProductionBuilding`).
+
+Verify with `pnpm run compile` and `pnpm run lint` after removal.
+
 ### Existing Components
 
 Check `src/components/` before creating new UI components. Reusable components like `PrunButton`, `PrunLink`, `ContextControls`, and `ContextControlsItem` already exist.
