@@ -14,7 +14,11 @@ import {
 import { objectId } from '@src/utils/object-id';
 import $style from './conts-shared.module.css';
 
-const { contract } = defineProps<{ contract: PrunApi.Contract }>();
+const { contract, deadline, deadlineStyle } = defineProps<{
+  contract: PrunApi.Contract;
+  deadline?: string;
+  deadlineStyle?: string;
+}>();
 
 const icons = computed(() => getContractIcons(contract));
 
@@ -95,5 +99,6 @@ const statusClass = computed(() => getStatusClass(contract.status));
         :show-text="true" />
     </td>
     <td :class="statusClass">{{ statusText }}</td>
+    <td :style="deadlineStyle">{{ deadline ?? '--' }}</td>
   </tr>
 </template>

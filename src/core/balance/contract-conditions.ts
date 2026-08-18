@@ -38,7 +38,10 @@ const sortedConditions = computed(() => {
   return conditions;
 });
 
-function calculateDeadline(contract: PrunApi.Contract, condition: PrunApi.ContractCondition) {
+export function calculateDeadline(
+  contract: PrunApi.Contract,
+  condition: PrunApi.ContractCondition,
+) {
   if (condition.type === 'COMEX_PURCHASE_PICKUP') {
     // COMEX_PURCHASE_PICKUP 条件有特殊处理：
     // 当所有依赖条件满足后，

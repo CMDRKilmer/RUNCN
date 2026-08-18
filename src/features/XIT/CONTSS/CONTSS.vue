@@ -10,6 +10,9 @@ import {
   calculateContractTotals,
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
+import { calculateDeadline } from '@src/core/balance/contract-conditions';
+import { timestampEachSecond } from '@src/utils/dayjs';
+import dayjs from 'dayjs';
 import $style from '../CONTS/conts-shared.module.css';
 
 const activeFilters = ref(
@@ -35,6 +38,76 @@ function compareContracts(a: PrunApi.Contract, b: PrunApi.Contract) {
 
 // 总待收款和应付款统计
 const totals = computed(() => calculateContractTotals(filtered.value));
+
+// 计算每个合同最近的截止时间
+const contractDeadlines = computed(() => {
+  const map = new Map<string, number | undefined>();
+  for (const contract of filtered.value) {
+    let nearest = Infinity;
+    for (const condition of contract.conditions) {
+      if (condition.status === 'FULFILLED') {
+        continue;
+      }
+      const deadline = calculateDeadline(contract, condition);
+      if (Number.isFinite(deadline) && deadline < nearest) {
+        nearest = deadline;
+      }
+    }
+    map.set(contract.id, nearest === Infinity ? undefined : nearest);
+  }
+  return map;
+});
+
+const dayMs = 24 * 60 * 60 * 1000;
+
+function formatDuration(timestamp: number) {
+  const now = timestampEachSecond.value;
+  if (timestamp <= now) {
+    return '已过期';
+  }
+  let duration = dayjs.duration({ milliseconds: timestamp - now });
+  const days = Math.floor(duration.asDays());
+  duration = duration.subtract(days, 'days');
+  const hours = Math.floor(duration.asHours());
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  duration = duration.subtract(hours, 'hours');
+  const minutes = Math.floor(duration.asMinutes());
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  duration = duration.subtract(minutes, 'minutes');
+  const seconds = Math.floor(duration.asSeconds());
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function deadlineStyle(ms?: number) {
+  if (ms === undefined) {
+    return '';
+  }
+  const remaining = ms - timestampEachSecond.value;
+  if (remaining <= 0) {
+    return 'color: #d9534f';
+  }
+  if (remaining <= dayMs) {
+    return 'color: #d9534f';
+  }
+  if (remaining <= dayMs * 3) {
+    return 'color: #f0ad4e';
+  }
+  return '';
+}
+
+function deadlineText(ms?: number) {
+  if (ms === undefined) {
+    return '--';
+  }
+  return formatDuration(ms);
+}
 </script>
 
 <template>
@@ -49,7 +122,7 @@ const totals = computed(() => calculateContractTotals(filtered.value));
 
       <!-- 混合货币警告 -->
       <span v-if="totals.hasMixedCurrency" :class="$style.warningText">
-        ⚠️ 检测到不同货币，金额统计可能不准确
+        检测到不同货币，金额统计可能不准确
       </span>
 
       <span v-if="totals.receivable > 0" :class="$style.receivableText">
@@ -70,17 +143,20 @@ const totals = computed(() => calculateContractTotals(filtered.value));
           <th>应付款</th>
           <th>进度</th>
           <th>状态</th>
+          <th>截止</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="isEmpty(filtered)">
-          <td colspan="7" :class="$style.empty">没有活动合同</td>
+          <td colspan="8" :class="$style.empty">没有活动合同</td>
         </tr>
         <template v-else>
           <ContractOverviewRow
             v-for="contract in filtered"
             :key="contract.id"
-            :contract="contract" />
+            :contract="contract"
+            :deadline="deadlineText(contractDeadlines.get(contract.id))"
+            :deadline-style="deadlineStyle(contractDeadlines.get(contract.id))" />
         </template>
       </tbody>
     </table>

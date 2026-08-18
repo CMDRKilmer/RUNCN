@@ -83,8 +83,12 @@ const tooltipText = computed(() => tooltipLines.value.join('\n'));
     <FracCell :numerator="activeOrders" :denominator="capacity" />
     <td>
       <div :class="$style.buttons">
-        <PrunButton dark inline @click="showBuffer(`PRODCO ${productionLine.id}`)">CO</PrunButton>
-        <PrunButton dark inline @click="showBuffer(`PRODQ ${productionLine.id}`)">Q</PrunButton>
+        <PrunButton dark inline @click="showBuffer(`PRODCO ${productionLine.id.substring(0, 8)}`)"
+          >CO</PrunButton
+        >
+        <PrunButton dark inline @click="showBuffer(`PRODQ ${productionLine.id.substring(0, 8)}`)"
+          >Q</PrunButton
+        >
       </div>
     </td>
   </tr>
