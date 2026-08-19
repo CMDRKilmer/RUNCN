@@ -7,7 +7,8 @@ import {
   isSameAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { calculatePlanetBurn } from '@src/core/burn';
+import { calculatePlanetBurn, getResupplyDays } from '@src/core/burn';
+import type { MaterialBurn } from '@src/core/burn';
 import { isRepairableBuilding } from '@src/core/buildings';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
@@ -35,40 +36,70 @@ export interface DispatchShip {
   cargoStore?: PrunApi.Store;
 }
 
-export function computeResupplyBill(
-  data: { useBaseInv?: boolean; consumablesOnly?: boolean; includeConsumables?: boolean },
-  planet: string | undefined,
-  days: number | undefined,
-): Record<string, number> | undefined {
-  if (!planet || days === undefined || isNaN(days)) return undefined;
+interface ResupplyFilter {
+  useBaseInv?: boolean;
+  consumablesOnly?: boolean;
+  includeConsumables?: boolean;
+}
+
+function getPlanetBurnForResupply(data: ResupplyFilter, planet: string | undefined) {
+  if (!planet) return undefined;
   const site = sitesStore.getByPlanetNaturalIdOrName(planet);
   if (!site) return undefined;
   const workforce = workforcesStore.getById(site.siteId)?.workforces;
   const production = productionStore.getBySiteId(site.siteId);
   if (workforce === undefined || production === undefined) return undefined;
   const stores = storagesStore.getByAddressableId(site.siteId);
-  const planetBurn = calculatePlanetBurn(
-    production,
-    workforce,
-    (data.useBaseInv ?? true) ? stores : undefined,
-  );
+  return calculatePlanetBurn(production, workforce, (data.useBaseInv ?? true) ? stores : undefined);
+}
+
+function isResupplyMaterial(mat: MaterialBurn, data: ResupplyFilter) {
+  if (mat.dailyAmount >= 0) return false;
+  // 两个独立开关:
+  //   consumablesOnly       → 是否纳入 workforce 消耗的物资(消耗品)
+  //   includeConsumables    → 是否纳入 production 消耗的物资(原料)
+  // 默认两者都开,任何一类有需求就纳入。
+  if (data.consumablesOnly === false && mat.workforce > 0 && mat.input === 0) {
+    return false;
+  }
+  if (data.includeConsumables === false && mat.input > 0 && mat.workforce === 0) {
+    return false;
+  }
+  return true;
+}
+
+// 基地过滤后净消耗物料的最小库存可用天数(与补给账单口径一致)。
+// 数据未加载时返回 undefined;无净消耗物料时返回 Infinity。
+export function getBaseInventoryDays(data: ResupplyFilter, planet: string | undefined) {
+  const planetBurn = getPlanetBurnForResupply(data, planet);
+  if (!planetBurn) return undefined;
+  let days = Infinity;
+  for (const ticker of Object.keys(planetBurn)) {
+    const mat = planetBurn[ticker];
+    if (!isResupplyMaterial(mat, data)) continue;
+    days = Math.min(days, mat.daysLeft);
+  }
+  return days;
+}
+
+export function computeResupplyBill(
+  data: ResupplyFilter,
+  planet: string | undefined,
+  days: number | undefined,
+): Record<string, number> | undefined {
+  if (days === undefined || isNaN(days)) return undefined;
+  const planetBurn = getPlanetBurnForResupply(data, planet);
+  if (!planetBurn) return undefined;
+  // 补给天数(输入的追加天数)与库存可用天数相加,不得超过推荐补给天数的 105%。
+  const cap = getResupplyDays(planet) * 1.05;
   const bill: Record<string, number> = {};
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
-    if (matBurn.dailyAmount >= 0) continue;
-    // 两个独立开关:
-    //   consumablesOnly       → 是否纳入 workforce 消耗的物资(消耗品)
-    //   includeConsumables    → 是否纳入 production 消耗的物资(原料)
-    // 默认两者都开,任何一类有需求就纳入。
-    if (data.consumablesOnly === false && matBurn.workforce > 0 && matBurn.input === 0) {
-      continue;
-    }
-    if (data.includeConsumables === false && matBurn.input > 0 && matBurn.workforce === 0) {
-      continue;
-    }
-    const consumed = days * -matBurn.dailyAmount;
-    const need = Math.max(0, Math.ceil(consumed - matBurn.inventory + 1));
-    if (need > 0) bill[ticker] = need;
+    if (!isResupplyMaterial(matBurn, data)) continue;
+    // 每种物料的追加天数:不超过输入天数,且补后总天数(库存可用+追加)不超过上限。
+    const additional = Math.max(0, Math.min(days, cap - matBurn.daysLeft));
+    if (additional <= 0) continue;
+    bill[ticker] = Math.ceil(additional * -matBurn.dailyAmount + 1);
   }
   return bill;
 }
@@ -87,6 +118,24 @@ export function computeRepairBill(site: PrunApi.Site, advance: BraAdvance): Reco
     for (const mat of building[key] ?? []) {
       const ticker = mat.material.ticker;
       parsedGroup[ticker] = (parsedGroup[ticker] ?? 0) + mat.amount;
+    }
+  }
+  // 扣除基地现成库存，只计算实际缺口（与 BRA 生成维修 ACT 的行为一致）。
+  const baseStore = storagesStore.getByAddressableId(site.siteId)?.find(x => x.type === 'STORE');
+  if (baseStore) {
+    const inventory: Record<string, number> = {};
+    for (const item of baseStore.items) {
+      if (item.quantity) {
+        inventory[item.quantity.material.ticker] = item.quantity.amount;
+      }
+    }
+    for (const ticker of Object.keys(parsedGroup)) {
+      const need = Math.max(0, parsedGroup[ticker] - (inventory[ticker] ?? 0));
+      if (need > 0) {
+        parsedGroup[ticker] = need;
+      } else {
+        delete parsedGroup[ticker];
+      }
     }
   }
   return parsedGroup;
@@ -260,26 +309,6 @@ export function fitDaysForShip(
     return 0;
   }
 
-  // Quick check that burn data is loaded for every resupply base.
-  for (const base of sharing) {
-    if (!base.config.resupply) {
-      continue;
-    }
-    if (
-      !computeResupplyBill(
-        {
-          useBaseInv: true,
-          consumablesOnly: base.config.consumablesOnly,
-          includeConsumables: base.config.includeConsumables,
-        },
-        base.naturalId,
-        1,
-      )
-    ) {
-      return undefined;
-    }
-  }
-
   const fits = (days: number) => {
     let weight = 0;
     let volume = 0;
@@ -287,15 +316,7 @@ export function fitDaysForShip(
       if (!base.config.resupply) {
         continue;
       }
-      const entries = computeResupplyBill(
-        {
-          useBaseInv: true,
-          consumablesOnly: base.config.consumablesOnly,
-          includeConsumables: base.config.includeConsumables,
-        },
-        base.naturalId,
-        days,
-      )!;
+      const entries = computeResupplyBill(base.config, base.naturalId, days)!;
       const totals = billTotals(entries);
       weight += totals.weight;
       volume += totals.volume;
@@ -306,13 +327,30 @@ export function fitDaysForShip(
     return true;
   };
 
-  if (fits(999)) {
-    return 999;
+  // 各补给基地的库存可用天数(同时验证消耗数据已加载),
+  // 以及账单饱和点:追加天数达到 推荐天数×105% − 库存可用天数 后该基地账单不再增长。
+  let saturation = 0;
+  let hasResupply = false;
+  for (const base of sharing) {
+    if (!base.config.resupply) {
+      continue;
+    }
+    hasResupply = true;
+    const invDays = getBaseInventoryDays(base.config, base.naturalId);
+    if (invDays === undefined) {
+      return undefined;
+    }
+    saturation = Math.max(saturation, getResupplyDays(base.naturalId) * 1.05 - invDays);
+  }
+  // 搜索上界:各基地饱和点中的最大值(此时所有基地都已补到各自的 推荐天数×105% 上限)。
+  let hi = hasResupply ? Math.max(0, saturation) : 999;
+
+  if (fits(hi)) {
+    return hi;
   }
 
   // 二分搜索最大补给天数，支持小数（参考 BURN act 的小数精度搜索）。
   let lo = 0;
-  let hi = 999;
   for (let i = 0; i < 100; i++) {
     const mid = (lo + hi) / 2;
     if (fits(mid)) {

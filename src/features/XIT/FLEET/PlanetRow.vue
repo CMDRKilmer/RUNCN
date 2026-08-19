@@ -8,7 +8,7 @@ import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import Tooltip from '@src/components/Tooltip.vue';
-import { getPlanetBurn } from '@src/core/burn';
+import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { calculateSiteOptimalDay, calcRepairCostTotal } from '@src/core/repair-plan';
@@ -62,25 +62,27 @@ const emit = defineEmits<{
 
 const canFit = computed(() => !!config.ship);
 
-// 天数输入不能超过基地「可容纳供应天数」。
-// analysis.daysOfSuppliesFit = 出货后填到 N% 时基地可容纳的总消耗天数;
-// 配置天数超过这个值会导致补给账单超出仓储,在 FLEET 的「适配」与「装载」计算中也按此上限截断。
-// 同时监听 days 与 cap,确保持久化的初始超 cap 值以及 cap 后置变小的情况都能被截断。
+const burn = computed(() => getPlanetBurn(siteId));
+const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
+
+// 天数输入为「追加补给天数」:与库存可用天数(days,即消耗状态列)相加得到最终天数,
+// 不得超过 min(仓储可容纳供应天数 daysOfSuppliesFit, 推荐补给天数×105%)。
+// analysis.daysOfSuppliesFit = 出货后填到 N% 时基地可容纳的总消耗天数(含现有库存);
+// computeResupplyBill 按同一上限逐物料截断,此处钳制输入使其与账单一致。
 watch(
-  [() => config.days, () => analysis?.daysOfSuppliesFit],
-  ([days, cap]) => {
-    if (cap === undefined || !isFinite(cap)) {
-      return;
+  [() => config.days, () => analysis?.daysOfSuppliesFit, days],
+  ([daysVal, fit, invDays]) => {
+    let cap = fit === undefined || !isFinite(fit) ? Infinity : fit;
+    cap = Math.min(cap, getResupplyDays(naturalId) * 1.05);
+    if (invDays !== undefined && isFinite(invDays)) {
+      cap -= invDays;
     }
-    if (days > cap) {
-      config.days = cap;
+    if (daysVal > cap) {
+      config.days = Math.max(0, cap);
     }
   },
   { immediate: true },
 );
-
-const burn = computed(() => getPlanetBurn(siteId));
-const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
 
 const burnBgClass = computed(() => (days.value === undefined ? {} : burnDaysClass(days.value)));
 
@@ -154,14 +156,18 @@ const fillText = computed(() => {
   return formatBurnDays(days);
 });
 
-// 补给天数输入框悬浮提示:展示 analysis.daysOfSuppliesFit 公式
-// 计算的可容纳供应天数,提示用户该基地理论可补给的最大天数。
+// 补给天数输入框悬浮提示:输入为「追加天数」,
+// 与库存可用天数相加后不得超过 min(仓储可容纳供应天数, 推荐补给天数×105%)。
 const daysTooltip = computed(() => {
-  const cap = analysis?.daysOfSuppliesFit;
-  if (cap === undefined || !isFinite(cap)) {
-    return undefined;
-  }
-  return `推荐天数: ${formatBurnDays(cap)} 天 (基于仓储可容纳供应天数)`;
+  const fit = analysis?.daysOfSuppliesFit;
+  const recommended = getResupplyDays(naturalId);
+  const totalCap = Math.min(
+    fit === undefined || !isFinite(fit) ? Infinity : fit,
+    recommended * 1.05,
+  );
+  const inv = days.value ?? 0;
+  const inputCap = Math.max(0, totalCap - inv);
+  return `天数上限: ${formatBurnDays(inputCap)} 天 (库存 ${formatBurnDays(inv)} + 补给 ≤ ${formatBurnDays(totalCap)} 天, 推荐 ${formatBurnDays(recommended)} 天)`;
 });
 
 const fillBgClass = computed(() => {
