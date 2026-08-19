@@ -93,9 +93,6 @@ function deadlineStyle(ms?: number) {
   if (remaining <= 0) {
     return 'color: #d9534f';
   }
-  if (remaining <= dayMs) {
-    return 'color: #d9534f';
-  }
   if (remaining <= dayMs * 3) {
     return 'color: #f0ad4e';
   }
