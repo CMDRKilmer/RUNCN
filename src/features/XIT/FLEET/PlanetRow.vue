@@ -8,7 +8,7 @@ import GripCell from '@src/components/grip/GripCell.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import Tooltip from '@src/components/Tooltip.vue';
-import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
+import { getPlanetBurn } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
 import { calculateSiteOptimalDay, calcRepairCostTotal } from '@src/core/repair-plan';
@@ -66,19 +66,19 @@ const burn = computed(() => getPlanetBurn(siteId));
 const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
 
 // 天数输入为「追加补给天数」:与库存可用天数(days,即消耗状态列)相加得到最终天数,
-// 不得超过 min(仓储可容纳供应天数 daysOfSuppliesFit, 推荐补给天数×105%)。
-// analysis.daysOfSuppliesFit = 出货后填到 N% 时基地可容纳的总消耗天数(含现有库存);
+// 不得超过 suppliesCapDays(下次到港前仓储不超限反算,含产出累积,防止补给填满
+// 仓库导致产出无处存放);不耦合全局推荐项。
 // computeResupplyBill 按同一上限逐物料截断,此处钳制输入使其与账单一致。
 watch(
-  [() => config.days, () => analysis?.daysOfSuppliesFit, days],
-  ([daysVal, fit, invDays]) => {
-    let cap = fit === undefined || !isFinite(fit) ? Infinity : fit;
-    cap = Math.min(cap, getResupplyDays(naturalId) * 1.05);
-    if (invDays !== undefined && isFinite(invDays)) {
-      cap -= invDays;
-    }
-    if (daysVal > cap) {
-      config.days = Math.max(0, cap);
+  [() => config.days, () => analysis?.suppliesCapDays, days],
+  ([daysVal, capDays, invDays]) => {
+    const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
+    // countDays 以 1000 作为"无净消耗物料"的哨兵值,此时无需预留库存天数。
+    const effective =
+      invDays !== undefined && isFinite(invDays) && invDays < 1000 ? cap - invDays : cap;
+    if (daysVal > effective) {
+      // 截断到上限,向下取两位小数(与适配 fitDaysForShip 的精度一致)。
+      config.days = Math.max(0, Math.floor(effective * 100) / 100);
     }
   },
   { immediate: true },
@@ -157,17 +157,27 @@ const fillText = computed(() => {
 });
 
 // 补给天数输入框悬浮提示:输入为「追加天数」,
-// 与库存可用天数相加后不得超过 min(仓储可容纳供应天数, 推荐补给天数×105%)。
+// 与库存可用天数相加后不得超过 suppliesCapDays(下次到港前仓储不超限反算)。
+// inputDaysCap 与 watch 共用钳制公式,绑定到 NumberInput 的 max 以约束浏览器原生箭头。
+const inputDaysCap = computed(() => {
+  const capDays = analysis?.suppliesCapDays;
+  const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
+  const raw = days.value;
+  if (raw !== undefined && isFinite(raw) && raw < 1000) {
+    return Math.max(0, cap - raw);
+  }
+  return Math.max(0, cap);
+});
+
 const daysTooltip = computed(() => {
-  const fit = analysis?.daysOfSuppliesFit;
-  const recommended = getResupplyDays(naturalId);
-  const totalCap = Math.min(
-    fit === undefined || !isFinite(fit) ? Infinity : fit,
-    recommended * 1.05,
-  );
-  const inv = days.value ?? 0;
+  const capDays = analysis?.suppliesCapDays;
+  const totalCap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
+  // 与 watch 钳制口径一致:无净消耗物料(哨兵 1000)时不预留库存天数。
+  const raw = days.value;
+  const inv = raw !== undefined && isFinite(raw) && raw < 1000 ? raw : 0;
   const inputCap = Math.max(0, totalCap - inv);
-  return `天数上限: ${formatBurnDays(inputCap)} 天 (库存 ${formatBurnDays(inv)} + 补给 ≤ ${formatBurnDays(totalCap)} 天, 推荐 ${formatBurnDays(recommended)} 天)`;
+  const totalText = !isFinite(totalCap) ? '∞' : formatBurnDays(totalCap);
+  return `天数上限: ${formatBurnDays(inputCap)} 天 (库存 ${formatBurnDays(inv)} + 补给 ≤ ${totalText} 天)`;
 });
 
 const fillBgClass = computed(() => {
@@ -308,7 +318,11 @@ const barAlarmReason = computed(() =>
     </td>
     <td :class="$style.inputCell">
       <Tooltip no-icon position="top" :tooltip="daysTooltip">
-        <NumberInput v-model="config.days" :class="$style.faintInput" />
+        <NumberInput
+          v-model="config.days"
+          :min="0"
+          :max="inputDaysCap"
+          :class="$style.faintInput" />
       </Tooltip>
     </td>
     <td :class="$style.statusCell">

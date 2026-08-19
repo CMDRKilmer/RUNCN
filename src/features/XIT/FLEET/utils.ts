@@ -7,8 +7,9 @@ import {
   isSameAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { calculatePlanetBurn, getResupplyDays } from '@src/core/burn';
+import { calculatePlanetBurn } from '@src/core/burn';
 import type { MaterialBurn } from '@src/core/burn';
+import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import { isRepairableBuilding } from '@src/core/buildings';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
@@ -90,8 +91,13 @@ export function computeResupplyBill(
   if (days === undefined || isNaN(days)) return undefined;
   const planetBurn = getPlanetBurnForResupply(data, planet);
   if (!planetBurn) return undefined;
-  // 补给天数(输入的追加天数)与库存可用天数相加,不得超过推荐补给天数的 105%。
-  const cap = getResupplyDays(planet) * 1.05;
+  const site = planet ? sitesStore.getByPlanetNaturalIdOrName(planet) : undefined;
+  if (!site) return undefined;
+  // 最终总天数(库存可用+追加)不得超过 suppliesCapDays:
+  // 按「下次到港前仓储不超过 (1−reserve)」反算(含产出累积),保证补给不会
+  // 填满仓库导致产出无处存放。不耦合全局推荐项;analysis 未加载时不限制。
+  const capDays = getBaseStorageAnalysis(site)?.suppliesCapDays;
+  const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
   const bill: Record<string, number> = {};
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
@@ -328,7 +334,7 @@ export function fitDaysForShip(
   };
 
   // 各补给基地的库存可用天数(同时验证消耗数据已加载),
-  // 以及账单饱和点:追加天数达到 推荐天数×105% − 库存可用天数 后该基地账单不再增长。
+  // 以及账单饱和点:追加天数达到 总天数上限 − 库存可用天数 后该基地账单不再增长。
   let saturation = 0;
   let hasResupply = false;
   for (const base of sharing) {
@@ -340,9 +346,11 @@ export function fitDaysForShip(
     if (invDays === undefined) {
       return undefined;
     }
-    saturation = Math.max(saturation, getResupplyDays(base.naturalId) * 1.05 - invDays);
+    // 与 computeResupplyBill 一致的补给容量上限(suppliesCapDays)。
+    const cap = getBaseStorageAnalysis(base.site)?.suppliesCapDays ?? Infinity;
+    saturation = Math.max(saturation, cap - invDays);
   }
-  // 搜索上界:各基地饱和点中的最大值(此时所有基地都已补到各自的 推荐天数×105% 上限)。
+  // 搜索上界:各基地饱和点中的最大值(此时所有基地都已补到各自的总天数上限)。
   let hi = hasResupply ? Math.max(0, saturation) : 999;
 
   if (fits(hi)) {

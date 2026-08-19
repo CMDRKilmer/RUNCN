@@ -33,7 +33,8 @@ const inputModel = computed({
   <div>
     <input
       v-model="inputModel"
-      type="number"
+      type="text"
+      inputmode="decimal"
       :min="min"
       :max="max"
       autocomplete="off"

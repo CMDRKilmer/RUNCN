@@ -56,6 +56,13 @@ export interface BaseStorageAnalysis {
   // 0.20 when storage is filling (reserve for produced goods that keep
   // accumulating between visits), 0.05 when draining (small variance buffer).
   suppliesReserveFraction: number;
+  // FLEET 补给容量上限：含现有库存的总补给天数上限。按「下次到港(ship-out 清空产物)
+  // 前仓储不超过 (1−reserve)」反算，两条约束取小(吨/体积各一)：
+  //   1) 装填型(净产出>0)：到港时 仓储 = idleNon + export×N
+  //   2) 消耗型(净产出≤0)：卸货后峰值 仓储 = idleNon + import×N
+  // daysOfSuppliesFit 只看消耗品占用、忽略产出累积，装填型基地会严重高估，
+  // 导致补给填满仓库、产出无处存放(卡线)。本字段取代其作为 FLEET 上限。
+  suppliesCapDays: number;
 
   // Days-until-full at net production rate. Infinity when net flow ≤ 0.
   daysUntilFull: number;
@@ -75,6 +82,33 @@ const analysisBySiteId = computed(() => {
   }
   return bySiteId;
 });
+
+// 单维度补给容量上限(天):到港峰值与卸货峰值两约束取小。
+// reserved = (1−reserve)×capacity;idle = 留守非消耗品负荷;consumerInv = 现有消耗品负荷。
+function capDaysForPeak(
+  reserved: number,
+  idle: number,
+  consumerInv: number,
+  importRate: number,
+  exportRate: number,
+): number {
+  const invDays = importRate > 0 ? consumerInv / importRate : Infinity;
+  // 约束 1: 到港仓储 f(N) = idle + export×N + max(0, consumerInv − import×N) ≤ reserved
+  let fill: number;
+  const atInvDays = idle + exportRate * invDays;
+  if (atInvDays <= reserved) {
+    fill = exportRate > 0 ? (reserved - idle) / exportRate : Infinity;
+  } else {
+    // 周期短于库存天数:消耗品有残留,用净流(export−import)回推
+    fill =
+      exportRate > importRate
+        ? Math.max((reserved - idle - consumerInv) / (exportRate - importRate), 0)
+        : 0;
+  }
+  // 约束 2: 卸货后峰值 idle + import×N ≤ reserved(N ≥ invDays 才有卸货)
+  const peak = importRate > 0 ? Math.max((reserved - idle) / importRate, invDays) : Infinity;
+  return Math.min(fill, peak);
+}
 
 function computeAnalysis(site: PrunApi.Site): BaseStorageAnalysis | undefined {
   const storage = storagesStore.getByAddressableId(site.siteId);
@@ -203,6 +237,36 @@ function computeAnalysis(site: PrunApi.Site): BaseStorageAnalysis | undefined {
   const daysFitV = importVolume > 0 ? consumableCapVolume / importVolume : Infinity;
   const daysOfSuppliesFit = Math.min(daysFitW, daysFitV);
 
+  // suppliesCapDays（见接口注释）：到港前峰值仓储约束下的最大补给天数。
+  // 到港仓储曲线 f(N) = idleNon + export×N + max(0, consumerInv − import×N)
+  //   （N ≥ invDays = consumerInv/import 后现有消耗品恰好耗尽,末项为 0）
+  // 约束 1（到港峰值）f(N) ≤ (1−reserve)×capacity 分段求解:
+  //   f(invDays) ≤ reserved → 末段 N ≤ (reserved − idle)/export
+  //   否则(周期短于库存天数,不卸货,消耗品有残留) → N ≤ (reserved − idle − consumerInv)/(export − import)
+  // 约束 2（卸货峰值,仅 N ≥ invDays 才有卸货）idle + import×N ≤ reserved,
+  //   不可行时退化为 invDays(不卸货,维持现状)。
+  const reservedWeight = store.weightCapacity * (1 - suppliesReserveFraction);
+  const reservedVolume = store.volumeCapacity * (1 - suppliesReserveFraction);
+  const suppliesCapDays = Math.max(
+    0,
+    Math.min(
+      capDaysForPeak(
+        reservedWeight,
+        idleNonConsumableWeight,
+        consumerInventoryWeight,
+        importWeight,
+        exportWeight,
+      ),
+      capDaysForPeak(
+        reservedVolume,
+        idleNonConsumableVolume,
+        consumerInventoryVolume,
+        importVolume,
+        exportVolume,
+      ),
+    ),
+  );
+
   return {
     siteId: site.siteId,
     storeId: store.id,
@@ -227,6 +291,7 @@ function computeAnalysis(site: PrunApi.Site): BaseStorageAnalysis | undefined {
     availableAfterShipOutVolume,
     daysOfSuppliesFit,
     suppliesReserveFraction,
+    suppliesCapDays,
     daysUntilFull,
     bindingLimit,
   };
