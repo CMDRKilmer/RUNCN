@@ -153,10 +153,6 @@ function recomputeFiltered() {
   rowsKey.value++;
 }
 
-watch(materialSearch, () => {
-  rowsKey.value++;
-});
-
 watch([rows, materialSearch], recomputeFiltered, { immediate: true });
 
 function formatCurrency(value: number) {
