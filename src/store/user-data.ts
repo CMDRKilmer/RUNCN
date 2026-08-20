@@ -60,6 +60,10 @@ export const initialUserData = deepFreeze({
     refuel: {
       enabled: false,
     },
+    nx: {
+      enabled: false,
+      targets: {} as Record<string, { sf: number; ff: number }>,
+    },
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
     mutedDesktopNotifications: [] as string[],
