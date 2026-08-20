@@ -12,7 +12,10 @@ const USE_JUMP_POINT = false;
 const UNLOAD_AFTER_ARRIVAL = true;
 
 function getSliderLabel(slider: Element) {
-  const row = slider.closest(`.${C.FormComponent.containerActive}`);
+  // 行处于 active 或 passive 状态时都能取到标签，避免被动行内滑块被误判为无标签。
+  const row = slider.closest(
+    `.${C.FormComponent.containerActive}, .${C.FormComponent.containerPassive}`,
+  );
   const label = row ? _$(row, 'label') : undefined;
   return label?.textContent?.trim();
 }
@@ -20,7 +23,12 @@ function getSliderLabel(slider: Element) {
 // 记录每个 SFC 磁贴已成功写入的滑块标签，避免节点重建后重复写入、覆盖手动修改。
 const configuredLabels = new WeakMap<Element, Set<string>>();
 
+// 每个磁贴正在写入的滑块标签：写入期间 React 重建的新节点会再次触发回调，
+// 用该集合同步拦截并发重复写入；写入失败则移除，允许后续重建时重试。
+const pendingLabels = new WeakMap<Element, Set<string>>();
+
 async function configureSlider(tile: PrunTile, slider: Element) {
+  // 星系内飞行时“反应堆使用量”不是轨道条（显示为 --），不会触发写入；燃料消耗仍会调整。
   const label = getSliderLabel(slider);
   let value: number;
   if (label === '燃料消耗') {
@@ -38,9 +46,22 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   if (labels.has(label)) {
     return;
   }
-  // 只有写入成功才标记，避免滑块未就绪的骨架节点被误判为已配置。
-  if (await setSliderValue(slider, value)) {
-    labels.add(label);
+  let pending = pendingLabels.get(tile.anchor);
+  if (!pending) {
+    pending = new Set();
+    pendingLabels.set(tile.anchor, pending);
+  }
+  if (pending.has(label)) {
+    return;
+  }
+  pending.add(label);
+  try {
+    // 只有写入成功才标记，避免滑块未就绪的骨架节点被误判为已配置。
+    if (await setSliderValue(slider, value)) {
+      labels.add(label);
+    }
+  } finally {
+    pending.delete(label);
   }
 }
 
