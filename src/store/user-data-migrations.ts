@@ -17,6 +17,14 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '20.08.2026 Add nx auto-buy settings',
+    userData => {
+      if (!userData.settings.nx) {
+        userData.settings.nx = { enabled: false, targets: {} };
+      }
+    },
+  ],
+  [
     '19.08.2026 Add refuel settings',
     userData => {
       if (!userData.settings.refuel) {
