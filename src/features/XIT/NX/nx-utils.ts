@@ -8,6 +8,7 @@ import { fillAmount } from '@src/features/XIT/ACT/actions/cx-buy/utils';
 import { changeInputValue, clickElement } from '@src/util';
 import { fixed0, fixed02 } from '@src/utils/format';
 import { sleep } from '@src/utils/sleep';
+import { ref } from 'vue';
 
 // 四大交易所空间站（naturalId）
 export const EXCHANGE_CODES = ['ANT', 'BEN', 'HRT', 'MOR'];
