@@ -17,6 +17,14 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '19.08.2026 Add refuel settings',
+    userData => {
+      if (!userData.settings.refuel) {
+        userData.settings.refuel = { enabled: false };
+      }
+    },
+  ],
+  [
     '15.08.2026 Add base aliases',
     userData => {
       if (!userData.baseAliases || typeof userData.baseAliases !== 'object') {

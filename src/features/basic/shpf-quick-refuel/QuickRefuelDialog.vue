@@ -11,12 +11,14 @@ import { atSameLocation, serializeStorage, storageSort } from '@src/features/XIT
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { changeInputValue, clickElement, focusElement } from '@src/util';
 import { sleep } from '@src/utils/sleep';
+import type { RefuelResult } from './refuel-result';
 
-const { onDone, registration, silent } = defineProps<{
+const { onDone, onResult, registration, silent } = defineProps<{
   onDone?: () => void;
+  onResult?: (result: RefuelResult) => void;
   registration?: string;
   silent?: boolean;
-  tile: PrunTile;
+  tile?: PrunTile;
 }>();
 
 interface TransferPlan {
@@ -143,13 +145,16 @@ const isExecuting = ref(false);
 const logMessages = ref<string[]>([]);
 const hasError = ref(false);
 let autoStarted = false;
+// 未进入 runRefuel 的提前返回分支的静默结果（由微任务统一上报）。
+let silentOutcome: RefuelResult | undefined;
 
 function appendLog(message: string) {
   logMessages.value.push(message);
 }
 
-function finishSilentRun() {
+function finishSilentRun(outcome: RefuelResult) {
   if (silent) {
+    onResult?.(outcome);
     onDone?.();
   }
 }
@@ -393,6 +398,7 @@ async function runRefuel() {
     executionStatus.value = needsAnyFuel.value
       ? '无法加油（来源库存不足）。'
       : '油箱已满，无需加油。';
+    silentOutcome = needsAnyFuel.value ? { success: false, reason: 'no-fuel' } : { success: true };
     return;
   }
 
@@ -439,29 +445,34 @@ async function runRefuel() {
   } finally {
     closeWhen.value = true;
     isExecuting.value = false;
-    finishSilentRun();
+    finishSilentRun(hasError.value ? { success: false, reason: 'other' } : { success: true });
   }
 }
 
 onMounted(() => {
   if (!ship.value) {
     executionStatus.value = '未找到飞船数据。';
+    silentOutcome = { success: false, reason: 'other' };
     return;
   }
   if (isFlying.value) {
     executionStatus.value = '飞船正在飞行中，无法加油。';
+    silentOutcome = { success: false, reason: 'other' };
     return;
   }
   if (!needsAnyFuel.value) {
     executionStatus.value = '油箱已满，无需加油。';
+    silentOutcome = { success: true };
     return;
   }
   if (!selectedOrigin.value) {
     executionStatus.value = '附近没有可用的燃料来源。';
+    silentOutcome = { success: false, reason: 'no-fuel' };
     return;
   }
   if (!hasTransferableFuel.value) {
     executionStatus.value = '无法加油（来源库存不足）。';
+    silentOutcome = { success: false, reason: 'no-fuel' };
     return;
   }
   autoStarted = true;
@@ -474,7 +485,7 @@ onMounted(() => {
   }
   queueMicrotask(() => {
     if (!isExecuting.value) {
-      finishSilentRun();
+      finishSilentRun(silentOutcome ?? { success: false, reason: 'other' });
     }
   });
 });

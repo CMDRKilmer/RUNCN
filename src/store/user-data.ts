@@ -57,6 +57,9 @@ export const initialUserData = deepFreeze({
       ['琉璃', 'XIT ORG'],
       ['购物车', 'XIT CART'],
     ] as [string, string][],
+    refuel: {
+      enabled: false,
+    },
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
     mutedDesktopNotifications: [] as string[],

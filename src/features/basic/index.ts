@@ -1,6 +1,7 @@
 import './adm-hide-inactive-buttons';
 import './align-chat-delete-button';
 import './audio-volume-slider/audio-volume-slider';
+import './auto-refuel';
 import './auto-resize-buffers';
 import './bbc-building-count';
 import './base-alias-display/base-alias-display';
