@@ -312,8 +312,8 @@ function onClick() {
 }
 
 .tall {
-  min-height: 24px;
-  height: 24px;
+  min-height: 18px;
+  height: 18px;
 }
 
 .isUpdating {

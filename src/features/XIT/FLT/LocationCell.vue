@@ -85,7 +85,11 @@ const posData = computed(() => {
 <template>
   <span
     v-if="posData.command"
-    :class="[C.Link.link, mode === 'destination' ? $style.destination : undefined]"
+    :class="[
+      C.Link.link,
+      { [$style.destination]: props.mode === 'destination' },
+      { [$style.alwaysHighlight]: props.mode === 'location' },
+    ]"
     @click.stop="showBuffer(posData.command)">
     {{ posData.name }}
     <BaseAlias :natural-id="posData.naturalId" />
@@ -93,7 +97,14 @@ const posData = computed(() => {
 </template>
 
 <style module>
+/* 目的地列文字常亮黄色 */
 .destination {
+  color: #f7a600;
+}
+
+/* 位置列文字常亮：复用 PrUn 链接 hover 色 (#f7a600)，去除非 hover 时的蓝色。
+   双类选择器提高优先级，压过 PrUn 的 .Link__link___xxx 与 :hover 规则。 */
+.alwaysHighlight.alwaysHighlight {
   color: #f7a600;
 }
 </style>

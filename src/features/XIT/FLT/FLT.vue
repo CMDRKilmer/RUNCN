@@ -1,11 +1,31 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getInvStore } from '@src/core/store-id';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
-import StatusCell from './StatusCell.vue';
+
+// Status arrow icons (inlined from deleted ship-status-icons.ts). Arrow per
+// flight segment type; stationary (⦁) when docked or no active flight.
+const stationaryIcon = '\u23E5';
+const statusIconMap: Record<string, string> = {
+  TAKE_OFF: '\u2191',
+  DEPARTURE: '\u2197',
+  TRANSIT: '\u27F6',
+  CHARGE: '\u00B1',
+  JUMP: '\u27BE',
+  FLOAT: '\u2191',
+  APPROACH: '\u2198',
+  LANDING: '\u2193',
+  LOCK: '\u27F4',
+  DECAY: '\u27F4',
+  JUMP_GATEWAY: '\u27F4',
+};
+function segStatusIcon(segType: string) {
+  return statusIconMap[segType] ?? '?';
+}
 import LocationCell from './LocationCell.vue';
 import TimeCell from './TimeCell.vue';
 import FleetCargoBar from './FleetCargoBar.vue';
@@ -17,6 +37,7 @@ type FlightRow = {
   ftlFuelRatio: number | undefined;
   cargoSizeText: string;
   isFtlCapable: boolean;
+  statusIcon: string;
 };
 
 const rawRows = computed<FlightRow[] | undefined>(() => {
@@ -33,6 +54,9 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
     const ftlFuelRatio = getFuelRatio(ftlStore);
 
     const isFtlCapable = (ftlStore?.weightCapacity ?? 0) > 0;
+    const flight = flightsStore.getById(ship.flightId);
+    const segment = flight?.segments[flight.currentSegmentIndex];
+    const statusIcon = segment ? segStatusIcon(segment.type) : stationaryIcon;
 
     return {
       ship,
@@ -40,6 +64,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
       ftlFuelRatio,
       cargoSizeText: getCargoSizeText(inventory),
       isFtlCapable,
+      statusIcon,
     };
   });
 });
@@ -53,6 +78,12 @@ const rows = computed(() => {
     (a.ship.name || a.ship.registration).localeCompare(b.ship.name || b.ship.registration),
   );
 });
+
+// 燃料列（油条）显示开关。
+const showFuel = ref(true);
+
+// 缺油自动加油已迁移至全局 feature（src/features/basic/auto-refuel.ts）。
+// 此处仅负责 FLT 总览表的展示。
 
 function getCargoSizeText(inventory: PrunApi.Store | undefined) {
   if (!inventory) {
@@ -81,11 +112,6 @@ function getFuelRatio(store: PrunApi.Store | undefined) {
 function onFuel(registration: string) {
   showBuffer(`SHPF ${registration}`);
 }
-
-// Repair fill color: light purple, red at/below 83% condition.
-function repairColor(condition: number) {
-  return condition <= 0.83 ? '#d9534f' : '#9b59b6';
-}
 </script>
 
 <template>
@@ -96,17 +122,17 @@ function repairColor(condition: number) {
       <div :class="$style.headerRow">
         <div :class="[$style.headerCell]">舰名</div>
         <div :class="[$style.headerCell, $style.cargoCombinedCell]">货物</div>
-        <div :class="[$style.headerCell, $style.colStatus]">状态</div>
         <div :class="[$style.headerCell, $style.colLocation]">位置</div>
-        <div :class="[$style.headerCell, $style.colLocation]">目的地</div>
         <div :class="[$style.headerCell, $style.colTime]">ETA</div>
-        <div :class="[$style.headerCell, $style.colFuel]">维护</div>
+        <div :class="[$style.headerCell, $style.colFuel]" @click="showFuel = !showFuel">燃料</div>
       </div>
 
       <!-- Body rows -->
       <div v-for="x in rows" :key="x.ship.id" :class="$style.row">
         <div :class="[$style.bodyCell]">
-          <span :class="C.Link.link" @click="showBuffer(`SHP ${x.ship.registration}`)">
+          <span
+            :class="[C.Link.link, { [$style.lowCondition]: x.ship.condition <= 0.83 }]"
+            @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}
           </span>
         </div>
@@ -120,16 +146,9 @@ function repairColor(condition: number) {
           </div>
         </div>
 
-        <div :class="[$style.bodyCell, $style.colStatus]">
-          <StatusCell :ship-id="x.ship.id" />
-        </div>
-
         <div :class="[$style.bodyCell, $style.colLocation]">
-          <LocationCell :ship-id="x.ship.id" mode="location" />
-        </div>
-
-        <div :class="[$style.bodyCell, $style.colLocation]">
-          <LocationCell :ship-id="x.ship.id" mode="destination" />
+          <span :class="$style.statusArrow">{{ x.statusIcon }}</span>
+          <LocationCell :ship-id="x.ship.id" :mode="x.ship.flightId ? 'destination' : 'location'" />
         </div>
 
         <div :class="[$style.bodyCell, $style.colTime]">
@@ -138,16 +157,9 @@ function repairColor(condition: number) {
 
         <div :class="[$style.bodyCell, $style.colFuel]">
           <div
-            :class="[C.ShipFuel.container, C.ShipFuel.pointer, $style.fuelBars]"
+            v-show="showFuel"
+            :class="[C.ShipFuel.container, C.ShipFuel.pointer]"
             @click="onFuel(x.ship.registration)">
-            <div :class="C.ProgressBar.container">
-              <progress
-                :class="[C.ProgressBar.progress, $style.fuelBar, $style.repairBar]"
-                :style="{ '--bar-color': repairColor(x.ship.condition) }"
-                :value="x.ship.condition"
-                max="1"
-                @click.stop="showBuffer(`SHP ${x.ship.registration}`)" />
-            </div>
             <div :class="C.ProgressBar.container">
               <progress
                 :class="[C.ProgressBar.primary, C.ProgressBar.progress, $style.fuelBar]"
@@ -183,8 +195,8 @@ function repairColor(condition: number) {
   border-bottom: 1px solid #2b485a;
   container-type: inline-size;
   grid-template-columns:
-    minmax(80px, auto) minmax(60px, auto) auto minmax(110px, auto)
-    minmax(110px, auto) minmax(80px, 1fr) minmax(50px, auto);
+    minmax(80px, auto) minmax(60px, auto) minmax(110px, auto) minmax(80px, 1fr)
+    minmax(50px, auto);
 }
 
 .headerRow {
@@ -249,12 +261,21 @@ function repairColor(condition: number) {
   margin-top: 2px;
 }
 
-.colStatus {
-  border-right: none;
-}
-
 .colLocation {
   min-width: 110px;
+}
+
+.colFuel {
+  cursor: pointer;
+}
+
+.statusArrow {
+  margin-right: 4px;
+  color: #3fa2de;
+}
+
+.lowCondition {
+  color: #d9534f;
 }
 
 /* TimeCell right-aligns its own content, so the header has to follow suit in every
@@ -275,45 +296,5 @@ function repairColor(condition: number) {
 
 .row:hover > .bodyCell {
   background-color: rgba(255, 255, 255, 0.06);
-}
-
-.fuelBars {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  margin: 0;
-  min-width: 30px;
-  width: 100%;
-  border: 1px solid #2b485a;
-}
-
-/* Collapse the wrappers around each progress bar so the three bars fuse
-   into a single composite bar inside .fuelBars. The wrappers must fill the
-   full width (PrUn's container is inline-block by default). */
-.fuelBars > div {
-  display: block;
-  width: 100%;
-  margin: 0;
-  padding: 0;
-}
-
-/* Thin bars fused into a single stacked bar. Doubled class selectors raise
-   specificity above PrUn's .ProgressBar__progress (height: 9px, margin, padding,
-   inline-block). Bars sit flush against each other and against the outer border. */
-.fuelBar.fuelBar {
-  display: block;
-  width: 100%;
-  height: 7.5px;
-  border: none;
-  margin: 0;
-  padding: 0;
-}
-
-.repairBar.repairBar::-webkit-progress-value {
-  background-color: var(--bar-color);
-}
-
-.repairBar.repairBar::-moz-progress-bar {
-  background: var(--bar-color);
 }
 </style>
