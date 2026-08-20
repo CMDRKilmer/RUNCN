@@ -11,6 +11,11 @@ const USE_JUMP_POINT = false;
 // 预留接口：是否自动勾选“抵达后卸货”。默认勾选。
 const UNLOAD_AFTER_ARRIVAL = true;
 
+// 最大重试次数
+const MAX_RETRIES = 3;
+// 重试间隔（毫秒）
+const RETRY_DELAY_MS = 500;
+
 function getSliderLabel(slider: Element) {
   // 行处于 active 或 passive 状态时都能取到标签，避免被动行内滑块被误判为无标签。
   const row = slider.closest(
@@ -20,8 +25,10 @@ function getSliderLabel(slider: Element) {
   return label?.textContent?.trim();
 }
 
-// 记录每个 SFC 磁贴已成功写入的滑块标签，避免节点重建后重复写入、覆盖手动修改。
-const configuredLabels = new WeakMap<Element, Set<string>>();
+// 记录每个 SFC 磁贴的滑块标签配置状态：
+//   - 'done' 表示成功配置
+//   - 数字表示当前重试次数（未成功）
+const configuredLabels = new WeakMap<Element, Map<string, number | 'done'>>();
 
 // 每个磁贴正在写入的滑块标签：写入期间 React 重建的新节点会再次触发回调，
 // 用该集合同步拦截并发重复写入；写入失败则移除，允许后续重建时重试。
@@ -38,12 +45,16 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   } else {
     return;
   }
-  let labels = configuredLabels.get(tile.anchor);
-  if (!labels) {
-    labels = new Set();
-    configuredLabels.set(tile.anchor, labels);
+
+  let labelMap = configuredLabels.get(tile.anchor);
+  if (!labelMap) {
+    labelMap = new Map();
+    configuredLabels.set(tile.anchor, labelMap);
   }
-  if (labels.has(label)) {
+
+  const state = labelMap.get(label);
+  // 已成功或已放弃（达到最大重试次数）则跳过
+  if (state === 'done' || (typeof state === 'number' && state >= MAX_RETRIES)) {
     return;
   }
   let pending = pendingLabels.get(tile.anchor);
@@ -55,13 +66,30 @@ async function configureSlider(tile: PrunTile, slider: Element) {
     return;
   }
   pending.add(label);
+  let shouldRetry = false;
   try {
     // 只有写入成功才标记，避免滑块未就绪的骨架节点被误判为已配置。
-    if (await setSliderValue(slider, value)) {
-      labels.add(label);
+    const success = await setSliderValue(slider, value);
+    if (success) {
+      labelMap.set(label, 'done');
+    } else {
+      const currentRetries = typeof state === 'number' ? state : 0;
+      const nextRetries = currentRetries + 1;
+      if (nextRetries < MAX_RETRIES) {
+        labelMap.set(label, nextRetries);
+        shouldRetry = true;
+      } else {
+        // 达到最大重试次数，标记为放弃（不再尝试）
+        labelMap.set(label, MAX_RETRIES);
+      }
     }
   } finally {
     pending.delete(label);
+  }
+  // 延迟重试：先释放 pending，避免递归重新进入时被并发拦截卡住。
+  if (shouldRetry) {
+    await sleep(RETRY_DELAY_MS);
+    await configureSlider(tile, slider);
   }
 }
 
@@ -112,20 +140,33 @@ async function setSliderValue(slider: Element, value: number): Promise<boolean> 
   if (!range) {
     return false;
   }
-  // 最大值直接点击末尾刻度，避免离散滑块在右边界吸附到前一档。
+  // 最大值：直接点击轨道最右端，不依赖 lastMark，更稳健
   if (value >= range.max) {
-    const mark = await $(slider, 'rc-slider-mark');
-    const lastMark = mark?.lastElementChild;
-    if (!lastMark) return false;
-    await clickElement(lastMark as HTMLElement);
+    const rect = slider.getBoundingClientRect();
+    // 留 2px 边距避免边界问题
+    const clientX = rect.right - 2;
+    const clientY = rect.top + rect.height / 2;
+    slider.dispatchEvent(
+      new MouseEvent('mousedown', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX,
+        clientY,
+      }),
+    );
+    await Promise.resolve();
+    document.dispatchEvent(
+      new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }),
+    );
   } else {
     await clickSliderTrack(slider, value, range);
   }
-  // 等 React 重新渲染后校验写入结果，区分“已生效”与“未就绪的骨架节点”。
+  // 等 React 重新渲染后校验写入结果，容差放宽到 0.01
   await sleep(0);
   const handle = _$(slider, 'rc-slider-handle');
   const current = Number(handle?.getAttribute('aria-valuenow'));
-  return Number.isFinite(current) && Math.abs(current - value) < 1e-9;
+  return Number.isFinite(current) && Math.abs(current - value) < 0.01;
 }
 
 // 预留：按标签勾选指定单选选项（如“使用跃迁点”“抵达后卸货”）。
