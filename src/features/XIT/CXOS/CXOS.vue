@@ -348,29 +348,36 @@ async function batchPriceCut() {
       groups.get(key)!.push(o);
     }
 
+    // 不同 (交易所, 材料) 组互相独立，并发压价；组内保持顺序（目标价链）。
+    const tasks: Promise<void>[] = [];
     for (const [key, orders] of groups) {
-      const [exchange, ticker] = key.split('|');
-      const broker = cxobStore.all.value?.find(
-        b => b.exchange.code === exchange && b.material.ticker === ticker,
-      );
-      if (!broker) continue;
-      // 市场最低卖价（排除自己的所有订单）
-      const myIds = new Set(orders.map(o => o.id));
-      const others = broker.sellingOrders.filter(o => !myIds.has(o.id));
-      if (others.length === 0) continue;
-      let currentLowest = Math.min(...others.map(o => o.limit.amount));
+      tasks.push(
+        (async () => {
+          const [exchange, ticker] = key.split('|');
+          const broker = cxobStore.all.value?.find(
+            b => b.exchange.code === exchange && b.material.ticker === ticker,
+          );
+          if (!broker) return;
+          // 市场最低卖价（排除自己的所有订单）
+          const myIds = new Set(orders.map(o => o.id));
+          const others = broker.sellingOrders.filter(o => !myIds.has(o.id));
+          if (others.length === 0) return;
+          let currentLowest = Math.min(...others.map(o => o.limit.amount));
 
-      // 组内按当前价格从低到高处理：第一个压到最低-1档，
-      // 后续订单在前一个目标价基础上再压一档，保证依次霸榜前几名。
-      const sorted = [...orders].sort((a, b) => a.limit.amount - b.limit.amount);
-      for (const order of sorted) {
-        const step = getPriceStep(currentLowest);
-        const target = currentLowest - step;
-        if (target <= 0) continue;
-        currentLowest = target;
-        await runPriceCut(targetElement, order, target);
-      }
+          // 组内按当前价格从低到高处理：第一个压到最低-1档，
+          // 后续订单在前一个目标价基础上再压一档，保证依次霸榜前几名。
+          const sorted = [...orders].sort((a, b) => a.limit.amount - b.limit.amount);
+          for (const order of sorted) {
+            const step = getPriceStep(currentLowest);
+            const target = currentLowest - step;
+            if (target <= 0) continue;
+            currentLowest = target;
+            await runPriceCut(targetElement, order, target);
+          }
+        })(),
+      );
     }
+    await Promise.all(tasks);
   } finally {
     batchRunning.value = false;
     selectedIds.value = new Set();
