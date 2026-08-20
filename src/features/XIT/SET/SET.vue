@@ -7,6 +7,7 @@ import FIN from '@src/features/XIT/SET/FIN.vue';
 import BFR from '@src/features/XIT/SET/BFR.vue';
 import TRANSLATE from '@src/features/XIT/SET/TRANSLATE.vue';
 import DARK from '@src/features/XIT/SET/DARK.vue';
+import REFUEL from '@src/features/XIT/SET/REFUEL.vue';
 
 const tabs: Tab[] = [
   {
@@ -38,6 +39,11 @@ const tabs: Tab[] = [
     id: 'DARK',
     label: '反色模式',
     component: DARK,
+  },
+  {
+    id: 'REFUEL',
+    label: '加油',
+    component: REFUEL,
   },
 ];
 
