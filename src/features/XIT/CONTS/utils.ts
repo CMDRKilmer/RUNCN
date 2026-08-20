@@ -2,6 +2,16 @@ export function canAcceptContract(contract: PrunApi.Contract) {
   return contract.party === 'CUSTOMER' && contract.status === 'OPEN';
 }
 
+export function compareContracts(a: PrunApi.Contract, b: PrunApi.Contract) {
+  if (canAcceptContract(a) && !canAcceptContract(b)) {
+    return -1;
+  }
+  if (canAcceptContract(b) && !canAcceptContract(a)) {
+    return 1;
+  }
+  return (b.date?.timestamp ?? 0) - (a.date?.timestamp ?? 0);
+}
+
 export function canPartnerAcceptContract(contract: PrunApi.Contract) {
   return contract.party === 'PROVIDER' && contract.status === 'OPEN';
 }

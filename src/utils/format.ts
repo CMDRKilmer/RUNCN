@@ -3,6 +3,7 @@ import { userData } from '@src/store/user-data';
 import { isPresent } from 'ts-extras';
 import { balancesStore } from '@src/infrastructure/prun-api/data/balances';
 import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
+import dayjs from 'dayjs';
 
 const hour12 = computed(() => {
   switch (userData.settings.time) {
@@ -120,6 +121,41 @@ export function formatEta(from: number, to: number) {
     ret += ` +${days}d`;
   }
   return ret;
+}
+
+// 将毫秒数格式化为倒计时字符串，如 "2d 3h"、"3h 4m"、"4m 5s"、"5s"。
+export function formatCountdown(ms: number) {
+  let duration = dayjs.duration({ milliseconds: ms });
+  const days = Math.floor(duration.asDays());
+  duration = duration.subtract(days, 'days');
+  const hours = Math.floor(duration.asHours());
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+  duration = duration.subtract(hours, 'hours');
+  const minutes = Math.floor(duration.asMinutes());
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  duration = duration.subtract(minutes, 'minutes');
+  const seconds = Math.floor(duration.asSeconds());
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+const DEADLINE_DAY_MS = 24 * 60 * 60 * 1000;
+
+// 根据剩余毫秒数返回截止日期的内联样式：1 天内红色，3 天内橙色，否则无色。
+export function deadlineColor(remaining: number) {
+  if (remaining < DEADLINE_DAY_MS) {
+    return 'color: #d9534f';
+  }
+  if (remaining < DEADLINE_DAY_MS * 3) {
+    return 'color: #f0ad4e';
+  }
+  return '';
 }
 
 export function displaytimeBetween(from: number, to: number) {

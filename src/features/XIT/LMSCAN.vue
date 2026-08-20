@@ -13,7 +13,7 @@ import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { starsStore } from '@src/infrastructure/prun-api/data/stars';
 import { cxStore } from '@src/infrastructure/fio/cx';
-import { fixed1 } from '@src/utils/format';
+import { fixed0, fixed1, fixed2 } from '@src/utils/format';
 import { sleep } from '@src/utils/sleep';
 
 interface CxPrice {
@@ -132,12 +132,15 @@ async function autoLoadLm() {
   // Open each owned planet's LM panel silently. Panels auto-close after a short
   // window, long enough for the ad DOM to render so the prun-id collector above
   // can read each ad's real identifier.
-  const started = Date.now();
+  const closeInFiveSeconds = ref(false);
+  setTimeout(() => {
+    closeInFiveSeconds.value = true;
+  }, 5000);
   for (const naturalId of planets) {
     void showBuffer(`LM ${naturalId}`, {
       force: true,
       autoClose: true,
-      closeWhen: computed(() => Date.now() - started > 5000),
+      closeWhen: closeInFiveSeconds,
     }).catch(() => undefined);
   }
 
@@ -289,7 +292,7 @@ function findHighestCx(ticker: string): CxPrice | undefined {
 }
 
 function formatCurrency(value: number, currency: string) {
-  return `${value.toFixed(2)} ${currency}`;
+  return `${fixed2(value)} ${currency}`;
 }
 
 function formatCx(cx: CxPrice) {
@@ -309,42 +312,40 @@ function spreadClass(pct: number) {
 
 <template>
   <LoadingSpinner v-if="rows === undefined" />
-  <table v-else :style="{ width: '100%' }">
+  <table v-else :class="$style.table">
     <thead>
       <tr>
         <th>地点</th>
-        <th class="colItem">物品</th>
-        <th class="colType">类型</th>
+        <th :class="$style.colItem">物品</th>
+        <th :class="$style.colType">类型</th>
         <th>数量</th>
         <th>LM 单价</th>
         <th>最近CX</th>
         <th>最高CX</th>
-        <th class="colSpread">价差</th>
+        <th :class="$style.colSpread">价差</th>
         <th>价差%</th>
-        <th class="colAction">操作</th>
+        <th :class="$style.colAction">操作</th>
       </tr>
     </thead>
     <tbody>
       <tr v-if="rows.length === 0">
-        <td colspan="10" style="text-align: center; opacity: 0.5; padding: 12px">
-          暂无 LM 广告数据
-        </td>
+        <td colspan="10" :class="$style.empty">暂无 LM 广告数据</td>
       </tr>
       <tr v-for="row in rows" :key="row.adId">
         <td>{{ row.location }}</td>
-        <td class="colItem">
+        <td :class="$style.colItem">
           <MaterialIcon :ticker="row.ticker" size="small" compact />
         </td>
-        <td class="colType">{{ row.type === 'BUYING' ? '收购' : '出售' }}</td>
-        <td>{{ row.quantity.toLocaleString() }}</td>
+        <td :class="$style.colType">{{ row.type === 'BUYING' ? '收购' : '出售' }}</td>
+        <td>{{ fixed0(row.quantity) }}</td>
         <td>{{ formatCurrency(row.lmPrice, row.currency) }}</td>
         <td>{{ formatCx(row.nearestCx) }}</td>
         <td>{{ formatCx(row.highestCx) }}</td>
-        <td :class="[spreadClass(row.spreadPct), 'colSpread']">
+        <td :class="[spreadClass(row.spreadPct), $style.colSpread]">
           {{ formatCurrency(row.spread, row.currency) }}
         </td>
         <td :class="spreadClass(row.spreadPct)">{{ fixed1(row.spreadPct) }}%</td>
-        <td class="colAction">
+        <td :class="$style.colAction">
           <button
             v-if="row.marketNaturalId"
             :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
@@ -357,11 +358,12 @@ function spreadClass(pct: number) {
   </table>
 </template>
 
-<style scoped>
-table {
+<style module>
+.table {
+  width: 100%;
   table-layout: auto;
 }
-tr > :not(:first-child) {
+.table tr > :not(:first-child) {
   text-align: right;
 }
 .colItem {
@@ -375,5 +377,10 @@ tr > :not(:first-child) {
 }
 .colAction {
   width: 56px;
+}
+.empty {
+  text-align: center;
+  opacity: 0.5;
+  padding: 12px;
 }
 </style>

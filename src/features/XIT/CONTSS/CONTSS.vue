@@ -6,13 +6,13 @@ import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import ContractOverviewRow from '@src/features/XIT/CONTS/ContractOverviewRow.vue';
 import { isEmpty } from 'ts-extras';
 import {
-  canAcceptContract,
   calculateContractTotals,
+  compareContracts,
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
 import { calculateDeadline } from '@src/core/balance/contract-conditions';
 import { timestampEachSecond } from '@src/utils/dayjs';
-import dayjs from 'dayjs';
+import { formatCountdown } from '@src/utils/format';
 import $style from '../CONTS/conts-shared.module.css';
 
 const activeFilters = ref(
@@ -25,16 +25,6 @@ const filtered = computed(() =>
     .filter(c => activeFilters.value.has(c.status))
     .sort(compareContracts),
 );
-
-function compareContracts(a: PrunApi.Contract, b: PrunApi.Contract) {
-  if (canAcceptContract(a) && !canAcceptContract(b)) {
-    return -1;
-  }
-  if (canAcceptContract(b) && !canAcceptContract(a)) {
-    return 1;
-  }
-  return (b.date?.timestamp ?? 0) - (a.date?.timestamp ?? 0);
-}
 
 // 总待收款和应付款统计
 const totals = computed(() => calculateContractTotals(filtered.value));
@@ -60,31 +50,6 @@ const contractDeadlines = computed(() => {
 
 const dayMs = 24 * 60 * 60 * 1000;
 
-function formatDuration(timestamp: number) {
-  const now = timestampEachSecond.value;
-  if (timestamp <= now) {
-    return '已过期';
-  }
-  let duration = dayjs.duration({ milliseconds: timestamp - now });
-  const days = Math.floor(duration.asDays());
-  duration = duration.subtract(days, 'days');
-  const hours = Math.floor(duration.asHours());
-  if (days > 0) {
-    return `${days}d ${hours}h`;
-  }
-  duration = duration.subtract(hours, 'hours');
-  const minutes = Math.floor(duration.asMinutes());
-  if (hours > 0) {
-    return `${hours}h ${minutes}m`;
-  }
-  duration = duration.subtract(minutes, 'minutes');
-  const seconds = Math.floor(duration.asSeconds());
-  if (minutes > 0) {
-    return `${minutes}m ${seconds}s`;
-  }
-  return `${seconds}s`;
-}
-
 function deadlineStyle(ms?: number) {
   if (ms === undefined) {
     return '';
@@ -103,7 +68,11 @@ function deadlineText(ms?: number) {
   if (ms === undefined) {
     return '--';
   }
-  return formatDuration(ms);
+  const remaining = ms - timestampEachSecond.value;
+  if (remaining <= 0) {
+    return '已过期';
+  }
+  return formatCountdown(remaining);
 }
 </script>
 

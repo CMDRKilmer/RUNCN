@@ -3,7 +3,7 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import ContractRow from '@src/features/XIT/CONTS/ContractRow.vue';
 import { isEmpty } from 'ts-extras';
-import { canAcceptContract } from '@src/features/XIT/CONTS/utils';
+import { compareContracts } from '@src/features/XIT/CONTS/utils';
 
 const filtered = computed(() =>
   contractsStore.all.value!.filter(shouldShowContract).sort(compareContracts),
@@ -21,16 +21,6 @@ function shouldShowContract(contract: PrunApi.Contract) {
       return false;
     }
   }
-}
-
-function compareContracts(a: PrunApi.Contract, b: PrunApi.Contract) {
-  if (canAcceptContract(a) && !canAcceptContract(b)) {
-    return -1;
-  }
-  if (canAcceptContract(b) && !canAcceptContract(a)) {
-    return 1;
-  }
-  return (b.date?.timestamp ?? 0) - (a.date?.timestamp ?? 0);
 }
 </script>
 
