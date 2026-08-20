@@ -208,21 +208,33 @@ export class ActionRunner {
       })
       .filter(({ cxTicker }) => !cxobStore.getByTicker(cxTicker));
     if (cxTickers.length === 0) return;
-    const opened: Element[] = [];
-    for (const { command } of cxTickers) {
-      const win = await showBuffer(command, { force: true, autoSubmit: true });
-      if (win !== undefined) opened.push(win);
-    }
-    // wait for price data, up to 5 seconds
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      const allReady = cxTickers.every(({ cxTicker }) => !!cxobStore.getByTicker(cxTicker));
-      if (allReady) break;
-      await sleep(200);
-    }
-    // close temp windows
-    for (const win of opened) {
-      closeWindow(win);
+    const opened: { window: Element; closeWhen: Ref<boolean> }[] = [];
+    try {
+      for (const { command } of cxTickers) {
+        const closeWhen = shallowRef(false);
+        const win = await showBuffer(command, {
+          force: true,
+          autoSubmit: true,
+          autoClose: true,
+          closeWhen,
+        });
+        if (win !== undefined) {
+          opened.push({ window: win, closeWhen });
+        }
+      }
+      // Wait for price data, up to 5 seconds.
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        const allReady = cxTickers.every(({ cxTicker }) => !!cxobStore.getByTicker(cxTicker));
+        if (allReady) break;
+        await sleep(200);
+      }
+    } finally {
+      // Close temporary windows: flip refs for autoClose, then close as fallback.
+      for (const { window, closeWhen } of opened) {
+        closeWhen.value = true;
+        closeWindow(window);
+      }
     }
   }
 
