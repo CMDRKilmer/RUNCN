@@ -63,17 +63,11 @@ jobs:
           let [y, m, d] = date.slice(2).split('-').map(x => Number(x));
           const taken = new Set(execSync('git tag', { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean));
           let version = `${y}.${m}.${d}`;
+          let suffix = 1;
           while (taken.has(version)) {
-            d += 1;
-            if (d > 31) {
-              d = 1;
-              m += 1;
-            }
-            if (m > 12) {
-              m = 1;
-              y += 1;
-            }
-            version = `${y}.${m}.${d}`;
+            // 同一天二次发布：在日期后追加序号（26.8.19.1、26.8.19.2 …），不顺延到次日。
+            version = `${y}.${m}.${d}.${suffix}`;
+            suffix += 1;
           }
           fs.writeFileSync('/tmp/release-notes.md', body);
           console.log(`VERSION=${version}`);
