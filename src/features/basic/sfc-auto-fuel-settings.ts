@@ -71,8 +71,10 @@ async function configureSlider(tile: PrunTile, slider: Element) {
     // 只有写入成功才标记，避免滑块未就绪的骨架节点被误判为已配置。
     const success = await setSliderValue(slider, value);
     if (success) {
+      console.log(`[sfc-auto-fuel-settings] set ${label} to ${value}`);
       labelMap.set(label, 'done');
     } else {
+      console.warn(`[sfc-auto-fuel-settings] failed to set ${label} to ${value}`);
       const currentRetries = typeof state === 'number' ? state : 0;
       const nextRetries = currentRetries + 1;
       if (nextRetries < MAX_RETRIES) {
@@ -180,9 +182,11 @@ async function selectRadioItem(radio: Element, label: string, enabled: boolean) 
   }
   const indicator = _$(radio, C.RadioItem.indicator);
   const active = indicator?.classList.contains(C.RadioItem.active) ?? false;
-  if (!active) {
-    await clickElement(radio as HTMLElement);
+  if (active) {
+    return;
   }
+  console.log(`[sfc-auto-fuel-settings] select ${label}`);
+  await clickElement(radio as HTMLElement);
 }
 
 // 等目的地行程统计(MissionPlan)加载出来后再开始配置,

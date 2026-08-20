@@ -125,6 +125,40 @@ const rows = computed<RecipeProfit[] | undefined>(() => {
   return result.sort((a, b) => b.margin - a.margin);
 });
 
+// ── 材料搜索：按配方任一输入/输出材料的 ticker 过滤 ──
+const materialSearch = ref('');
+
+// 用 ref 而不是 computed，强制每次 materialSearch / rows 变化都生成新数组。
+// 之前用 computed 时 v-for 偶尔读取到的是缓存的旧引用（依赖追踪在嵌套
+// <div v-else> + v-else-if 链路下脱钩），导致行数与 filteredRows.length
+// 不一致。改为 ref + watch 显式触发更新更可靠。
+const filteredRows = ref<RecipeProfit[]>([]);
+
+// 给 tbody 加 :key，每次搜索词或数据变化时强制整个 tbody 重建，
+// 避免 Vue v-for 在某些边角情况下 patch 出错的 tr 节点残留。
+const rowsKey = ref(0);
+
+function matchesSearch(row: RecipeProfit) {
+  const q = materialSearch.value.trim().toUpperCase();
+  if (q.length === 0) {
+    return true;
+  }
+  const tickers = [...row.inputs, ...row.outputs].map(x => x.ticker);
+  return tickers.some(t => t.toUpperCase().includes(q));
+}
+
+function recomputeFiltered() {
+  const all = rows.value ?? [];
+  filteredRows.value = all.filter(matchesSearch);
+  rowsKey.value++;
+}
+
+watch(materialSearch, () => {
+  rowsKey.value++;
+});
+
+watch([rows, materialSearch], recomputeFiltered, { immediate: true });
+
 function formatCurrency(value: number) {
   return value.toFixed(2);
 }
@@ -142,72 +176,87 @@ function marginClass(margin: number) {
 
 <template>
   <LoadingSpinner v-if="rows === undefined" />
-  <table v-else :class="$style.table" cellspacing="0" cellpadding="0">
-    <thead>
-      <tr>
-        <th :class="$style.colPlanet">星球</th>
-        <th :class="$style.colBuilding">建筑</th>
-        <th>输入</th>
-        <th :class="$style.colOutput">输出</th>
-        <th>成本</th>
-        <th>收入</th>
-        <th>利润</th>
-        <th :class="$style.colMargin">利润率</th>
-        <th :class="$style.colAction">操作</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr v-if="rows.length === 0">
-        <td colspan="9" style="text-align: center; opacity: 0.5; padding: 12px">
-          暂无配方数据 - 请确保已打开 PROD 面板
-        </td>
-      </tr>
-      <tr v-for="row in rows" :key="row.recipeName + row.siteId">
-        <td>
-          <PrunLink inline :command="`PLI ${row.naturalId}`">
-            {{ row.planetName }}
-            <BaseAlias :natural-id="row.naturalId" />
-          </PrunLink>
-        </td>
-        <IconCell :class="$style.colBuilding">
-          <BuildingIcon size="inline-table" :ticker="row.buildingTicker" />
-        </IconCell>
-        <td :class="$style.iconColumn">
-          <div :class="$style.iconRow">
-            <MaterialIcon
-              v-for="input in row.inputs"
-              :key="input.ticker"
-              :ticker="input.ticker"
-              :amount="input.factor"
-              size="small"
-              compact />
-          </div>
-        </td>
-        <td :class="[$style.iconColumn, $style.colOutput]">
-          <div :class="$style.iconRow">
-            <MaterialIcon
-              v-for="output in row.outputs"
-              :key="output.ticker"
-              :ticker="output.ticker"
-              :amount="output.factor"
-              size="small"
-              compact />
-          </div>
-        </td>
-        <td>{{ formatCurrency(row.inputCost) }}</td>
-        <td>{{ formatCurrency(row.outputValue) }}</td>
-        <td :class="marginClass(row.margin)">{{ formatCurrency(row.profit) }}</td>
-        <td :class="[marginClass(row.margin), $style.colMargin]">{{ fixed2(row.margin) }}%</td>
-        <td :class="$style.colAction">
-          <button
-            :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
-            @click="showBuffer(`PROD ${row.siteId.substring(0, 8)}`)">
-            PROD
-          </button>
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <template v-else>
+    <div :class="$style.searchBar">
+      <label :class="$style.searchLabel">材料</label>
+      <input
+        v-model="materialSearch"
+        :class="$style.searchInput"
+        type="text"
+        placeholder="搜索材料代码…" />
+    </div>
+    <table :class="$style.table" cellspacing="0" cellpadding="0">
+      <thead>
+        <tr>
+          <th :class="$style.colPlanet">星球</th>
+          <th :class="$style.colBuilding">建筑</th>
+          <th>输入</th>
+          <th :class="$style.colOutput">输出</th>
+          <th>成本</th>
+          <th>收入</th>
+          <th>利润</th>
+          <th :class="$style.colMargin">利润率</th>
+          <th :class="$style.colAction">操作</th>
+        </tr>
+      </thead>
+      <tbody :key="rowsKey">
+        <tr v-if="rows.length === 0">
+          <td colspan="9" style="text-align: center; opacity: 0.5; padding: 12px">
+            暂无配方数据 - 请确保已打开 PROD 面板
+          </td>
+        </tr>
+        <tr v-else-if="materialSearch.trim() !== '' && filteredRows.length === 0">
+          <td colspan="9" style="text-align: center; opacity: 0.5; padding: 12px"
+            >没有匹配的配方</td
+          >
+        </tr>
+        <tr v-for="row in filteredRows" :key="row.recipeName + row.siteId">
+          <td>
+            <PrunLink inline :command="`PLI ${row.naturalId}`">
+              {{ row.planetName }}
+              <BaseAlias :natural-id="row.naturalId" />
+            </PrunLink>
+          </td>
+          <IconCell :class="$style.colBuilding">
+            <BuildingIcon size="inline-table" :ticker="row.buildingTicker" />
+          </IconCell>
+          <td :class="$style.iconColumn">
+            <div :class="$style.iconRow">
+              <MaterialIcon
+                v-for="input in row.inputs"
+                :key="input.ticker"
+                :ticker="input.ticker"
+                :amount="input.factor"
+                size="small"
+                compact />
+            </div>
+          </td>
+          <td :class="[$style.iconColumn, $style.colOutput]">
+            <div :class="$style.iconRow">
+              <MaterialIcon
+                v-for="output in row.outputs"
+                :key="output.ticker"
+                :ticker="output.ticker"
+                :amount="output.factor"
+                size="small"
+                compact />
+            </div>
+          </td>
+          <td>{{ formatCurrency(row.inputCost) }}</td>
+          <td>{{ formatCurrency(row.outputValue) }}</td>
+          <td :class="marginClass(row.margin)">{{ formatCurrency(row.profit) }}</td>
+          <td :class="[marginClass(row.margin), $style.colMargin]">{{ fixed2(row.margin) }}%</td>
+          <td :class="$style.colAction">
+            <button
+              :class="[C.Button.btn, C.Button.primary, C.Button.inline]"
+              @click="showBuffer(`PROD ${row.siteId.substring(0, 8)}`)">
+              PROD
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </template>
 </template>
 
 <style module>
@@ -250,5 +299,24 @@ function marginClass(margin: number) {
 .table th:not(:first-child),
 .table td:not(:first-child) {
   text-align: right;
+}
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.searchLabel {
+  font-size: 0.85em;
+  opacity: 0.7;
+}
+.searchInput {
+  background: #1a2632;
+  color: #ccc;
+  border: 1px solid #2b485a;
+  padding: 2px 6px;
+  font-size: 0.85em;
+  width: 160px;
 }
 </style>
