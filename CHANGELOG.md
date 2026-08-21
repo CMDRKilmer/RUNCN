@@ -2,11 +2,18 @@
 
 ## [Unreleased]
 
+> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
+
+---
+
+## [26.8.21] - 2026-08-21
 ### 🔧 Improvements
 
 - **`XIT/FLEET`**：补给账单对齐 BURN 算法 —— `computeResupplyBill` 改为按「总目标天数」计算物料需求（`max(0, targetDays × dailyConsume − inventory)`），与 BURN `Resupply` 组运行时的物料生成口径一致；同时库存口径改为纯 `inventory`（不再混入 `remainingAllocation`），消除之前派遣包比 BURN 补给包多买的问题。`suppliesCapDays` 上限钳制保留，目标天数超出时按上限截断。
 - **`XIT/FLEET`**：天数输入改为「总目标天数」 —— PlanetRow 输入与 `fitDaysForShip` 搜索上界同步改为 `min(targetDays, suppliesCapDays)`，与 BURN 行为一致。
 - **`XIT/FLEET utils`**：`getBaseInventoryDays` 同步改用纯 `inventory` 计算库存可用天数，使饱和点搜索与账单一致。
+
+---
 
 ---
 
