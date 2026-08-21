@@ -90,12 +90,6 @@ async function buyAll() {
 <template>
   <div :class="$style.container">
     <SectionHeader>快捷买油</SectionHeader>
-    <div :class="$style.autoBar">
-      <label :class="$style.autoLabel">
-        <input v-model="nx.enabled" type="checkbox" :class="$style.autoCheck" />
-        自动补油：实时监听仓库油量，低于目标自动购买
-      </label>
-    </div>
     <table :class="$style.table">
       <thead>
         <tr>
@@ -147,26 +141,6 @@ async function buyAll() {
 .container {
   padding: 4px;
   box-sizing: border-box;
-}
-
-.autoBar {
-  padding: 4px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.autoLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.9em;
-  cursor: pointer;
-}
-
-.autoCheck {
-  width: 14px;
-  height: 14px;
-  accent-color: #1a6a8a;
-  cursor: pointer;
 }
 
 .table {

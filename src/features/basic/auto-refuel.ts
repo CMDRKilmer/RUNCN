@@ -36,7 +36,7 @@ function shipSignature(ship: PrunApi.Ship) {
 }
 
 // 当前需要加油的停靠飞船 registration 列表。
-const lowFuelShips = computed(() => {
+export const lowFuelShips = computed(() => {
   const ships = shipsStore.all.value;
   if (!ships) {
     return [];

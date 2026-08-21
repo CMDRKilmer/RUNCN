@@ -153,6 +153,10 @@ Event-driven ACT execution. Two event source kinds (`event-sources.ts`):
 
 Execution modes per trigger: `CONFIRM` (desktop notification; click executes) and `AUTO` (execute immediately, gated by the global `userData.settings.triggers.autoEnabled`, default off, with a ToS warning in the panel — see the "user click" hard rule in `docs/contributing.md`).
 
+### Built-in automation stays out of the trigger engine
+
+Two always-on automation policies — auto-refuel (`features/basic/auto-refuel.ts`, 30 s cooldown, ship-state watch) and NX auto-buy (`features/XIT/NX/NX.ts`, 20 s cooldown, warehouse watch) — are **not** trigger-engine event sources. The engine's 60 s condition polling + 15 min cooldown floor conflicts with their second-level responsiveness; merging them would break their behavior. They keep their own fast engines and are surfaced in the `XIT TRIGGER` panel's 内置自动化 section as toggles + live status (`TRIGGER.vue` imports the `lowFuelShips` computed from `auto-refuel.ts`; the NX row's 设置 button opens the `XIT NX` panel via `showBuffer` for target editing). Both toggles write the same `userData.settings.*` flags the engines already read, so multi-panel state stays in sync with zero migration. Rule of thumb: edge-triggered one-shot work (execute an action package) belongs in the trigger engine; continuous level policies with fast response belong in their own engines with a panel toggle.
+
 ### Cross-feature execution handoff
 
 Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known before a window opens — **do not use it for feature→window handoff**. Instead, `features/XIT/ACT/trigger-queue.ts` provides a module-level reactive queue: the engine pushes a `PendingTriggerRun` and calls `showBuffer('XIT ACT_<name>')`; `ExecuteActionPackage.vue` watches the queue for its package name and auto-starts (preview → execute). Queue entries expire after 60 s.

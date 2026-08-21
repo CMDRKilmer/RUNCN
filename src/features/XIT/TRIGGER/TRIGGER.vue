@@ -4,9 +4,11 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { showConfirmationOverlay, showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import removeArrayElement from '@src/utils/remove-array-element';
 import { createId } from '@src/store/create-id';
 import { userData } from '@src/store/user-data';
+import { lowFuelShips } from '@src/features/basic/auto-refuel';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
 
@@ -78,6 +80,10 @@ async function onRequestNotificationClick() {
     await Notification.requestPermission();
   }
 }
+
+function onOpenNxClick() {
+  showBuffer('XIT NX');
+}
 </script>
 
 <template>
@@ -103,6 +109,26 @@ async function onRequestNotificationClick() {
           授权
         </PrunButton>
       </span>
+    </p>
+  </div>
+  <SectionHeader>内置自动化</SectionHeader>
+  <div :class="$style.builtin">
+    <div :class="$style.builtinRow">
+      <RadioItem v-model="userData.settings.refuel.enabled">自动加油</RadioItem>
+      <span :class="$style.builtinStatus">
+        停靠且燃料低于 95% 时静默加油
+        <template v-if="userData.settings.refuel.enabled">
+          · 当前低油 {{ lowFuelShips.length }} 艘
+        </template>
+      </span>
+    </div>
+    <div :class="$style.builtinRow">
+      <RadioItem v-model="userData.settings.nx.enabled">NX 自动补油</RadioItem>
+      <span :class="$style.builtinStatus">实时监听四大空间站仓库油量，低于目标自动购买</span>
+      <PrunButton dark inline @click="onOpenNxClick">设置</PrunButton>
+    </div>
+    <p :class="$style.builtinHint">
+      内置自动化是持续策略，随游戏数据实时生效；触发器按事件/条件触发后执行操作包。
     </p>
   </div>
   <SectionHeader>触发器</SectionHeader>
@@ -184,6 +210,30 @@ async function onRequestNotificationClick() {
 
 .notification {
   margin: 0;
+}
+
+.builtin {
+  margin: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.builtinRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.builtinStatus {
+  font-size: 0.85em;
+  color: #888;
+}
+
+.builtinHint {
+  margin: 2px 0 0;
+  font-size: 0.8em;
+  color: #666;
 }
 
 .ok {

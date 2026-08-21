@@ -7,7 +7,8 @@ import { buyFuel, EXCHANGE_CODES, getAmountOf, getCxStore } from '@src/features/
 xit.add({
   command: 'NX',
   name: '快捷买油',
-  description: '显示四大交易所空间站（ANT/BEN/HRT/MOR）仓库油量，一键补油到目标；可开启自动补油。',
+  description:
+    '显示四大交易所空间站（ANT/BEN/HRT/MOR）仓库油量，一键补油到目标；自动补油开关位于 XIT TRIGGER。',
   component: () => NX,
   bufferSize: [680, 340],
 });

@@ -218,6 +218,10 @@ The extension does make some background server requests (e.g., `XIT BURN` opens 
 
 ## Workflow
 
+### Pulling Updates
+
+`main` tracks the `nn` remote (Euovo/NN), but that remote is not used — pulls must come from `origin` (CMDRKilmer/RUNCN). The `xxc` remote is unreachable and can be ignored/removed. Local uncommitted `public/manifest.json` version bumps are intentional user state; preserve them across pulls and rebuilds. Rebuild dist with `pnpm run build` after merging.
+
 ### Changelog
 
 Don't modify `CHANGELOG.md` in PRs. The maintainer adds changelog notes right before merging. This avoids merge conflicts.
