@@ -4,6 +4,16 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### ✨ Features
+
+- **`XIT/TRIGGER`**：新增内置自动化区块 —— 集中管理「自动加油」与「NX 自动补油」开关：自动加油展示低油飞船计数（`lowFuelShips`），NX 自动补油提供「设置」按钮跳转 NX 面板；移除 SET 加油选项卡（`REFUEL.vue`）与 NX 面板内的自动补油开关（保留目标设置与一键补油），加油设置统一在 TRIGGER 面板管理。
+
+### 🔧 Improvements
+
+- **`XIT/TRIGGER`**：飞船到港（FLIGHT_ENDED）触发器新增飞船下拉选择器 —— 按注册码排序并显示船名，可筛选指定飞船或选择任意飞船；重构通知权限获取逻辑（computed 暴露 `Notification` 权限，避免模板直接访问全局导致渲染报错）；触发器 ID 改用 `createId` 生成。
+- **`XIT/ACT`**：预览静默执行时临时 CXPO 窗口全程隐藏 —— 取价临时窗口改用 `autoClose` + `closeWhen` 机制并在 `finally` 中兜底关闭，执行期间不再闪现窗口。
+- **`XIT/FLT`**：恢复本地燃料列与状态图标重构 —— 燃料/维修状态在表格内直接渲染，删除 `StatusCell.vue` 与 `ship-status-icons.ts` 死代码。
+
 ---
 
 ## [26.8.21.1] - 2026-08-21
