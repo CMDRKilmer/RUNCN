@@ -141,3 +141,22 @@ Migrations (`user-data-migrations.ts`) run on every load to transform stored dat
 ## Feature Development
 
 See `docs/feature-patterns.md` for all patterns (registration, tiles, DOM helpers, CSS, data stores, formatting).
+
+---
+
+## Automation Triggers (`features/basic/automation-triggers/`)
+
+Event-driven ACT execution. Two event source kinds (`event-sources.ts`):
+
+- **Alert sources** (arrival / supplies low / production finished): watch `alertsStore` for new alerts, dedup by `alert.id`. Edge-triggered by nature. Alert `data` key-value pairs (e.g. `registration`, `planet.address`) provide filter fields.
+- **Condition sources** (building condition / interval): evaluated every 60 s, **level + cooldown** semantics — fire while true once cooldown (min 15 min, stored in `TriggerData.cooldownMin`) has elapsed since `lastRun`. No edge tracking needed.
+
+Execution modes per trigger: `CONFIRM` (desktop notification; click executes) and `AUTO` (execute immediately, gated by the global `userData.settings.triggers.autoEnabled`, default off, with a ToS warning in the panel — see the "user click" hard rule in `docs/contributing.md`).
+
+### Cross-feature execution handoff
+
+Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known before a window opens — **do not use it for feature→window handoff**. Instead, `features/XIT/ACT/trigger-queue.ts` provides a module-level reactive queue: the engine pushes a `PendingTriggerRun` and calls `showBuffer('XIT ACT_<name>')`; `ExecuteActionPackage.vue` watches the queue for its package name and auto-starts (preview → execute). Queue entries expire after 60 s.
+
+### ACT action/step registration recap
+
+New action types must be added to the `ActionType` union in `src/store/user-data.types.d.ts` (plus any action-specific fields on `ActionData`). Steps register via `act.addActionStep` (execution logic), actions via `act.addAction` (Edit.vue must `defineExpose({ validate, save })`; `EditAction.vue` clears all keys of the action object before `save()` repopulates it). Import the action module in `ACT.ts`.
