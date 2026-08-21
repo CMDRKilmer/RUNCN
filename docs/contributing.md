@@ -111,6 +111,32 @@ if (divisor === 0) {
 }
 ```
 
+### Truthiness Checks on Objects
+
+ESLint `strict-boolean-expressions` rejects truthiness checks on object-typed values (array indexing, record lookups). Compare against `undefined` explicitly.
+
+```ts
+// Bad
+const next = stops[i + 1];
+if (next) { }
+
+// Good
+const next = stops[i + 1];
+if (next !== undefined) { }
+```
+
+### null vs undefined
+
+Some PrUn API fields are `| null` (e.g. `Ship.address`) while helper functions accept `| undefined`. Convert with `?? undefined` instead of disabling types.
+
+```ts
+// Bad
+getEntityNaturalIdFromAddress(ship.address) // TS error: null not assignable
+
+// Good
+getEntityNaturalIdFromAddress(ship.address ?? undefined)
+```
+
 ### Comments
 
 Put on a separate line, start with a capital letter, end with a full stop.

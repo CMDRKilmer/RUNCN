@@ -41,6 +41,8 @@ interface ResupplyFilter {
   useBaseInv?: boolean;
   consumablesOnly?: boolean;
   includeConsumables?: boolean;
+  // 链式补给模式：这些 ticker 由环线上游基地供应，从 CX 账单中剔除。
+  exclusions?: Set<string>;
 }
 
 function getPlanetBurnForResupply(data: ResupplyFilter, planet: string | undefined) {
@@ -109,6 +111,7 @@ export function computeResupplyBill(
   const useBaseInv = data.useBaseInv ?? true;
   const bill: Record<string, number> = {};
   for (const ticker of Object.keys(planetBurn)) {
+    if (data.exclusions?.has(ticker)) continue;
     const matBurn = planetBurn[ticker];
     if (!isResupplyMaterial(matBurn, data)) continue;
     const dailyConsume = -matBurn.dailyAmount;
