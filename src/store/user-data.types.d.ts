@@ -77,7 +77,7 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'BRA Repair';
 
   interface ActionData {
     type: ActionType;
@@ -100,6 +100,10 @@ declare namespace UserData {
 
     destination?: string;
     shipSourceAction?: string;
+
+    // BRA Repair 专用。
+    base?: string;
+    threshold?: number;
   }
 
   interface TaskList {

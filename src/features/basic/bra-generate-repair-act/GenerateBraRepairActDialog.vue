@@ -31,6 +31,7 @@ const exchange = persistedRef('genact-bra-exchange', exchanges[0]);
 const useBaseInv = persistedRef('genact-bra-use-inv', true);
 const timeOffset = persistedRef<'now' | '24' | '48'>('genact-bra-time-offset', 'now');
 const openSfc = persistedRef('genact-bra-sfc', false);
+const repairExec = persistedRef('genact-bra-exec', true);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'JIANZHUWEIXIU';
@@ -112,6 +113,16 @@ function onGenerateClick() {
         origin: warehouseName.value,
         dest: configurableValue,
       },
+      ...(repairExec.value
+        ? [
+            {
+              type: 'BRA Repair' as const,
+              name: 'Repair',
+              base: planetNaturalId ?? '',
+              threshold: userData.settings.repair.threshold,
+            },
+          ]
+        : []),
       ...(openSfc.value
         ? [
             {
@@ -169,6 +180,11 @@ function onGenerateClick() {
       </Active>
       <Active label="打开航行控制" tooltip="转移完成后自动打开 SFC 并输入目的地。">
         <RadioItem v-model="openSfc">打开航行控制</RadioItem>
+      </Active>
+      <Active
+        label="自动提交维修"
+        tooltip="材料转移完成后自动勾选状况低于阈值的建筑并提交维修（追加 BRA Repair 操作）。">
+        <RadioItem v-model="repairExec">自动提交维修</RadioItem>
       </Active>
       <Commands>
         <PrunButton primary @click="onGenerateClick">生成</PrunButton>
