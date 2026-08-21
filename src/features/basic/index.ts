@@ -3,6 +3,7 @@ import './align-chat-delete-button';
 import './audio-volume-slider/audio-volume-slider';
 import './auto-refuel';
 import './auto-resize-buffers';
+import './automation-triggers/automation-triggers';
 import './bbc-building-count';
 import './base-alias-display/base-alias-display';
 import './bbl-condition-progress-bar';
