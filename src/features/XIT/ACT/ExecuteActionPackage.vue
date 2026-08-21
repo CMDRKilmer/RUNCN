@@ -10,6 +10,7 @@ import ConfigWindow from '@src/features/XIT/ACT/ConfigureWindow.vue';
 import { ActionPackageConfig } from '@src/features/XIT/ACT/shared-types';
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { userData } from '@src/store/user-data';
+import { consumeTriggerRun, hasPendingTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -119,6 +120,19 @@ const runner = new ActionRunner({
   },
   isAutoAct: () => autoAct.value,
 });
+
+// 触发器队列监视：队列中出现本操作包的待执行项时自动开始（预览通过后执行）。
+// immediate 覆盖触发器新开窗口的场景；窗口已开时由队列变化触发。
+watch(
+  () => hasPendingTriggerRun(pkg.global.name),
+  has => {
+    if (has) {
+      consumeTriggerRun(pkg.global.name);
+      void onAutoClick();
+    }
+  },
+  { immediate: true },
+);
 
 function onConfigureApplyClick() {
   showConfigure.value = false;
