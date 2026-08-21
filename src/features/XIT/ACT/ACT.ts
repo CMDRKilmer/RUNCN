@@ -2,6 +2,7 @@ import './actions/cx-buy/cx-buy';
 import './actions/mtra/mtra';
 import './actions/refuel/refuel';
 import './actions/open-sfc/open-sfc';
+import './actions/bra-repair/bra-repair';
 
 import './material-groups/repair/repair';
 import './material-groups/resupply/resupply';
