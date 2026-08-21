@@ -12,7 +12,8 @@ for (let i = 0; i < scripts.length; i++) {
   clone.src = safeUrl;
   clone.defer = script.defer;
   clone.async = script.async;
-  clone.type = script.type;
+  // prepare 阶段把脚本标成了 application/json 以防执行，原始 type 存在 dataset 里。
+  clone.type = script.dataset.rpType ?? script.type;
   document.head.appendChild(clone);
   script.remove();
 }

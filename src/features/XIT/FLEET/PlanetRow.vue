@@ -65,20 +65,17 @@ const canFit = computed(() => !!config.ship);
 const burn = computed(() => getPlanetBurn(siteId));
 const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
 
-// 天数输入为「追加补给天数」:与库存可用天数(days,即消耗状态列)相加得到最终天数,
+// 天数输入为「总目标天数」(补到第 N 天),与 BURN/ACT Resupply 语义一致:
 // 不得超过 suppliesCapDays(下次到港前仓储不超限反算,含产出累积,防止补给填满
 // 仓库导致产出无处存放);不耦合全局推荐项。
 // computeResupplyBill 按同一上限逐物料截断,此处钳制输入使其与账单一致。
 watch(
-  [() => config.days, () => analysis?.suppliesCapDays, days],
-  ([daysVal, capDays, invDays]) => {
+  [() => config.days, () => analysis?.suppliesCapDays],
+  ([daysVal, capDays]) => {
     const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-    // countDays 以 1000 作为"无净消耗物料"的哨兵值,此时无需预留库存天数。
-    const effective =
-      invDays !== undefined && isFinite(invDays) && invDays < 1000 ? cap - invDays : cap;
-    if (daysVal > effective) {
+    if (daysVal > cap) {
       // 截断到上限,向下取两位小数(与适配 fitDaysForShip 的精度一致)。
-      config.days = Math.max(0, Math.floor(effective * 100) / 100);
+      config.days = Math.max(0, Math.floor(cap * 100) / 100);
     }
   },
   { immediate: true },
@@ -156,28 +153,27 @@ const fillText = computed(() => {
   return formatBurnDays(days);
 });
 
-// 补给天数输入框悬浮提示:输入为「追加天数」,
-// 与库存可用天数相加后不得超过 suppliesCapDays(下次到港前仓储不超限反算)。
+// 补给天数输入框悬浮提示:输入为「总目标天数」(补到第 N 天),
+// 不得超过 suppliesCapDays(下次到港前仓储不超限反算)。
 // inputDaysCap 与 watch 共用钳制公式,绑定到 NumberInput 的 max 以约束浏览器原生箭头。
 const inputDaysCap = computed(() => {
   const capDays = analysis?.suppliesCapDays;
   const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-  const raw = days.value;
-  if (raw !== undefined && isFinite(raw) && raw < 1000) {
-    return Math.max(0, cap - raw);
-  }
   return Math.max(0, cap);
 });
 
 const daysTooltip = computed(() => {
   const capDays = analysis?.suppliesCapDays;
-  const totalCap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-  // 与 watch 钳制口径一致:无净消耗物料(哨兵 1000)时不预留库存天数。
-  const raw = days.value;
-  const inv = raw !== undefined && isFinite(raw) && raw < 1000 ? raw : 0;
-  const inputCap = Math.max(0, totalCap - inv);
-  const totalText = !isFinite(totalCap) ? '∞' : formatBurnDays(totalCap);
-  return `天数上限: ${formatBurnDays(inputCap)} 天 (库存 ${formatBurnDays(inv)} + 补给 ≤ ${totalText} 天)`;
+  if (capDays === undefined) {
+    return '天数上限: -- (仓储分析未加载)';
+  }
+  if (!isFinite(capDays)) {
+    return '天数上限: ∞ 天 (补给后总天数无上限)';
+  }
+  if (capDays <= 0) {
+    return '天数上限: 0 天 (基地无可用补给空间)';
+  }
+  return `天数上限: ${formatBurnDays(capDays)} 天 (补给后总天数不超过此值,防止撑爆仓库)`;
 });
 
 const fillBgClass = computed(() => {

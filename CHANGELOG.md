@@ -6,6 +6,34 @@
 
 ---
 
+## [26.8.21.1] - 2026-08-21
+### ✨ Features
+
+- **`XIT/ACT`**：新增 BRA Repair 操作 —— 静默打开 BRA 面板，勾选状况低于阈值的建筑，轮询「维护」按钮从禁用变为可用（材料到位信号）后自动提交；BRA 生成器默认追加该操作，形成「采购→转移→提交维修」闭环。
+- **`automation-triggers`**：新增触发器引擎 —— 到港/物资告急/生产完成挂游戏告警（按告警 ID 去重），建筑状况/定时为电平+冷却条件源（冷却下限 15 分钟）；CONFIRM 模式桌面通知确认后执行，AUTO 模式需全局开关（默认禁用）。
+- **`XIT/TRIGGER`**：新增自动触发器面板 —— 触发器增删改、启用开关、触发历史，AUTO 全局总开关（含 ToS 风险提示）与桌面通知授权入口。
+- **`XIT/PLAN`**：JH 计划一键生成建造购材 ACT 包 —— 按 FIO 建筑成本 + 星球环境建材（与 BPLAN 同规则）汇总需求，生成「CX Buy → MTRA 转基地」操作包。
+
+### 🐛 Bug Fixes
+
+- **`refined-prun-prepare`**：修复脚本序列化的双重执行缺陷 —— 无 src 守卫 + `data-rp-serialized` 标记保证幂等（此前另一副本/二次运行会把已序列化的 URL 清空）；改用 `removeAttribute('src')` 替代 `src = ''`（空 src 会解析为页面 URL，浏览器把 HTML 当脚本执行，即控制台 `（索引）:1 Unexpected token '<'` 报错）；原始 `type` 存入 dataset 供反序列化还原。
+- **`shell/config`**：配置元素为空时报清晰错误（提示可能启用了重复的扩展副本），替代难以定位的 `Unexpected end of JSON input`。
+
+---
+
+---
+
+## [26.8.21] - 2026-08-21
+### 🔧 Improvements
+
+- **`XIT/FLEET`**：补给账单对齐 BURN 算法 —— `computeResupplyBill` 改为按「总目标天数」计算物料需求（`max(0, targetDays × dailyConsume − inventory)`），与 BURN `Resupply` 组运行时的物料生成口径一致；同时库存口径改为纯 `inventory`（不再混入 `remainingAllocation`），消除之前派遣包比 BURN 补给包多买的问题。`suppliesCapDays` 上限钳制保留，目标天数超出时按上限截断。
+- **`XIT/FLEET`**：天数输入改为「总目标天数」 —— PlanetRow 输入与 `fitDaysForShip` 搜索上界同步改为 `min(targetDays, suppliesCapDays)`，与 BURN 行为一致。
+- **`XIT/FLEET utils`**：`getBaseInventoryDays` 同步改用纯 `inventory` 计算库存可用天数，使饱和点搜索与账单一致。
+
+---
+
+---
+
 ## [26.8.20.2] - 2026-08-20
 ### ✨ Features
 

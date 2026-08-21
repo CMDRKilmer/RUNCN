@@ -82,6 +82,17 @@ Core principle: Everything is a **command** (all-caps 2–6 letter codes). Comma
 - Modal dialogs pause interaction with background
 - Require user to confirm or cancel before proceeding
 
+## Panel DOM Reference
+
+### BRA — Building Repair Assistant (`BRA <base>`)
+
+- Building list container: `BuildingRepairAssistantPanel__buildingList` (use `C.BuildingRepairAssistantPanel.buildingList`).
+- Each building row: `.building` child containing a clickable `BuildingIcon__container` (has `title` = building name, ticker inside) followed by the condition percentage as plain text (e.g. `INC100%`).
+- Clicking a building icon selects it for repair; clicking again deselects.
+- The game's **维护 (repair)** button is the **first** `C.Button.btn` in the tile. It is **disabled** (`C.Button.disabled` class) when no building needs repair OR when required materials are missing from base storage.
+- Clicking 维护 submits immediately — no confirmation dialog.
+- Consequence for automation: "button transitions from disabled to enabled" is a reliable "materials arrived" signal after a material transfer; poll it before clicking.
+
 ## Accessibility Notes
 
 - All-caps command language may appear cryptic but is intentional: precise, searchable, unmistakable.

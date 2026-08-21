@@ -70,7 +70,9 @@ function isResupplyMaterial(mat: MaterialBurn, data: ResupplyFilter) {
 }
 
 // 基地过滤后净消耗物料的最小库存可用天数(与补给账单口径一致)。
-// 数据未加载时返回 undefined;无净消耗物料时返回 Infinity。
+// 库存口径与 BURN/ACT Resupply 对齐：只看 matBurn.inventory，不计
+// remainingAllocation，使 fitDaysForShip 算出的饱和点与实际账单一致。
+// 数据未加载时返回 undefined；无净消耗物料时返回 Infinity。
 export function getBaseInventoryDays(data: ResupplyFilter, planet: string | undefined) {
   const planetBurn = getPlanetBurnForResupply(data, planet);
   if (!planetBurn) return undefined;
@@ -78,7 +80,10 @@ export function getBaseInventoryDays(data: ResupplyFilter, planet: string | unde
   for (const ticker of Object.keys(planetBurn)) {
     const mat = planetBurn[ticker];
     if (!isResupplyMaterial(mat, data)) continue;
-    days = Math.min(days, mat.daysLeft);
+    const dailyConsume = -mat.dailyAmount;
+    if (dailyConsume <= 0) continue;
+    const invDays = mat.inventory > 0 ? mat.inventory / dailyConsume : 0;
+    days = Math.min(days, invDays);
   }
   return days;
 }
@@ -93,19 +98,29 @@ export function computeResupplyBill(
   if (!planetBurn) return undefined;
   const site = planet ? sitesStore.getByPlanetNaturalIdOrName(planet) : undefined;
   if (!site) return undefined;
-  // 最终总天数(库存可用+追加)不得超过 suppliesCapDays:
-  // 按「下次到港前仓储不超过 (1−reserve)」反算(含产出累积),保证补给不会
-  // 填满仓库导致产出无处存放。不耦合全局推荐项;analysis 未加载时不限制。
+  // days 与 BURN/ACT Resupply 一致：总目标天数（补到第 N 天），
+  // 不是「再补 N 天」。库存口径：只看 matBurn.inventory，不计 remainingAllocation。
+  // suppliesCapDays：补后总天数不得超出此值，防止补给填满仓库导致产出无处存放；
+  // analysis 未加载时不限制。超出则钳制到 cap。
   const capDays = getBaseStorageAnalysis(site)?.suppliesCapDays;
   const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
+  const targetDays = Math.min(days, cap);
+  if (targetDays <= 0) return {};
+  const useBaseInv = data.useBaseInv ?? true;
   const bill: Record<string, number> = {};
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
     if (!isResupplyMaterial(matBurn, data)) continue;
-    // 每种物料的追加天数:不超过输入天数,且补后总天数(库存可用+追加)不超过上限。
-    const additional = Math.max(0, Math.min(days, cap - matBurn.daysLeft));
-    if (additional <= 0) continue;
-    bill[ticker] = Math.ceil(additional * -matBurn.dailyAmount + 1);
+    const dailyConsume = -matBurn.dailyAmount;
+    if (dailyConsume <= 0) continue;
+    // 与 BURN/ACT Resupply 公式一致：days * dailyConsume - inventory。
+    // inventory 已在 storage 计算时累加进 matBurn.inventory，无需再访问 store。
+    const inventory = useBaseInv ? matBurn.inventory : 0;
+    if (useBaseInv && inventory >= targetDays * dailyConsume) continue;
+    const rawRequired = targetDays * dailyConsume - inventory;
+    const required = Math.max(0, rawRequired);
+    if (required <= 0) continue;
+    bill[ticker] = Math.ceil(required);
   }
   return bill;
 }
@@ -334,7 +349,8 @@ export function fitDaysForShip(
   };
 
   // 各补给基地的库存可用天数(同时验证消耗数据已加载),
-  // 以及账单饱和点:追加天数达到 总天数上限 − 库存可用天数 后该基地账单不再增长。
+  // 以及账单饱和点:目标天数达到 suppliesCapDays 后该基地账单不再增长。
+  // 与 computeResupplyBill 语义对齐：days 为总目标天数（补到第 N 天）。
   let saturation = 0;
   let hasResupply = false;
   for (const base of sharing) {
@@ -348,9 +364,9 @@ export function fitDaysForShip(
     }
     // 与 computeResupplyBill 一致的补给容量上限(suppliesCapDays)。
     const cap = getBaseStorageAnalysis(base.site)?.suppliesCapDays ?? Infinity;
-    saturation = Math.max(saturation, cap - invDays);
+    saturation = Math.max(saturation, cap);
   }
-  // 搜索上界:各基地饱和点中的最大值(此时所有基地都已补到各自的总天数上限)。
+  // 搜索上界:各基地 cap 中的最大值(此时所有基地都已补到各自的总天数上限)。
   let hi = hasResupply ? Math.max(0, saturation) : 999;
 
   if (fits(hi)) {

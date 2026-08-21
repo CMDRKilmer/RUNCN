@@ -77,7 +77,7 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'BRA Repair';
 
   interface ActionData {
     type: ActionType;
@@ -100,6 +100,39 @@ declare namespace UserData {
 
     destination?: string;
     shipSourceAction?: string;
+
+    // BRA Repair 专用。
+    base?: string;
+    threshold?: number;
+  }
+
+  type TriggerMode = 'CONFIRM' | 'AUTO';
+
+  type TriggerEventType =
+    'FLIGHT_ENDED' | 'SUPPLIES_LOW' | 'PRODUCTION_FINISHED' | 'BUILDING_CONDITION' | 'INTERVAL';
+
+  type TriggerEventData =
+    | { type: 'FLIGHT_ENDED'; ship?: string }
+    | { type: 'SUPPLIES_LOW'; planet?: string }
+    | { type: 'PRODUCTION_FINISHED'; planet?: string }
+    | { type: 'BUILDING_CONDITION'; planet: string; belowPct: number }
+    | { type: 'INTERVAL' };
+
+  interface TriggerData {
+    id: string;
+    name: string;
+    enabled: boolean;
+    event: TriggerEventData;
+    /** 目标操作包名称。 */
+    packageName: string;
+    mode: TriggerMode;
+    /** 触发冷却（分钟）；INTERVAL 源同时作为周期。 */
+    cooldownMin: number;
+    createdAt: number;
+    lastRun?: number;
+    runCount?: number;
+    /** 最近一次触发异常（如目标操作包缺失）。 */
+    lastResult?: string;
   }
 
   interface TaskList {
