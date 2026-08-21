@@ -164,9 +164,16 @@ const inputDaysCap = computed(() => {
 
 const daysTooltip = computed(() => {
   const capDays = analysis?.suppliesCapDays;
-  const totalCap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-  const totalText = !isFinite(totalCap) ? '∞' : formatBurnDays(totalCap);
-  return `天数上限: ${totalText} 天(补给后总天数不得超过 suppliesCapDays,防止撑爆仓库)`;
+  if (capDays === undefined) {
+    return '天数上限: -- (仓储分析未加载)';
+  }
+  if (!isFinite(capDays)) {
+    return '天数上限: ∞ 天 (补给后总天数无上限)';
+  }
+  if (capDays <= 0) {
+    return '天数上限: 0 天 (基地无可用补给空间)';
+  }
+  return `天数上限: ${formatBurnDays(capDays)} 天 (补给后总天数不超过此值,防止撑爆仓库)`;
 });
 
 const fillBgClass = computed(() => {
