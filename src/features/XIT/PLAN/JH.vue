@@ -2,11 +2,12 @@
 import ActionBar from '@src/components/ActionBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { showConfirmationOverlay, showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { userData } from '@src/store/user-data';
 import { getTileState } from '@src/store/user-data-tiles';
 import removeArrayElement from '@src/utils/remove-array-element';
 import { ddmmyyyy, hhmm } from '@src/utils/format';
+import GenerateConstructionActDialog from '@src/features/XIT/PLAN/GenerateConstructionActDialog.vue';
 
 const plans = computed(() => userData.basePlans);
 
@@ -45,6 +46,10 @@ function onDeleteClick(ev: Event, plan: UserData.BasePlan) {
   });
 }
 
+function onGenerateActClick(ev: Event, plan: UserData.BasePlan) {
+  showTileOverlay(ev, GenerateConstructionActDialog, { plan });
+}
+
 function formatDate(ts: number) {
   return `${ddmmyyyy(ts)} ${hhmm(ts)}`;
 }
@@ -61,12 +66,13 @@ function formatDate(ts: number) {
         <th>星球</th>
         <th>保存时间</th>
         <th>打开</th>
+        <th>购材</th>
         <th>删除</th>
       </tr>
     </thead>
     <tbody v-if="plans.length === 0">
       <tr>
-        <td colspan="5">暂无计划，点「新建计划」开始规划。</td>
+        <td colspan="6">暂无计划，点「新建计划」开始规划。</td>
       </tr>
     </tbody>
     <tbody v-else>
@@ -76,6 +82,9 @@ function formatDate(ts: number) {
         <td>{{ formatDate(plan.savedAt) }}</td>
         <td>
           <PrunButton primary @click="onOpenClick(plan)">打开</PrunButton>
+        </td>
+        <td>
+          <PrunButton dark inline @click="onGenerateActClick($event, plan)">购材 ACT</PrunButton>
         </td>
         <td>
           <PrunButton dark inline @click="onDeleteClick($event, plan)">删除</PrunButton>
