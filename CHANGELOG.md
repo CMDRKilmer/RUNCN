@@ -4,6 +4,18 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### ✨ Features
+
+- **`XIT/ACT`**：新增 BRA Repair 操作 —— 静默打开 BRA 面板，勾选状况低于阈值的建筑，轮询「维护」按钮从禁用变为可用（材料到位信号）后自动提交；BRA 生成器默认追加该操作，形成「采购→转移→提交维修」闭环。
+- **`automation-triggers`**：新增触发器引擎 —— 到港/物资告急/生产完成挂游戏告警（按告警 ID 去重），建筑状况/定时为电平+冷却条件源（冷却下限 15 分钟）；CONFIRM 模式桌面通知确认后执行，AUTO 模式需全局开关（默认禁用）。
+- **`XIT/TRIGGER`**：新增自动触发器面板 —— 触发器增删改、启用开关、触发历史，AUTO 全局总开关（含 ToS 风险提示）与桌面通知授权入口。
+- **`XIT/PLAN`**：JH 计划一键生成建造购材 ACT 包 —— 按 FIO 建筑成本 + 星球环境建材（与 BPLAN 同规则）汇总需求，生成「CX Buy → MTRA 转基地」操作包。
+
+### 🐛 Bug Fixes
+
+- **`refined-prun-prepare`**：修复脚本序列化的双重执行缺陷 —— 无 src 守卫 + `data-rp-serialized` 标记保证幂等（此前另一副本/二次运行会把已序列化的 URL 清空）；改用 `removeAttribute('src')` 替代 `src = ''`（空 src 会解析为页面 URL，浏览器把 HTML 当脚本执行，即控制台 `（索引）:1 Unexpected token '<'` 报错）；原始 `type` 存入 dataset 供反序列化还原。
+- **`shell/config`**：配置元素为空时报清晰错误（提示可能启用了重复的扩展副本），替代难以定位的 `Unexpected end of JSON input`。
+
 ---
 
 ## [26.8.21] - 2026-08-21
