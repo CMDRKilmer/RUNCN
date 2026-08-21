@@ -52,7 +52,8 @@ const eventType = ref<UserData.TriggerEventType>(trigger.event.type);
 // 事件过滤字段（按事件类型条件展示）
 const ship = ref(trigger.event.type === 'FLIGHT_ENDED' ? (trigger.event.ship ?? '') : '');
 const planet = ref(
-  trigger.event.type === 'BUILDING_CONDITION' ||
+  trigger.event.type === 'FLIGHT_ENDED' ||
+    trigger.event.type === 'BUILDING_CONDITION' ||
     trigger.event.type === 'SUPPLIES_LOW' ||
     trigger.event.type === 'PRODUCTION_FINISHED'
     ? (trigger.event.planet ?? '')
@@ -88,6 +89,7 @@ function save() {
       trigger.event = {
         type: 'FLIGHT_ENDED',
         ...(ship.value ? { ship: ship.value.toUpperCase() } : {}),
+        ...(planet.value ? { planet: planet.value } : {}),
       };
       break;
     case 'SUPPLIES_LOW':
@@ -139,7 +141,11 @@ function onSaveClick() {
         <SelectInput v-model="ship" :options="shipOptions" />
       </Active>
       <Active
-        v-if="eventType === 'SUPPLIES_LOW' || eventType === 'PRODUCTION_FINISHED'"
+        v-if="
+          eventType === 'FLIGHT_ENDED' ||
+          eventType === 'SUPPLIES_LOW' ||
+          eventType === 'PRODUCTION_FINISHED'
+        "
         label="星球"
         tooltip="留空表示任意基地均触发；填写自然 ID（如 KW1）或名称。">
         <TextInput v-model="planet" />

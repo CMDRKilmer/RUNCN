@@ -107,6 +107,13 @@ const runner = new ActionRunner({
       if (idx >= 0) {
         userData.actionPackages.splice(idx, 1);
       }
+      // 同步删除指向该操作包的一次性触发器（FLEET 到港卸货）。
+      for (let i = userData.triggers.length - 1; i >= 0; i--) {
+        const trigger = userData.triggers[i];
+        if (trigger.autoDelete && trigger.packageName === pkg.global.name) {
+          userData.triggers.splice(i, 1);
+        }
+      }
     }
   },
   onStatusChanged: (title, keepReady) => {

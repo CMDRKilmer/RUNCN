@@ -26,8 +26,10 @@ const notificationPermission = computed(() => Notification?.permission ?? 'defau
 
 function describeEvent(event: UserData.TriggerEventData) {
   switch (event.type) {
-    case 'FLIGHT_ENDED':
-      return event.ship ? `${event.ship} 到港` : '任意飞船到港';
+    case 'FLIGHT_ENDED': {
+      const arrival = event.ship ? `${event.ship} 到港` : '飞船到港';
+      return event.planet ? `${arrival}（${event.planet}）` : arrival;
+    }
     case 'SUPPLIES_LOW':
       return event.planet ? `${event.planet} 物资告急` : '任意基地物资告急';
     case 'PRODUCTION_FINISHED':

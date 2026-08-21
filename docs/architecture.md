@@ -148,10 +148,12 @@ See `docs/feature-patterns.md` for all patterns (registration, tiles, DOM helper
 
 Event-driven ACT execution. Two event source kinds (`event-sources.ts`):
 
-- **Alert sources** (arrival / supplies low / production finished): watch `alertsStore` for new alerts, dedup by `alert.id`. Edge-triggered by nature. Alert `data` key-value pairs (e.g. `registration`, `planet.address`) provide filter fields.
+- **Alert sources** (arrival / supplies low / production finished): watch `alertsStore` for new alerts, dedup by `alert.id`. Edge-triggered by nature. Alert `data` key-value pairs (e.g. `registration`, `planet.address`) provide filter fields. Note: `SHIP_FLIGHT_ENDED` carries **`destination`** (an address) in addition to `registration` — `FLIGHT_ENDED` triggers can filter on ship AND destination planet (naturalId via `getEntityNaturalIdFromAddress`), which `event-sources.ts` matches.
 - **Condition sources** (building condition / interval): evaluated every 60 s, **level + cooldown** semantics — fire while true once cooldown (min 15 min, stored in `TriggerData.cooldownMin`) has elapsed since `lastRun`. No edge tracking needed.
 
 Execution modes per trigger: `CONFIRM` (desktop notification; click executes) and `AUTO` (execute immediately, gated by the global `userData.settings.triggers.autoEnabled`, default off, with a ToS warning in the panel — see the "user click" hard rule in `docs/contributing.md`).
+
+**One-shot triggers (`TriggerData.autoDelete`)**: a trigger marked `autoDelete` is removed automatically once its action package executes successfully — `ExecuteActionPackage.vue` deletes it in the same `onEnd` success branch that honors the package's own `autoDelete`. Used by FLEET's 到港卸货 feature: clicking 执行 in `XIT FLEET` upserts one `FLIGHT_ENDED` trigger per dispatched base (`ship` + `planet` filter, `packageName` = the base's `<星球> Unload` package, mode `CONFIRM`, togglable via the FLEET toolbar's 到港卸货 switch) so the ship is unloaded automatically when it arrives at that base.
 
 ### Built-in automation stays out of the trigger engine
 

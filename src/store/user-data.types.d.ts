@@ -112,7 +112,7 @@ declare namespace UserData {
     'FLIGHT_ENDED' | 'SUPPLIES_LOW' | 'PRODUCTION_FINISHED' | 'BUILDING_CONDITION' | 'INTERVAL';
 
   type TriggerEventData =
-    | { type: 'FLIGHT_ENDED'; ship?: string }
+    | { type: 'FLIGHT_ENDED'; ship?: string; planet?: string }
     | { type: 'SUPPLIES_LOW'; planet?: string }
     | { type: 'PRODUCTION_FINISHED'; planet?: string }
     | { type: 'BUILDING_CONDITION'; planet: string; belowPct: number }
@@ -133,6 +133,8 @@ declare namespace UserData {
     runCount?: number;
     /** 最近一次触发异常（如目标操作包缺失）。 */
     lastResult?: string;
+    /** 一次性触发器：其操作包执行成功后自动删除（FLEET 到港卸货）。 */
+    autoDelete?: boolean;
   }
 
   interface TaskList {

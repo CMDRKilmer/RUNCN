@@ -24,6 +24,7 @@ import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
+import { createId } from '@src/store/create-id';
 import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
@@ -70,6 +71,8 @@ const baseOrder = useTileState<string[]>('baseOrder', []);
 const orderedIds = ref<string[]>([]);
 const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefined);
 const refuel = useTileState<boolean>('refuel', true);
+// 执行时同步在 TRIGGER 面板创建一次性到港卸货触发器。
+const autoUnloadTrigger = useTileState<boolean>('autoUnloadTrigger', true);
 
 // Column visibility
 const showBurn = useTileState('showBurn', true);
@@ -672,6 +675,32 @@ function execute() {
     } else {
       userData.actionPackages.push(unloadPkg);
     }
+
+    // 到港自动卸货：同步创建一次性触发器，飞船到达该基地时执行上方操作包。
+    if (autoUnloadTrigger.value) {
+      const trigger: UserData.TriggerData = {
+        id: createId(),
+        name: `${base.planetName} 卸货`,
+        enabled: true,
+        event: {
+          type: 'FLIGHT_ENDED',
+          ship: base.dispatchShip.ship.registration,
+          planet: base.naturalId,
+        },
+        packageName: unloadName,
+        mode: 'CONFIRM',
+        cooldownMin: 60,
+        createdAt: Date.now(),
+        autoDelete: true,
+      };
+      const existingTrigger = userData.triggers.find(x => x.packageName === unloadName);
+      if (existingTrigger) {
+        const index = userData.triggers.indexOf(existingTrigger);
+        userData.triggers[index] = trigger;
+      } else {
+        userData.triggers.push(trigger);
+      }
+    }
   }
 }
 
@@ -795,6 +824,8 @@ async function importDispatchConfig() {
         </RadioItem>
         <div :class="$style.separator" />
         <RadioItem v-model="refuel" horizontal>加油</RadioItem>
+        <div :class="$style.separator" />
+        <RadioItem v-model="autoUnloadTrigger" horizontal>到港卸货</RadioItem>
         <div :class="$style.separator" />
         <RadioItem v-model="showBurn" horizontal>消耗</RadioItem>
         <RadioItem v-model="showProd" horizontal>生产</RadioItem>

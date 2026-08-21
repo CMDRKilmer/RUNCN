@@ -21,6 +21,11 @@ function alertEntityNaturalId(alert: PrunApi.Alert): string | undefined {
   return wrapped ? getEntityNaturalIdFromAddress(wrapped.address) : undefined;
 }
 
+function alertDestinationNaturalId(alert: PrunApi.Alert): string | undefined {
+  const wrapped = alertData(alert, 'destination') as { address: PrunApi.Address } | undefined;
+  return wrapped ? getEntityNaturalIdFromAddress(wrapped.address) : undefined;
+}
+
 function matchesPlanet(event: { planet?: string }, alert: PrunApi.Alert) {
   return event.planet === undefined || alertEntityNaturalId(alert) === event.planet;
 }
@@ -28,11 +33,22 @@ function matchesPlanet(event: { planet?: string }, alert: PrunApi.Alert) {
 export const alertSources: Partial<Record<string, AlertSource>> = {
   FLIGHT_ENDED: {
     alertTypes: ['SHIP_FLIGHT_ENDED'],
-    matches: (event, alert) =>
-      event.type !== 'FLIGHT_ENDED' ||
-      event.ship === undefined ||
-      alertData(alert, 'registration') === event.ship,
-    describe: alert => `舰只 ${String(alertData(alert, 'registration') ?? '')} 已到达`,
+    matches: (event, alert) => {
+      if (event.type !== 'FLIGHT_ENDED') {
+        return false;
+      }
+      if (event.ship !== undefined && alertData(alert, 'registration') !== event.ship) {
+        return false;
+      }
+      return event.planet === undefined || alertDestinationNaturalId(alert) === event.planet;
+    },
+    describe: alert => {
+      const registration = String(alertData(alert, 'registration') ?? '');
+      const destination = alertDestinationNaturalId(alert);
+      return destination
+        ? `舰只 ${registration} 已到达 ${destination}`
+        : `舰只 ${registration} 已到达`;
+    },
   },
   SUPPLIES_LOW: {
     alertTypes: ['WORKFORCE_LOW_SUPPLIES', 'WORKFORCE_OUT_OF_SUPPLIES'],
