@@ -17,6 +17,17 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '21.08.2026 Add automation triggers',
+    userData => {
+      if (!userData.settings.triggers) {
+        userData.settings.triggers = { autoEnabled: false };
+      }
+      if (!userData.triggers) {
+        userData.triggers = [];
+      }
+    },
+  ],
+  [
     '20.08.2026 Add nx auto-buy settings',
     userData => {
       if (!userData.settings.nx) {

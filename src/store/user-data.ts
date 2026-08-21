@@ -60,6 +60,9 @@ export const initialUserData = deepFreeze({
     refuel: {
       enabled: false,
     },
+    triggers: {
+      autoEnabled: false,
+    },
     nx: {
       enabled: false,
       targets: {} as Record<string, { sf: number; ff: number }>,
@@ -97,6 +100,7 @@ export const initialUserData = deepFreeze({
   fullEquityMode: true,
   notes: [] as UserData.Note[],
   actionPackages: [] as UserData.ActionPackageData[],
+  triggers: [] as UserData.TriggerData[],
   basePlans: [] as UserData.BasePlan[],
   systemMessages: [] as UserData.SystemMessages[],
   todo: [] as UserData.TaskList[],
