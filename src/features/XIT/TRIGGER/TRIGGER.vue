@@ -5,7 +5,7 @@ import Commands from '@src/components/forms/Commands.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { showConfirmationOverlay, showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import removeArrayElement from '@src/utils/remove-array-element';
-import { objectId } from '@src/utils/object-id';
+import { createId } from '@src/store/create-id';
 import { userData } from '@src/store/user-data';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
@@ -17,6 +17,10 @@ const eventLabels: Record<UserData.TriggerEventType, string> = {
   BUILDING_CONDITION: '建筑状况',
   INTERVAL: '定时',
 };
+
+// Notification 是浏览器全局，Vue 模板无法直接访问 globalThis；
+// 通过 computed 暴露，避免模板读取 undefined 导致渲染抛错。
+const notificationPermission = computed(() => Notification?.permission ?? 'default');
 
 function describeEvent(event: UserData.TriggerEventData) {
   switch (event.type) {
@@ -39,7 +43,7 @@ function formatTime(timestamp: number | undefined) {
 
 function onAddClick(e: Event) {
   const trigger: UserData.TriggerData = {
-    id: objectId(),
+    id: createId(),
     name: '',
     enabled: true,
     event: { type: 'INTERVAL' },
@@ -88,11 +92,11 @@ async function onRequestNotificationClick() {
     </p>
     <p :class="$style.notification">
       桌面通知（CONFIRM 模式触发时提醒）：
-      <span v-if="Notification.permission === 'granted'" :class="$style.ok">已授权</span>
+      <span v-if="notificationPermission === 'granted'" :class="$style.ok">已授权</span>
       <span v-else>
-        {{ Notification.permission === 'denied' ? '已被浏览器拒绝' : '未授权' }}
+        {{ notificationPermission === 'denied' ? '已被浏览器拒绝' : '未授权' }}
         <PrunButton
-          v-if="Notification.permission === 'default'"
+          v-if="notificationPermission === 'default'"
           dark
           inline
           @click="onRequestNotificationClick">

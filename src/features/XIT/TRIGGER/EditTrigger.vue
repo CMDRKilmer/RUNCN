@@ -8,6 +8,7 @@ import NumberInput from '@src/components/forms/NumberInput.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { userData } from '@src/store/user-data';
 
 const { add, trigger, onSave } = defineProps<{
@@ -30,6 +31,19 @@ const packages = computed(() => userData.actionPackages.map(x => x.global.name))
 const bases = computed(() =>
   (sitesStore.all.value ?? []).map(x => getEntityNaturalIdFromAddress(x.address)!),
 );
+const shipOptions = computed(() => {
+  const ships = [...(shipsStore.all.value ?? [])].sort((a, b) =>
+    a.registration.localeCompare(b.registration),
+  );
+  const list: { label: string; value: string }[] = [{ label: '任意飞船', value: '' }];
+  for (const ship of ships) {
+    list.push({
+      label: ship.name ? `${ship.registration}（${ship.name}）` : ship.registration,
+      value: ship.registration,
+    });
+  }
+  return list;
+});
 
 const name = ref(trigger.name);
 const nameError = ref(false);
@@ -122,7 +136,7 @@ function onSaveClick() {
         v-if="eventType === 'FLIGHT_ENDED'"
         label="飞船"
         tooltip="留空表示任意飞船到港均触发。">
-        <TextInput v-model="ship" />
+        <SelectInput v-model="ship" :options="shipOptions" />
       </Active>
       <Active
         v-if="eventType === 'SUPPLIES_LOW' || eventType === 'PRODUCTION_FINISHED'"
