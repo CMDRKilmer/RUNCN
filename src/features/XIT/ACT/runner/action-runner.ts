@@ -198,7 +198,7 @@ export class ActionRunner {
 
   private async preloadPriceData(steps: ActionStep[]) {
     const cxTickers = steps
-      .filter(s => s.type === 'CXPO_BUY')
+      .filter(s => s.type === 'CXPO_BUY' || s.type === 'CXPO_SELL')
       .map(s => {
         const data = s as ActionStep & { ticker: string; exchange: string };
         return {
@@ -241,7 +241,7 @@ export class ActionRunner {
   private async preOpenTiles(steps: ActionStep[]) {
     const commands = new Set<string>();
     for (const step of steps) {
-      if (step.type === 'CXPO_BUY') {
+      if (step.type === 'CXPO_BUY' || step.type === 'CXPO_SELL') {
         const data = step as ActionStep & { ticker: string; exchange: string };
         commands.add(`CXPO ${data.ticker}.${data.exchange}`);
       }

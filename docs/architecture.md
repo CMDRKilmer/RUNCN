@@ -175,3 +175,5 @@ Two structural rules for generated packages:
 
 - `OPEN SFC` resolves its ship by reading the `dest` (serialized ship store) of the MTRA named in `shipSourceAction` — it reads action **data**, not execution results, so it works even if that MTRA no-opped. Every package that flies must keep one MTRA with `dest` = the ship's cargo store.
 - Match the FLEET 派遣包 shape: one `Manual` group per base (`name` = planet name, `planet` = naturalId, `materials` = that base's bill), a merged `购买 <CX>` group containing only bases with `cxBuy` on (CX Buy action references it), and a merged `装载 <ship>` group for the warehouse→ship MTRA.
+
+`ActionStepExecuteContext` has **no** `globalOptions` — generateSteps-time global flags (like `skipMissingMaterials`) must be baked into the step data at emit time (`CXPO_BUY`/`CXPO_SELL` carry a `skipMissing` field).

@@ -96,6 +96,10 @@ tile.anchor.parentElement as HTMLDivElement
 tile.anchor.parentElement!
 ```
 
+### Array Access with Truthiness Checks
+
+`arr[i]` is typed non-`undefined` (no `noUncheckedIndexedAccess`), so `if (arr[i])` fails `strict-boolean-expressions`. Use `.at(i)` (returns `T | undefined`) for arrays, and `children.item(i)` (returns `Element | null`) for DOM collections.
+
 ### Nullish Checks
 
 Don't use `||` with numbers — use explicit checks.

@@ -77,6 +77,14 @@ export const fixed02 = numberFormat({
   maximumFractionDigits: 2,
 });
 
+// 无千分位分组的 fixed02：游戏输入框（如 CXPO 价格框）解析不了带分组的
+// "6,400" / "6.400"，写表单时必须用无分组版本；仍保留本地化小数分隔符。
+export const fixed02ng = numberFormat({
+  useGrouping: false,
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+});
+
 export const fixed1 = numberFormat({
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,

@@ -8,6 +8,30 @@ export function isFiniteOrder(
   return order.amount !== null;
 }
 
+// 交易所挂单价位步长（CXOS 压价同款）：按价格档位取下一档的步进。
+export function getPriceStep(price: number) {
+  if (price >= 10000) return 100;
+  if (price >= 1000) return 10;
+  return 1;
+}
+
+// 挂单限价：压过（排除自己后）第 rank 名卖价一档，使新订单成为卖价第 rank 名。
+// 无卖单可参考时返回 undefined；rank 超出盘口深度时钳到最深一档。
+export function getSellLimitPrice(
+  asks: PrunApi.CXBrokerOrder[],
+  rank: number,
+  ownTraderId?: string | null,
+) {
+  const others = asks.filter(x => x.trader.id !== ownTraderId);
+  const index = Math.min(Math.max(rank, 1) - 1, others.length - 1);
+  if (index < 0) {
+    return undefined;
+  }
+  const base = others[index].limit.amount;
+  const target = base - getPriceStep(base);
+  return target > 0 ? target : base;
+}
+
 // 如果任一生产线有循环订单，则视所有生产线都有循环订单。
 const hasRecurringOrders = computed(() => {
   if (userDataStore.subscriptionLevel !== 'PRO') {
