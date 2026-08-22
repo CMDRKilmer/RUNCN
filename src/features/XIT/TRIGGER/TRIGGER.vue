@@ -52,7 +52,7 @@ function onAddClick(e: Event) {
     enabled: true,
     event: { type: 'INTERVAL' },
     packageName: userData.actionPackages[0]?.global.name ?? '',
-    mode: 'CONFIRM',
+    mode: 'AUTO',
     cooldownMin: 60,
     createdAt: Date.now(),
   };

@@ -7,6 +7,8 @@ import TextInput from '@src/components/forms/TextInput.vue';
 import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
 import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
 import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
+import ChainView from '@src/features/XIT/FLEET/ChainView.vue';
+import type { ChainPlannerBase } from '@src/features/XIT/FLEET/chain-planner';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
@@ -62,7 +64,7 @@ const tile = useTile();
 const panesEl = ref<HTMLElement | null>(null);
 
 // Mode
-type ViewMode = 'plan' | 'inventory';
+type ViewMode = 'plan' | 'inventory' | 'chain';
 const viewMode = useTileState<ViewMode>('viewMode', 'plan');
 
 // Plan mode state
@@ -216,6 +218,17 @@ const rows = computed(() =>
   (bases.value ?? [])
     .map(base => ({ base, config: baseConfigs.value[base.naturalId] }))
     .filter(x => x.config !== undefined),
+);
+
+// 产业链环线模式的基地输入（天数等配置沿用规划模式的 baseConfigs）。
+const chainBases = computed<ChainPlannerBase[]>(() =>
+  rows.value.map(({ base, config }) => ({
+    siteId: base.siteId,
+    naturalId: base.naturalId,
+    planetName: base.planetName,
+    site: base.site,
+    config,
+  })),
 );
 
 // Filtered and sorted rows
@@ -812,6 +825,12 @@ async function importDispatchConfig() {
         @update:model-value="viewMode = 'inventory'">
         库存总览
       </RadioItem>
+      <RadioItem
+        :model-value="viewMode === 'chain'"
+        horizontal
+        @update:model-value="viewMode = 'chain'">
+        产业链环线
+      </RadioItem>
       <div :class="$style.separator" />
       <template v-if="viewMode === 'plan'">
         <RadioItem
@@ -860,6 +879,9 @@ async function importDispatchConfig() {
 
     <!-- Inventory mode -->
     <InventoryView v-if="viewMode === 'inventory'" />
+
+    <!-- Chain loop mode -->
+    <ChainView v-else-if="viewMode === 'chain'" :ships="filteredCxShips" :bases="chainBases" />
 
     <!-- Plan mode -->
     <template v-else>

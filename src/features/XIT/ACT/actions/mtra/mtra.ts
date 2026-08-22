@@ -54,6 +54,12 @@ act.addAction<Config>({
     const isSameLocation = atSameLocation(origin, dest);
     assert(isSameLocation, '出发点和目的地不在同一位置');
 
+    if (Object.keys(materials).length === 0) {
+      // 空组无货可移：生成的操作包中该侧可能没有物资（如无采购账单的装船），
+      // 视为完成而不是失败，保证后续动作（如 OPEN SFC）继续执行。
+      return;
+    }
+
     emitStep(
       MTRA_BATCH({
         from: origin.id,

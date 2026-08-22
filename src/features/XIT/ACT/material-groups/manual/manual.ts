@@ -18,8 +18,9 @@ act.addMaterialGroup({
   editComponent: Edit,
   generateMaterialBill: async ({ data, log }) => {
     if (!data.materials || Object.keys(data.materials).length == 0) {
-      log.error('缺少材料。');
-      return undefined;
+      // 空组是合法状态（生成的操作包中本侧无货可移），返回空账单而非失败。
+      log.warning('材料组为空。');
+      return {};
     }
     return structuredClone(deepToRaw(data.materials));
   },

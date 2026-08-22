@@ -16,6 +16,8 @@ Before creating new features, prioritize searching for existing reusable modules
 
 Refined PrUn (rprun) is a browser extension for Prosperous Universe (PrUn) that enhances the game interface.
 
+Sandbox `node_modules` is not persisted: run `pnpm install --frozen-lockfile` before `pnpm run compile` / `pnpm run lint`.
+
 ## THE MAIN FLOW
 
 Create the following to-do list immediately.
