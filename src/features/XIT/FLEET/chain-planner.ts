@@ -7,7 +7,7 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { createId } from '@src/store/create-id';
 import {
-  computeResupplyBill,
+  combinedBaseBill,
   type DispatchBaseConfig,
   type DispatchShip,
 } from '@src/features/XIT/FLEET/utils';
@@ -45,6 +45,8 @@ export interface ChainStopPlan {
   naturalId: string;
   planetName: string;
   days: number;
+  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
+  cxBuy: boolean;
   // 卸货（船→基地）：CX 采购的非链物资。
   unloadCx: Record<string, number>;
   // 卸货（船→基地）：上游基地输送来的链上物资。ticker → { 数量, 来源星球名 }。
@@ -53,8 +55,6 @@ export interface ChainStopPlan {
   load: Map<string, { amount: number; to: string }>;
   // 提取被舱容缩减过。
   clipped: boolean;
-  // 链上缺口：上游库存不足，下游需求无法满足的部分。
-  deficits: Map<string, number>;
 }
 
 export interface ChainPlan {
@@ -63,8 +63,10 @@ export interface ChainPlan {
   stops: ChainStopPlan[];
   // 归航时在出发地卸下的最终产物。
   finalUnload: Record<string, number>;
-  // 出发地在 CX 采购的总账单（所有站的非链物资合并）。
+  // 出发地装船总账单（所有站账单合并，含未开启「购买」的基地）。
   cxBill: Record<string, number>;
+  // 出发地在 CX 实际下单的账单（仅开启「购买」的基地）。
+  purchaseBill: Record<string, number>;
   warnings: string[];
   peakLoad: { weight: number; volume: number };
   freeCapacity: { weight: number; volume: number };
@@ -154,6 +156,7 @@ export function planChainRoute(input: {
     stops: [],
     finalUnload: {},
     cxBill: {},
+    purchaseBill: {},
     warnings,
     peakLoad: { weight: 0, volume: 0 },
     freeCapacity: {
@@ -241,9 +244,9 @@ export function planChainRoute(input: {
   };
 
   // 按 ticker 平衡：多下游共享多上游时，按需求比例分配总可提取量，
-  // 再按上游库存比例分摊到各条边。
+  // 再按上游库存比例分摊到各条边。上游不足的部分不在此处理，
+  // 由下方账单扣减后回落到 CX 采购。
   const flows: ChainFlow[] = [];
-  const deficits = new Map<string, number>(); // `${to}|${ticker}` → 缺口
   for (const ticker of new Set(edges.map(x => x.ticker))) {
     const tickerEdges = edges.filter(x => x.ticker === ticker);
     const upstreams = [...new Set(tickerEdges.map(x => x.from))];
@@ -255,19 +258,15 @@ export function planChainRoute(input: {
     }
     const avails = new Map(upstreams.map(x => [x, avail(x, ticker)] as const));
     const totalAvail = [...avails.values()].reduce((a, b) => a + b, 0);
+    if (totalAvail <= 0) {
+      continue;
+    }
     for (const to of downstreams) {
       const needTo = needs.get(to)!;
       if (needTo <= 0) {
         continue;
       }
-      if (totalAvail <= 0) {
-        deficits.set(`${to}|${ticker}`, needTo);
-        continue;
-      }
       const share = Math.min(needTo, (totalAvail * needTo) / totalNeed);
-      if (share < needTo) {
-        deficits.set(`${to}|${ticker}`, Math.ceil(needTo - share));
-      }
       for (const from of upstreams) {
         const amount = Math.floor((avails.get(from)! * share) / totalAvail);
         if (amount > 0) {
@@ -277,31 +276,31 @@ export function planChainRoute(input: {
     }
   }
 
-  // 每站非链物资的 CX 账单（剔除链上 ticker，避免重复补给）。
-  const chainTickersByStop = new Map<string, Set<string>>();
+  // 每站 CX 账单：与基地规划派遣一致的完整账单（补给+维修），
+  // 再减去链上「确定输送」的量——上游不足的缺口自动回落到 CX 采购，
+  // 避免整 ticker 剔除导致下游缺料。
+  const incoming = new Map<string, Map<string, number>>(); // naturalId → ticker → 输送量
   for (const flow of flows) {
-    const set = chainTickersByStop.get(flow.to) ?? new Set<string>();
-    set.add(flow.ticker);
-    chainTickersByStop.set(flow.to, set);
+    const byTicker = incoming.get(flow.to) ?? new Map<string, number>();
+    byTicker.set(flow.ticker, (byTicker.get(flow.ticker) ?? 0) + flow.amount);
+    incoming.set(flow.to, byTicker);
   }
   const cxResupply = new Map<string, Record<string, number>>();
   for (const id of order) {
     const base = byNaturalId.get(id)!;
-    if (!base.config.resupply) {
-      cxResupply.set(id, {});
-      continue;
+    const bill = combinedBaseBill(id, base.config, base.site) ?? {};
+    const inc = incoming.get(id);
+    if (inc) {
+      for (const [ticker, amount] of inc) {
+        const remaining = (bill[ticker] ?? 0) - amount;
+        if (remaining > 0) {
+          bill[ticker] = remaining;
+        } else {
+          delete bill[ticker];
+        }
+      }
     }
-    const bill = computeResupplyBill(
-      {
-        useBaseInv: true,
-        consumablesOnly: base.config.consumablesOnly,
-        includeConsumables: base.config.includeConsumables,
-        exclusions: chainTickersByStop.get(id),
-      },
-      id,
-      targetDays.get(id),
-    );
-    cxResupply.set(id, bill ?? {});
+    cxResupply.set(id, bill);
   }
 
   // 最终产物：产出且无任何下游边的 ticker → 全部提取回出发地
@@ -395,11 +394,11 @@ export function planChainRoute(input: {
       naturalId: id,
       planetName: base.planetName || id,
       days: targetDays.get(id)!,
+      cxBuy: base.config.cxBuy,
       unloadCx: {},
       unloadChain: new Map(),
       load: new Map(),
       clipped: false,
-      deficits: new Map(),
     };
 
     // 到站卸货：目的地为本站的舱内货物。
@@ -434,14 +433,6 @@ export function planChainRoute(input: {
         } else {
           stop.unloadChain.set(item.ticker, { amount: item.amount, from: fromName });
         }
-      }
-    }
-
-    // 链缺口（本站下游需求未被上游满足的部分）。
-    for (const [key, deficit] of deficits) {
-      const [to, ticker] = key.split('|');
-      if (to === id && deficit > 0) {
-        stop.deficits.set(ticker, deficit);
       }
     }
 
@@ -493,11 +484,14 @@ export function planChainRoute(input: {
     }
   }
 
-  // 汇总 CX 总账单。
-  for (const bill of cxResupply.values()) {
-    for (const [ticker, amount] of Object.entries(bill)) {
+  // 汇总装船总账单（全部站）与 CX 采购账单（仅开启「购买」的站）。
+  for (const stop of stops) {
+    for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
       if (amount > 0) {
         plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
+        if (stop.cxBuy) {
+          plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + amount;
+        }
       }
     }
   }
@@ -523,7 +517,8 @@ export interface ChainActionPlan {
 
 /**
  * 把环线计划转成 ACT 操作包与 TRIGGER 触发器数据：
- * - 主包：加油 + CX 采购非链物资 + 装船 + 飞往第一站；
+ * - 主包：加油 + 按基地材料组 + CX 采购（仅开启「购买」的基地）+ 装船 +
+ *   飞往第一站，结构与基地规划派遣包一致；
  * - 每站包：卸货（船→基地）+ 提取（基地→船）+ 飞往下一站（末站飞回出发地）；
  * - 归航包：最终产物卸至出发地仓库。
  * 卸货/提取 MTRA 始终成对存在（即使某侧为空），保证 OPEN SFC 能从「提取」
@@ -543,9 +538,19 @@ export function buildChainActionPackages(
   const shipCargo = serializeStorage(ship.cargoStore);
 
   const actions: UserData.ActionData[] = [];
-  const groups: UserData.MaterialGroupData[] = [
-    { type: 'Manual', name: loadGroupName, materials: plan.cxBill },
-  ];
+  const groups: UserData.MaterialGroupData[] = [];
+
+  // 每个有账单的基地一个材料组（与基地规划派遣包一致，便于在 ACT 中查看调整）。
+  for (const stop of plan.stops) {
+    if (Object.keys(stop.unloadCx).length > 0) {
+      groups.push({
+        type: 'Manual',
+        name: stop.planetName || stop.naturalId,
+        planet: stop.naturalId,
+        materials: stop.unloadCx,
+      });
+    }
+  }
 
   if (options.refuel) {
     actions.push({
@@ -556,9 +561,10 @@ export function buildChainActionPackages(
     });
   }
 
-  if (Object.keys(plan.cxBill).length > 0) {
+  // 采购：仅合并开启「购买」的基地账单；未开启的基地账单仍会装船（来自仓库库存）。
+  if (Object.keys(plan.purchaseBill).length > 0) {
     const buyGroupName = `购买 ${ship.exchangeCode}`;
-    groups.push({ type: 'Manual', name: buyGroupName, materials: plan.cxBill });
+    groups.push({ type: 'Manual', name: buyGroupName, materials: plan.purchaseBill });
     actions.push({
       type: 'CX Buy',
       name: buyGroupName,
@@ -567,6 +573,8 @@ export function buildChainActionPackages(
       useCXInv: true,
     });
   }
+
+  groups.push({ type: 'Manual', name: loadGroupName, materials: plan.cxBill });
 
   actions.push({
     type: 'MTRA',

@@ -130,10 +130,6 @@ function formatLoad(stop: ChainStopPlan) {
     .join('、');
 }
 
-function formatDeficits(stop: ChainStopPlan) {
-  return [...stop.deficits.entries()].map(([ticker, amount]) => `${ticker} 缺${amount}`).join('、');
-}
-
 const executeTooltip = computed(() => {
   if (!selectedShip.value) {
     return '请先选择执行环线的船只';
@@ -254,7 +250,6 @@ function execute() {
               <th>卸货（CX 采购）</th>
               <th>卸货（上游输送）</th>
               <th>提取（产物去向）</th>
-              <th>缺口</th>
               <th :class="$style.narrowCol">限载</th>
             </tr>
           </thead>
@@ -266,9 +261,6 @@ function execute() {
               <td :class="$style.matCell">{{ formatMaterials(stop.unloadCx) || '—' }}</td>
               <td :class="$style.matCell">{{ formatUnloadChain(stop) || '—' }}</td>
               <td :class="$style.matCell">{{ formatLoad(stop) || '—' }}</td>
-              <td :class="[$style.matCell, stop.deficits.size > 0 ? $style.deficit : '']">
-                {{ formatDeficits(stop) || '—' }}
-              </td>
               <td :class="$style.narrowCol">{{ stop.clipped ? '缩减' : '—' }}</td>
             </tr>
           </tbody>
@@ -277,6 +269,10 @@ function execute() {
         <div :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">CX 采购（{{ plan.originNaturalId }}）：</span>
+            <span>{{ formatMaterials(plan.purchaseBill) || '无' }}</span>
+          </div>
+          <div :class="$style.summaryRow">
+            <span :class="$style.summaryLabel">装船总账（含仓库库存装船）：</span>
             <span>{{ formatMaterials(plan.cxBill) || '无' }}</span>
           </div>
           <div :class="$style.summaryRow">
@@ -398,10 +394,6 @@ function execute() {
 
 .matCell {
   font-size: 11px;
-}
-
-.deficit {
-  color: #e8a33d;
 }
 
 .summary {

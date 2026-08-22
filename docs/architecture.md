@@ -166,3 +166,12 @@ Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known bef
 ### ACT action/step registration recap
 
 New action types must be added to the `ActionType` union in `src/store/user-data.types.d.ts` (plus any action-specific fields on `ActionData`). Steps register via `act.addActionStep` (execution logic), actions via `act.addAction` (Edit.vue must `defineExpose({ validate, save })`; `EditAction.vue` clears all keys of the action object before `save()` repopulates it). Import the action module in `ACT.ts`.
+
+### Generating packages programmatically
+
+Programmatically generated packages (FLEET 派遣/环线, BURN ACT) may legitimately contain **empty** material groups — a stop with nothing to buy/unload/extract. Contract: a `Manual` group with empty `materials` generates an empty bill (warning, not error), `MTRA` treats an empty bill as a no-op, and `CX Buy` iterates zero materials naturally. Never let an empty group abort the package — a failed action stops the whole package (`assert` throws in step generation), which would strand later actions like `OPEN SFC`.
+
+Two structural rules for generated packages:
+
+- `OPEN SFC` resolves its ship by reading the `dest` (serialized ship store) of the MTRA named in `shipSourceAction` — it reads action **data**, not execution results, so it works even if that MTRA no-opped. Every package that flies must keep one MTRA with `dest` = the ship's cargo store.
+- Match the FLEET 派遣包 shape: one `Manual` group per base (`name` = planet name, `planet` = naturalId, `materials` = that base's bill), a merged `购买 <CX>` group containing only bases with `cxBuy` on (CX Buy action references it), and a merged `装载 <ship>` group for the warehouse→ship MTRA.
