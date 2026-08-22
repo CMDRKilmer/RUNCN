@@ -9,7 +9,7 @@ const REACTOR_USAGE = 1;
 const USE_JUMP_POINT = false;
 
 // 预留接口：是否自动勾选“抵达后卸货”。默认勾选。
-const UNLOAD_AFTER_ARRIVAL = true;
+const UNLOAD_AFTER_ARRIVAL = false;
 
 // 最大重试次数
 const MAX_RETRIES = 3;
