@@ -24,19 +24,33 @@ const { ships, bases } = defineProps<{
 
 const chainShipId = useTileState<string | undefined>('chainShipId', undefined);
 const chainRefuel = useTileState<boolean>('chainRefuel', true);
-// 玩家自选参与环线的基地；未设置时默认全选。
+// 环线基地范围：主界面（基地规划）分配给该船的基地；在此范围内可勾选/取消。
 const chainBaseIds = useTileState<string[] | undefined>('chainBaseIds', undefined);
+
+// 换船时重置勾选（新船默认全选其分配基地）。
+watch(chainShipId, () => {
+  chainBaseIds.value = undefined;
+});
+
+// 主界面分配给所选船的基地。
+const assignedBases = computed(() => {
+  const shipId = chainShipId.value;
+  if (shipId === undefined) {
+    return [];
+  }
+  return bases.filter(x => x.config.ship === shipId);
+});
 
 const selectedBaseIds = computed(() => {
   if (chainBaseIds.value === undefined) {
-    return bases.map(x => x.naturalId);
+    return assignedBases.value.map(x => x.naturalId);
   }
-  const present = new Set(bases.map(x => x.naturalId));
+  const present = new Set(assignedBases.value.map(x => x.naturalId));
   return chainBaseIds.value.filter(id => present.has(id));
 });
 
 const selectedBases = computed(() =>
-  bases.filter(x => selectedBaseIds.value.includes(x.naturalId)),
+  assignedBases.value.filter(x => selectedBaseIds.value.includes(x.naturalId)),
 );
 
 function setBaseSelected(id: string, selected: boolean) {
@@ -49,7 +63,7 @@ function setBaseSelected(id: string, selected: boolean) {
 }
 
 function selectAllBases() {
-  chainBaseIds.value = bases.map(x => x.naturalId);
+  chainBaseIds.value = assignedBases.value.map(x => x.naturalId);
 }
 
 function clearAllBases() {
@@ -124,6 +138,9 @@ const executeTooltip = computed(() => {
   if (!selectedShip.value) {
     return '请先选择执行环线的船只';
   }
+  if (assignedBases.value.length === 0) {
+    return '该船在基地规划中未分配基地';
+  }
   if (selectedBases.value.length === 0) {
     return '请勾选参与环线的基地';
   }
@@ -188,11 +205,13 @@ function execute() {
       <PrunButton v-else primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
     </div>
 
-    <!-- Base selection -->
-    <div v-if="bases.length > 0" :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
+    <!-- Base selection: 仅主界面分配给所选船的基地 -->
+    <div
+      v-if="selectedShip && assignedBases.length > 0"
+      :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
       <span :class="$style.baseBarLabel">基地</span>
       <RadioItem
-        v-for="base in bases"
+        v-for="base in assignedBases"
         :key="base.naturalId"
         :model-value="selectedBaseIds.includes(base.naturalId)"
         horizontal
@@ -206,7 +225,10 @@ function execute() {
 
     <div v-if="!selectedShip" :class="$style.hint">
       选择一艘停靠 CX
-      的船只，勾选参与环线的基地，将根据基地产物推断产业链上下游，自动规划环线补给航线。
+      的船只，将自动载入基地规划中分配给它的基地，并根据基地产物推断产业链上下游，自动规划环线补给航线。
+    </div>
+    <div v-else-if="assignedBases.length === 0" :class="$style.hint">
+      该船在基地规划中未分配基地，请先在「基地规划」中把基地分配给这艘船。
     </div>
     <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
     <LoadingSpinner v-else-if="loading" />
