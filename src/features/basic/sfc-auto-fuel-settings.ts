@@ -11,6 +11,10 @@ const USE_JUMP_POINT = false;
 // 预留接口：是否自动勾选“抵达后卸货”。默认勾选。
 const UNLOAD_AFTER_ARRIVAL = false;
 
+// 预留接口：是否在燃料参数设置完成后自动点击“开始”按钮。默认关闭。
+// 点击“开始”会提交飞行（服务端通信），按 ToS 需玩家显式操作，仅当显式开启时生效。
+const CLICK_START = false;
+
 // 最大重试次数
 const MAX_RETRIES = 3;
 // 重试间隔（毫秒）
@@ -73,6 +77,7 @@ async function configureSlider(tile: PrunTile, slider: Element) {
     if (success) {
       console.log(`[sfc-auto-fuel-settings] set ${label} to ${value}`);
       labelMap.set(label, 'done');
+      await maybeClickStart(tile);
     } else {
       console.warn(`[sfc-auto-fuel-settings] failed to set ${label} to ${value}`);
       const currentRetries = typeof state === 'number' ? state : 0;
@@ -187,6 +192,43 @@ async function selectRadioItem(radio: Element, label: string, enabled: boolean) 
   }
   console.log(`[sfc-auto-fuel-settings] select ${label}`);
   await clickElement(radio as HTMLElement);
+}
+
+// 记录已点击“开始”的磁贴，避免重复点击。
+const startClicked = new WeakSet<Element>();
+
+// 等 SFC 指令表单的“开始”按钮渲染出来。
+async function findStartButton(tile: PrunTile) {
+  const command = await $(tile.anchor, C.FormComponent.containerCommand);
+  return $(command, C.Button.success);
+}
+
+// 开启 CLICK_START 时，等“开始”按钮出现后再判断是否点击。
+async function maybeClickStart(tile: PrunTile) {
+  if (!CLICK_START) {
+    return;
+  }
+  if (startClicked.has(tile.anchor)) {
+    return;
+  }
+  const labelMap = configuredLabels.get(tile.anchor);
+  if (!labelMap) {
+    return;
+  }
+  const targets = ['燃料消耗', '反应堆使用量'];
+  if (!targets.every(x => labelMap.get(x) === 'done')) {
+    // 星系内飞行没有“反应堆使用量”滑块，永不满足，因此不会自动点击。
+    return;
+  }
+  // 等“开始”按钮渲染出来后再判断是否点击。
+  const button = await findStartButton(tile);
+  if (button.classList.contains(C.Button.disabled)) {
+    console.warn('[sfc-auto-fuel-settings] 开始按钮尚未就绪（可能未设置目的地），跳过');
+    return;
+  }
+  console.log('[sfc-auto-fuel-settings] click 开始');
+  startClicked.add(tile.anchor);
+  await clickElement(button as HTMLElement);
 }
 
 // 等目的地行程统计(MissionPlan)加载出来后再开始配置,

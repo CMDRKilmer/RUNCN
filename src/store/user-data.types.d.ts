@@ -77,7 +77,7 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'BRA Repair' | 'CX Sell';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'DEPART' | 'BRA Repair' | 'CX Sell';
 
   interface ActionData {
     type: ActionType;
@@ -100,6 +100,8 @@ declare namespace UserData {
 
     destination?: string;
     shipSourceAction?: string;
+    // DEPART 专用：要自动发船的飞船注册号。
+    registration?: string;
 
     // BRA Repair 专用。
     base?: string;
@@ -114,7 +116,7 @@ declare namespace UserData {
     rank?: number;
   }
 
-  type TriggerMode = 'CONFIRM' | 'AUTO';
+  type TriggerMode = 'CONFIRM' | 'AUTO' | 'MANUAL';
 
   type TriggerEventType =
     'FLIGHT_ENDED' | 'SUPPLIES_LOW' | 'PRODUCTION_FINISHED' | 'BUILDING_CONDITION' | 'INTERVAL';
@@ -244,4 +246,10 @@ declare namespace UserData {
   // 玩家在 SFC 目的地输入框键入别名时，会被替换为该基地的行星 naturalId，
   // 从而通过 PrUn 原生搜索定位该基地。
   type BaseAliases = Record<string, string>;
+
+  // 基地产物列表：siteId → ticker 数组。
+  // 用于 XIT FLEET 产业链环线的「最终产物提取」读取：在 BSN 面板中手动指定
+  // 哪些 ticker 算作本基地的「最终产物」（不参与链上输送，提取后运回出发地）。
+  // 未设置时，chain-planner 回落到 burn 推断（output > 0 且无下游边）。
+  type BaseProducts = Record<string, string[]>;
 }

@@ -185,6 +185,21 @@ target.click();
 await clickElement(target);
 ```
 
+### Wait for the target to appear before clicking
+
+Buttons/inputs that only render after async data loads (e.g. the SFC 指令表单「开始」button appears once a destination resolves) must be awaited via the `$` gate before judging their state — a sync `_$` lookup silently returns `undefined`/stale state if the node hasn't rendered yet.
+
+```ts
+// Blocks until the button actually renders, then judge.
+const command = await $(tile.anchor, C.FormComponent.containerCommand);
+const button = await $(command, C.Button.success);
+if (button.classList.contains(C.Button.disabled)) {
+  return; // not ready (e.g. no destination set)
+}
+```
+
+Actions that trigger server communication (clicking SFC「开始」launches the flight) must stay behind a reserved interface defaulting to OFF — the player has to opt in (ToS).
+
 ### Why this matters
 
 PrUn's modal dialogs (template selection, contract conditions) read their state from PrUn's React state tree at the moment their `应用` / `保存` button is clicked. If `onSuggestionSelected` never fired, the value visible in `input.value` is just a DOM mirror — the React state stays empty, and the modal-close drops the value. The `_valueTracker` reset + native setter + clickElement chain we tried first did populate `input.value` but never reached React state.

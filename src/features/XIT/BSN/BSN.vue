@@ -1,11 +1,14 @@
 <script setup lang="ts">
 // 基地别名管理面板：列出玩家所有基地，
 // 已设置别名的可在此修改或清除，未设置的可直接填写新别名。
+// 同步支持为每基地配置产物 ticker 列表，供 XIT FLEET 产业链环线读取。
 import { computed, reactive } from 'vue';
 import { userData } from '@src/store/user-data';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { setBaseAlias, clearBaseAlias } from '@src/core/base-aliases';
+import { setBaseProducts, clearBaseProducts, formatBaseProducts } from '@src/core/base-products';
+import { getPlanetBurn } from '@src/core/burn';
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
@@ -15,6 +18,7 @@ interface BaseRow {
   naturalId: string;
   planetName: string;
   alias: string;
+  products: string[];
 }
 
 const baseRows = computed<BaseRow[]>(() => {
@@ -30,6 +34,7 @@ const baseRows = computed<BaseRow[]>(() => {
       naturalId,
       planetName: getEntityNameFromAddress(site.address) ?? naturalId,
       alias: userData.baseAliases[site.siteId] ?? '',
+      products: userData.baseProducts[site.siteId] ?? [],
     });
   }
   // 有别名的基地按别名排序；其余按 naturalId 排在末尾。
@@ -49,17 +54,50 @@ const baseRows = computed<BaseRow[]>(() => {
 });
 
 const aliasedCount = computed(() => baseRows.value.filter(x => x.alias.length > 0).length);
+const productsCount = computed(() => baseRows.value.filter(x => x.products.length > 0).length);
+
+// 产物占位文案：BURN 预读产出 (output > 0) 的 ticker。
+// 仅在产品列表未设置时使用，让玩家看见本基地产什么。
+const burnProductTickers = computed<Map<string, string>>(() => {
+  const map = new Map<string, string>();
+  for (const row of baseRows.value) {
+    const burn = getPlanetBurn(row.siteId);
+    if (!burn) continue;
+    const tickers: string[] = [];
+    for (const [ticker, mat] of Object.entries(burn.burn)) {
+      if (mat.output > 0) tickers.push(ticker);
+    }
+    map.set(row.siteId, tickers.join(','));
+  }
+  return map;
+});
+
+function productsPlaceholder(siteId: string): string {
+  return burnProductTickers.value.get(siteId) ?? '';
+}
 
 // 输入草稿：编辑期间只写本地草稿，不立即写回 userData，
 // 避免每次按键触发 baseRows 重排导致列表跳动、输入框失焦。
 const drafts = reactive<Record<string, string>>({});
+const productDrafts = reactive<Record<string, string>>({});
 
 function draftFor(siteId: string): string {
   return drafts[siteId] ?? userData.baseAliases[siteId] ?? '';
 }
 
+function productDraftFor(siteId: string): string {
+  if (productDrafts[siteId] !== undefined) {
+    return productDrafts[siteId];
+  }
+  return formatBaseProducts(userData.baseProducts[siteId]);
+}
+
 function onAliasInput(siteId: string, value: string) {
   drafts[siteId] = value;
+}
+
+function onProductsInput(siteId: string, value: string) {
+  productDrafts[siteId] = value;
 }
 
 function commitAlias(siteId: string) {
@@ -71,12 +109,34 @@ function commitAlias(siteId: string) {
   delete drafts[siteId];
 }
 
+function commitProducts(siteId: string) {
+  const draft = productDrafts[siteId];
+  if (draft === undefined) {
+    return;
+  }
+  const tickers = draft
+    .split(/[,\s，、]+/)
+    .map(x => x.trim())
+    .filter(x => x.length > 0);
+  setBaseProducts(siteId, tickers);
+  delete productDrafts[siteId];
+}
+
 function onAliasBlur(siteId: string) {
   commitAlias(siteId);
 }
 
+function onProductsBlur(siteId: string) {
+  commitProducts(siteId);
+}
+
 function onAliasEnter(siteId: string, event: KeyboardEvent) {
   commitAlias(siteId);
+  (event.target as HTMLInputElement).blur();
+}
+
+function onProductsEnter(siteId: string, event: KeyboardEvent) {
+  commitProducts(siteId);
   (event.target as HTMLInputElement).blur();
 }
 
@@ -85,18 +145,30 @@ function onAliasEscape(siteId: string, event: KeyboardEvent) {
   (event.target as HTMLInputElement).blur();
 }
 
+function onProductsEscape(siteId: string, event: KeyboardEvent) {
+  delete productDrafts[siteId];
+  (event.target as HTMLInputElement).blur();
+}
+
 function onClear(siteId: string) {
   delete drafts[siteId];
+  delete productDrafts[siteId];
   clearBaseAlias(siteId);
+  clearBaseProducts(siteId);
 }
 </script>
 
 <template>
-  <SectionHeader>基地别名（{{ aliasedCount }} / {{ baseRows.length }}）</SectionHeader>
+  <SectionHeader
+    >基地别名（{{ aliasedCount }} / {{ baseRows.length }}） · 产物（{{
+      productsCount
+    }}）</SectionHeader
+  >
   <table v-if="baseRows.length > 0">
     <thead>
       <tr>
         <th>别名</th>
+        <th>产物</th>
         <th>基地</th>
         <th>星球标识符</th>
         <th />
@@ -117,12 +189,31 @@ function onClear(siteId: string) {
             @keydown.enter.prevent="onAliasEnter(row.siteId, $event)"
             @keydown.esc="onAliasEscape(row.siteId, $event)" />
         </td>
+        <td :class="$style.productsCell">
+          <input
+            :value="productDraftFor(row.siteId)"
+            :class="$style.aliasInput"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            :placeholder="productsPlaceholder(row.siteId)"
+            title="逗号或空格分隔的 ticker 列表；环线提取最终产物时优先读取此处"
+            @input="onProductsInput(row.siteId, ($event.target as HTMLInputElement).value)"
+            @blur="onProductsBlur(row.siteId)"
+            @keydown.enter.prevent="onProductsEnter(row.siteId, $event)"
+            @keydown.esc="onProductsEscape(row.siteId, $event)" />
+        </td>
         <td>{{ row.planetName }}</td>
         <td>
           <PrunLink :command="`BS ${row.naturalId}`">{{ row.naturalId }}</PrunLink>
         </td>
         <td>
-          <PrunButton danger :disabled="!row.alias" @click="onClear(row.siteId)">清除</PrunButton>
+          <PrunButton
+            danger
+            :disabled="!row.alias && !row.products.length"
+            @click="onClear(row.siteId)">
+            清除
+          </PrunButton>
         </td>
       </tr>
     </tbody>
@@ -138,6 +229,11 @@ function onClear(siteId: string) {
 
 .aliasCell {
   width: 140px;
+  padding: 2px;
+}
+
+.productsCell {
+  width: 200px;
   padding: 2px;
 }
 

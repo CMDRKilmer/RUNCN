@@ -17,13 +17,20 @@ import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { fixed0 } from '@src/utils/format';
 
-const { ships, bases } = defineProps<{
+const props = defineProps<{
   ships: DispatchShip[];
   bases: ChainPlannerBase[];
 }>();
 
+const { ships, bases } = props;
+
 const chainShipId = useTileState<string | undefined>('chainShipId', undefined);
-const chainRefuel = useTileState<boolean>('chainRefuel', true);
+// 环线模式下原「加油」按钮被「自动发船」取代：生成包时主包与每站包尾部
+// 追加 DEPART 动作，跳过手动 SFC 确认（链上飞行仅需触发器推动）。
+const chainAutoLaunch = useTileState<boolean>('chainAutoLaunch', true);
+// 环线到港触发器模式：开启 → 生成 AUTO 触发器（到港自动卸货+提取+飞下一站），
+// 关闭 → 生成 CONFIRM 触发器（到港通知确认后执行）。
+const chainAutoTrigger = useTileState<boolean>('chainAutoTrigger', false);
 // 环线基地范围：主界面（基地规划）分配给该船的基地；在此范围内可勾选/取消。
 const chainBaseIds = useTileState<string[] | undefined>('chainBaseIds', undefined);
 
@@ -124,10 +131,49 @@ function formatUnloadChain(stop: ChainStopPlan) {
     .join('、');
 }
 
+// 卸货总明细：CX 采购 + 链上输送（含来源标注）。
+function formatUnloadAt(stop: ChainStopPlan) {
+  const cx = formatMaterials(stop.unloadCx);
+  const chain = formatUnloadChain(stop);
+  if (cx && chain) {
+    return `${cx}、${chain}`;
+  }
+  return cx || chain;
+}
+
+// 本站之后的飞行目的地：下一站，末站回出发地。
+function nextStopName(stops: ChainStopPlan[], i: number): string {
+  return stops[i + 1]?.planetName ?? '出发地';
+}
+
 function formatLoad(stop: ChainStopPlan) {
   return [...stop.load.entries()]
     .map(([ticker, x]) => `${ticker}×${x.amount}(→${x.to})`)
     .join('、');
+}
+
+function formatLoadCell(
+  load: { weight: number; volume: number },
+  capacity: { weight: number; volume: number },
+) {
+  const wPct = capacity.weight > 0 ? Math.round((load.weight / capacity.weight) * 100) : 0;
+  const vPct = capacity.volume > 0 ? Math.round((load.volume / capacity.volume) * 100) : 0;
+  return `${fixed0(load.weight)}t ${wPct}%／${fixed0(load.volume)}m³ ${vPct}%`;
+}
+
+function formatLoadDelta(stop: ChainStopPlan) {
+  const dw = stop.loadOnDeparture.weight - stop.loadOnArrival.weight;
+  const dv = stop.loadOnDeparture.volume - stop.loadOnArrival.volume;
+  const sign = (n: number) => (n > 0 ? `+${fixed0(n)}` : fixed0(n));
+  const arrow = dw > 0 || dv > 0 ? '↑' : dw < 0 || dv < 0 ? '↓' : '·';
+  return `${arrow} ${sign(dw)}t／${sign(dv)}m³`;
+}
+
+function formatPercent(value: number, capacity: number) {
+  if (capacity <= 0) {
+    return '0%';
+  }
+  return `${Math.round((value / capacity) * 100)}%`;
 }
 
 const executeTooltip = computed(() => {
@@ -169,7 +215,10 @@ function execute() {
   if (!ship || !p || p.stops.length === 0) {
     return;
   }
-  const actionPlan = buildChainActionPackages(ship, p, { refuel: chainRefuel.value });
+  const actionPlan = buildChainActionPackages(ship, p, {
+    autoLaunch: chainAutoLaunch.value,
+    triggerMode: chainAutoTrigger.value ? 'AUTO' : 'CONFIRM',
+  });
   if (!actionPlan) {
     return;
   }
@@ -193,7 +242,8 @@ function execute() {
     <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
       <SelectInput v-model="shipSelect" :options="shipOptions" :width="220" />
       <div :class="$style.separator" />
-      <RadioItem v-model="chainRefuel" horizontal>加油</RadioItem>
+      <RadioItem v-model="chainAutoLaunch" horizontal>自动发船</RadioItem>
+      <RadioItem v-model="chainAutoTrigger" horizontal>自动执行</RadioItem>
       <div :class="$style.spacer" />
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
@@ -245,23 +295,65 @@ function execute() {
           <thead>
             <tr>
               <th :class="$style.narrowCol">序</th>
-              <th :class="$style.narrowCol">星球</th>
-              <th :class="$style.narrowCol">天数</th>
-              <th>卸货（CX 采购）</th>
-              <th>卸货（上游输送）</th>
-              <th>提取（产物去向）</th>
-              <th :class="$style.narrowCol">限载</th>
+              <th :class="$style.narrowCol">星球/空间站</th>
+              <th>操作</th>
+              <th>飞行</th>
+              <th :class="$style.narrowCol">载重</th>
             </tr>
           </thead>
           <tbody>
+            <!-- 行 0：出发地 采购 -->
+            <tr>
+              <td :class="$style.narrowCol">0</td>
+              <td :class="$style.narrowCol">
+                <span :class="$style.routeOrigin">{{ plan.originNaturalId }}</span>
+              </td>
+              <td :class="$style.matCell">
+                <span :class="$style.opsLabel">采购</span>
+                [{{ formatMaterials(plan.purchaseBill) || '无' }}]
+              </td>
+              <td :class="$style.matCell">
+                → {{ plan.stops[0]?.planetName ?? plan.originNaturalId }}
+              </td>
+              <td :class="$style.narrowCol">{{
+                formatLoadCell(plan.loadOnDeparture, plan.capacity)
+              }}</td>
+            </tr>
+            <!-- 各站：卸货 + 取货 -->
             <tr v-for="(stop, i) in plan.stops" :key="stop.naturalId">
               <td :class="$style.narrowCol">{{ i + 1 }}</td>
               <td :class="$style.narrowCol">{{ stop.planetName }}</td>
-              <td :class="$style.narrowCol">{{ fixed0(stop.days) }}</td>
-              <td :class="$style.matCell">{{ formatMaterials(stop.unloadCx) || '—' }}</td>
-              <td :class="$style.matCell">{{ formatUnloadChain(stop) || '—' }}</td>
-              <td :class="$style.matCell">{{ formatLoad(stop) || '—' }}</td>
-              <td :class="$style.narrowCol">{{ stop.clipped ? '缩减' : '—' }}</td>
+              <td :class="$style.matCell">
+                <div>
+                  <span :class="$style.opsLabel">卸货</span>
+                  [{{ formatUnloadAt(stop) || '无' }}]
+                </div>
+                <div>
+                  <span :class="$style.opsLabel">取货</span>
+                  [{{ formatLoad(stop) || '无' }}]
+                </div>
+                <span v-if="stop.clipped" :class="$style.opsWarn">（限载缩减）</span>
+              </td>
+              <td :class="$style.matCell"> → {{ nextStopName(plan.stops, i) }} </td>
+              <td :class="$style.narrowCol">
+                <div>{{ formatLoadCell(stop.loadOnDeparture, plan.capacity) }}</div>
+                <div :class="$style.loadSub">{{ formatLoadDelta(stop) }}</div>
+              </td>
+            </tr>
+            <!-- 末行：归航卸货 -->
+            <tr>
+              <td :class="$style.narrowCol">{{ plan.stops.length + 1 }}</td>
+              <td :class="$style.narrowCol">
+                <span :class="$style.routeOrigin">{{ plan.originNaturalId }}</span>
+              </td>
+              <td :class="$style.matCell">
+                <span :class="$style.opsLabel">卸货</span>
+                [{{ formatMaterials(plan.finalUnload) || '无' }}]
+              </td>
+              <td :class="$style.matCell">归航</td>
+              <td :class="$style.narrowCol">{{
+                formatLoadCell({ weight: 0, volume: 0 }, plan.capacity)
+              }}</td>
             </tr>
           </tbody>
         </table>
@@ -282,8 +374,24 @@ function execute() {
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">舱容峰值：</span>
             <span>
-              {{ fixed0(plan.peakLoad.weight) }}t / 剩余 {{ fixed0(plan.freeCapacity.weight) }}t，
-              {{ fixed0(plan.peakLoad.volume) }}m³ / 剩余 {{ fixed0(plan.freeCapacity.volume) }}m³
+              {{ fixed0(plan.peakLoad.weight) }}t / 剩余 {{ fixed0(plan.freeCapacity.weight) }}t（
+              {{ formatPercent(plan.peakLoad.weight, plan.capacity.weight) }} 重量），
+              {{ fixed0(plan.peakLoad.volume) }}m³ / 剩余 {{ fixed0(plan.freeCapacity.volume) }}m³（
+              {{ formatPercent(plan.peakLoad.volume, plan.capacity.volume) }} 体积）
+            </span>
+          </div>
+          <div :class="$style.summaryRow">
+            <span :class="$style.summaryLabel">出发载重（装船后）：</span>
+            <span>
+              {{ fixed0(plan.loadOnDeparture.weight) }}t / {{ fixed0(plan.capacity.weight) }}t，
+              {{ fixed0(plan.loadOnDeparture.volume) }}m³ / {{ fixed0(plan.capacity.volume) }}m³
+            </span>
+          </div>
+          <div :class="$style.summaryRow">
+            <span :class="$style.summaryLabel">归航载重（卸货前）：</span>
+            <span>
+              {{ fixed0(plan.loadOnReturn.weight) }}t / {{ fixed0(plan.capacity.weight) }}t，
+              {{ fixed0(plan.loadOnReturn.volume) }}m³ / {{ fixed0(plan.capacity.volume) }}m³
             </span>
           </div>
           <div v-for="warning in plan.warnings" :key="warning" :class="$style.warning">
@@ -394,6 +502,23 @@ function execute() {
 
 .matCell {
   font-size: 11px;
+}
+
+.opsLabel {
+  display: inline-block;
+  min-width: 2.5em;
+  color: #7ec8a3;
+  font-weight: 600;
+}
+
+.opsWarn {
+  color: #e8a33d;
+  font-size: 10px;
+}
+
+.loadSub {
+  font-size: 10px;
+  color: #8a9aa8;
 }
 
 .summary {

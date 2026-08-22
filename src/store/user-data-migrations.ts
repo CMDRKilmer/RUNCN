@@ -17,6 +17,14 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '22.08.2026 Add base products',
+    userData => {
+      if (!userData.baseProducts || typeof userData.baseProducts !== 'object') {
+        userData.baseProducts = {};
+      }
+    },
+  ],
+  [
     '21.08.2026 Add automation triggers',
     userData => {
       if (!userData.settings.triggers) {

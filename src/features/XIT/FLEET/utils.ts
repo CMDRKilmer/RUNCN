@@ -9,7 +9,7 @@ import {
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { calculatePlanetBurn } from '@src/core/burn';
 import type { MaterialBurn } from '@src/core/burn';
-import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
+import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import { isRepairableBuilding } from '@src/core/buildings';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
@@ -102,9 +102,7 @@ export function computeResupplyBill(
   // 不是「再补 N 天」。库存口径：只看 matBurn.inventory，不计 remainingAllocation。
   // suppliesCapDays：补后总天数不得超出此值，防止补给填满仓库导致产出无处存放；
   // analysis 未加载时不限制。超出则钳制到 cap。
-  const capDays = getBaseStorageAnalysis(site)?.suppliesCapDays;
-  const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-  const targetDays = Math.min(days, cap);
+  const targetDays = clampTargetDays(days, getSuppliesCap(site));
   if (targetDays <= 0) return {};
   const useBaseInv = data.useBaseInv ?? true;
   const bill: Record<string, number> = {};
@@ -363,7 +361,7 @@ export function fitDaysForShip(
       return undefined;
     }
     // 与 computeResupplyBill 一致的补给容量上限(suppliesCapDays)。
-    const cap = getBaseStorageAnalysis(base.site)?.suppliesCapDays ?? Infinity;
+    const cap = getSuppliesCap(base.site);
     saturation = Math.max(saturation, cap);
   }
   // 搜索上界:各基地 cap 中的最大值(此时所有基地都已补到各自的总天数上限)。

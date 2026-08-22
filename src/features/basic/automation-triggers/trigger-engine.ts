@@ -50,7 +50,7 @@ class TriggerEngine {
 
   private onNewAlert(alert: PrunApi.Alert) {
     for (const trigger of userData.triggers) {
-      if (!trigger.enabled) {
+      if (!trigger.enabled || trigger.mode === 'MANUAL') {
         continue;
       }
       const source = alertSources[trigger.event.type];
@@ -69,7 +69,7 @@ class TriggerEngine {
 
   private evaluateConditions() {
     for (const trigger of userData.triggers) {
-      if (!trigger.enabled || isAlertSource(trigger.event.type)) {
+      if (!trigger.enabled || trigger.mode === 'MANUAL' || isAlertSource(trigger.event.type)) {
         continue;
       }
       if (!this.passesCooldown(trigger)) {

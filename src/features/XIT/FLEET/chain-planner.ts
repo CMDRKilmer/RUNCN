@@ -1,9 +1,15 @@
 import { getPlanetBurn } from '@src/core/burn';
 import type { BurnValues } from '@src/core/burn';
-import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
+import { getBaseProducts } from '@src/core/base-products';
+import {
+  clampTargetDays as clampTargetDaysUtil,
+  getSuppliesCap,
+} from '@src/features/XIT/FLEET/supplies-cap';
 import { comparePlanets } from '@src/util';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { createId } from '@src/store/create-id';
 import {
@@ -55,6 +61,10 @@ export interface ChainStopPlan {
   load: Map<string, { amount: number; to: string }>;
   // 提取被舱容缩减过。
   clipped: boolean;
+  // 到站卸货后、提取前的舱载。
+  loadOnArrival: { weight: number; volume: number };
+  // 到站卸货+提取后的舱载（离开本站时）。
+  loadOnDeparture: { weight: number; volume: number };
 }
 
 export interface ChainPlan {
@@ -70,6 +80,12 @@ export interface ChainPlan {
   warnings: string[];
   peakLoad: { weight: number; volume: number };
   freeCapacity: { weight: number; volume: number };
+  // 飞船总舱容（不是剩余）。
+  capacity: { weight: number; volume: number };
+  // 出发时舱载（装船后、飞首站前）。
+  loadOnDeparture: { weight: number; volume: number };
+  // 归航前舱载（最后站离开后、卸最终产物前）。
+  loadOnReturn: { weight: number; volume: number };
   overCapacity: boolean;
 }
 
@@ -81,11 +97,9 @@ function matWeightVolume(ticker: string, amount: number) {
   };
 }
 
-// 目标天数：与 computeResupplyBill 相同的 suppliesCapDays 钳制。
+// 目标天数：与 computeResupplyBill 相同的 suppliesCapDays 钳制（见 supplies-cap.ts）。
 function clampTargetDays(base: ChainPlannerBase) {
-  const capDays = getBaseStorageAnalysis(base.site)?.suppliesCapDays;
-  const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-  return Math.max(0, Math.min(base.config.days, cap));
+  return clampTargetDaysUtil(base.config.days, getSuppliesCap(base.site));
 }
 
 /**
@@ -119,20 +133,75 @@ export function planChainRoute(input: {
     burns.set(base.naturalId, burn.burn);
   }
 
+  // 预读白名单：BSN 中配置的 ticker 是「可提取产物白名单」，
+  // 只有白名单上的 ticker 才能被提取（送下游或运回出发地）。
+  // producer 推断仅考虑白名单 ticker（不白名单 = 中间产物，不参与搬运）。
+  const allowlistedProducers = new Map<string, Set<string>>(); // ticker → bases with it in BSN
+  for (const base of bases) {
+    const configured = getBaseProducts(base.siteId);
+    if (configured === undefined || configured.length === 0) continue;
+    const burn = burns.get(base.naturalId)!;
+    let i = 0;
+    while (i < configured.length) {
+      const ticker = configured[i]!;
+      const mat = burn[ticker];
+      if (mat === undefined || mat.output <= 0) {
+        i++;
+        continue;
+      }
+      let set: Set<string> | undefined = allowlistedProducers.get(ticker);
+      if (set === undefined) {
+        set = new Set<string>();
+        allowlistedProducers.set(ticker, set);
+      }
+      set.add(base.naturalId);
+      i++;
+    }
+  }
+
   // 推断产业链边：A 产出 T 且 B 消耗 T（原料或劳动力消耗品）→ A→B。
+  // consumer 来源扩展到所有玩家基地（不仅是 selectedBases）——
+  // 避免选中基地的 ticker 被误判为最终产物（实际它是其他玩家基地的下游消耗）。
+  // burn 数据未就绪的基地会被天然忽略。
+  // producer 集合仅包含白名单 ticker（中间产物不进入链上输送）。
   const producers = new Map<string, string[]>();
   const consumers = new Map<string, string[]>();
-  for (const [naturalId, burn] of burns) {
+  for (const base of bases) {
+    const burn = burns.get(base.naturalId)!;
     for (const [ticker, mat] of Object.entries(burn)) {
-      if (mat.output > 0) {
+      if (mat.output > 0 && allowlistedProducers.has(ticker)) {
         const list = producers.get(ticker) ?? [];
-        list.push(naturalId);
+        list.push(base.naturalId);
         producers.set(ticker, list);
       }
+    }
+  }
+  for (const site of sitesStore.all.value ?? []) {
+    const burn = getPlanetBurn(site.siteId);
+    if (!burn) continue;
+    const naturalId = getEntityNaturalIdFromAddress(site.address);
+    if (!naturalId) continue;
+    for (const [ticker, mat] of Object.entries(burn.burn)) {
       if (mat.input > 0 || mat.workforce > 0) {
         const list = consumers.get(ticker) ?? [];
-        list.push(naturalId);
+        if (!list.includes(naturalId)) list.push(naturalId);
         consumers.set(ticker, list);
+      }
+    }
+    // 补充：burn 过滤掉 started 订单的 input，导致正在运行的 PCB 生产线
+    // 不会出现在 burn.input 里。直接从 production orders 读所有 input 物料
+    // （不限于未启动订单），合并入 consumer 集合，避免 ticker 被误判为最终产物。
+    const lines = productionStore.getBySiteId(site.siteId);
+    if (lines) {
+      for (const line of lines) {
+        for (const order of line.orders) {
+          for (const mat of order.inputs ?? []) {
+            const ticker = mat.material.ticker;
+            const list = consumers.get(ticker) ?? [];
+            if (!list.includes(naturalId)) list.push(naturalId);
+            consumers.set(ticker, list);
+          }
+        }
       }
     }
   }
@@ -140,7 +209,10 @@ export function planChainRoute(input: {
   const rawEdges: ChainFlow[] = [];
   for (const [ticker, producerIds] of producers) {
     const consumerIds = consumers.get(ticker) ?? [];
+    // 进一步限制 producer 为白名单集合（仅白名单 base能产该 ticker）
+    const allowedSet = allowlistedProducers.get(ticker)!;
     for (const from of producerIds) {
+      if (!allowedSet.has(from)) continue;
       for (const to of consumerIds) {
         if (from === to) {
           continue;
@@ -163,6 +235,12 @@ export function planChainRoute(input: {
       weight: ship.cargoStore.weightCapacity - ship.cargoStore.weightLoad,
       volume: ship.cargoStore.volumeCapacity - ship.cargoStore.volumeLoad,
     },
+    capacity: {
+      weight: ship.cargoStore.weightCapacity,
+      volume: ship.cargoStore.volumeCapacity,
+    },
+    loadOnDeparture: { weight: 0, volume: 0 },
+    loadOnReturn: { weight: 0, volume: 0 },
     overCapacity: false,
   };
 
@@ -244,29 +322,29 @@ export function planChainRoute(input: {
   };
 
   // 按 ticker 平衡：多下游共享多上游时，按需求比例分配总可提取量，
-  // 再按上游库存比例分摊到各条边。上游不足的部分不在此处理，
-  // 由下方账单扣减后回落到 CX 采购。
+  // 再按上游库存比例分摊到各条边。
+  // 完整产业链语义：只要有下游边，即使下游当前不缺（need=0），
+  // 也把上游可提取量送下去（作为产业链储备），由下方 CX 账单扣减避免重复采购。
+  // 上游不足的部分不在此处理，由下方账单扣减后回落到 CX 采购。
   const flows: ChainFlow[] = [];
   for (const ticker of new Set(edges.map(x => x.ticker))) {
     const tickerEdges = edges.filter(x => x.ticker === ticker);
     const upstreams = [...new Set(tickerEdges.map(x => x.from))];
     const downstreams = [...new Set(tickerEdges.map(x => x.to))];
-    const needs = new Map(downstreams.map(x => [x, need(x, ticker)] as const));
-    const totalNeed = [...needs.values()].reduce((a, b) => a + b, 0);
-    if (totalNeed <= 0) {
-      continue;
-    }
     const avails = new Map(upstreams.map(x => [x, avail(x, ticker)] as const));
     const totalAvail = [...avails.values()].reduce((a, b) => a + b, 0);
     if (totalAvail <= 0) {
       continue;
     }
+    const needs = new Map(downstreams.map(x => [x, need(x, ticker)] as const));
+    const totalNeed = [...needs.values()].reduce((a, b) => a + b, 0);
     for (const to of downstreams) {
       const needTo = needs.get(to)!;
-      if (needTo <= 0) {
-        continue;
-      }
-      const share = Math.min(needTo, (totalAvail * needTo) / totalNeed);
+      // 有需求按需求分配，无需求按均分（完整产业链储备）。
+      const share =
+        totalNeed > 0
+          ? Math.min(needTo, (totalAvail * needTo) / totalNeed)
+          : totalAvail / downstreams.length;
       for (const from of upstreams) {
         const amount = Math.floor((avails.get(from)! * share) / totalAvail);
         if (amount > 0) {
@@ -303,17 +381,41 @@ export function planChainRoute(input: {
     cxResupply.set(id, bill);
   }
 
-  // 最终产物：产出且无任何下游边的 ticker → 全部提取回出发地
-  // （无链关系基地的全部产物均属最终产物）。
-  const consumerTickers = new Set(edges.map(x => x.ticker));
+  // 最终产物提取列表语义：BSN 中配置的 ticker 是「可提取产物白名单」，
+  // 只有白名单上的 ticker 才能从基地被拿走（不论是送给下游还是运回出发地）。
+  // 不在白名单中的产出为中间产物，不应被搬运。
+  // - 白名单 ticker 有下游边：进 flows（链上供给优先），不运回出发地。
+  // - 白名单 ticker 无下游边：进 finalTickers（运回出发地）。
+  // - 白名单未配置：所有产出按中间产物处理（不提取，不搬运）。
+  // 有下游边的 ticker 集合（用于排除 finalTickers）。
+  const chainTickers = new Set(edges.map(x => x.ticker));
   const finalTickers = new Map<string, string[]>(); // naturalId → tickers
-  for (const id of order) {
+  for (const base of bases) {
+    const id = base.naturalId;
+    const configured = getBaseProducts(base.siteId);
+    if (configured === undefined || configured.length === 0) {
+      continue;
+    }
+    // 白名单中仅保留「产出 > 0」且「无下游边」的 ticker：
+    // 有下游边的走 flows（完整产业链输送），无下游边的才运回出发地。
     const burn = burns.get(id)!;
     const list: string[] = [];
-    for (const [ticker, mat] of Object.entries(burn)) {
-      if (mat.output > 0 && !consumerTickers.has(ticker)) {
-        list.push(ticker);
+    let i = 0;
+    while (i < configured.length) {
+      const ticker = configured[i]!;
+      const mat = burn[ticker];
+      if (mat === undefined || mat.output <= 0 || chainTickers.has(ticker)) {
+        i++;
+        continue;
       }
+      list.push(ticker);
+      let set: Set<string> | undefined = allowlistedProducers.get(ticker);
+      if (set === undefined) {
+        set = new Set<string>();
+        allowlistedProducers.set(ticker, set);
+      }
+      set.add(id);
+      i++;
     }
     if (list.length > 0) {
       finalTickers.set(id, list);
@@ -386,6 +488,8 @@ export function planChainRoute(input: {
   }
   pushItems(initialItems);
   trackPeak();
+  // 出发时载重（装船后、飞首站前）。
+  plan.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
 
   const stops: ChainStopPlan[] = [];
   for (const id of order) {
@@ -399,6 +503,8 @@ export function planChainRoute(input: {
       unloadChain: new Map(),
       load: new Map(),
       clipped: false,
+      loadOnArrival: { weight: 0, volume: 0 },
+      loadOnDeparture: { weight: 0, volume: 0 },
     };
 
     // 到站卸货：目的地为本站的舱内货物。
@@ -417,6 +523,8 @@ export function planChainRoute(input: {
       cargoWeight -= weight;
       cargoVolume -= volume;
     }
+    // 到站卸货后、提取前的舱载。
+    stop.loadOnArrival = { weight: cargoWeight, volume: cargoVolume };
 
     // 按来源归并卸货明细（CX 采购 or 上游输送）。
     for (const item of unloaded) {
@@ -436,32 +544,34 @@ export function planChainRoute(input: {
       }
     }
 
-    // 提取：本站产物送往下游各站 + 最终产物回出发地。
-    const pickup: CargoItem[] = [];
+    // 提取：拆两阶段。
+    //   阶段 1：链输送（送下游）——受舱容约束，超载按比例缩减、警告。
+    //   阶段 2：最终产物（回出发地）——不裁剪，超载仅警告并截到裁点之前的部分（不缩减全部）。
+    // 这样保证船尽量装满产物运回，下游补给也不会被过裁。
+    const chainPickup: CargoItem[] = [];
     for (const flow of flows) {
       if (flow.from === id && flow.amount > 0) {
-        pickup.push({ ticker: flow.ticker, amount: flow.amount, from: id, dest: flow.to });
+        chainPickup.push({ ticker: flow.ticker, amount: flow.amount, from: id, dest: flow.to });
       }
     }
+    const finalPickup: CargoItem[] = [];
     for (const ticker of finalTickers.get(id) ?? []) {
-      const amount = avail(id, ticker);
+      // 最终产物装尽全部库存：不扣自用预留（自用是该基地 burn 的事）。
+      // 链上 flows 仍按 avail（扣自用）避免抽空基地导致断粮。
+      const mat = burns.get(id)![ticker];
+      const amount = Math.max(0, Math.floor(mat.inventory));
       if (amount > 0) {
-        pickup.push({ ticker, amount, from: id, dest: ORIGIN_DEST });
+        finalPickup.push({ ticker, amount, from: id, dest: ORIGIN_DEST });
       }
     }
-    const clipped = pushItems(pickup);
-    stop.clipped = clipped;
-    if (clipped) {
-      warnings.push(`「${stop.planetName}」提取超出船舱剩余载量，已按比例缩减。`);
-    }
-    for (const item of pickup) {
+
+    // 阶段 1:链输送（超载按比例缩减）。
+    const chainClipped = pushItems(chainPickup);
+    for (const item of chainPickup) {
       if (item.amount <= 0) {
         continue;
       }
-      const to =
-        item.dest === ORIGIN_DEST
-          ? '回出发地'
-          : byNaturalId.get(item.dest)?.planetName || item.dest;
+      const to = byNaturalId.get(item.dest)?.planetName || item.dest;
       const existing = stop.load.get(item.ticker);
       if (existing) {
         existing.amount += item.amount;
@@ -473,9 +583,66 @@ export function planChainRoute(input: {
       }
     }
 
+    // 阶段 2:最终产物。逐 ticker 尝试 push,装不下则跳过该 ticker 并警告,
+    // 让下一站的产物有机会被装上,不一次性裁掉全部。
+    let finalClipped = false;
+    for (const item of finalPickup) {
+      const remainingW = freeCapacity.weight - cargoWeight;
+      const remainingV = freeCapacity.volume - cargoVolume;
+      if (remainingW <= 0 || remainingV <= 0) {
+        finalClipped = true;
+        continue;
+      }
+      const { weight: itemW, volume: itemV } = matWeightVolume(item.ticker, 1);
+      const totalW = itemW * item.amount;
+      const totalV = itemV * item.amount;
+      // 若整批装不下,则装尽剩余空间(逐件填充以保留整数),仅最后一个 ticker 可能截断。
+      let amount = item.amount;
+      if (totalW > remainingW && itemW > 0) {
+        amount = Math.min(amount, Math.floor(remainingW / itemW));
+      }
+      if (totalV > remainingV && itemV > 0) {
+        amount = Math.min(amount, Math.floor(remainingV / itemV));
+      }
+      if (amount <= 0) {
+        finalClipped = true;
+        continue;
+      }
+      item.amount = amount;
+      const { weight, volume } = matWeightVolume(item.ticker, amount);
+      cargoWeight += weight;
+      cargoVolume += volume;
+      cargo = [...cargo, item];
+      const existing = stop.load.get(item.ticker);
+      if (existing) {
+        existing.amount += amount;
+        if (!existing.to.includes('回出发地')) {
+          existing.to = `${existing.to}、回出发地`;
+        }
+      } else {
+        stop.load.set(item.ticker, { amount, to: '回出发地' });
+      }
+      if (amount < item.amount || totalW > remainingW || totalV > remainingV) {
+        finalClipped = true;
+      }
+    }
+
+    stop.clipped = chainClipped || finalClipped;
+    if (chainClipped) {
+      warnings.push(`「${stop.planetName}」链上输送超出船舱剩余载量，已按比例缩减。`);
+    }
+    if (finalClipped) {
+      warnings.push(`「${stop.planetName}」最终产物受舱容限制，部分未装上船。`);
+    }
+
     trackPeak();
+    // 卸货+提取后舱载（离开本站时）。
+    stop.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
     stops.push(stop);
   }
+
+  // 归航前舱载（最后站离开后、卸最终产物前）。
+  plan.loadOnReturn = { weight: cargoWeight, volume: cargoVolume };
 
   // 归航：卸下最终产物。
   for (const item of cargo) {
@@ -527,7 +694,7 @@ export interface ChainActionPlan {
 export function buildChainActionPackages(
   ship: DispatchShip,
   plan: ChainPlan,
-  options: { refuel: boolean },
+  options: { autoLaunch?: boolean; triggerMode?: UserData.TriggerMode } = {},
 ): ChainActionPlan | undefined {
   if (!ship.warehouseStore || !ship.cargoStore) {
     return undefined;
@@ -551,15 +718,8 @@ export function buildChainActionPackages(
       });
     }
   }
-
-  if (options.refuel) {
-    actions.push({
-      type: 'Refuel',
-      name: '加油',
-      origin: originWarehouse,
-      buyMissingFuel: true,
-    });
-  }
+  // 注：环线模式不再生成加油动作。用户需要加油请在基地规划模式（Plan）操作，
+  // 或手动在 ACT 中调整生成的包。
 
   // 采购：仅合并开启「购买」的基地账单；未开启的基地账单仍会装船（来自仓库库存）。
   if (Object.keys(plan.purchaseBill).length > 0) {
@@ -592,6 +752,13 @@ export function buildChainActionPackages(
       destination: firstStop.naturalId,
       shipSourceAction: loadGroupName,
     });
+    if (options.autoLaunch) {
+      actions.push({
+        type: 'DEPART',
+        name: `出发 ${firstStop.planetName}`,
+        registration: ship.ship.registration,
+      });
+    }
   }
 
   const mainPkg: UserData.ActionPackageData = {
@@ -606,7 +773,7 @@ export function buildChainActionPackages(
     enabled: true,
     event: { type: 'FLIGHT_ENDED', ship: ship.ship.registration, planet },
     packageName: pkgName,
-    mode: 'CONFIRM',
+    mode: options.triggerMode ?? 'CONFIRM',
     cooldownMin: 60,
     createdAt: Date.now(),
     autoDelete: true,
@@ -628,6 +795,13 @@ export function buildChainActionPackages(
     }
 
     const next = plan.stops[i + 1];
+    const departAction: UserData.ActionData | undefined = options.autoLaunch
+      ? {
+          type: 'DEPART',
+          name: next !== undefined ? `出发 ${next.planetName}` : `出发 ${plan.originNaturalId}`,
+          registration: ship.ship.registration,
+        }
+      : undefined;
     const pkg: UserData.ActionPackageData = {
       global: { name: pkgName },
       autoDelete: true,
@@ -656,6 +830,7 @@ export function buildChainActionPackages(
           destination: next !== undefined ? next.naturalId : plan.originNaturalId,
           shipSourceAction: '提取',
         },
+        ...(departAction !== undefined ? [departAction] : []),
       ],
     };
     stopPkgs.push({

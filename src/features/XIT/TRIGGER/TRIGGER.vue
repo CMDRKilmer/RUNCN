@@ -9,6 +9,7 @@ import removeArrayElement from '@src/utils/remove-array-element';
 import { createId } from '@src/store/create-id';
 import { userData } from '@src/store/user-data';
 import { lowFuelShips } from '@src/features/basic/auto-refuel';
+import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
 
@@ -77,6 +78,26 @@ function onDeleteClick(e: Event, trigger: UserData.TriggerData) {
   });
 }
 
+// MANUAL 模式：点击执行按钮，直接把操作包入队并打开 XIT ACT 窗口运行。
+// 与 trigger-engine 的 execute() 同一路径（队列 + showBuffer）。
+function onManualExecute(trigger: UserData.TriggerData) {
+  queueTriggerRun({ triggerId: trigger.id, packageName: trigger.packageName });
+  showBuffer(`XIT ACT_${trigger.packageName.replace(' ', '_')}`);
+}
+
+function modeLabel(trigger: UserData.TriggerData): string {
+  switch (trigger.mode) {
+    case 'AUTO':
+      return 'AUTO';
+    case 'CONFIRM':
+      return 'CONFIRM';
+    case 'MANUAL':
+      return '手动';
+    default:
+      return trigger.mode;
+  }
+}
+
 async function onRequestNotificationClick() {
   if (Notification.permission === 'default') {
     await Notification.requestPermission();
@@ -141,6 +162,7 @@ function onOpenNxClick() {
         <th>事件</th>
         <th>操作包</th>
         <th>模式</th>
+        <th>操作</th>
         <th>冷却</th>
         <th>上次触发</th>
         <th>次数</th>
@@ -168,7 +190,18 @@ function onOpenNxClick() {
           <span v-if="trigger.mode === 'AUTO' && !userData.settings.triggers.autoEnabled">
             AUTO（禁用）
           </span>
-          <span v-else>{{ trigger.mode === 'AUTO' ? 'AUTO' : 'CONFIRM' }}</span>
+          <span v-else>{{ modeLabel(trigger) }}</span>
+        </td>
+        <td>
+          <template v-if="trigger.mode === 'MANUAL'">
+            <PrunButton dark inline @click="onManualExecute(trigger)">执行</PrunButton>
+          </template>
+          <template v-else-if="trigger.mode === 'AUTO'">
+            <span :class="$style.autoBadge">auto</span>
+          </template>
+          <template v-else>
+            <span :class="$style.autoBadge">confirm</span>
+          </template>
         </td>
         <td>{{
           trigger.event.type === 'INTERVAL'
@@ -244,6 +277,13 @@ function onOpenNxClick() {
 
 .emptyRow {
   text-align: center;
+}
+
+.autoBadge {
+  font-size: 0.8em;
+  color: #56b6c2;
+  font-family: monospace;
+  letter-spacing: 0.5px;
 }
 
 .sectionCommands {

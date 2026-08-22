@@ -3,6 +3,7 @@ import './actions/cx-sell/cx-sell';
 import './actions/mtra/mtra';
 import './actions/refuel/refuel';
 import './actions/open-sfc/open-sfc';
+import './actions/depart/depart';
 import './actions/bra-repair/bra-repair';
 
 import './material-groups/repair/repair';

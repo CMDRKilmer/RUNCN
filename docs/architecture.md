@@ -174,6 +174,7 @@ Programmatically generated packages (FLEET 派遣/环线, BURN ACT) may legitima
 Two structural rules for generated packages:
 
 - `OPEN SFC` resolves its ship by reading the `dest` (serialized ship store) of the MTRA named in `shipSourceAction` — it reads action **data**, not execution results, so it works even if that MTRA no-opped. Every package that flies must keep one MTRA with `dest` = the ship's cargo store.
+- 自动发船（`DEPART`）: FLEET 工具栏「自动发船」开启时，`execute` 在每个 `OPEN SFC` 后追加一个 `DEPART` 动作（携带 `registration`）。步骤用 `tiles.find('SFC <reg>', true).at(0)` 定位上一步打开的面板，轮询等指令表单（`C.FormComponent.containerCommand`）内 `C.Button.success` 出现且未带 `C.Button.disabled`（目的地/燃料计算就绪）后 `clickElement`。产业链环线的每站包同样追加（到港自动飞往下一站）。
 - Match the FLEET 派遣包 shape: one `Manual` group per base (`name` = planet name, `planet` = naturalId, `materials` = that base's bill), a merged `购买 <CX>` group containing only bases with `cxBuy` on (CX Buy action references it), and a merged `装载 <ship>` group for the warehouse→ship MTRA.
 
 `ActionStepExecuteContext` has **no** `globalOptions` — generateSteps-time global flags (like `skipMissingMaterials`) must be baked into the step data at emit time (`CXPO_BUY`/`CXPO_SELL` carry a `skipMissing` field).

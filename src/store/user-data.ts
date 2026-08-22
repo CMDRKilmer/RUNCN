@@ -110,6 +110,7 @@ export const initialUserData = deepFreeze({
     items: [] as UserData.CartItem[],
   },
   baseAliases: {} as UserData.BaseAliases,
+  baseProducts: {} as UserData.BaseProducts,
   tabs: {
     order: [] as string[],
     hidden: [] as string[],

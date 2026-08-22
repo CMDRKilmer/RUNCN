@@ -23,6 +23,7 @@ import { getPlanetProduction } from '@src/core/production';
 import { sumBy } from '@src/utils/sum-by';
 import { getStorageAlarmLevel } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
+import { clampDaysInput, normalizeSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
 import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
 
@@ -69,14 +70,13 @@ const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined
 // 不得超过 suppliesCapDays(下次到港前仓储不超限反算,含产出累积,防止补给填满
 // 仓库导致产出无处存放);不耦合全局推荐项。
 // computeResupplyBill 按同一上限逐物料截断,此处钳制输入使其与账单一致。
+// cap <= 0 时不动 days（保留用户输入）:cap=0 表示仓储已被产出堆满、确实不需要补给,
+// 但被 active change watch 钳成 0 会阻止后续 cap 上调后用户天数恢复。
 watch(
   [() => config.days, () => analysis?.suppliesCapDays],
   ([daysVal, capDays]) => {
-    const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
-    if (daysVal > cap) {
-      // 截断到上限,向下取两位小数(与适配 fitDaysForShip 的精度一致)。
-      config.days = Math.max(0, Math.floor(cap * 100) / 100);
-    }
+    // 截断到上限,向下取两位小数(与适配 fitDaysForShip 的精度一致)。
+    config.days = clampDaysInput(daysVal, capDays);
   },
   { immediate: true },
 );
@@ -157,8 +157,7 @@ const fillText = computed(() => {
 // 不得超过 suppliesCapDays(下次到港前仓储不超限反算)。
 // inputDaysCap 与 watch 共用钳制公式,绑定到 NumberInput 的 max 以约束浏览器原生箭头。
 const inputDaysCap = computed(() => {
-  const capDays = analysis?.suppliesCapDays;
-  const cap = capDays === undefined || !isFinite(capDays) ? Infinity : capDays;
+  const cap = normalizeSuppliesCap(analysis?.suppliesCapDays);
   return Math.max(0, cap);
 });
 

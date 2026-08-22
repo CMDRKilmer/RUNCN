@@ -60,6 +60,9 @@ const exchangeFilterOptions: { label: string; code: string }[] = [
   { label: 'BEN', code: 'CI1' },
 ];
 
+// 加油不在 FLEET 处理：XIT TRIGGER 面板已提供独立的自动加油触发器，
+// 重复加油会让仓库循环抽料。故 FLEET 不再保留 refuel 配置与包动作。
+
 const tile = useTile();
 const panesEl = ref<HTMLElement | null>(null);
 
@@ -72,9 +75,10 @@ const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfig
 const baseOrder = useTileState<string[]>('baseOrder', []);
 const orderedIds = ref<string[]>([]);
 const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefined);
-const refuel = useTileState<boolean>('refuel', true);
 // 执行时同步在 TRIGGER 面板创建一次性到港卸货触发器。
 const autoUnloadTrigger = useTileState<boolean>('autoUnloadTrigger', true);
+// 自动发船：在每个 OPEN SFC 步骤后追加 DEPART，执行时自动点击「开始」。
+const autoLaunch = useTileState<boolean>('autoLaunch', false);
 
 // Column visibility
 const showBurn = useTileState('showBurn', true);
@@ -508,9 +512,11 @@ function fitBase(naturalId: string) {
 
 function execute() {
   if (includedBases.value.length === 0) {
+    setNotice('无可执行基地：请先在表格中分配船只');
     return;
   }
   if (overloadedShips.value.size > 0) {
+    setNotice('有船只装载超过容量，已阻止执行');
     return;
   }
 
@@ -524,7 +530,12 @@ function execute() {
   for (const base of includedBases.value) {
     const { naturalId, config, dispatchShip } = base;
     const bill = billByBase.value.get(naturalId);
-    if (!bill || Object.keys(bill).length === 0) {
+    if (bill === undefined) {
+      setNotice(`${base.planetName}: burn 数据未加载，稍后再试`);
+      continue;
+    }
+    if (Object.keys(bill).length === 0) {
+      setNotice(`${base.planetName}: 当前库存已满足目标天数，无需补给`);
       continue;
     }
 
@@ -544,6 +555,7 @@ function execute() {
   }
 
   if (stagedBases.length === 0) {
+    setNotice('所有选中基地当前无需补给或维修');
     return;
   }
 
@@ -598,6 +610,13 @@ function execute() {
       destination: first.naturalId,
       shipSourceAction: loadName,
     });
+    if (autoLaunch.value) {
+      sfcActions.push({
+        type: 'DEPART',
+        name: `出发 ${shipName}`,
+        registration: dispatchShip.ship.registration,
+      });
+    }
   };
 
   for (const shipBases of multiShipGroups) {
@@ -627,26 +646,10 @@ function execute() {
     });
   }
 
-  const refuelActions: UserData.ActionData[] = [];
-  if (refuel.value) {
-    const seen = new Set<string>();
-    for (const entry of cxShips.value) {
-      if (entry.warehouseStore && !seen.has(entry.warehouseStore.id)) {
-        seen.add(entry.warehouseStore.id);
-        refuelActions.push({
-          type: 'Refuel',
-          name: '加油',
-          origin: serializeStorage(entry.warehouseStore),
-          buyMissingFuel: true,
-        });
-      }
-    }
-  }
-
   const pkg: UserData.ActionPackageData = {
     global: { name: '派遣' },
     groups,
-    actions: [...refuelActions, ...cxBuyActions, ...mtraActions, ...sfcActions],
+    actions: [...cxBuyActions, ...mtraActions, ...sfcActions],
   };
 
   stagedDispatch.value = {
@@ -728,7 +731,6 @@ interface DispatchConfigPayload {
   baseConfigs?: Record<string, DispatchBaseConfig>;
   baseOrder?: string[];
   exchangeFilter?: string;
-  refuel?: boolean;
 }
 
 const notice = ref<string | undefined>(undefined);
@@ -747,7 +749,6 @@ function collectDispatchConfig(): DispatchConfigPayload {
     baseConfigs: JSON.parse(JSON.stringify(baseConfigs.value)),
     baseOrder: [...baseOrder.value],
     exchangeFilter: exchangeFilter.value,
-    refuel: refuel.value,
   };
 }
 
@@ -804,7 +805,6 @@ async function importDispatchConfig() {
   baseConfigs.value = config.baseConfigs ?? {};
   baseOrder.value = config.baseOrder ?? [];
   exchangeFilter.value = config.exchangeFilter;
-  refuel.value = config.refuel ?? true;
   setNotice('配置已导入');
 }
 </script>
@@ -842,7 +842,7 @@ async function importDispatchConfig() {
           {{ option.label }}
         </RadioItem>
         <div :class="$style.separator" />
-        <RadioItem v-model="refuel" horizontal>加油</RadioItem>
+        <RadioItem v-model="autoLaunch" horizontal>自动发船</RadioItem>
         <div :class="$style.separator" />
         <RadioItem v-model="autoUnloadTrigger" horizontal>到港卸货</RadioItem>
         <div :class="$style.separator" />
