@@ -46,6 +46,7 @@ import './PROD/PROD';
 import './PWARN/PWARN';
 import './PROFIT';
 import './REP/REP';
+import './SELL/SELL';
 import './SET/SET';
 import './START';
 import './TODO/TODO';

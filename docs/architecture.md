@@ -166,3 +166,5 @@ Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known bef
 ### ACT action/step registration recap
 
 New action types must be added to the `ActionType` union in `src/store/user-data.types.d.ts` (plus any action-specific fields on `ActionData`). Steps register via `act.addActionStep` (execution logic), actions via `act.addAction` (Edit.vue must `defineExpose({ validate, save })`; `EditAction.vue` clears all keys of the action object before `save()` repopulates it). Import the action module in `ACT.ts`.
+
+`ActionStepExecuteContext` has **no** `globalOptions` — generateSteps-time global flags (like `skipMissingMaterials`) must be baked into the step data at emit time (`CXPO_BUY`/`CXPO_SELL` carry a `skipMissing` field).

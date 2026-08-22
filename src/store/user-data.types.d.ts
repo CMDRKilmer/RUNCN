@@ -77,7 +77,7 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'BRA Repair';
+  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'BRA Repair' | 'CX Sell';
 
   interface ActionData {
     type: ActionType;
@@ -104,6 +104,14 @@ declare namespace UserData {
     // BRA Repair 专用。
     base?: string;
     threshold?: number;
+
+    // CX Sell 专用。
+    ticker?: string;
+    amount?: number;
+    /** LIMIT=挂单售卖（压至卖价第 rank 名）；FILL=填单售卖（按买一价立即成交）。 */
+    sellMode?: 'LIMIT' | 'FILL';
+    /** 挂单排名（1=卖价第一名，默认 1）：压过第 rank 名卖价一档。 */
+    rank?: number;
   }
 
   type TriggerMode = 'CONFIRM' | 'AUTO';

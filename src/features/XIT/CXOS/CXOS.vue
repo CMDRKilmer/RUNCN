@@ -11,6 +11,7 @@ import {
   deleteExchangeOrderFromClick,
 } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { getPriceStep } from '@src/core/orders';
 import { changeInputValue, clickElement } from '@src/util';
 import { fixed0, fixed02, formatCurrency } from '@src/utils/format';
 import { sleep } from '@src/utils/sleep';
@@ -223,12 +224,6 @@ function onDeleteClick(event: MouseEvent, orderId: string) {
 }
 
 // ── 压价 ──
-function getPriceStep(price: number) {
-  if (price >= 10000) return 100;
-  if (price >= 1000) return 10;
-  return 1;
-}
-
 async function openCxpoTile(command: string) {
   // 后台静默打开：autoClose + closeWhen，窗口全程不可见
   const closeWhen = ref(false);
