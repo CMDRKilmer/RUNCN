@@ -92,6 +92,8 @@ function clampTargetDays(base: ChainPlannerBase) {
  * 2. 拓扑排序定航线（上游先到，循环依赖断链并警告）；
  * 3. 按目标天数平衡各链上物资运量（多上游按库存比例分摊）；
  * 4. 沿航线模拟舱容，超载按比例缩减提取量。
+ * 所有选中基地均为环线站点（含 CX 采购与卸货），无链关系的基地
+ * 按字母序混入航线，其产物视为最终产物运回出发地。
  * 数据未加载时返回 undefined。
  */
 export function planChainRoute(input: {
@@ -134,7 +136,6 @@ export function planChainRoute(input: {
   }
 
   const rawEdges: ChainFlow[] = [];
-  const participants = new Set<string>();
   for (const [ticker, producerIds] of producers) {
     const consumerIds = consumers.get(ticker) ?? [];
     for (const from of producerIds) {
@@ -143,8 +144,6 @@ export function planChainRoute(input: {
           continue;
         }
         rawEdges.push({ ticker, from, to, amount: 0 });
-        participants.add(from);
-        participants.add(to);
       }
     }
   }
@@ -164,15 +163,16 @@ export function planChainRoute(input: {
     overCapacity: false,
   };
 
-  if (participants.size === 0) {
-    warnings.push('未检测到基地间的产业链关系（无基地产物被其他基地消耗）。');
-    return plan;
+  if (rawEdges.length === 0) {
+    warnings.push('未检测到基地间的产业链关系，将执行纯补给环线（采购 → 卸货 → 提取 → 归航）。');
   }
 
-  // Kahn 拓扑排序（同层按星球名稳定排序）。
+  // Kahn 拓扑排序（同层按星球名稳定排序）；所有选中基地入序，
+  // 无链关系的基地为孤立节点，按字母序混入航线。
+  const allIds = bases.map(x => x.naturalId);
   const adjacency = new Map<string, Set<string>>();
   const inDegree = new Map<string, number>();
-  for (const id of participants) {
+  for (const id of allIds) {
     adjacency.set(id, new Set());
     inDegree.set(id, 0);
   }
@@ -184,7 +184,7 @@ export function planChainRoute(input: {
       inDegree.set(to, inDegree.get(to)! + 1);
     }
   }
-  const frontier = [...participants].filter(x => inDegree.get(x) === 0).sort(comparePlanets);
+  const frontier = allIds.filter(x => inDegree.get(x) === 0).sort(comparePlanets);
   const order: string[] = [];
   while (frontier.length > 0) {
     const next = frontier.shift()!;
@@ -198,10 +198,10 @@ export function planChainRoute(input: {
     }
     frontier.sort(comparePlanets);
   }
-  if (order.length < participants.size) {
+  if (order.length < allIds.length) {
     warnings.push('产业链存在循环依赖，循环部分的输送顺序可能不满足上下游先后。');
     const ordered = new Set(order);
-    for (const id of [...participants].sort(comparePlanets)) {
+    for (const id of [...allIds].sort(comparePlanets)) {
       if (!ordered.has(id)) {
         order.push(id);
       }
@@ -218,12 +218,10 @@ export function planChainRoute(input: {
 
   const byNaturalId = new Map(bases.map(x => [x.naturalId, x] as const));
 
-  // 目标天数。
+  // 目标天数（所有选中基地，含无链关系基地的采购补给）。
   const targetDays = new Map<string, number>();
   for (const base of bases) {
-    if (participants.has(base.naturalId)) {
-      targetDays.set(base.naturalId, clampTargetDays(base));
-    }
+    targetDays.set(base.naturalId, clampTargetDays(base));
   }
   // need: 下游 ticker 需求 = 目标天数 × 日耗（原料+消耗品）− 库存。
   const need = (id: string, ticker: string) => {
@@ -306,7 +304,8 @@ export function planChainRoute(input: {
     cxResupply.set(id, bill ?? {});
   }
 
-  // 最终产物：参与者产出且无任何下游边的 ticker → 全部提取回出发地。
+  // 最终产物：产出且无任何下游边的 ticker → 全部提取回出发地
+  // （无链关系基地的全部产物均属最终产物）。
   const consumerTickers = new Set(edges.map(x => x.ticker));
   const finalTickers = new Map<string, string[]>(); // naturalId → tickers
   for (const id of order) {

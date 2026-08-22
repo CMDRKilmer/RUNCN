@@ -24,6 +24,37 @@ const { ships, bases } = defineProps<{
 
 const chainShipId = useTileState<string | undefined>('chainShipId', undefined);
 const chainRefuel = useTileState<boolean>('chainRefuel', true);
+// 玩家自选参与环线的基地；未设置时默认全选。
+const chainBaseIds = useTileState<string[] | undefined>('chainBaseIds', undefined);
+
+const selectedBaseIds = computed(() => {
+  if (chainBaseIds.value === undefined) {
+    return bases.map(x => x.naturalId);
+  }
+  const present = new Set(bases.map(x => x.naturalId));
+  return chainBaseIds.value.filter(id => present.has(id));
+});
+
+const selectedBases = computed(() =>
+  bases.filter(x => selectedBaseIds.value.includes(x.naturalId)),
+);
+
+function setBaseSelected(id: string, selected: boolean) {
+  const current = selectedBaseIds.value;
+  if (selected) {
+    chainBaseIds.value = current.includes(id) ? current : [...current, id];
+  } else {
+    chainBaseIds.value = current.filter(x => x !== id);
+  }
+}
+
+function selectAllBases() {
+  chainBaseIds.value = bases.map(x => x.naturalId);
+}
+
+function clearAllBases() {
+  chainBaseIds.value = [];
+}
 
 function shipLabel(entry: DispatchShip) {
   return entry.ship.name ?? entry.ship.registration;
@@ -60,7 +91,7 @@ const plan = computed(() => {
   if (!ship) {
     return undefined;
   }
-  return planChainRoute({ ship, bases });
+  return planChainRoute({ ship, bases: selectedBases.value });
 });
 
 const loading = computed(() => selectedShip.value !== undefined && plan.value === undefined);
@@ -93,9 +124,8 @@ const executeTooltip = computed(() => {
   if (!selectedShip.value) {
     return '请先选择执行环线的船只';
   }
-  const p = plan.value;
-  if (p && p.stops.length === 0) {
-    return '未检测到基地间的产业链关系';
+  if (selectedBases.value.length === 0) {
+    return '请勾选参与环线的基地';
   }
   return undefined;
 });
@@ -158,15 +188,30 @@ function execute() {
       <PrunButton v-else primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
     </div>
 
-    <div v-if="!selectedShip" :class="$style.hint">
-      选择一艘停靠 CX 的船只，将根据基地产物推断产业链上下游，自动规划环线补给航线。
+    <!-- Base selection -->
+    <div v-if="bases.length > 0" :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
+      <span :class="$style.baseBarLabel">基地</span>
+      <RadioItem
+        v-for="base in bases"
+        :key="base.naturalId"
+        :model-value="selectedBaseIds.includes(base.naturalId)"
+        horizontal
+        @update:model-value="selected => setBaseSelected(base.naturalId, selected)">
+        {{ base.planetName || base.naturalId }}
+      </RadioItem>
+      <div :class="$style.separator" />
+      <PrunButton dark @click="selectAllBases">全选</PrunButton>
+      <PrunButton dark @click="clearAllBases">清空</PrunButton>
     </div>
+
+    <div v-if="!selectedShip" :class="$style.hint">
+      选择一艘停靠 CX
+      的船只，勾选参与环线的基地，将根据基地产物推断产业链上下游，自动规划环线补给航线。
+    </div>
+    <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
     <LoadingSpinner v-else-if="loading" />
     <div v-else-if="plan" :class="$style.content">
-      <div v-if="plan.stops.length === 0" :class="$style.hint">
-        未检测到基地间的产业链关系（没有基地产物被其他基地消耗）。
-      </div>
-      <template v-else>
+      <template v-if="plan.stops.length > 0">
         <div :class="$style.route">
           <span :class="$style.routeLabel">航线：</span>
           <span :class="$style.routeOrigin">{{ plan.originNaturalId }}</span>
@@ -249,6 +294,12 @@ function execute() {
 
 .filterBar :global(.SelectInput__container) {
   margin: 0;
+}
+
+.baseBarLabel {
+  color: #8a9aa8;
+  white-space: nowrap;
+  margin-right: 0.25rem;
 }
 
 .separator {
