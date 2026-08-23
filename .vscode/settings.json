@@ -1,6 +1,6 @@
 ﻿{
-    "Codegeex.CommitMessageStyle": "Default",
-    "Codegeex.GenerationPreference": "automatic",
-    "typescript.tsdk": "./node_modules/typescript/lib",
-    "typescript.enablePromptUseWorkspaceTs": true
+  "Codegeex.CommitMessageStyle": "Default",
+  "Codegeex.GenerationPreference": "automatic",
+  "typescript.tsdk": "./node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTs": true
 }

@@ -634,7 +634,7 @@ function execute() {
     if (!bill) {
       continue;
     }
-    const unloadName = `${base.planetName} Unload`;
+    const unloadName = `${base.naturalId} Unload`;
     const unloadPkg: UserData.ActionPackageData = {
       global: { name: unloadName },
       autoDelete: true,
