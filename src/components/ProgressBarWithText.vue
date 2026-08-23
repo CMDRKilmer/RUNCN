@@ -9,7 +9,9 @@ const props = defineProps<{
 }>();
 
 const progress = computed(() => {
-  if (props.total === 0) return 0;
+  if (props.total === 0) {
+    return 0;
+  }
   return Math.round((props.current / props.total) * 100);
 });
 

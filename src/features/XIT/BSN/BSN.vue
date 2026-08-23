@@ -62,10 +62,14 @@ const burnProductTickers = computed<Map<string, string>>(() => {
   const map = new Map<string, string>();
   for (const row of baseRows.value) {
     const burn = getPlanetBurn(row.siteId);
-    if (!burn) continue;
+    if (!burn) {
+      continue;
+    }
     const tickers: string[] = [];
     for (const [ticker, mat] of Object.entries(burn.burn)) {
-      if (mat.output > 0) tickers.push(ticker);
+      if (mat.output > 0) {
+        tickers.push(ticker);
+      }
     }
     map.set(row.siteId, tickers.join(','));
   }

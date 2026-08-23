@@ -122,20 +122,30 @@ const STATUS_LABELS: Record<WarningRow['status'], string> = {
 };
 
 function statusClass(status: WarningRow['status']) {
-  if (status === 'idle' || status === 'empty-queue') return C.ColoredValue.negative;
-  if (status === 'idle-slot') return C.ColoredValue.positive;
+  if (status === 'idle' || status === 'empty-queue') {
+    return C.ColoredValue.negative;
+  }
+  if (status === 'idle-slot') {
+    return C.ColoredValue.positive;
+  }
   return '';
 }
 
 function etaText(ms: number | undefined): string {
-  if (ms === undefined) return '--';
+  if (ms === undefined) {
+    return '--';
+  }
   const now = timestampEachMinute.value;
-  if (ms <= now) return '现在';
+  if (ms <= now) {
+    return '现在';
+  }
   return formatEta(now, ms);
 }
 
 function isUrgent(ms: number | undefined): boolean {
-  if (ms === undefined) return false;
+  if (ms === undefined) {
+    return false;
+  }
   return ms - timestampEachMinute.value < DAY_MS;
 }
 </script>

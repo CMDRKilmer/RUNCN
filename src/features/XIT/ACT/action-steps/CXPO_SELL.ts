@@ -1,6 +1,6 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { fixed0, fixed02, fixed02ng } from '@src/utils/format';
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';

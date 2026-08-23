@@ -1,6 +1,6 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { AssertFn } from '@src/features/XIT/ACT/shared-types';
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 
 interface Data {

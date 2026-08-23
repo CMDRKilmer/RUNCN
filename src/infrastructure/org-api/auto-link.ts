@@ -77,25 +77,37 @@ function contractInTimeWindow(contract: PrunApi.Contract, task: OrgTask): boolea
   // contract.date 是 PrUn DateTime { timestamp: number }；task 时间是 ISO 字符串
   const contractMs = contract.date?.timestamp;
   const taskClaimed = task.claimedAt ?? task.createdAt;
-  if (typeof contractMs !== 'number' || !taskClaimed) return true;
+  if (typeof contractMs !== 'number' || !taskClaimed) {
+    return true;
+  }
   const claimedMs = new Date(taskClaimed).getTime();
-  if (Number.isNaN(claimedMs)) return true;
+  if (Number.isNaN(claimedMs)) {
+    return true;
+  }
   // 提前 1 小时（玩家可能同时接取+签合同）
-  if (contractMs < claimedMs - 60 * 60 * 1000) return false;
-  if (contractMs > claimedMs + 7 * 24 * 60 * 60 * 1000) return false;
+  if (contractMs < claimedMs - 60 * 60 * 1000) {
+    return false;
+  }
+  if (contractMs > claimedMs + 7 * 24 * 60 * 60 * 1000) {
+    return false;
+  }
   return true;
 }
 
 function effectiveTaskTemplate(task: OrgTask): TaskContractJson['template'] {
   const tmpl = task.contractJson.template;
-  if (tmpl === 'SHIP') return 'SHIP';
+  if (tmpl === 'SHIP') {
+    return 'SHIP';
+  }
   // 新架构：从 listing claim 生成的 task，type 已经是 claimer 视角，不需要反转
   if (task.listingId) {
     return tmpl;
   }
   // 老架构：BUY/SELL 仅在接取者视角下反转；发布者视角保持原样
   const creatorIsPublisher = task.contractCreator === 'publisher';
-  if (creatorIsPublisher) return tmpl;
+  if (creatorIsPublisher) {
+    return tmpl;
+  }
   return tmpl === 'BUY' ? 'SELL' : 'BUY';
 }
 
@@ -127,7 +139,9 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
   if (originalTemplate === 'SHIP' || invertedTemplate === 'SHIP') {
     orderedTemplates.push('SHIP');
   }
-  if (originalTemplate !== 'SHIP') orderedTemplates.push(originalTemplate);
+  if (originalTemplate !== 'SHIP') {
+    orderedTemplates.push(originalTemplate);
+  }
   if (invertedTemplate !== originalTemplate && invertedTemplate !== 'SHIP') {
     orderedTemplates.push(invertedTemplate);
   }
@@ -135,7 +149,9 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
   const templatesToTry = Array.from(new Set(orderedTemplates));
 
   for (const contract of all) {
-    if (session.dismissedContractIds.has(contract.id)) continue;
+    if (session.dismissedContractIds.has(contract.id)) {
+      continue;
+    }
     // 接受任意合同状态。场景：ORG 接取后创建反向合同（status=OPEN），
     // 对方可能在我方 sync-status 到达前抢先接受 → status 转 CLOSED。
     // 若按 OPEN 过滤，错过这一窗口后就永远关联不上。
@@ -154,7 +170,9 @@ function scanOnce(session: AutoLinkSession): AutoLinkMatch | null {
         template: tmpl,
       };
       const result = matchContractJson(taskJsonForMatch, contract);
-      if (!result.matched) continue;
+      if (!result.matched) {
+        continue;
+      }
       console.log(
         '[auto-link] matched task=',
         session.task.id,
@@ -193,7 +211,9 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
     }
     try {
       const match = scanOnce(session);
-      if (!match) return;
+      if (!match) {
+        return;
+      }
       // 找到候选 → 暂停 interval，等待用户确认（避免扫到多个候选时反复弹窗）
       clearInterval(session.interval);
       session.interval = null!;
@@ -262,9 +282,13 @@ export function startAutoLink(task: OrgTask, callbacks: AutoLinkCallbacks): void
 
 export function stopAutoLink(taskId: string): void {
   const session = sessions.get(taskId);
-  if (!session) return;
+  if (!session) {
+    return;
+  }
   const interval = session.interval;
-  if (interval != null) clearInterval(interval);
+  if (interval != null) {
+    clearInterval(interval);
+  }
   sessions.delete(taskId);
   session.callbacks.onStateChange?.('stopped');
 }
@@ -313,20 +337,26 @@ const activeLinkedTaskIds = new Set<string>();
 // 且 contractId 非空（用于 sync contract status → COMPLETED）。
 // 接取成功 / 关联合同后调此；任务推完 COMPLETED/CANCELLED 时调 unregisterActiveTask。
 export function registerActiveTask(taskId: string): void {
-  if (activeLinkedTaskIds.has(taskId)) return;
+  if (activeLinkedTaskIds.has(taskId)) {
+    return;
+  }
   activeLinkedTaskIds.add(taskId);
   ensureGlobalAutoLinkRunning();
 }
 
 export function unregisterActiveTask(taskId: string): void {
-  if (!activeLinkedTaskIds.delete(taskId)) return;
+  if (!activeLinkedTaskIds.delete(taskId)) {
+    return;
+  }
   if (activeLinkedTaskIds.size === 0) {
     stopGlobalAutoLink();
   }
 }
 
 async function globalTick(): Promise<void> {
-  if (globalRunning) return;
+  if (globalRunning) {
+    return;
+  }
   globalRunning = true;
   try {
     // 按需轮询：活跃任务集合为空时不做任何 listTasks 请求。
@@ -351,15 +381,21 @@ async function globalTick(): Promise<void> {
     const seen = new Set<string>();
     const allTasks: OrgTask[] = [];
     for (const task of [...claimed.items, ...published.items]) {
-      if (seen.has(task.id)) continue;
+      if (seen.has(task.id)) {
+        continue;
+      }
       seen.add(task.id);
       allTasks.push(task);
     }
     for (const task of allTasks) {
       if (task.status === 'AWAITING_CONTRACT' && !task.contractId) {
         // 已有 session 跳过；dismissed 跳过
-        if (sessions.has(task.id)) continue;
-        if (dismissedTaskIds.has(task.id)) continue;
+        if (sessions.has(task.id)) {
+          continue;
+        }
+        if (dismissedTaskIds.has(task.id)) {
+          continue;
+        }
         startAutoLink(task, {
           // 全局模式无 UI 弹窗：onMatch 直接 resolve(true)，
           // 让 startAutoLink 内部走「倒计时结束 → link-contract」流程。
@@ -403,21 +439,29 @@ async function globalTick(): Promise<void> {
 // 状态变化时调后端 sync-status 端点，状态映射由后端 CONTRACT_STATUS_TO_TASK 处理。
 async function syncLinkedContractStatus(task: OrgTask): Promise<void> {
   const all = contractsStore.all.value;
-  if (!all) return;
+  if (!all) {
+    return;
+  }
   // task.contractId 是 PrUn 玩家可见的合同短码（U787KK6）= Contract.localId。
   // Contract.id 是 FQID（base32 ulid），与 localId 不同；entity store 的 getById 用 id
   // 做 key 找不 shortId。所以直接遍历 all 数组按 localId 等值匹配。
   const id = task.contractId;
   const contract = all.find(c => c.localId === id) ?? all.find(c => c.id === id);
-  if (!contract) return;
+  if (!contract) {
+    return;
+  }
   // 后端 CONTRACT_STATUS_TO_TASK:
   //   CLOSED → IN_PROGRESS, FULFILLED → COMPLETED,
   //   CANCELLED/BREACHED/TERMINATED → CANCELLED
   // OPEN/PARTIALLY_FULFILLED/REJECTED/DEADLINE_EXCEEDED 不映射（保持 IN_PROGRESS）
   const mappableStatuses = new Set(['CLOSED', 'FULFILLED', 'CANCELLED', 'BREACHED', 'TERMINATED']);
-  if (!mappableStatuses.has(contract.status)) return;
+  if (!mappableStatuses.has(contract.status)) {
+    return;
+  }
   // 早退：如果任务状态已经是合同状态的终态映射（如 COMPLETED），不再调 sync-status。
-  if (task.status === 'COMPLETED' || task.status === 'CANCELLED') return;
+  if (task.status === 'COMPLETED' || task.status === 'CANCELLED') {
+    return;
+  }
   try {
     const tasksApi = await import('./tasks');
     const updated = await tasksApi.syncContractStatus(task.id, contract.status);
@@ -429,14 +473,18 @@ async function syncLinkedContractStatus(task: OrgTask): Promise<void> {
 
 // 仅在有活跃任务时起 interval。
 function ensureGlobalAutoLinkRunning(): void {
-  if (globalInterval || activeLinkedTaskIds.size === 0) return;
+  if (globalInterval || activeLinkedTaskIds.size === 0) {
+    return;
+  }
   startInterval();
 }
 
 // 实际创建 interval + 立即跑一次；不检查 activeLinkedTaskIds 大小
 // （由 ensureGlobalAutoLinkRunning 守门）。
 function startInterval(): void {
-  if (globalInterval) return;
+  if (globalInterval) {
+    return;
+  }
   // 启动时如果 contractsStore 还没 fetched，主动触发一次 CONTS 缓存窗口拉取
   // （autoClose=true 不让窗口停留）。PrUn server 收到 CONTS 命令后会推
   // CONTRACTS_CONTRACTS 消息，把所有合同加入 contractsStore.all，

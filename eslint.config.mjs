@@ -59,6 +59,10 @@ export default ts.config(
   {
     rules: {
       'prettier/prettier': 'warn',
+      // eslint-config-prettier disables `curly`, so this rule must come after
+      // the `prettier` block. Code blocks are always wrapped in braces, even
+      // single-line ones. See docs/contributing.md "Braces and Control Flow".
+      curly: ['error', 'all'],
     },
   },
 

@@ -5,7 +5,7 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { fillAmount } from '@src/features/XIT/ACT/actions/cx-buy/utils';
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { fixed0, fixed02 } from '@src/utils/format';
 import { sleep } from '@src/utils/sleep';
 import { ref } from 'vue';

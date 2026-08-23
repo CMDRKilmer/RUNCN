@@ -119,6 +119,8 @@ User settings live in `userData` (`src/store/user-data.ts`), a reactive object a
 
 Migrations (`user-data-migrations.ts`) run on every load to transform stored data to the current schema. New migrations go at the **top** of the list. A legacy versioned system (`user-data-versioned-migrations.ts`) exists for old data — do not add to it.
 
+Legacy shapes can also re-enter at runtime via clipboard import (e.g. FLEET's `importDispatchConfig`). When a migration normalizes a persisted shape, export the normalize function (see `normalizeDispatchBaseConfigs`) and call it on the import path too — features may import from `store/`, so the function lives in the migrations module and stays single-sourced.
+
 ---
 
 ## Auto-Imports (no explicit import needed)

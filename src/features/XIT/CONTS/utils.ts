@@ -219,7 +219,9 @@ export function getStatusClass(status: string): string {
 export function calculateProgress(contract: PrunApi.Contract) {
   const fulfilledCount = contract.conditions.filter(c => c.status === 'FULFILLED').length;
   const totalCount = contract.conditions.length;
-  if (totalCount === 0) return { fulfilled: 0, total: 0, percentage: 0 };
+  if (totalCount === 0) {
+    return { fulfilled: 0, total: 0, percentage: 0 };
+  }
   return {
     fulfilled: fulfilledCount,
     total: totalCount,
@@ -234,8 +236,28 @@ export function calculateProgress(contract: PrunApi.Contract) {
  * @returns 格式化后的金额字符串
  */
 export function formatAmount(amount: number, currency: string): string {
-  if (!currency || amount === 0) return '-';
+  if (!currency || amount === 0) {
+    return '-';
+  }
   return `${amount.toLocaleString()} ${currency}`;
+}
+
+/**
+ * 格式化地址为实体名称列表
+ * @param address 地址对象
+ * @returns 以 " / " 连接的实体名称，无有效行时返回 '-'
+ */
+export function formatAddress(address?: PrunApi.Address): string {
+  if (!address?.lines) {
+    return '-';
+  }
+  const parts: string[] = [];
+  for (const line of address.lines) {
+    if (line.entity) {
+      parts.push(line.entity.name);
+    }
+  }
+  return parts.join(' / ') || '-';
 }
 
 /**
@@ -244,8 +266,12 @@ export function formatAmount(amount: number, currency: string): string {
  * @returns 样式类名
  */
 export function getProgressClass(progress: number): string {
-  if (progress >= 100) return 'fulfilled';
-  if (progress > 50) return 'active';
+  if (progress >= 100) {
+    return 'fulfilled';
+  }
+  if (progress > 50) {
+    return 'active';
+  }
   return 'pending';
 }
 

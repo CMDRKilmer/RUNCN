@@ -1,4 +1,4 @@
-import { changeInputValue } from '@src/util';
+import { changeInputValue } from '@src/utils/dom';
 import { correctMaterialCommand } from './material-commands';
 import { correctPlanetCommand } from './planet-commands';
 import { correctShipCommand } from './ship-commands';

@@ -16,6 +16,8 @@ if (!site) {
 }
 ```
 
+Enforced by the `curly` ESLint rule. Caveat: custom style rules must be declared **after** the `prettier` block in `eslint.config.mjs` — `eslint-config-prettier` sets `curly` to off, so a rule placed before that block is silently disabled.
+
 Invert conditions early to reduce nesting:
 
 ```ts

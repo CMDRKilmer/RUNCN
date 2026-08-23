@@ -18,13 +18,27 @@ export interface ListTasksParams {
 export async function listTasks(params: ListTasksParams): Promise<ListTasksResult> {
   const search = new URLSearchParams();
   search.set('scope', params.scope);
-  if (params.type) search.set('type', params.type);
-  if (params.publisherUsername) search.set('publisherUsername', params.publisherUsername);
-  if (params.claimerUsername) search.set('claimerUsername', params.claimerUsername);
-  if (params.location) search.set('location', params.location);
-  if (params.since) search.set('since', params.since);
-  if (params.limit !== undefined) search.set('limit', String(params.limit));
-  if (params.cursor) search.set('cursor', params.cursor);
+  if (params.type) {
+    search.set('type', params.type);
+  }
+  if (params.publisherUsername) {
+    search.set('publisherUsername', params.publisherUsername);
+  }
+  if (params.claimerUsername) {
+    search.set('claimerUsername', params.claimerUsername);
+  }
+  if (params.location) {
+    search.set('location', params.location);
+  }
+  if (params.since) {
+    search.set('since', params.since);
+  }
+  if (params.limit !== undefined) {
+    search.set('limit', String(params.limit));
+  }
+  if (params.cursor) {
+    search.set('cursor', params.cursor);
+  }
   return request<ListTasksResult>(`/tasks?${search.toString()}`);
 }
 

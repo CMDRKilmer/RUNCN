@@ -1,6 +1,6 @@
 import { prunCssStylesheets } from '@src/infrastructure/prun-ui/prun-css';
 import $style from './prun-bugs.module.css';
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 
 function removeMobileCssRules() {
   for (const style of prunCssStylesheets) {

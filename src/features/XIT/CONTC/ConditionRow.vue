@@ -31,7 +31,9 @@ const dependencyInfo = computed(() => {
 });
 
 const deadlineStyle = computed(() => {
-  if (!isFinite(deadline)) return '';
+  if (!isFinite(deadline)) {
+    return '';
+  }
   return deadlineColor(deadline - timestampEachSecond.value);
 });
 </script>

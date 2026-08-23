@@ -1,4 +1,4 @@
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 
 function onTileReady(tile: PrunTile) {
   subscribe($$(tile.anchor, C.Contribution.contribute), async contribute => {

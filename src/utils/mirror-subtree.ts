@@ -1,4 +1,4 @@
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
 export function mirrorSubtree(origin: Element, target: Element, classes: string[]) {

@@ -34,7 +34,10 @@ const days = computed(() => {
   for (const order of orders.value) {
     for (const trade of order.trades) {
       let ts = trade.time.timestamp;
-      if (ts < 1e12) ts = ts * 1000; // Normalize seconds -> milliseconds
+      // Normalizes seconds to milliseconds.
+      if (ts < 1e12) {
+        ts = ts * 1000;
+      }
       trades.push({
         order,
         trade,

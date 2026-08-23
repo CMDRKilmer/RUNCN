@@ -30,7 +30,9 @@ const receivable = computed(() => {
     if (cond.type === 'PAYMENT' && cond.amount && cond.status !== 'FULFILLED') {
       if (cond.party !== contract.party) {
         total += cond.amount.amount;
-        if (!currency) currency = cond.amount.currency;
+        if (!currency) {
+          currency = cond.amount.currency;
+        }
       }
     }
   }
@@ -45,7 +47,9 @@ const payable = computed(() => {
     if (cond.type === 'PAYMENT' && cond.amount && cond.status !== 'FULFILLED') {
       if (cond.party === contract.party) {
         total += cond.amount.amount;
-        if (!currency) currency = cond.amount.currency;
+        if (!currency) {
+          currency = cond.amount.currency;
+        }
       }
     }
   }

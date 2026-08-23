@@ -129,7 +129,9 @@ const actGroups = computed(() => {
     }
     const bucket: Record<string, number> = {};
     for (const c of components.value) {
-      if (!selectedTickers.value.has(c.ticker)) continue;
+      if (!selectedTickers.value.has(c.ticker)) {
+        continue;
+      }
       bucket[c.ticker] = (bucket[c.ticker] ?? 0) + c.amount;
     }
     return new Map([[code, bucket]]);
@@ -213,7 +215,9 @@ function sendToContgen() {
       : new Set(components.value.map(c => c.ticker));
   const materials: Record<string, number> = {};
   for (const c of components.value) {
-    if (!tickersToSend.has(c.ticker)) continue;
+    if (!tickersToSend.has(c.ticker)) {
+      continue;
+    }
     materials[c.ticker] = (materials[c.ticker] ?? 0) + c.amount;
   }
   if (Object.keys(materials).length === 0) {

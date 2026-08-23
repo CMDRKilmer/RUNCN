@@ -1,6 +1,6 @@
 import { getPrunId } from '@src/infrastructure/prun-ui/attributes';
 import { localAdsStore } from '@src/infrastructure/prun-api/data/local-ads';
-import { extractPlanetName } from '@src/util';
+import { extractPlanetName } from '@src/core/game-lookups';
 
 function onTileReady(tile: PrunTile) {
   subscribe($$(tile.anchor, C.CommodityAd.container), async container => {

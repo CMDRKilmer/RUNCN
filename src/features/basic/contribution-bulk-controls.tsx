@@ -1,4 +1,4 @@
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { refAnimationFrame } from '@src/utils/reactive-dom';
 import PrunButton from '@src/components/PrunButton.vue';
 

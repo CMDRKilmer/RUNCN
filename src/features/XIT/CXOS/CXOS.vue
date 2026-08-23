@@ -12,10 +12,10 @@ import {
 } from '@src/infrastructure/prun-ui/utils/delete-exchange-order';
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { getPriceStep } from '@src/core/orders';
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { fixed0, fixed02, formatCurrency } from '@src/utils/format';
 import { sleep } from '@src/utils/sleep';
-import { getMaterialNameByTicker } from '@src/util';
+import { getMaterialNameByTicker } from '@src/core/game-lookups';
 import { isEmpty } from 'ts-extras';
 
 const orders = computed(() => cxosStore.all.value);
@@ -28,7 +28,9 @@ const materialSearch = ref('');
 // ── 可用交易所列表 ──
 const exchanges = computed(() => {
   const set = new Set<string>();
-  if (!orders.value) return [];
+  if (!orders.value) {
+    return [];
+  }
   for (const o of orders.value) {
     set.add(o.exchange.code);
   }
@@ -48,13 +50,21 @@ interface OrderWithRank extends PrunApi.CXOrder {
 
 // ── 筛选 + 排序 + 排名后的订单 ──
 const filteredOrders = computed<OrderWithRank[]>(() => {
-  if (!orders.value) return [];
+  if (!orders.value) {
+    return [];
+  }
   const filtered = orders.value.filter(o => {
-    if (!statusFilters.value.has(o.status)) return false;
-    if (exchangeFilter.value && o.exchange.code !== exchangeFilter.value) return false;
+    if (!statusFilters.value.has(o.status)) {
+      return false;
+    }
+    if (exchangeFilter.value && o.exchange.code !== exchangeFilter.value) {
+      return false;
+    }
     if (materialSearch.value) {
       const q = materialSearch.value.toUpperCase();
-      if (!o.material.ticker.includes(q)) return false;
+      if (!o.material.ticker.includes(q)) {
+        return false;
+      }
     }
     return true;
   });
@@ -92,7 +102,9 @@ const filteredOrders = computed<OrderWithRank[]>(() => {
   // 按交易所优先级排序, 同交易所按材料代码排序
   return result.sort((a, b) => {
     const rankDiff = getExchangeRank(a.exchange.code) - getExchangeRank(b.exchange.code);
-    if (rankDiff !== 0) return rankDiff;
+    if (rankDiff !== 0) {
+      return rankDiff;
+    }
     return a.material.ticker.localeCompare(b.material.ticker);
   });
 });
@@ -104,7 +116,9 @@ const stats = computed(() => {
   const byCurrency: Record<string, { total: number; count: number }> = {};
   for (const o of active) {
     const ccy = o.limit.currency;
-    if (!(ccy in byCurrency)) byCurrency[ccy] = { total: 0, count: 0 };
+    if (!(ccy in byCurrency)) {
+      byCurrency[ccy] = { total: 0, count: 0 };
+    }
     byCurrency[ccy].total += o.amount * o.limit.amount;
     byCurrency[ccy].count += 1;
   }
@@ -141,9 +155,13 @@ function formatOrderAmount(value: number, currency: string): string {
 // ── 一键加载市场排名 ──
 const missingTickers = computed(() => {
   const brokers = cxobStore.all.value;
-  if (!brokers) return 0;
+  if (!brokers) {
+    return 0;
+  }
   const loaded = new Set<string>();
-  for (const b of brokers) loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+  for (const b of brokers) {
+    loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+  }
   return filteredOrders.value.filter(
     o => o.status !== 'FILLED' && !loaded.has(`${o.exchange.code}|${o.material.ticker}`),
   ).length;
@@ -155,13 +173,19 @@ async function loadAllRanks() {
   loadingRanks.value = true;
   const brokers = cxobStore.all.value ?? [];
   const loaded = new Set<string>();
-  for (const b of brokers) loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+  for (const b of brokers) {
+    loaded.add(`${b.exchange.code}|${b.material.ticker}`);
+  }
 
   const toLoad: { key: string; command: string }[] = [];
   for (const o of filteredOrders.value) {
-    if (o.status === 'FILLED') continue;
+    if (o.status === 'FILLED') {
+      continue;
+    }
     const key = `${o.exchange.code}|${o.material.ticker}`;
-    if (loaded.has(key)) continue;
+    if (loaded.has(key)) {
+      continue;
+    }
     loaded.add(key);
     toLoad.push({
       key,
@@ -210,8 +234,11 @@ onMounted(() => {
 // ── 切换筛选 ──
 function toggleStatus(s: string) {
   const next = new Set(statusFilters.value);
-  if (next.has(s)) next.delete(s);
-  else next.add(s);
+  if (next.has(s)) {
+    next.delete(s);
+  } else {
+    next.add(s);
+  }
   statusFilters.value = next;
 }
 
@@ -252,7 +279,9 @@ function poll<T>(get: () => T | undefined, ms: number): Promise<T | undefined> {
 }
 
 function onPriceCut(event: MouseEvent, order: OrderWithRank) {
-  if (order.type !== 'SELLING') return;
+  if (order.type !== 'SELLING') {
+    return;
+  }
   const target = computeTargetPrice(order);
   if (target === undefined || target === null || Number.isNaN(target)) {
     return;
@@ -309,7 +338,9 @@ const allSelected = computed(
 );
 
 function toggleSelect(order: OrderWithRank) {
-  if (order.type !== 'SELLING' || order.status === 'FILLED') return;
+  if (order.type !== 'SELLING' || order.status === 'FILLED') {
+    return;
+  }
   const next = new Set(selectedIds.value);
   if (next.has(order.id)) {
     next.delete(order.id);
@@ -328,9 +359,13 @@ function toggleSelectAll() {
 }
 
 async function batchPriceCut() {
-  if (batchRunning.value) return;
+  if (batchRunning.value) {
+    return;
+  }
   const sells = selectedOrders.value;
-  if (sells.length === 0) return;
+  if (sells.length === 0) {
+    return;
+  }
 
   batchRunning.value = true;
   const targetElement = document.querySelector(`.${C.TileFrame.body}`) ?? document.body;
@@ -339,7 +374,9 @@ async function batchPriceCut() {
     const groups = new Map<string, OrderWithRank[]>();
     for (const o of sells) {
       const key = `${o.exchange.code}|${o.material.ticker}`;
-      if (!groups.has(key)) groups.set(key, []);
+      if (!groups.has(key)) {
+        groups.set(key, []);
+      }
       groups.get(key)!.push(o);
     }
 
@@ -352,11 +389,15 @@ async function batchPriceCut() {
           const broker = cxobStore.all.value?.find(
             b => b.exchange.code === exchange && b.material.ticker === ticker,
           );
-          if (!broker) return;
+          if (!broker) {
+            return;
+          }
           // 市场最低卖价（排除自己的所有订单）
           const myIds = new Set(orders.map(o => o.id));
           const others = broker.sellingOrders.filter(o => !myIds.has(o.id));
-          if (others.length === 0) return;
+          if (others.length === 0) {
+            return;
+          }
           let currentLowest = Math.min(...others.map(o => o.limit.amount));
 
           // 组内按当前价格从低到高处理：第一个压到最低-1档，
@@ -365,7 +406,9 @@ async function batchPriceCut() {
           for (const order of sorted) {
             const step = getPriceStep(currentLowest);
             const target = currentLowest - step;
-            if (target <= 0) continue;
+            if (target <= 0) {
+              continue;
+            }
             currentLowest = target;
             await runPriceCut(targetElement, order, target);
           }

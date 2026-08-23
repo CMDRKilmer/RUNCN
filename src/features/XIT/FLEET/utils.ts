@@ -44,18 +44,26 @@ interface ResupplyFilter {
 }
 
 function getPlanetBurnForResupply(data: ResupplyFilter, planet: string | undefined) {
-  if (!planet) return undefined;
+  if (!planet) {
+    return undefined;
+  }
   const site = sitesStore.getByPlanetNaturalIdOrName(planet);
-  if (!site) return undefined;
+  if (!site) {
+    return undefined;
+  }
   const workforce = workforcesStore.getById(site.siteId)?.workforces;
   const production = productionStore.getBySiteId(site.siteId);
-  if (workforce === undefined || production === undefined) return undefined;
+  if (workforce === undefined || production === undefined) {
+    return undefined;
+  }
   const stores = storagesStore.getByAddressableId(site.siteId);
   return calculatePlanetBurn(production, workforce, (data.useBaseInv ?? true) ? stores : undefined);
 }
 
 function isResupplyMaterial(mat: MaterialBurn, data: ResupplyFilter) {
-  if (mat.dailyAmount >= 0) return false;
+  if (mat.dailyAmount >= 0) {
+    return false;
+  }
   // 两个独立开关:
   //   consumablesOnly       → 是否纳入 workforce 消耗的物资(消耗品)
   //   includeConsumables    → 是否纳入 production 消耗的物资(原料)
@@ -75,13 +83,19 @@ function isResupplyMaterial(mat: MaterialBurn, data: ResupplyFilter) {
 // 数据未加载时返回 undefined；无净消耗物料时返回 Infinity。
 export function getBaseInventoryDays(data: ResupplyFilter, planet: string | undefined) {
   const planetBurn = getPlanetBurnForResupply(data, planet);
-  if (!planetBurn) return undefined;
+  if (!planetBurn) {
+    return undefined;
+  }
   let days = Infinity;
   for (const ticker of Object.keys(planetBurn)) {
     const mat = planetBurn[ticker];
-    if (!isResupplyMaterial(mat, data)) continue;
+    if (!isResupplyMaterial(mat, data)) {
+      continue;
+    }
     const dailyConsume = -mat.dailyAmount;
-    if (dailyConsume <= 0) continue;
+    if (dailyConsume <= 0) {
+      continue;
+    }
     const invDays = mat.inventory > 0 ? mat.inventory / dailyConsume : 0;
     days = Math.min(days, invDays);
   }
@@ -93,31 +107,47 @@ export function computeResupplyBill(
   planet: string | undefined,
   days: number | undefined,
 ): Record<string, number> | undefined {
-  if (days === undefined || isNaN(days)) return undefined;
+  if (days === undefined || isNaN(days)) {
+    return undefined;
+  }
   const planetBurn = getPlanetBurnForResupply(data, planet);
-  if (!planetBurn) return undefined;
+  if (!planetBurn) {
+    return undefined;
+  }
   const site = planet ? sitesStore.getByPlanetNaturalIdOrName(planet) : undefined;
-  if (!site) return undefined;
+  if (!site) {
+    return undefined;
+  }
   // days 与 BURN/ACT Resupply 一致：总目标天数（补到第 N 天），
   // 不是「再补 N 天」。库存口径：只看 matBurn.inventory，不计 remainingAllocation。
   // suppliesCapDays：补后总天数不得超出此值，防止补给填满仓库导致产出无处存放；
   // analysis 未加载时不限制。超出则钳制到 cap。
   const targetDays = clampTargetDays(days, getSuppliesCap(site));
-  if (targetDays <= 0) return {};
+  if (targetDays <= 0) {
+    return {};
+  }
   const useBaseInv = data.useBaseInv ?? true;
   const bill: Record<string, number> = {};
   for (const ticker of Object.keys(planetBurn)) {
     const matBurn = planetBurn[ticker];
-    if (!isResupplyMaterial(matBurn, data)) continue;
+    if (!isResupplyMaterial(matBurn, data)) {
+      continue;
+    }
     const dailyConsume = -matBurn.dailyAmount;
-    if (dailyConsume <= 0) continue;
+    if (dailyConsume <= 0) {
+      continue;
+    }
     // 与 BURN/ACT Resupply 公式一致：days * dailyConsume - inventory。
     // inventory 已在 storage 计算时累加进 matBurn.inventory，无需再访问 store。
     const inventory = useBaseInv ? matBurn.inventory : 0;
-    if (useBaseInv && inventory >= targetDays * dailyConsume) continue;
+    if (useBaseInv && inventory >= targetDays * dailyConsume) {
+      continue;
+    }
     const rawRequired = targetDays * dailyConsume - inventory;
     const required = Math.max(0, rawRequired);
-    if (required <= 0) continue;
+    if (required <= 0) {
+      continue;
+    }
     bill[ticker] = Math.ceil(required);
   }
   return bill;
@@ -133,7 +163,9 @@ export function computeRepairBill(site: PrunApi.Site, advance: BraAdvance): Reco
         : 'repairMaterials';
   const parsedGroup: Record<string, number> = {};
   for (const building of site.platforms) {
-    if (!isRepairableBuilding(building)) continue;
+    if (!isRepairableBuilding(building)) {
+      continue;
+    }
     for (const mat of building[key] ?? []) {
       const ticker = mat.material.ticker;
       parsedGroup[ticker] = (parsedGroup[ticker] ?? 0) + mat.amount;
@@ -385,8 +417,12 @@ export function fitDaysForShip(
 }
 
 export function formatBurnDays(days: number) {
-  if (days > 999) return '∞';
-  if (days >= 10) return fixed0(Math.floor(days));
+  if (days > 999) {
+    return '∞';
+  }
+  if (days >= 10) {
+    return fixed0(Math.floor(days));
+  }
   return fixed01(days);
 }
 

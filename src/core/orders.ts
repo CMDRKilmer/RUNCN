@@ -10,8 +10,12 @@ export function isFiniteOrder(
 
 // 交易所挂单价位步长（CXOS 压价同款）：按价格档位取下一档的步进。
 export function getPriceStep(price: number) {
-  if (price >= 10000) return 100;
-  if (price >= 1000) return 10;
+  if (price >= 10000) {
+    return 100;
+  }
+  if (price >= 1000) {
+    return 10;
+  }
   return 1;
 }
 

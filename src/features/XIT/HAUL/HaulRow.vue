@@ -5,6 +5,7 @@ import PartnerLink from '@src/features/XIT/CONTS/PartnerLink.vue';
 import ProgressBarWithText from '@src/components/ProgressBarWithText.vue';
 import {
   formatAmount,
+  formatAddress,
   getStatusText,
   getStatusClass,
   calculateProgress,
@@ -15,32 +16,28 @@ const { contract } = defineProps<{
   type: 'carrier' | 'shipper';
 }>();
 
-// 格式化地址
-function formatAddress(address?: PrunApi.Address): string {
-  if (!address?.lines) return '-';
-  const parts: string[] = [];
-  for (const line of address.lines) {
-    if (line.entity) {
-      parts.push(line.entity.name);
-    }
-  }
-  return parts.join(' / ') || '-';
-}
-
 // 提取起点地址（从 PICKUP_SHIPMENT/PROVISION_SHIPMENT 条件）
 const origin = computed(() => {
   const pickup = contract.conditions.find(c => c.type === 'PICKUP_SHIPMENT');
-  if (pickup?.address) return formatAddress(pickup.address);
+  if (pickup?.address) {
+    return formatAddress(pickup.address);
+  }
   const provision = contract.conditions.find(c => c.type === 'PROVISION_SHIPMENT');
-  if (provision?.address) return formatAddress(provision.address);
+  if (provision?.address) {
+    return formatAddress(provision.address);
+  }
   return '-';
 });
 
 // 提取终点地址（从 DELIVERY_SHIPMENT 条件）
 const destination = computed(() => {
   const delivery = contract.conditions.find(c => c.type === 'DELIVERY_SHIPMENT');
-  if (delivery?.destination) return formatAddress(delivery.destination);
-  if (delivery?.address) return formatAddress(delivery.address);
+  if (delivery?.destination) {
+    return formatAddress(delivery.destination);
+  }
+  if (delivery?.address) {
+    return formatAddress(delivery.address);
+  }
   return '-';
 });
 
@@ -68,7 +65,9 @@ const cargo = computed(() => {
 // 运费（PAYMENT 条件）
 const payment = computed(() => {
   const pay = contract.conditions.find(c => c.type === 'PAYMENT');
-  if (!pay?.amount) return '-';
+  if (!pay?.amount) {
+    return '-';
+  }
   return formatAmount(pay.amount.amount, pay.amount.currency);
 });
 
@@ -96,24 +95,34 @@ const cargoMetrics = computed(() => {
 const ratePerT = computed(() => {
   const pay = contract.conditions.find(c => c.type === 'PAYMENT')?.amount;
   const cargo = cargoMetrics.value;
-  if (!pay || !cargo || cargo.weight === 0) return undefined;
+  if (!pay || !cargo || cargo.weight === 0) {
+    return undefined;
+  }
   return pay.amount / cargo.weight;
 });
 
 const ratePerM3 = computed(() => {
   const pay = contract.conditions.find(c => c.type === 'PAYMENT')?.amount;
   const cargo = cargoMetrics.value;
-  if (!pay || !cargo || cargo.volume === 0) return undefined;
+  if (!pay || !cargo || cargo.volume === 0) {
+    return undefined;
+  }
   return pay.amount / cargo.volume;
 });
 
 const rateText = computed(() => {
   const t = ratePerT.value;
   const m = ratePerM3.value;
-  if (t === undefined && m === undefined) return '-';
+  if (t === undefined && m === undefined) {
+    return '-';
+  }
   const parts: string[] = [];
-  if (t !== undefined) parts.push(`${t.toFixed(0)}/t`);
-  if (m !== undefined) parts.push(`${m.toFixed(0)}/m³`);
+  if (t !== undefined) {
+    parts.push(`${t.toFixed(0)}/t`);
+  }
+  if (m !== undefined) {
+    parts.push(`${m.toFixed(0)}/m³`);
+  }
   return parts.join(' ');
 });
 

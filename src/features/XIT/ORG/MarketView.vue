@@ -65,8 +65,11 @@ onMounted(refresh);
 
 function toggle(ticker: string) {
   const next = new Set(expanded.value);
-  if (next.has(ticker)) next.delete(ticker);
-  else next.add(ticker);
+  if (next.has(ticker)) {
+    next.delete(ticker);
+  } else {
+    next.add(ticker);
+  }
   expanded.value = next;
 }
 
@@ -140,9 +143,13 @@ const materialRows = computed<MaterialRow[]>(() => {
   const map = new Map<string, MaterialRow>();
   // 1) 先用 PrUn 全部商品做底（含无挂单的商品）
   for (const material of materialsStore.all.value ?? []) {
-    if (material.resource) continue; // 资源类不参与市场
+    if (material.resource) {
+      continue;
+    } // 资源类不参与市场
     const ticker = material.ticker;
-    if (!ticker) continue;
+    if (!ticker) {
+      continue;
+    }
     map.set(ticker, {
       ticker,
       name: getMaterialName(material) ?? ticker,
@@ -153,10 +160,18 @@ const materialRows = computed<MaterialRow[]>(() => {
   }
   // 2) 把所有 OPEN 挂单摊到对应商品行
   for (const listing of listings.value) {
-    if (listing.status !== 'OPEN') continue;
-    if (listing.type !== 'BUY' && listing.type !== 'SELL') continue;
-    if (listing.remainingAmount <= 0) continue;
-    if (listing.price <= 0) continue;
+    if (listing.status !== 'OPEN') {
+      continue;
+    }
+    if (listing.type !== 'BUY' && listing.type !== 'SELL') {
+      continue;
+    }
+    if (listing.remainingAmount <= 0) {
+      continue;
+    }
+    if (listing.price <= 0) {
+      continue;
+    }
     const ticker = listing.commodity;
     let row = map.get(ticker);
     if (!row) {
@@ -191,7 +206,9 @@ const materialRows = computed<MaterialRow[]>(() => {
       if (a.type !== b.type) {
         return a.type === 'BUY' ? -1 : 1;
       }
-      if (a.type === 'BUY') return b.price - a.price;
+      if (a.type === 'BUY') {
+        return b.price - a.price;
+      }
       return a.price - b.price;
     });
   }
@@ -208,11 +225,19 @@ const materialRows = computed<MaterialRow[]>(() => {
 const categoryIdToLabel = computed<Map<string, string>>(() => {
   const map = new Map<string, string>();
   for (const m of materialsStore.all.value ?? []) {
-    if (m.resource) continue;
-    if (!m.category) continue;
-    if (map.has(m.category)) continue;
+    if (m.resource) {
+      continue;
+    }
+    if (!m.category) {
+      continue;
+    }
+    if (map.has(m.category)) {
+      continue;
+    }
     const label = getMaterialCategoryName(m.category);
-    if (label) map.set(m.category, label);
+    if (label) {
+      map.set(m.category, label);
+    }
   }
   return map;
 });
@@ -237,31 +262,45 @@ const displayRows = computed<MaterialRow[]>(() => {
   const q = searchQuery.value.trim().toLowerCase();
   const cat = selectedCategory.value;
   const rows = materialRows.value.filter(r => {
-    if (onlyWithListings.value && r.orders.length === 0) return false;
+    if (onlyWithListings.value && r.orders.length === 0) {
+      return false;
+    }
     // 分类过滤：selectedCategory 是分类 id（'all' 表示不过滤）
-    if (cat !== 'all' && r.category !== cat) return false;
+    if (cat !== 'all' && r.category !== cat) {
+      return false;
+    }
     if (q) {
       const hay = `${r.ticker} ${r.name}`.toLowerCase();
-      if (!hay.includes(q)) return false;
+      if (!hay.includes(q)) {
+        return false;
+      }
     }
     return true;
   });
   return rows.sort((a, b) => {
     // 有挂单的优先（按 ticker 升序）
-    if (a.orders.length > 0 && b.orders.length === 0) return -1;
-    if (a.orders.length === 0 && b.orders.length > 0) return 1;
+    if (a.orders.length > 0 && b.orders.length === 0) {
+      return -1;
+    }
+    if (a.orders.length === 0 && b.orders.length > 0) {
+      return 1;
+    }
     return a.ticker.localeCompare(b.ticker);
   });
 });
 
 function bestBidPrice(orders: MarketOrder[]): number | undefined {
   const bids = orders.filter(o => o.type === 'BUY');
-  if (bids.length === 0) return undefined;
+  if (bids.length === 0) {
+    return undefined;
+  }
   return Math.max(...bids.map(o => o.price));
 }
 function bestAskPrice(orders: MarketOrder[]): number | undefined {
   const asks = orders.filter(o => o.type === 'SELL');
-  if (asks.length === 0) return undefined;
+  if (asks.length === 0) {
+    return undefined;
+  }
   return Math.min(...asks.map(o => o.price));
 }
 function totalAmount(orders: MarketOrder[], type: 'BUY' | 'SELL'): number {
@@ -269,12 +308,16 @@ function totalAmount(orders: MarketOrder[], type: 'BUY' | 'SELL'): number {
 }
 function bestBid(orders: MarketOrder[]): MarketOrder | undefined {
   const bids = orders.filter(o => o.type === 'BUY');
-  if (bids.length === 0) return undefined;
+  if (bids.length === 0) {
+    return undefined;
+  }
   return bids.reduce((a, b) => (a.price >= b.price ? a : b));
 }
 function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   const asks = orders.filter(o => o.type === 'SELL');
-  if (asks.length === 0) return undefined;
+  if (asks.length === 0) {
+    return undefined;
+  }
   return asks.reduce((a, b) => (a.price <= b.price ? a : b));
 }
 </script>

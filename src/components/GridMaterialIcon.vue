@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import GridItemView from '@src/components/GridItemView.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
-import { getMaterialNameByTicker } from '@src/util';
+import { getMaterialNameByTicker } from '@src/core/game-lookups';
 
 const { text, ticker } = defineProps<{
   amount?: number;

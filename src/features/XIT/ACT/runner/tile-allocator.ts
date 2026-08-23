@@ -1,7 +1,7 @@
 import { getPrunId } from '@src/infrastructure/prun-ui/attributes';
 import { UI_TILES_CHANGE_COMMAND } from '@src/infrastructure/prun-api/client-messages';
 import { dispatchClientPrunMessage } from '@src/infrastructure/prun-api/prun-api-listener';
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import css from '@src/utils/css-utils.module.css';

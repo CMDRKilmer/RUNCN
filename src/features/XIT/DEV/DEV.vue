@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { downloadFile } from '@src/util';
+import { downloadFile } from '@src/utils/dom';
 import DebugButton from '@src/features/XIT/DEV/DevButton.vue';
 import { userData } from '@src/store/user-data';
 import Cookies from 'js-cookie';

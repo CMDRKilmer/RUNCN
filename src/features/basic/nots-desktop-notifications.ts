@@ -94,7 +94,9 @@ function formatAddress(address: PrunApi.Address): string {
   // 降级：取第一个有 entity 的行
   for (const line of address.lines) {
     const l = line as PrunApi.UnknownAddressLine;
-    if (l.entity) return l.entity.name || l.entity.naturalId;
+    if (l.entity) {
+      return l.entity.name || l.entity.naturalId;
+    }
   }
   return '';
 }
@@ -106,8 +108,12 @@ function formatAlertBody(alert: PrunApi.Alert): string {
       const reg = getData(alert, 'registration') as string | undefined;
       const dest = getData(alert, 'destination') as { address: PrunApi.Address } | undefined;
       const destStr = dest ? formatAddress(dest.address) : '';
-      if (reg && destStr) return `舰只 ${reg} 已到达 ${destStr}`;
-      if (reg) return `舰只 ${reg} 已到达目的地`;
+      if (reg && destStr) {
+        return `舰只 ${reg} 已到达 ${destStr}`;
+      }
+      if (reg) {
+        return `舰只 ${reg} 已到达目的地`;
+      }
       return '飞船已到达目的地';
     }
     case 'COMEX_ORDER_FILLED': {
@@ -139,8 +145,12 @@ function formatAlertBody(alert: PrunApi.Alert): string {
     case 'PRODUCTION_ORDER_FINISHED': {
       const material = getData(alert, 'material') as string | undefined;
       const quantity = getData(alert, 'quantity') as number | undefined;
-      if (material && quantity != null) return `${material} × ${quantity} 生产完成`;
-      if (material) return `${material} 生产完成`;
+      if (material && quantity != null) {
+        return `${material} × ${quantity} 生产完成`;
+      }
+      if (material) {
+        return `${material} 生产完成`;
+      }
       return '生产订单已完成';
     }
     case 'CONTRACT_CONDITION_FULFILLED': {
@@ -311,8 +321,12 @@ function formatAlertBody(alert: PrunApi.Alert): string {
 
 // ── 发送桌面通知 ──────────────────────────────────────────────────────────────
 function sendDesktopNotification(alert: PrunApi.Alert) {
-  if (Notification.permission !== 'granted') return;
-  if (userData.settings.mutedDesktopNotifications.includes(alert.type)) return;
+  if (Notification.permission !== 'granted') {
+    return;
+  }
+  if (userData.settings.mutedDesktopNotifications.includes(alert.type)) {
+    return;
+  }
   const label = labelMap.get(alert.type) ?? '通知';
   const body = formatAlertBody(alert);
   new Notification(`APEX — ${label}`, {
@@ -340,7 +354,9 @@ async function init() {
   watch(
     () => alertsStore.all.value,
     alerts => {
-      if (!alerts || Notification.permission !== 'granted') return;
+      if (!alerts || Notification.permission !== 'granted') {
+        return;
+      }
       for (const alert of alerts) {
         if (!knownIds.has(alert.id)) {
           knownIds.add(alert.id);

@@ -333,7 +333,9 @@ function onUploadClick() {
 watch(
   () => importText.value,
   next => {
-    if (next.trim().length === 0) importStatus.value = null;
+    if (next.trim().length === 0) {
+      importStatus.value = null;
+    }
   },
 );
 
@@ -352,7 +354,9 @@ function computeUnit(total: number, amount: number): number {
 }
 
 function applyTotalPrice() {
-  if (!canApplyTotal.value) return;
+  if (!canApplyTotal.value) {
+    return;
+  }
   const total = Number(totalPrice.value);
   if (!Number.isFinite(total) || total < 0) {
     importStatus.value = { kind: 'err', message: '请输入有效的总价。' };

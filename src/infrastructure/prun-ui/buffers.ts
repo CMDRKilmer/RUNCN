@@ -1,4 +1,4 @@
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import css from '@src/utils/css-utils.module.css';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';

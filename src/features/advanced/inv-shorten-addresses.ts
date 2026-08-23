@@ -1,4 +1,4 @@
-import { extractPlanetName } from '@src/util';
+import { extractPlanetName } from '@src/core/game-lookups';
 
 function onTileReady(tile: PrunTile) {
   // 仅在主 INV 磁贴中缩短名称

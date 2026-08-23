@@ -130,26 +130,35 @@ function unitWeight(opp: ArbOpportunity): number {
 }
 
 function maxUnitsFor(opp: ArbOpportunity): number {
-  if (!selectedSelected.value) return opp.executableVolume;
+  if (!selectedSelected.value) {
+    return opp.executableVolume;
+  }
   const sel = selectedSelected.value;
   const v = unitVolume(opp);
   const w = unitWeight(opp);
-  if (v <= 0 || w <= 0) return 0;
+  if (v <= 0 || w <= 0) {
+    return 0;
+  }
   const byVol = sel.freeVolume > 0 ? Math.floor(sel.freeVolume / v) : Infinity;
   const byWeight = sel.freeWeight > 0 ? Math.floor(sel.freeWeight / w) : Infinity;
   return Math.min(opp.executableVolume, byVol, byWeight);
 }
 
 function shipFitsAny(opp: ArbOpportunity): boolean {
-  if (!selectedSelected.value) return true;
+  if (!selectedSelected.value) {
+    return true;
+  }
   return maxUnitsFor(opp) > 0;
 }
 
 function toggleChecked(ticker: string, ev: Event) {
   const checked = (ev.target as HTMLInputElement).checked;
   const next = new Set(checkedTickers.value);
-  if (checked) next.add(ticker);
-  else next.delete(ticker);
+  if (checked) {
+    next.add(ticker);
+  } else {
+    next.delete(ticker);
+  }
   checkedTickers.value = next;
 }
 
@@ -220,7 +229,9 @@ function buildShipmentItems(): ShipmentItem[] {
   // 之前用 buyQuantity 直接封顶会导致 sellQuantity < buyQuantity 时超买。
   const byKey = new Map<string, ShipmentItem>();
   for (const o of filtered.value) {
-    if (!checkedTickers.value.has(o.ticker) || o.profitPerUnit <= 0) continue;
+    if (!checkedTickers.value.has(o.ticker) || o.profitPerUnit <= 0) {
+      continue;
+    }
     const key = `${o.ticker}|${o.buyExchange}|${o.buyPrice}`;
     const v = unitVolume(o);
     const w = unitWeight(o);
@@ -251,12 +262,16 @@ const suggestedUnits = (() => {
     return `${selectedShipId.value}|${checked.join(',')}`;
   };
   const compute = (opp: ArbOpportunity): number => {
-    if (!selectedSelected.value) return 0;
+    if (!selectedSelected.value) {
+      return 0;
+    }
     const fingerprint = computeFingerprint();
     const itemKey = `${opp.ticker}|${opp.buyExchange}|${opp.buyPrice}`;
     const cacheKey = `${fingerprint}|${itemKey}`;
     const cached = cache.get(cacheKey);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      return cached;
+    }
 
     if (!checkedTickers.value.has(opp.ticker)) {
       cache.set(cacheKey, 0);
@@ -281,11 +296,15 @@ const suggestedUnits = (() => {
     });
     for (const it of sorted) {
       // 单位缺失时无法估算体积/重量消耗，跳过装载，避免 ACT 实际超出船容。
-      if (it.v <= 0 || it.w <= 0) continue;
+      if (it.v <= 0 || it.w <= 0) {
+        continue;
+      }
       const byVol = Math.floor(remVol / it.v);
       const byWt = Math.floor(remWt / it.w);
       const cap = Math.min(it.totalCapacity, byVol, byWt);
-      if (cap <= 0) continue;
+      if (cap <= 0) {
+        continue;
+      }
       remVol -= cap * it.v;
       remWt -= cap * it.w;
       if (
@@ -326,11 +345,17 @@ function totalExpectedProfitFor(ticker: string): number {
   let total = 0;
   const counted = new Set<string>();
   for (const o of filtered.value) {
-    if (o.ticker !== ticker) continue;
+    if (o.ticker !== ticker) {
+      continue;
+    }
     const itemKey = `${o.buyExchange}|${o.buyPrice}`;
-    if (counted.has(itemKey)) continue;
+    if (counted.has(itemKey)) {
+      continue;
+    }
     const units = suggestedUnits(o);
-    if (units <= 0) continue;
+    if (units <= 0) {
+      continue;
+    }
     counted.add(itemKey);
     total += profitForBuyLevel(o, units);
   }
@@ -342,11 +367,17 @@ function totalSuggestedUnits(ticker: string): number {
   let total = 0;
   const counted = new Set<string>();
   for (const o of filtered.value) {
-    if (o.ticker !== ticker) continue;
+    if (o.ticker !== ticker) {
+      continue;
+    }
     const itemKey = `${o.buyExchange}|${o.buyPrice}`;
-    if (counted.has(itemKey)) continue;
+    if (counted.has(itemKey)) {
+      continue;
+    }
     const units = suggestedUnits(o);
-    if (units <= 0) continue;
+    if (units <= 0) {
+      continue;
+    }
     counted.add(itemKey);
     total += units;
   }
@@ -406,11 +437,17 @@ const summary = computed(() => {
   let totalProfit = 0;
   const counted = new Set<string>();
   for (const o of filtered.value) {
-    if (!checkedTickers.value.has(o.ticker)) continue;
+    if (!checkedTickers.value.has(o.ticker)) {
+      continue;
+    }
     const itemKey = `${o.ticker}|${o.buyExchange}|${o.buyPrice}`;
-    if (counted.has(itemKey)) continue;
+    if (counted.has(itemKey)) {
+      continue;
+    }
     const units = suggestedUnits(o);
-    if (units <= 0) continue;
+    if (units <= 0) {
+      continue;
+    }
     counted.add(itemKey);
     totalWeight += unitWeight(o) * units;
     totalVolume += unitVolume(o) * units;
@@ -428,15 +465,21 @@ const sourceCurrency = computed(
 // 一键生成 ACT 脚本：把勾选 + 贪心分配的商品打包成一个 CX Buy action package，
 // 推入 userData.actionPackages 并自动打开 ACT_EDIT 缓冲窗。
 function generateActScript() {
-  if (!selectedSelected.value || checkedTickers.value.size === 0) return;
+  if (!selectedSelected.value || checkedTickers.value.size === 0) {
+    return;
+  }
 
   const materials: Record<string, number> = {};
   for (const ticker of checkedTickers.value) {
     const units = totalSuggestedUnits(ticker);
-    if (units <= 0) continue;
+    if (units <= 0) {
+      continue;
+    }
     materials[ticker] = units;
   }
-  if (Object.keys(materials).length === 0) return;
+  if (Object.keys(materials).length === 0) {
+    return;
+  }
 
   const ship = selectedSelected.value.ship;
   const exchange = sourceExchange.value;

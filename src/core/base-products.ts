@@ -24,9 +24,15 @@ export function setBaseProducts(siteId: string, products: string[]) {
   const seen = new Set<string>();
   for (const raw of products) {
     const ticker = raw.trim().toUpperCase();
-    if (ticker.length === 0) continue;
-    if (!materialsStore.getByTicker(ticker)) continue;
-    if (seen.has(ticker)) continue;
+    if (ticker.length === 0) {
+      continue;
+    }
+    if (!materialsStore.getByTicker(ticker)) {
+      continue;
+    }
+    if (seen.has(ticker)) {
+      continue;
+    }
     seen.add(ticker);
     cleaned.push(ticker);
   }

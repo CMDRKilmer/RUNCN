@@ -20,10 +20,18 @@ export interface ListListingsParams {
 
 export async function listListings(params: ListListingsParams = {}): Promise<OrgListing[]> {
   const query: Record<string, string> = {};
-  if (params.commodity) query.commodity = params.commodity;
-  if (params.type) query.type = params.type;
-  if (params.scope) query.scope = params.scope;
-  if (params.limit !== undefined) query.limit = String(params.limit);
+  if (params.commodity) {
+    query.commodity = params.commodity;
+  }
+  if (params.type) {
+    query.type = params.type;
+  }
+  if (params.scope) {
+    query.scope = params.scope;
+  }
+  if (params.limit !== undefined) {
+    query.limit = String(params.limit);
+  }
   const qs = new URLSearchParams(query).toString();
   const path = `/listings${qs ? `?${qs}` : ''}`;
   const result = await request<ListListingsResult>(path);

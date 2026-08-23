@@ -13,9 +13,49 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
   return entry.length === 1;
 }
 
+// 将旧版 FLEET 派遣配置归一为当前 schema：
+// materialFilter（字符串）拆分为 consumablesOnly / includeConsumables / cxBuy，
+// 数字型 repAdvance 归一为 BRA 三档。剪贴板导入旧配置时也会调用。
+export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
+  for (const naturalId of Object.keys(configs)) {
+    const config = configs[naturalId];
+    if (config === null || typeof config !== 'object') {
+      continue;
+    }
+    if (
+      config.consumablesOnly === undefined ||
+      config.includeConsumables === undefined ||
+      config.cxBuy === undefined ||
+      config.materialFilter !== undefined
+    ) {
+      const legacy = config.materialFilter;
+      config.consumablesOnly ??= legacy === 'Workforce';
+      config.includeConsumables ??= legacy !== 'Production';
+      config.cxBuy ??= true;
+      delete config.materialFilter;
+    }
+    if (config.repAdvance !== 'now' && config.repAdvance !== '24' && config.repAdvance !== '48') {
+      config.repAdvance = 'now';
+    }
+  }
+}
+
 // 新的迁移应添加到列表顶部。
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
+  [
+    '22.08.2026 Normalize FLEET dispatch base configs',
+    userData => {
+      const tileState: Record<string, any> = userData.tileState ?? {};
+      for (const state of Object.values(tileState)) {
+        const configs = state?.baseConfigs;
+        if (configs === null || typeof configs !== 'object') {
+          continue;
+        }
+        normalizeDispatchBaseConfigs(configs);
+      }
+    },
+  ],
   [
     '22.08.2026 Add base products',
     userData => {
@@ -229,7 +269,9 @@ const migrations: MigrationEntry[] = [
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;
       const idx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT BURN');
-      if (idx >= 0) sidebar[idx][0] = '消耗';
+      if (idx >= 0) {
+        sidebar[idx][0] = '消耗';
+      }
     },
   ],
   [
@@ -237,13 +279,19 @@ const migrations: MigrationEntry[] = [
     userData => {
       const sidebar: [string, string][] = userData.settings.sidebar;
       const setIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT SET');
-      if (setIdx >= 0) sidebar[setIdx][0] = '设置';
+      if (setIdx >= 0) {
+        sidebar[setIdx][0] = '设置';
+      }
 
       const helpIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT HELP');
-      if (helpIdx >= 0) sidebar[helpIdx][0] = '帮助';
+      if (helpIdx >= 0) {
+        sidebar[helpIdx][0] = '帮助';
+      }
 
       const facIdx = sidebar.findIndex(([, cmd]: [string, string]) => cmd === 'XIT FACTION');
-      if (facIdx >= 0) sidebar[facIdx][0] = '琉璃';
+      if (facIdx >= 0) {
+        sidebar[facIdx][0] = '琉璃';
+      }
     },
   ],
   [

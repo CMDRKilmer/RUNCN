@@ -1,4 +1,4 @@
-import { extractPlanetName } from '@src/util';
+import { extractPlanetName } from '@src/core/game-lookups';
 
 function onTileReady(tile: PrunTile) {
   subscribe($$(tile.anchor, C.Link.link), link => {

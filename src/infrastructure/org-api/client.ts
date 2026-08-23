@@ -25,7 +25,9 @@ const REFRESH_AHEAD_SECONDS = 60;
 // 不做签名校验——后端会在 401 时兜底；这里只用来决策"是否要提前 refresh"。
 function getAccessTokenExp(token: string): number | null {
   const parts = token.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) {
+    return null;
+  }
   try {
     // base64url → base64
     const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');

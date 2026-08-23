@@ -4,7 +4,7 @@ import Active from '@src/components/forms/Active.vue';
 import { Config } from '@src/features/XIT/ACT/material-groups/repair/config';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 
 const { config } = defineProps<{ data: UserData.ActionData; config: Config }>();
 

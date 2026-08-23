@@ -82,7 +82,9 @@ export class ActionRunner {
         }
       }
       const ticker = (step as ActionStep & { ticker?: string }).ticker;
-      if (!ticker && step.type !== 'MTRA_BATCH') continue;
+      if (!ticker && step.type !== 'MTRA_BATCH') {
+        continue;
+      }
       if (stepInfo.weight !== undefined) {
         const w = stepInfo.weight(step) ?? 0;
         if (step.type === 'CXPO_BUY') {
@@ -125,14 +127,22 @@ export class ActionRunner {
     }
     if (buyWeight > 0 || buyVolume > 0) {
       const buyParts: string[] = [];
-      if (buyWeight > 0) buyParts.push(`重量 ${fixed2(buyWeight)} t`);
-      if (buyVolume > 0) buyParts.push(`体积 ${fixed2(buyVolume)} m3`);
+      if (buyWeight > 0) {
+        buyParts.push(`重量 ${fixed2(buyWeight)} t`);
+      }
+      if (buyVolume > 0) {
+        buyParts.push(`体积 ${fixed2(buyVolume)} m3`);
+      }
       this.log.summary(`购买：${buyParts.join('，')}`);
     }
     if (transferWeight > 0 || transferVolume > 0) {
       const transferParts: string[] = [];
-      if (transferWeight > 0) transferParts.push(`重量 ${fixed2(transferWeight)} t`);
-      if (transferVolume > 0) transferParts.push(`体积 ${fixed2(transferVolume)} m3`);
+      if (transferWeight > 0) {
+        transferParts.push(`重量 ${fixed2(transferWeight)} t`);
+      }
+      if (transferVolume > 0) {
+        transferParts.push(`体积 ${fixed2(transferVolume)} m3`);
+      }
       this.log.summary(`转移：${transferParts.join('，')}`);
     }
     // 再显示每个步骤的详情
@@ -207,7 +217,9 @@ export class ActionRunner {
         };
       })
       .filter(({ cxTicker }) => !cxobStore.getByTicker(cxTicker));
-    if (cxTickers.length === 0) return;
+    if (cxTickers.length === 0) {
+      return;
+    }
     const opened: { window: Element; closeWhen: Ref<boolean> }[] = [];
     try {
       for (const { command } of cxTickers) {
@@ -226,7 +238,9 @@ export class ActionRunner {
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
         const allReady = cxTickers.every(({ cxTicker }) => !!cxobStore.getByTicker(cxTicker));
-        if (allReady) break;
+        if (allReady) {
+          break;
+        }
         await sleep(200);
       }
     } finally {

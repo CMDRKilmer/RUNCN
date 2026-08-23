@@ -1,5 +1,5 @@
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
-import { changeInputValue } from '@src/util';
+import { changeInputValue } from '@src/utils/dom';
 import { fixed02 } from '@src/utils/format';
 import { refValue } from '@src/utils/reactive-dom';
 import { createReactiveDiv } from '@src/utils/reactive-element';

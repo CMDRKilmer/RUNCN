@@ -1,4 +1,4 @@
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { mirrorConfirmationOverlay } from '@src/infrastructure/prun-ui/utils/mirror-confirmation-overlay';
 import { getPrunId } from '@src/infrastructure/prun-ui/attributes';

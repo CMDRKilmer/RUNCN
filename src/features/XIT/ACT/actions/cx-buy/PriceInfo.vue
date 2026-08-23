@@ -23,16 +23,24 @@ const material = computed(() => materialsStore.getByTicker(props.ticker));
 const askVs7D = computed(() => deviation(info.value?.Ask, info.value?.VWAP7D));
 
 function deviation(current?: number | null, average?: number | null) {
-  if (current === undefined || current === null) return undefined;
-  if (average === undefined || average === null) return undefined;
-  if (average === 0) return undefined;
+  if (current === undefined || current === null) {
+    return undefined;
+  }
+  if (average === undefined || average === null) {
+    return undefined;
+  }
+  if (average === 0) {
+    return undefined;
+  }
   return (current - average) / average;
 }
 
 // Ask 与 7D 均价的偏离方向及是否触发高亮（>10%）
 const askVs7DSign = computed(() => {
   const d = askVs7D.value;
-  if (d === undefined || Math.abs(d) <= 0.1) return undefined;
+  if (d === undefined || Math.abs(d) <= 0.1) {
+    return undefined;
+  }
   return d > 0 ? 'up' : 'down';
 });
 
@@ -43,20 +51,30 @@ const style = useCssModule();
 
 // 仅在偏离超过 10% 时返回颜色类；否则不染色
 function priceClass(sign: 'up' | 'down' | undefined) {
-  if (sign === undefined) return undefined;
+  if (sign === undefined) {
+    return undefined;
+  }
   return sign === 'up' ? style.priceHigh : style.priceLow;
 }
 
 function formatPercent(d: number | undefined) {
-  if (d === undefined) return '-';
+  if (d === undefined) {
+    return '-';
+  }
   const sign = d > 0 ? '+' : '';
   return `${sign}${fixed01(d * 100)}%`;
 }
 
 function formatVolume(v: number | undefined | null) {
-  if (v === undefined || v === null) return '-';
-  if (v >= 1_000_000) return `${fixed01(v / 1_000_000)}M`;
-  if (v >= 1_000) return `${fixed01(v / 1_000)}K`;
+  if (v === undefined || v === null) {
+    return '-';
+  }
+  if (v >= 1_000_000) {
+    return `${fixed01(v / 1_000_000)}M`;
+  }
+  if (v >= 1_000) {
+    return `${fixed01(v / 1_000)}K`;
+  }
   return fixed0(v);
 }
 

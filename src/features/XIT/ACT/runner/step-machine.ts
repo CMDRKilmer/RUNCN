@@ -2,7 +2,7 @@ import { act } from '@src/features/XIT/ACT/act-registry';
 import { ActionStep } from '@src/features/XIT/ACT/shared-types';
 import { Logger } from '@src/features/XIT/ACT/runner/logger';
 import { TileAllocator } from '@src/features/XIT/ACT/runner/tile-allocator';
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 
 interface StepMachineOptions {

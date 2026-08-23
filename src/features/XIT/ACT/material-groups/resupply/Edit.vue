@@ -4,7 +4,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import TextInput from '@src/components/forms/TextInput.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';

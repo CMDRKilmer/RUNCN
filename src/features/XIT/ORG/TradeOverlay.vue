@@ -56,9 +56,15 @@ const claimedTaskId = computed(() => claimedTask.value?.id ?? null);
 const creatingContract = ref(false);
 
 const canSubmit = computed(() => {
-  if (loading.value) return false;
-  if (!Number.isFinite(amount.value) || (amount.value ?? 0) <= 0) return false;
-  if ((amount.value ?? 0) > props.maxAmount) return false;
+  if (loading.value) {
+    return false;
+  }
+  if (!Number.isFinite(amount.value) || (amount.value ?? 0) <= 0) {
+    return false;
+  }
+  if ((amount.value ?? 0) > props.maxAmount) {
+    return false;
+  }
   return true;
 });
 
@@ -72,7 +78,9 @@ watch(
 const totalCost = computed(() => {
   const amt = amount.value ?? 0;
   const pr = props.price;
-  if (!Number.isFinite(amt) || !Number.isFinite(pr)) return 0;
+  if (!Number.isFinite(amt) || !Number.isFinite(pr)) {
+    return 0;
+  }
   return amt * pr;
 });
 
@@ -91,7 +99,9 @@ function inc(delta: number) {
 }
 
 async function onClaim() {
-  if (!canSubmit.value) return;
+  if (!canSubmit.value) {
+    return;
+  }
   loading.value = true;
   error.value = '';
   try {
@@ -111,7 +121,9 @@ async function onClaim() {
 // 在 PrUn CONTD 里创建新合同并自动填入 task 的合同条件。
 // 新架构：task 一定有 listingId（来自 listing 接取），template 不需要反转。
 async function onCreateContract() {
-  if (!claimedTask.value) return;
+  if (!claimedTask.value) {
+    return;
+  }
   creatingContract.value = true;
   error.value = '';
   try {

@@ -79,7 +79,9 @@ interface CommandEntry {
 
 const grouped = computed(() => {
   const map = new Map<string, CommandEntry[]>();
-  for (const cat of categoryOrder) map.set(cat, []);
+  for (const cat of categoryOrder) {
+    map.set(cat, []);
+  }
 
   for (const entry of xit.registry) {
     const commands = castArray<string>(entry.command);

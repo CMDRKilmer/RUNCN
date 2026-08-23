@@ -95,7 +95,9 @@ interface LoadResult {
 }
 
 function getFilteredBurnData(): Record<string, MaterialBurn> {
-  if (!burn.value) return {} as Record<string, MaterialBurn>;
+  if (!burn.value) {
+    return {} as Record<string, MaterialBurn>;
+  }
   const consumablesOnly = includeConsumables.value && !includeInputs.value;
   let burnData = burn.value.burn;
   if (!useBaseInv.value && site.value) {
@@ -115,22 +117,32 @@ function calcLoadAmounts(targetDays: number): LoadResult {
 
   for (const ticker of Object.keys(burnData)) {
     const matBurn = burnData[ticker];
-    if (matBurn.dailyAmount >= 0) continue;
+    if (matBurn.dailyAmount >= 0) {
+      continue;
+    }
 
     const consumablesOnly = includeConsumables.value && !includeInputs.value;
-    if (consumablesOnly && matBurn.type !== 'workforce') continue;
-    if (!consumablesOnly && !includeConsumables.value && matBurn.type === 'workforce') continue;
+    if (consumablesOnly && matBurn.type !== 'workforce') {
+      continue;
+    }
+    if (!consumablesOnly && !includeConsumables.value && matBurn.type === 'workforce') {
+      continue;
+    }
 
     const dailyConsume = -matBurn.dailyAmount;
     const inventory = matBurn.inventory;
 
-    if (useBaseInv.value && inventory >= targetDays * dailyConsume) continue;
+    if (useBaseInv.value && inventory >= targetDays * dailyConsume) {
+      continue;
+    }
 
     const rawRequired = useBaseInv.value
       ? targetDays * dailyConsume - inventory
       : targetDays * dailyConsume;
     const required = Math.max(0, rawRequired);
-    if (required <= 0) continue;
+    if (required <= 0) {
+      continue;
+    }
 
     const loadAmount = Math.ceil(required);
     loadAmounts[ticker] = loadAmount;
@@ -174,22 +186,36 @@ const exchangeStationNaturalId = computed(() =>
 // 根据交易所 + 标准货箱筛选飞船。任一前置条件缺失返回空。
 const eligibleShips = computed<ShipOption[]>(() => {
   const box = boxSize.value ? boxSizes[boxSize.value] : undefined;
-  if (!box) return [];
+  if (!box) {
+    return [];
+  }
   const stationId = exchangeStationNaturalId.value;
-  if (!stationId) return [];
+  if (!stationId) {
+    return [];
+  }
 
   const ships = shipsStore.all.value ?? [];
   const result: ShipOption[] = [];
   for (const ship of ships) {
-    if (!ship.address) continue;
+    if (!ship.address) {
+      continue;
+    }
     const shipStationId = getEntityNaturalIdFromAddress(ship.address);
-    if (shipStationId !== stationId) continue;
+    if (shipStationId !== stationId) {
+      continue;
+    }
 
     const cargoStore = findShipCargoStore(ship);
-    if (!cargoStore) continue;
+    if (!cargoStore) {
+      continue;
+    }
 
-    if (cargoStore.weightCapacity !== box.weight) continue;
-    if (cargoStore.volumeCapacity !== box.volume) continue;
+    if (cargoStore.weightCapacity !== box.weight) {
+      continue;
+    }
+    if (cargoStore.volumeCapacity !== box.volume) {
+      continue;
+    }
 
     result.push({
       id: ship.id,
@@ -219,11 +245,15 @@ watch([exchange, boxSize], () => {
 // 选中标准货箱时自动计算最大天数（平衡天数）。
 watch([boxSize, includeConsumables, includeInputs, useBaseInv], () => {
   const box = boxSize.value ? boxSizes[boxSize.value] : undefined;
-  if (!box) return;
+  if (!box) {
+    return;
+  }
   const wCap = box.weight;
   const vCap = box.volume;
 
-  if (wCap <= 0 || vCap <= 0) return;
+  if (wCap <= 0 || vCap <= 0) {
+    return;
+  }
 
   // 二分搜索最大平衡天数（支持小数）
   let lo = 1;
@@ -278,7 +308,9 @@ watch([boxSize, includeConsumables, includeInputs, useBaseInv], () => {
   // 如果超容，逐步减少天数直到不超容
   while (finalResult.weight > wCap || finalResult.volume > vCap) {
     finalDays -= 0.1;
-    if (finalDays < 1) break;
+    if (finalDays < 1) {
+      break;
+    }
     finalResult = calcLoadAmounts(finalDays);
   }
 
