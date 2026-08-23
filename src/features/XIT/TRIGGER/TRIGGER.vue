@@ -5,12 +5,15 @@ import Commands from '@src/components/forms/Commands.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { showConfirmationOverlay, showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { downloadJson } from '@src/utils/json-file';
 import removeArrayElement from '@src/utils/remove-array-element';
 import { createId } from '@src/store/create-id';
 import { userData } from '@src/store/user-data';
 import { lowFuelShips } from '@src/features/basic/auto-refuel';
 import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import { stripDeletedActions } from '@src/features/XIT/ACT/utils';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
+import ImportTriggerConfig from '@src/features/XIT/TRIGGER/ImportTriggerConfig.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
 
 const eventLabels: Record<UserData.TriggerEventType, string> = {
@@ -75,6 +78,61 @@ function onDeleteClick(e: Event, trigger: UserData.TriggerData) {
   showConfirmationOverlay(e, () => removeArrayElement(userData.triggers, trigger), {
     message: `确定要删除触发器 "${trigger.name || '--'}" 吗？`,
     confirmLabel: '删除',
+  });
+}
+
+function onDeleteAllClick(e: Event) {
+  showConfirmationOverlay(e, () => userData.triggers.splice(0), {
+    message: '确定要删除全部触发器吗？',
+    confirmLabel: '删除全部',
+  });
+}
+
+// 导出配置：全部触发器 + 它们引用的操作包（自包含，便于分享/备份）。
+function onExportConfigClick() {
+  const referenced = new Set(userData.triggers.map(t => t.packageName));
+  downloadJson(
+    {
+      version: 1,
+      triggers: userData.triggers,
+      actionPackages: userData.actionPackages.filter(p => referenced.has(p.global.name)),
+    },
+    `trigger-config-${Date.now()}.json`,
+    { pretty: true },
+  );
+}
+
+// 事件为扁平对象，按键排序归一化后序列化，避免键序差异导致同一触发器签名不同；
+// 保留 planet/ship 等参数，避免把不同星球/飞船的同类触发器误判为重复而漏导入。
+function canonicalEvent(event: UserData.TriggerEventData) {
+  return Object.fromEntries(Object.entries(event).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+// 导入配置：操作包按名称覆盖或新增；触发器追加（按名称+操作包+事件+模式去重），避免重复导入。
+function onImportConfigClick(e: Event) {
+  showTileOverlay(e, ImportTriggerConfig, {
+    onImport: config => {
+      for (const pkg of config.actionPackages) {
+        stripDeletedActions(pkg);
+        const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
+        if (index >= 0) {
+          userData.actionPackages[index] = pkg;
+        } else {
+          userData.actionPackages.push(pkg);
+        }
+      }
+      const signature = (t: UserData.TriggerData) =>
+        JSON.stringify([t.name, t.packageName, canonicalEvent(t.event), t.mode]);
+      const existing = new Set(userData.triggers.map(signature));
+      for (const trigger of config.triggers) {
+        if (existing.has(signature(trigger))) {
+          continue;
+        }
+        userData.triggers.push({ ...trigger, id: createId() });
+        existing.add(signature(trigger));
+      }
+      triggerEngine.start();
+    },
   });
 }
 
@@ -221,6 +279,11 @@ function onOpenNxClick() {
   <form :class="$style.sectionCommands">
     <Commands>
       <PrunButton primary @click="onAddClick">添加</PrunButton>
+      <PrunButton v-if="userData.triggers.length > 0" dark @click="onDeleteAllClick"
+        >删除全部</PrunButton
+      >
+      <PrunButton dark @click="onExportConfigClick">导出配置</PrunButton>
+      <PrunButton dark @click="onImportConfigClick">导入配置</PrunButton>
     </Commands>
   </form>
   <p :class="$style.hint">

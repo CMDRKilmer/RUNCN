@@ -7,15 +7,27 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import {
   planChainRoute,
   buildChainActionPackages,
+  sanitizeActName,
   type ChainPlannerBase,
   type ChainStopPlan,
 } from '@src/features/XIT/FLEET/chain-planner';
 import type { DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
-import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
+import { stagedDispatch, dispatchFinished } from '@src/features/XIT/FLEET/staged';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { fixed0 } from '@src/utils/format';
+import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import { createId } from '@src/store/create-id';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import {
+  getEntityNameFromAddress,
+  getEntityNaturalIdFromAddress,
+} from '@src/infrastructure/prun-api/data/addresses';
+import { displaytimeBetween, fixed0, hhmm } from '@src/utils/format';
+import { timestampEachMinute } from '@src/utils/dayjs';
+import dayjs from 'dayjs';
 
 const props = defineProps<{
   ships: DispatchShip[];
@@ -88,12 +100,36 @@ const eligibleShips = computed(() =>
     .sort((a, b) => shipLabel(a).localeCompare(shipLabel(b))),
 );
 
+// 正在执行环线的船（含未停靠 CX 的）：仅用于查看进度，不能在此生成新计划。
+// 来源：chainRuns 运行记录 + 匹配环线包名的 FLIGHT_ENDED 触发器反推。
+const chainShips = computed(() => {
+  const ids = new Set(Object.keys(userData.chainRuns));
+  const allShips = shipsStore.all.value ?? [];
+  for (const ship of allShips) {
+    const shipName = sanitizeActName(ship.name ?? ship.registration) || ship.registration;
+    const hasChain = userData.triggers.some(
+      t =>
+        t.event.type === 'FLIGHT_ENDED' &&
+        (t.packageName.endsWith(` Loop ${shipName}`) ||
+          t.packageName.endsWith(` 环线 ${shipName}`)),
+    );
+    if (hasChain) {
+      ids.add(ship.id);
+    }
+  }
+  return allShips.filter(s => ids.has(s.id));
+});
+
 const shipOptions = computed(() => [
   { label: '选择船只…', value: '' },
   ...eligibleShips.value.map(x => ({
     label: `${shipLabel(x)}（${x.exchangeCode}）`,
     value: x.ship.id,
   })),
+  // 环线进行中的船（不在 CX）追加到列表末尾，便于查看进度。
+  ...chainShips.value
+    .filter(s => !eligibleShips.value.some(x => x.ship.id === s.id))
+    .map(s => ({ label: `${s.name ?? s.registration}（环线）`, value: s.id })),
 ]);
 
 const shipSelect = computed({
@@ -117,6 +153,250 @@ const plan = computed(() => {
 
 const loading = computed(() => selectedShip.value !== undefined && plan.value === undefined);
 const hasStops = computed(() => (plan.value?.stops.length ?? 0) > 0);
+
+// ── 环线执行进度 ─────────────────────────────────────────────
+// 各站状态判定：
+// - done：站点操作包已被 autoDelete 移除（卸货/取货/起飞全部成功）
+// - arrived：触发器已触发或船已停靠该站，等待/正在执行
+// - transit：船正在飞往该站（以当前航班目的地为准）
+// - pending：待执行
+type StopState = 'done' | 'arrived' | 'transit' | 'pending';
+
+// 无运行记录时（如功能上线前已开跑的环线），从既有到港触发器反推运行记录：
+// 站点包名形如 `${星球} Loop ${船名}`（旧版为 `${星球} 环线 ${船名}`），
+// 归航包名 `Chain Return ${船名}`（旧版 `环线归航 ${船名}`），按 createdAt 排序得站点顺序。
+const derivedChainRun = computed<UserData.ChainRun | undefined>(() => {
+  const shipId = chainShipId.value;
+  if (shipId === undefined) {
+    return undefined;
+  }
+  const ship = shipsStore.getById(shipId);
+  if (!ship) {
+    return undefined;
+  }
+  const shipName = sanitizeActName(ship.name ?? ship.registration) || ship.registration;
+  const stopTriggers = userData.triggers
+    .filter(
+      t =>
+        t.event.type === 'FLIGHT_ENDED' &&
+        (t.packageName.endsWith(` Loop ${shipName}`) ||
+          t.packageName.endsWith(` 环线 ${shipName}`)),
+    )
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (stopTriggers.length === 0) {
+    return undefined;
+  }
+  const stops = stopTriggers.map(t => {
+    const naturalId = t.event.type === 'FLIGHT_ENDED' ? t.event.planet : undefined;
+    const site = naturalId ? sitesStore.getByPlanetNaturalId(naturalId) : undefined;
+    return {
+      naturalId: naturalId ?? '',
+      planetName: site ? getEntityNameFromAddress(site.address) : (naturalId ?? t.packageName),
+      pkgName: t.packageName,
+    };
+  });
+  const finalTrigger = userData.triggers.find(
+    t =>
+      t.event.type === 'FLIGHT_ENDED' &&
+      (t.packageName === `Chain Return ${shipName}` || t.packageName === `环线归航 ${shipName}`),
+  );
+  return {
+    shipId: ship.id,
+    shipName: ship.name ?? ship.registration,
+    startedAt: stopTriggers[0]!.createdAt,
+    originNaturalId: '',
+    stops,
+    finalPkgName: finalTrigger?.packageName,
+  };
+});
+
+const chainRun = computed(() => {
+  if (chainShipId.value === undefined) {
+    return undefined;
+  }
+  return userData.chainRuns[chainShipId.value] ?? derivedChainRun.value;
+});
+
+// 选中的船正在执行环线但未停靠 CX：仅展示进度面板，不生成新计划。
+const isChainShip = computed(() => {
+  const id = chainShipId.value;
+  if (id === undefined || selectedShip.value !== undefined) {
+    return false;
+  }
+  return userData.chainRuns[id] !== undefined || derivedChainRun.value !== undefined;
+});
+
+const runShip = computed(() => {
+  const run = chainRun.value;
+  return run ? shipsStore.getById(run.shipId) : undefined;
+});
+
+const runFlight = computed(() => {
+  const ship = runShip.value;
+  return ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
+});
+
+const runFlightDest = computed(() => {
+  const flight = runFlight.value;
+  return flight ? getEntityNaturalIdFromAddress(flight.destination) : undefined;
+});
+
+const runDockedAt = computed(() => {
+  const ship = runShip.value;
+  return ship?.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+});
+
+const stopProgress = computed(() => {
+  const run = chainRun.value;
+  if (!run) {
+    return [];
+  }
+  const flightDest = runFlightDest.value;
+  const dockedAt = runDockedAt.value;
+  return run.stops.map(stop => {
+    const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
+    const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
+    let state: StopState;
+    if (!pkgExists) {
+      state = 'done';
+    } else if (fired || dockedAt === stop.naturalId) {
+      state = 'arrived';
+    } else if (flightDest === stop.naturalId) {
+      state = 'transit';
+    } else {
+      state = 'pending';
+    }
+    return { naturalId: stop.naturalId, planetName: stop.planetName, state };
+  });
+});
+
+const finalPkgExists = computed(() => {
+  const run = chainRun.value;
+  return (
+    run?.finalPkgName !== undefined &&
+    userData.actionPackages.some(p => p.global.name === run.finalPkgName)
+  );
+});
+
+const runCompleted = computed(() => {
+  const run = chainRun.value;
+  if (!run) {
+    return false;
+  }
+  if (!stopProgress.value.every(s => s.state === 'done')) {
+    return false;
+  }
+  return run.finalPkgName === undefined || !finalPkgExists.value;
+});
+
+// 环线完成后清理运行记录，恢复该船可重新生成环线计划。
+// immediate 覆盖环线期间 FLEET 窗口关闭、完成后才重新打开的场景；
+// 派生记录（derivedChainRun）的触发器随站点包 autoDelete 一并清除，无需处理。
+watch(
+  runCompleted,
+  done => {
+    if (!done) {
+      return;
+    }
+    const id = chainShipId.value;
+    if (id !== undefined && userData.chainRuns[id] !== undefined) {
+      delete userData.chainRuns[id];
+    }
+  },
+  { immediate: true },
+);
+
+const runDoneCount = computed(() => stopProgress.value.filter(s => s.state === 'done').length);
+
+const runPercent = computed(() =>
+  stopProgress.value.length === 0
+    ? 0
+    : Math.round((runDoneCount.value / stopProgress.value.length) * 100),
+);
+
+function etaText(timestamp: number | undefined) {
+  if (timestamp == null || Number.isNaN(timestamp)) {
+    return '';
+  }
+  return `，${displaytimeBetween(timestampEachMinute.value, timestamp)}后到达（${hhmm(timestamp)}）`;
+}
+
+interface StopRow {
+  naturalId: string;
+  planetName: string;
+  state: StopState;
+  marker: { text: string; cls: string };
+}
+
+function stopMarker(state: StopState) {
+  switch (state) {
+    case 'done':
+      return { text: '✓', cls: 'markDone' };
+    case 'arrived':
+      return { text: '●', cls: 'markArrived' };
+    case 'transit':
+      return { text: '✈', cls: 'markTransit' };
+    default:
+      return { text: '○', cls: 'markPending' };
+  }
+}
+
+function stopDetail(state: StopState) {
+  switch (state) {
+    case 'done':
+      return '已完成';
+    case 'arrived':
+      return '已到港 · 等待执行';
+    case 'transit':
+      return `飞行中${etaText(runFlight.value?.arrival?.timestamp)}`;
+    default:
+      return '待执行';
+  }
+}
+
+const stopRows = computed<StopRow[]>(() =>
+  stopProgress.value.map(s => ({ ...s, marker: stopMarker(s.state) })),
+);
+
+// 末站归航卸货（finalPkg 存在时显示为末行）。
+const finalReturn = computed<StopRow | undefined>(() => {
+  const run = chainRun.value;
+  if (!run || run.finalPkgName === undefined) {
+    return undefined;
+  }
+  let state: StopState;
+  if (!finalPkgExists.value) {
+    state = 'done';
+  } else if (run.originNaturalId !== '' && runFlightDest.value === run.originNaturalId) {
+    state = 'transit';
+  } else {
+    state = 'pending';
+  }
+  return {
+    naturalId: run.originNaturalId,
+    planetName: run.originNaturalId || '归航',
+    state,
+    marker: stopMarker(state),
+  };
+});
+
+const runStatusText = computed(() => {
+  if (runCompleted.value) {
+    return '已完成';
+  }
+  const flight = runFlight.value;
+  if (flight) {
+    const dest = runFlightDest.value;
+    const destLabel = stopRows.value.find(s => s.naturalId === dest)?.planetName ?? dest ?? '';
+    return `飞往 ${destLabel}${etaText(flight.arrival?.timestamp)}`;
+  }
+  const dockedAt = runDockedAt.value;
+  if (dockedAt) {
+    const stop = stopRows.value.find(s => s.naturalId === dockedAt);
+    return stop ? `已抵达 ${stop.planetName}，等待执行` : `停靠 ${dockedAt}`;
+  }
+  return '待发船';
+});
 
 function formatMaterials(record: Record<string, number>) {
   return Object.entries(record)
@@ -222,9 +502,34 @@ function execute() {
   if (!actionPlan) {
     return;
   }
-  // 主包（加油+采购+装载+飞往首站）暂存至 FLEETACT 确认执行。
+  // 记录环线运行进度：以船为键持久化，环线页签据此展示各站执行状态。
+  // stops 与 actionPlan.stopPkgs 一一对应，pkgName 即净化后的站点操作包名。
+  userData.chainRuns[ship.ship.id] = {
+    shipId: ship.ship.id,
+    shipName: ship.ship.name ?? ship.ship.registration,
+    startedAt: Date.now(),
+    originNaturalId: p.originNaturalId,
+    stops: p.stops.map((stop, i) => ({
+      naturalId: stop.naturalId,
+      planetName: stop.planetName,
+      pkgName: actionPlan.stopPkgs[i]!.pkg.global.name,
+    })),
+    finalPkgName: actionPlan.finalPkg?.pkg.global.name,
+  };
+  // 主包（加油+采购+装载+飞往首站）暂存至 FLEETACT 执行。
   stagedDispatch.value = { pkg: JSON.parse(JSON.stringify(actionPlan.mainPkg)) };
-  showBuffer('XIT FLEETACT');
+  if (chainAutoTrigger.value) {
+    // 自动执行：后台静默打开 FLEETACT，经触发队列自动执行主包，执行结束后自动关窗。
+    dispatchFinished.value = false;
+    queueTriggerRun({ triggerId: createId(), packageName: actionPlan.mainPkg.global.name });
+    void showBuffer('XIT FLEETACT', {
+      force: true,
+      autoClose: true,
+      closeWhen: computed(() => dispatchFinished.value),
+    });
+  } else {
+    showBuffer('XIT FLEETACT');
+  }
   // 各站操作包 + FLIGHT_ENDED 触发器写入 userData，到港自动「卸货→提取→飞下一站」。
   for (const { pkg, trigger } of actionPlan.stopPkgs) {
     upsertPackage(pkg);
@@ -269,7 +574,49 @@ function execute() {
       <PrunButton dark @click="clearAllBases">清空</PrunButton>
     </div>
 
-    <div v-if="!selectedShip" :class="$style.hint">
+    <!-- 环线执行进度：所选船存在运行记录时展示各站状态 -->
+    <div v-if="chainRun" :class="$style.runPanel">
+      <div :class="$style.runHeader">
+        <span :class="$style.runTitle">正在执行的环线</span>
+        <span :class="$style.runMeta">
+          {{ chainRun.shipName }} · {{ dayjs(chainRun.startedAt).format('MM-DD HH:mm') }} 起
+        </span>
+        <span :class="[$style.runStatus, runCompleted ? $style.statusDone : $style.statusActive]">
+          {{ runStatusText }}
+        </span>
+        <span :class="$style.runProgress">{{ runDoneCount }}/{{ stopRows.length }} 站</span>
+      </div>
+      <div :class="$style.progressTrack">
+        <div :class="$style.progressFill" :style="{ width: `${runPercent}%` }" />
+      </div>
+      <div :class="$style.runList">
+        <div v-for="stop in stopRows" :key="stop.naturalId" :class="$style.runRow">
+          <span :class="[$style.marker, $style[stop.marker.cls]]">{{ stop.marker.text }}</span>
+          <span :class="$style.runNode">{{ stop.planetName }}</span>
+          <span :class="$style.runDetail">{{ stopDetail(stop.state) }}</span>
+        </div>
+        <div v-if="finalReturn" :class="$style.runRow">
+          <span :class="[$style.marker, $style[finalReturn.marker.cls]]">
+            {{ finalReturn.marker.text }}
+          </span>
+          <span :class="$style.runNode">{{ finalReturn.planetName }}</span>
+          <span :class="$style.runDetail">
+            {{
+              finalReturn.state === 'done'
+                ? '归航卸货完成'
+                : finalReturn.state === 'transit'
+                  ? `归航中${etaText(runFlight.arrival?.timestamp)}`
+                  : '归航卸货待执行'
+            }}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="isChainShip" :class="$style.hint">
+      该船正在执行环线，进度见上方面板；环线结束后即可在此生成新的环线计划。
+    </div>
+    <div v-else-if="!selectedShip" :class="$style.hint">
       选择一艘停靠 CX
       的船只，将自动载入基地规划中分配给它的基地，并根据基地产物推断产业链上下游，自动规划环线补给航线。
     </div>
@@ -538,5 +885,105 @@ function execute() {
 .warning {
   color: #e8a33d;
   font-size: 11px;
+}
+
+.runPanel {
+  margin: 0 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #2b485a;
+  border-radius: 4px;
+  background: rgba(43, 72, 90, 0.2);
+}
+
+.runHeader {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.runTitle {
+  font-weight: 600;
+}
+
+.runMeta {
+  color: #8a9aa8;
+  font-size: 11px;
+}
+
+.runStatus {
+  font-size: 11px;
+}
+
+.statusActive {
+  color: rgb(63, 162, 222);
+}
+
+.statusDone {
+  color: rgb(171, 198, 128);
+}
+
+.runProgress {
+  color: #8a9aa8;
+  font-size: 11px;
+}
+
+.progressTrack {
+  height: 4px;
+  border-radius: 2px;
+  background: #1d3341;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: rgb(63, 162, 222);
+  transition: width 0.3s;
+}
+
+.runList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.runRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.marker {
+  width: 1.2em;
+  flex: none;
+  text-align: center;
+}
+
+.markDone {
+  color: rgb(171, 198, 128);
+}
+
+.markArrived {
+  color: #f0ad4e;
+}
+
+.markTransit {
+  color: rgb(63, 162, 222);
+}
+
+.markPending {
+  color: #8a9aa8;
+}
+
+.runNode {
+  color: rgb(171, 198, 128);
+}
+
+.runDetail {
+  color: #8a9aa8;
 }
 </style>

@@ -11,6 +11,7 @@ import { ActionPackageConfig } from '@src/features/XIT/ACT/shared-types';
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { userData } from '@src/store/user-data';
 import { consumeTriggerRun, hasPendingTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import { dispatchFinished } from '@src/features/XIT/FLEET/staged';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -101,6 +102,7 @@ const runner = new ActionRunner({
     isRunning.value = false;
     status.value = undefined;
     autoAct.value = false;
+    dispatchFinished.value = true;
     // 一次性操作包（BURNGEN 生成）执行成功后自动删除。
     if (success && pkg.autoDelete) {
       const idx = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);

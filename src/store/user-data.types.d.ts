@@ -252,4 +252,22 @@ declare namespace UserData {
   // 哪些 ticker 算作本基地的「最终产物」（不参与链上输送，提取后运回出发地）。
   // 未设置时，chain-planner 回落到 burn 推断（output > 0 且无下游边）。
   type BaseProducts = Record<string, string[]>;
+
+  // 环线执行记录：以 shipId 为键，供 FLEET 环线页签展示「正在执行的环线」进度。
+  // stops.pkgName 为净化后的站点操作包名，用于关联 FLIGHT_ENDED 触发器与操作包
+  // 判定各站状态（包被 autoDelete 移除即完成）。
+  interface ChainRunStop {
+    naturalId: string;
+    planetName: string;
+    pkgName: string;
+  }
+
+  interface ChainRun {
+    shipId: string;
+    shipName: string;
+    startedAt: number;
+    originNaturalId: string;
+    stops: ChainRunStop[];
+    finalPkgName?: string;
+  }
 }

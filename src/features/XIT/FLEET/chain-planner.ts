@@ -706,7 +706,7 @@ export interface ChainActionPlan {
 // XIT 命令参数仅接受 ASCII（与 BPC/CART 生成 ACT 同款约束）：包名会拼进
 // `XIT ACT_${name}` 命令，含中文 / `()'"&` 等符号时 PrUn 端解析失败（提示无效指令）。
 // 仅保留 ASCII 字母 / 数字 / hyphen，其余符号与空白折叠为单个空格。
-function sanitizeActName(name: string): string {
+export function sanitizeActName(name: string): string {
   return name
     .replace(/[^\x20-\x7E]/g, '')
     .replace(/[^A-Za-z0-9-]+/g, ' ')

@@ -46,7 +46,7 @@ export const DEPART = act.addActionStep<Data>({
   type: 'DEPART',
   description: data => `自动出发 ${data.registration}`,
   execute: async ctx => {
-    const { data, log, setStatus, complete, fail } = ctx;
+    const { data, log, setStatus, complete, fail, waitActionFeedback } = ctx;
     const assert: AssertFn = ctx.assert;
     const { registration } = data;
 
@@ -62,6 +62,8 @@ export const DEPART = act.addActionStep<Data>({
     }
     log.info(`点击「开始」...`);
     await clickElement(button);
+    // 点击后游戏弹出「需要确认」覆盖层，需再点一次「开始」才能实际出发。
+    await waitActionFeedback(tile);
     complete();
   },
 });

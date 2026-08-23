@@ -111,6 +111,7 @@ export const initialUserData = deepFreeze({
   },
   baseAliases: {} as UserData.BaseAliases,
   baseProducts: {} as UserData.BaseProducts,
+  chainRuns: {} as Record<string, UserData.ChainRun>,
   tabs: {
     order: [] as string[],
     hidden: [] as string[],
