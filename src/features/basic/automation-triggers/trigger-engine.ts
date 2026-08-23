@@ -1,10 +1,10 @@
 import { alertsStore } from '@src/infrastructure/prun-api/data/alerts';
 import { userData } from '@src/store/user-data';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import { getPackageFinished, queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
 import { alertSources, evaluateTriggerCondition, isAlertSource } from './event-sources';
 import { watchUntil } from '@src/utils/watch';
-import { watch } from 'vue';
+import { computed, watch } from 'vue';
 
 // 条件源评估周期（后台标签页浏览器最低也约 1 分钟，电平语义可容忍）。
 const CONDITION_EVALUATE_INTERVAL = 60_000;
@@ -100,15 +100,28 @@ class TriggerEngine {
 
     const isAuto = trigger.mode === 'AUTO' && userData.settings.triggers.autoEnabled;
     if (isAuto) {
-      this.execute(trigger.id, pkg.global.name);
+      this.execute(trigger.id, pkg.global.name, true);
     } else {
       this.confirm(trigger, pkg.global.name, detail);
     }
   }
 
-  private execute(triggerId: string, packageName: string) {
+  private execute(triggerId: string, packageName: string, silent: boolean) {
+    // 后台静默执行：隐藏窗口，包执行结束后（成功/失败/取消）经完成信号自动关窗，
+    // 与环线主包（ChainView 的 dispatchFinished + closeWhen）同一模式。
+    // silent=false（CONFIRM 通知点击）：保持可见，便于用户查看执行过程。
+    const finished = getPackageFinished(packageName);
+    finished.value = false;
     queueTriggerRun({ triggerId, packageName });
-    showBuffer(`XIT ACT_${packageName.replace(' ', '_')}`);
+    if (!silent) {
+      showBuffer(`XIT ACT_${packageName.replace(' ', '_')}`);
+      return;
+    }
+    showBuffer(`XIT ACT_${packageName.replace(' ', '_')}`, {
+      force: true,
+      autoClose: true,
+      closeWhen: computed(() => finished.value),
+    });
   }
 
   private confirm(trigger: UserData.TriggerData, packageName: string, detail?: string) {
@@ -122,7 +135,7 @@ class TriggerEngine {
     });
     notification.onclick = () => {
       window.focus();
-      this.execute(trigger.id, packageName);
+      this.execute(trigger.id, packageName, false);
     };
   }
 }

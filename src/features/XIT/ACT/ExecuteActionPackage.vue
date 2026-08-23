@@ -10,7 +10,11 @@ import ConfigWindow from '@src/features/XIT/ACT/ConfigureWindow.vue';
 import { ActionPackageConfig } from '@src/features/XIT/ACT/shared-types';
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { userData } from '@src/store/user-data';
-import { consumeTriggerRun, hasPendingTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import {
+  consumeTriggerRun,
+  getPackageFinished,
+  hasPendingTriggerRun,
+} from '@src/features/XIT/ACT/trigger-queue';
 import { dispatchFinished } from '@src/features/XIT/FLEET/staged';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
@@ -103,6 +107,8 @@ const runner = new ActionRunner({
     status.value = undefined;
     autoAct.value = false;
     dispatchFinished.value = true;
+    // 触发器引擎静默打开的 ACT 窗口据此自动关窗（成功/失败/取消均关闭）。
+    getPackageFinished(pkg.global.name).value = true;
     // 一次性操作包（BURNGEN 生成）执行成功后自动删除。
     if (success && pkg.autoDelete) {
       const idx = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
@@ -200,6 +206,8 @@ async function onAutoClick() {
   if (!ok) {
     autoAct.value = false;
     status.value = undefined;
+    // 预览失败不会走到 onEnd：置位完成信号，关闭触发器引擎静默打开的执行窗口。
+    getPackageFinished(pkg.global.name).value = true;
     return;
   }
   logScrolling.value = true;

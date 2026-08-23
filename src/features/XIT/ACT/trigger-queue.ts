@@ -1,4 +1,5 @@
-import { reactive } from 'vue';
+import { reactive, ref } from 'vue';
+import type { Ref } from 'vue';
 
 // 触发器引擎 → ACT 执行窗口的待执行队列。
 // 引擎触发后入队并打开 XIT ACT 窗口，ExecuteActionPackage 监视队列自动开始执行。
@@ -33,4 +34,18 @@ export function consumeTriggerRun(packageName: string) {
     x => x.packageName === packageName && now - x.queuedAt < PENDING_EXPIRE_MS,
   );
   return index >= 0 ? queue.splice(index, 1)[0] : undefined;
+}
+
+// 按包名索引的完成信号：触发器引擎静默打开 ACT 窗口时，用 autoClose + closeWhen
+// 让窗口在包执行结束（成功/失败/取消）后自动关闭，实现后台静默执行。
+// 每次触发执行前由引擎重置为 false，执行结束后由 ExecuteActionPackage 置 true。
+const finishedByPackage = new Map<string, Ref<boolean>>();
+
+export function getPackageFinished(packageName: string) {
+  let signal = finishedByPackage.get(packageName);
+  if (!signal) {
+    signal = ref(false);
+    finishedByPackage.set(packageName, signal);
+  }
+  return signal;
 }
