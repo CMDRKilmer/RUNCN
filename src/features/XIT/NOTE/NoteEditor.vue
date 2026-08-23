@@ -9,7 +9,9 @@ const $style = useCssModule();
 const LINK_REGEXP = /\b(?:[a-zA-Z0-9]{1,3}\.(?:CI1|IC1|AI1|NC1|CI2|NC2))\b/g;
 
 function parseSegments(text?: string) {
-  if (!text) return [];
+  if (!text) {
+    return [];
+  }
 
   if (text[text.length - 1] === '\n') {
     text += ' ';
@@ -48,7 +50,9 @@ watch(
   async () => {
     await nextTick();
     const el = overlay.value;
-    if (!el) return;
+    if (!el) {
+      return;
+    }
 
     // Clear existing content
     while (el.firstChild) {

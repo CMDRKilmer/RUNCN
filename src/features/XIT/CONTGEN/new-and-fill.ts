@@ -43,7 +43,7 @@ import tiles from '@src/infrastructure/prun-ui/tiles';
 import { UI_TILES_CHANGE_COMMAND } from '@src/infrastructure/prun-api/client-messages';
 import { dispatchClientPrunMessage } from '@src/infrastructure/prun-api/prun-api-listener';
 import { contractDraftsStore } from '@src/infrastructure/prun-api/data/contract-drafts';
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 
 // Localized text of the "New Draft" button on the CONTD list view.

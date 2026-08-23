@@ -79,10 +79,16 @@ watchEffect(() => {
 // 消息还没收到）。computed 依赖 .value 是响应式的，fetched 变 true 后会重算。
 const linkedContract = computed(() => {
   const id = localTask.value.contractId;
-  if (!id) return null;
-  if (!contractsStore.fetched.value) return null;
+  if (!id) {
+    return null;
+  }
+  if (!contractsStore.fetched.value) {
+    return null;
+  }
   const all = contractsStore.all.value;
-  if (!all) return null;
+  if (!all) {
+    return null;
+  }
   return all.find(c => c.localId === id) ?? all.find(c => c.id === id) ?? null;
 });
 
@@ -97,11 +103,19 @@ watch(
   linkedContract,
   contract => {
     const id = localTask.value.contractId;
-    if (!id) return;
-    if (linkedContractFetchAttempted) return;
+    if (!id) {
+      return;
+    }
+    if (linkedContractFetchAttempted) {
+      return;
+    }
     // 等 contractsStore fetch 完成 + 找不到该合同 → 拉一次
-    if (!contractsStore.fetched.value) return;
-    if (contract) return; // 已经找到，无需拉
+    if (!contractsStore.fetched.value) {
+      return;
+    }
+    if (contract) {
+      return;
+    } // 已经找到，无需拉
     linkedContractFetchAttempted = true;
     console.debug(
       '[TaskDetail] linkedContract not in store, fetching:',
@@ -207,7 +221,9 @@ function onStartAutoLink() {
 watch(
   canAutoLink,
   ok => {
-    if (!ok) return;
+    if (!ok) {
+      return;
+    }
     onStartAutoLink();
   },
   { immediate: true },

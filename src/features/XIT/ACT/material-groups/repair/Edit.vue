@@ -4,7 +4,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 
 const { group } = defineProps<{ group: UserData.MaterialGroupData }>();

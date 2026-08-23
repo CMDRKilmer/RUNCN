@@ -16,7 +16,9 @@ const showFilters = ref(true);
 // 判断我是否为借款方（对方发放贷款给我）
 function isBorrowing(contract: PrunApi.Contract) {
   const payout = contract.conditions.find(c => c.type === 'LOAN_PAYOUT');
-  if (!payout) return false;
+  if (!payout) {
+    return false;
+  }
   return payout.party !== contract.party;
 }
 
@@ -54,7 +56,9 @@ function getLoanSummary(contracts: PrunApi.Contract[]) {
     for (const cond of contract.conditions) {
       if (cond.type === 'LOAN_PAYOUT' && cond.amount) {
         totalPrincipal += cond.amount.amount;
-        if (!currency) currency = cond.amount.currency;
+        if (!currency) {
+          currency = cond.amount.currency;
+        }
       }
       if (cond.type === 'LOAN_INSTALLMENT') {
         totalInstallments++;

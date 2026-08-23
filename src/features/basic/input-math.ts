@@ -1,6 +1,6 @@
 import fa from '@src/utils/font-awesome.module.css';
 import $style from './input-math.module.css';
-import { changeInputValue } from '@src/util';
+import { changeInputValue } from '@src/utils/dom';
 import Mexp from 'math-expression-evaluator';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 

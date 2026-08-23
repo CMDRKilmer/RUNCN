@@ -13,7 +13,7 @@ import {
   getEntityNaturalIdFromAddress,
   getLocationLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';

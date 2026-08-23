@@ -82,13 +82,19 @@ const rows = computed<WorkforceRow[] | undefined>(() => {
 });
 
 function satisfactionClass(value: number) {
-  if (value < 0.8) return C.ColoredValue.negative;
-  if (value < 1) return '';
+  if (value < 0.8) {
+    return C.ColoredValue.negative;
+  }
+  if (value < 1) {
+    return '';
+  }
   return C.ColoredValue.positive;
 }
 
 function unmetText(needs: { ticker: string; satisfaction: number; essential: boolean }[]): string {
-  if (needs.length === 0) return '--';
+  if (needs.length === 0) {
+    return '--';
+  }
   return needs
     .slice(0, 5)
     .map(n => `${n.essential ? '★' : ''}${n.ticker}:${percent0(n.satisfaction)}`)

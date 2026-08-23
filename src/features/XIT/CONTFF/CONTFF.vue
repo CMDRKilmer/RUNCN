@@ -56,12 +56,20 @@ function getReceivable(contract: PrunApi.Contract) {
 
 function getDeadline(contract: PrunApi.Contract): string {
   const deadline = contract.dueDate;
-  if (!deadline || deadline.timestamp === undefined || deadline.timestamp === null) return '-';
+  if (!deadline || deadline.timestamp === undefined || deadline.timestamp === null) {
+    return '-';
+  }
   const remaining = deadline.timestamp - timestampEachSecond.value;
-  if (remaining <= 0) return '已逾期';
+  if (remaining <= 0) {
+    return '已逾期';
+  }
   const d = dayjs.duration(remaining);
-  if (d.days() > 0) return `${d.days()}天 ${d.hours()}小时`;
-  if (d.hours() > 0) return `${d.hours()}小时 ${d.minutes()}分钟`;
+  if (d.days() > 0) {
+    return `${d.days()}天 ${d.hours()}小时`;
+  }
+  if (d.hours() > 0) {
+    return `${d.hours()}小时 ${d.minutes()}分钟`;
+  }
   return `${d.minutes()}分钟`;
 }
 </script>

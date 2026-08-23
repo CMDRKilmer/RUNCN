@@ -5,7 +5,7 @@ import {
   clampTargetDays as clampTargetDaysUtil,
   getSuppliesCap,
 } from '@src/features/XIT/FLEET/supplies-cap';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
@@ -139,7 +139,9 @@ export function planChainRoute(input: {
   const allowlistedProducers = new Map<string, Set<string>>(); // ticker → bases with it in BSN
   for (const base of bases) {
     const configured = getBaseProducts(base.siteId);
-    if (configured === undefined || configured.length === 0) continue;
+    if (configured === undefined || configured.length === 0) {
+      continue;
+    }
     const burn = burns.get(base.naturalId)!;
     let i = 0;
     while (i < configured.length) {
@@ -178,13 +180,19 @@ export function planChainRoute(input: {
   }
   for (const site of sitesStore.all.value ?? []) {
     const burn = getPlanetBurn(site.siteId);
-    if (!burn) continue;
+    if (!burn) {
+      continue;
+    }
     const naturalId = getEntityNaturalIdFromAddress(site.address);
-    if (!naturalId) continue;
+    if (!naturalId) {
+      continue;
+    }
     for (const [ticker, mat] of Object.entries(burn.burn)) {
       if (mat.input > 0 || mat.workforce > 0) {
         const list = consumers.get(ticker) ?? [];
-        if (!list.includes(naturalId)) list.push(naturalId);
+        if (!list.includes(naturalId)) {
+          list.push(naturalId);
+        }
         consumers.set(ticker, list);
       }
     }
@@ -198,7 +206,9 @@ export function planChainRoute(input: {
           for (const mat of order.inputs ?? []) {
             const ticker = mat.material.ticker;
             const list = consumers.get(ticker) ?? [];
-            if (!list.includes(naturalId)) list.push(naturalId);
+            if (!list.includes(naturalId)) {
+              list.push(naturalId);
+            }
             consumers.set(ticker, list);
           }
         }
@@ -212,7 +222,9 @@ export function planChainRoute(input: {
     // 进一步限制 producer 为白名单集合（仅白名单 base能产该 ticker）
     const allowedSet = allowlistedProducers.get(ticker)!;
     for (const from of producerIds) {
-      if (!allowedSet.has(from)) continue;
+      if (!allowedSet.has(from)) {
+        continue;
+      }
       for (const to of consumerIds) {
         if (from === to) {
           continue;

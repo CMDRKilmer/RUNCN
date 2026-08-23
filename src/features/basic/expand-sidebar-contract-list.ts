@@ -1,6 +1,6 @@
 import $style from './expand-sidebar-contract-list.module.css';
 import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 
 async function onSidebarReady(sidebar: HTMLElement) {
   const sectionHeads = _$$(sidebar, C.Sidebar.sectionHead);

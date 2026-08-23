@@ -31,7 +31,9 @@ const cancelError = ref('');
 // 只有 publisher 本人才能取消（后端会二次校验）。
 const canCancel = computed(() => {
   const userId = props.currentUser?.id;
-  if (!userId) return false;
+  if (!userId) {
+    return false;
+  }
   return props.listing.publisherId === userId;
 });
 
@@ -62,7 +64,9 @@ function getStatusLabel(status: OrgListing['status']) {
 }
 
 async function onCancel() {
-  if (!canCancel.value || cancelling.value) return;
+  if (!canCancel.value || cancelling.value) {
+    return;
+  }
   if (
     !confirm(
       `确认取消挂单 ${props.listing.type} ${formatNumber(props.listing.amount)} ${props.listing.commodity} ？`,

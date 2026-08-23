@@ -25,7 +25,9 @@ export const customHttpTranslateProvider: TranslationProvider = {
     }
 
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (providerConfig.apiKey) headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
+    if (providerConfig.apiKey) {
+      headers['Authorization'] = `Bearer ${providerConfig.apiKey}`;
+    }
 
     const response = await fetchWithTimeout(
       url,

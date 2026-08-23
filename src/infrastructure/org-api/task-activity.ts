@@ -20,13 +20,17 @@ import { registerActiveTask, unregisterActiveTask } from './auto-link';
 const TERMINAL_STATUSES = new Set<TaskStatus>(['COMPLETED', 'CANCELLED']);
 
 function needsActivity(task: OrgTask): boolean {
-  if (TERMINAL_STATUSES.has(task.status)) return false;
+  if (TERMINAL_STATUSES.has(task.status)) {
+    return false;
+  }
   return task.status === 'AWAITING_CONTRACT' || task.status === 'IN_PROGRESS';
 }
 
 // listings.claimListing 成功 / 自动 link 成功后调用：把任务加入活跃集合。
 export function notifyTaskClaimed(task: OrgTask): void {
-  if (!needsActivity(task)) return;
+  if (!needsActivity(task)) {
+    return;
+  }
   registerActiveTask(task.id);
 }
 

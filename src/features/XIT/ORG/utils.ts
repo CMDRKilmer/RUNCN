@@ -68,7 +68,9 @@ export async function sendTaskToContd(
 // 数字千分位格式化（不附加货币单位）。
 // 复用 INT 4 位小数 + 去尾零，避免 0.1+0.2=0.30000000000000004 露馅。
 export function formatNumber(value: number | undefined): string {
-  if (value === undefined || value === null || Number.isNaN(value)) return '—';
+  if (value === undefined || value === null || Number.isNaN(value)) {
+    return '—';
+  }
   const fixed = Number(Math.round(Number(value + 'e4')) + 'e-4');
   const [intPart, decPart] = fixed.toString().split('.');
   const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');

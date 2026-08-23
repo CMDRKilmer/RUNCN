@@ -18,8 +18,9 @@ import {
 } from '@src/infrastructure/prun-api/data/addresses';
 import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import { useTileState } from '@src/store/user-data-tiles';
+import { normalizeDispatchBaseConfigs } from '@src/store/user-data-migrations';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
@@ -164,7 +165,9 @@ const baseAnalyses = computed<Map<string, BaseStorageAnalysis> | undefined>(() =
   return map;
 });
 
-// Fill in missing base configs and patch older persisted configs.
+// Fill in configs for bases that do not have one yet.
+// Legacy config shapes are normalized by the user data migrations,
+// and on import by importDispatchConfig.
 watchEffect(() => {
   const list = bases.value;
   if (!list) {
@@ -173,43 +176,12 @@ watchEffect(() => {
   let next = baseConfigs.value;
   let changed = false;
   for (const base of list) {
-    const existing = next[base.naturalId];
-    if (existing === undefined) {
+    if (next[base.naturalId] === undefined) {
       if (!changed) {
         next = { ...next };
         changed = true;
       }
       next[base.naturalId] = createBaseConfig(base.naturalId);
-      continue;
-    }
-    let patched = existing;
-    if (
-      existing.consumablesOnly === undefined ||
-      existing.includeConsumables === undefined ||
-      existing.cxBuy === undefined ||
-      (existing as unknown as Record<string, unknown>).materialFilter !== undefined
-    ) {
-      const legacy = (existing as unknown as Record<string, unknown>).materialFilter as
-        string | undefined;
-      patched = {
-        ...patched,
-        consumablesOnly: existing.consumablesOnly ?? legacy === 'Workforce',
-        includeConsumables: existing.includeConsumables ?? legacy !== 'Production',
-        cxBuy: existing.cxBuy ?? true,
-      };
-      delete (patched as unknown as Record<string, unknown>).materialFilter;
-    }
-    // repAdvance 曾为数字（提前天数），现改为 BRA 三档；旧值归一到 'now'。
-    const legacyAdvance = (existing as unknown as Record<string, unknown>).repAdvance;
-    if (legacyAdvance !== 'now' && legacyAdvance !== '24' && legacyAdvance !== '48') {
-      patched = { ...patched, repAdvance: 'now' };
-    }
-    if (patched !== existing) {
-      if (!changed) {
-        next = { ...next };
-        changed = true;
-      }
-      next[base.naturalId] = patched;
     }
   }
   if (changed) {
@@ -802,7 +774,9 @@ async function importDispatchConfig() {
     setNotice('剪贴板内容不是 FLEET 配置');
     return;
   }
-  baseConfigs.value = config.baseConfigs ?? {};
+  const configs = config.baseConfigs ?? {};
+  normalizeDispatchBaseConfigs(configs);
+  baseConfigs.value = configs;
   baseOrder.value = config.baseOrder ?? [];
   exchangeFilter.value = config.exchangeFilter;
   setNotice('配置已导入');

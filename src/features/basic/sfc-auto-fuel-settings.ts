@@ -1,4 +1,4 @@
-import { clickElement } from '@src/util';
+import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 
 // 打开 SFC 时自动写入的燃料参数。

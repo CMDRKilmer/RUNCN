@@ -6,7 +6,7 @@
 // 替换方式：调用 util.changeInputValue 走 React 的 setter+事件路径，
 // 与 selectAddress 的写法一致。
 
-import { changeInputValue, focusElement } from '@src/util';
+import { changeInputValue, focusElement } from '@src/utils/dom';
 import { refValue } from '@src/utils/reactive-dom';
 import { resolveBaseAliasOrNaturalId } from '@src/core/base-aliases';
 import { userData } from '@src/store/user-data';

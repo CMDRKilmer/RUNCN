@@ -91,7 +91,9 @@ const EXPERTISE_LABELS: Record<string, string> = {
 };
 
 function getEfficiencyMultiplier(expertise: string | null | undefined): number {
-  if (!expertise) return 1;
+  if (!expertise) {
+    return 1;
+  }
   const expertCount = Math.min(5, Math.max(0, experts.value[expertise] ?? 0));
   const expertBonus = EXPERT_BONUSES[expertCount];
   const cogcBonus = cogcIndustry.value === expertise ? 0.25 : 0;
@@ -426,24 +428,34 @@ const workforceProvided = computed(() => {
 
 // 使用 PLAN 磁贴的交易所设置获取价格
 function getPlanPrice(ticker?: string | null): number | undefined {
-  if (!ticker) return undefined;
+  if (!ticker) {
+    return undefined;
+  }
 
   const upper = ticker.toUpperCase();
   const ignored = new Set(userData.settings.financial.ignoredMaterials.split(','));
   const mmMaterials = new Set(userData.settings.financial.mmMaterials.split(','));
 
-  if (ignored.has(upper)) return 0;
-  if (!cxStore.fetched) return undefined;
+  if (ignored.has(upper)) {
+    return 0;
+  }
+  if (!cxStore.fetched) {
+    return undefined;
+  }
 
   const exchangeData = cxStore.prices.get(exchange.value);
-  if (!exchangeData) return undefined;
+  if (!exchangeData) {
+    return undefined;
+  }
 
   if (mmMaterials.has(upper)) {
     return exchangeData.get(ticker)?.MMBuy ?? 0;
   }
 
   const tickerInfo = exchangeData.get(ticker);
-  if (!tickerInfo) return 0;
+  if (!tickerInfo) {
+    return 0;
+  }
 
   const method = userData.settings.pricing.method;
   switch (method) {
@@ -472,17 +484,23 @@ function getPlanPrice(ticker?: string | null): number | undefined {
 
 // 优先使用自定义价格，否则回退到交易所价格。
 function getInputPrice(ticker: string): number | undefined {
-  if (Object.hasOwn(customInputPrices.value, ticker)) return customInputPrices.value[ticker];
+  if (Object.hasOwn(customInputPrices.value, ticker)) {
+    return customInputPrices.value[ticker];
+  }
   return getPlanPrice(ticker);
 }
 
 function getOutputPrice(ticker: string): number | undefined {
-  if (Object.hasOwn(customOutputPrices.value, ticker)) return customOutputPrices.value[ticker];
+  if (Object.hasOwn(customOutputPrices.value, ticker)) {
+    return customOutputPrices.value[ticker];
+  }
   return getPlanPrice(ticker);
 }
 
 function getWfPrice(ticker: string): number | undefined {
-  if (Object.hasOwn(customWfPrices.value, ticker)) return customWfPrices.value[ticker];
+  if (Object.hasOwn(customWfPrices.value, ticker)) {
+    return customWfPrices.value[ticker];
+  }
   return getPlanPrice(ticker);
 }
 
@@ -517,11 +535,15 @@ function calcBatchRuns(fb: FioBuilding, recipes: PlannedRecipe[], buildingCount:
   const effectiveRecipes = getEffectiveRecipes(fb);
   let totalBatchTime = 0;
   for (const r of recipes) {
-    if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) continue;
+    if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) {
+      continue;
+    }
     const recipe = effectiveRecipes[r.recipeIdx];
     totalBatchTime += (recipe.DurationMs * r.count) / eff;
   }
-  if (totalBatchTime === 0) return undefined;
+  if (totalBatchTime === 0) {
+    return undefined;
+  }
   const batchRuns = (86400000 * buildingCount) / totalBatchTime;
   return { batchRuns, eff };
 }
@@ -532,25 +554,37 @@ function calcDailyProfit(
   buildingCount: number,
 ): number | undefined {
   const batch = calcBatchRuns(fb, recipes, buildingCount);
-  if (!batch) return undefined;
+  if (!batch) {
+    return undefined;
+  }
 
   const effectiveRecipes = getEffectiveRecipes(fb);
   let total = 0;
   for (const r of recipes) {
-    if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) continue;
+    if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) {
+      continue;
+    }
     const recipe = effectiveRecipes[r.recipeIdx];
     let outputValue = 0;
     for (const out of recipe.Outputs) {
-      if (!out.CommodityTicker) continue;
+      if (!out.CommodityTicker) {
+        continue;
+      }
       const price = getOutputPrice(out.CommodityTicker);
-      if (price === undefined) return undefined;
+      if (price === undefined) {
+        return undefined;
+      }
       outputValue += out.Amount * r.count * price;
     }
     let inputValue = 0;
     for (const inp of recipe.Inputs) {
-      if (!inp.CommodityTicker) continue;
+      if (!inp.CommodityTicker) {
+        continue;
+      }
       const price = getInputPrice(inp.CommodityTicker);
-      if (price === undefined) return undefined;
+      if (price === undefined) {
+        return undefined;
+      }
       inputValue += inp.Amount * r.count * price;
     }
     total += (outputValue - inputValue) * batch.batchRuns;
@@ -563,10 +597,16 @@ const dailyProfit = computed<number | undefined>(() => {
   for (const pb of buildings.value) {
     const migrated = migrateBuilding(pb);
     const fb = findFioBuilding(migrated.ticker);
-    if (!fb || !isProductionBuilding(migrated.ticker)) continue;
-    if (migrated.recipes.length === 0) continue;
+    if (!fb || !isProductionBuilding(migrated.ticker)) {
+      continue;
+    }
+    if (migrated.recipes.length === 0) {
+      continue;
+    }
     const profit = calcDailyProfit(fb, migrated.recipes, pb.count);
-    if (profit === undefined) return undefined;
+    if (profit === undefined) {
+      return undefined;
+    }
     total += profit;
   }
   return total;
@@ -578,17 +618,25 @@ const dailyInputs = computed<Record<string, number>>(() => {
   for (const pb of buildings.value) {
     const migrated = migrateBuilding(pb);
     const fb = findFioBuilding(migrated.ticker);
-    if (!fb || !isProductionBuilding(migrated.ticker)) continue;
+    if (!fb || !isProductionBuilding(migrated.ticker)) {
+      continue;
+    }
 
     const batch = calcBatchRuns(fb, migrated.recipes, pb.count);
-    if (!batch) continue;
+    if (!batch) {
+      continue;
+    }
 
     const effectiveRecipes = getEffectiveRecipes(fb);
     for (const r of migrated.recipes) {
-      if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) continue;
+      if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) {
+        continue;
+      }
       const recipe = effectiveRecipes[r.recipeIdx];
       for (const inp of recipe.Inputs) {
-        if (!inp.CommodityTicker) continue;
+        if (!inp.CommodityTicker) {
+          continue;
+        }
         result[inp.CommodityTicker] =
           (result[inp.CommodityTicker] ?? 0) + inp.Amount * r.count * batch.batchRuns;
       }
@@ -603,17 +651,25 @@ const dailyOutputs = computed<Record<string, number>>(() => {
   for (const pb of buildings.value) {
     const migrated = migrateBuilding(pb);
     const fb = findFioBuilding(migrated.ticker);
-    if (!fb || !isProductionBuilding(migrated.ticker)) continue;
+    if (!fb || !isProductionBuilding(migrated.ticker)) {
+      continue;
+    }
 
     const batch = calcBatchRuns(fb, migrated.recipes, pb.count);
-    if (!batch) continue;
+    if (!batch) {
+      continue;
+    }
 
     const effectiveRecipes = getEffectiveRecipes(fb);
     for (const r of migrated.recipes) {
-      if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) continue;
+      if (r.recipeIdx < 0 || r.recipeIdx >= effectiveRecipes.length) {
+        continue;
+      }
       const recipe = effectiveRecipes[r.recipeIdx];
       for (const out of recipe.Outputs) {
-        if (!out.CommodityTicker) continue;
+        if (!out.CommodityTicker) {
+          continue;
+        }
         result[out.CommodityTicker] =
           (result[out.CommodityTicker] ?? 0) + out.Amount * r.count * batch.batchRuns;
       }
@@ -633,7 +689,9 @@ const totalMaterials = computed<Record<string, number>>(() => {
     const count = pb.count;
     // 基础建材
     for (const cost of fb.BuildingCosts) {
-      if (!cost.CommodityTicker) continue;
+      if (!cost.CommodityTicker) {
+        continue;
+      }
       result[cost.CommodityTicker] = (result[cost.CommodityTicker] ?? 0) + cost.Amount * count;
     }
     // 环境建材（根据星球环境和建筑面积计算）
@@ -664,11 +722,15 @@ const dailyCost = computed<number | undefined>(() => {
   let total = 0;
   for (const [ticker, amount] of Object.entries(dailyInputs.value)) {
     const price = getInputPrice(ticker);
-    if (price === undefined) return undefined;
+    if (price === undefined) {
+      return undefined;
+    }
     total += amount * price;
   }
   const wfCost = dailyWorkforceCost.value;
-  if (wfCost === undefined) return undefined;
+  if (wfCost === undefined) {
+    return undefined;
+  }
   total += wfCost;
   return total;
 });
@@ -678,7 +740,9 @@ const dailyRevenue = computed<number | undefined>(() => {
   let total = 0;
   for (const [ticker, amount] of Object.entries(dailyOutputs.value)) {
     const price = getOutputPrice(ticker);
-    if (price === undefined) return undefined;
+    if (price === undefined) {
+      return undefined;
+    }
     total += amount * price;
   }
   return total;
@@ -697,7 +761,9 @@ const wfTierNames: Record<WfTier, string> = {
 // 每日人口消耗品汇总（按 FIO workforceneeds 数据，每100人/天换算，不足1个取整为1）。
 const dailyWorkforceConsumption = computed<Record<string, number>>(() => {
   const needs = workforceNeedsStore.needs;
-  if (!needs) return {};
+  if (!needs) {
+    return {};
+  }
 
   const wfCounts: Record<string, number> = {
     PIONEER: workforceNeeded.value.Pioneers,
@@ -710,7 +776,9 @@ const dailyWorkforceConsumption = computed<Record<string, number>>(() => {
   const result: Record<string, number> = {};
   for (const tierNeeds of needs) {
     const count = wfCounts[tierNeeds.WorkforceType] ?? 0;
-    if (count <= 0) continue;
+    if (count <= 0) {
+      continue;
+    }
     for (const need of tierNeeds.Needs) {
       const ticker = need.MaterialTicker;
       result[ticker] = (result[ticker] ?? 0) + (need.Amount * count) / 100;
@@ -733,7 +801,9 @@ const dailyWorkforceCost = computed<number | undefined>(() => {
   let total = 0;
   for (const [ticker, amount] of Object.entries(dailyWorkforceConsumption.value)) {
     const price = getWfPrice(ticker);
-    if (price === undefined) return undefined;
+    if (price === undefined) {
+      return undefined;
+    }
     total += amount * price;
   }
   return total;
@@ -744,7 +814,9 @@ const activeExpertiseCategories = computed(() => {
   const cats = new Set<string>();
   for (const pb of buildings.value) {
     const fb = findFioBuilding(pb.ticker);
-    if (fb?.Expertise) cats.add(fb.Expertise);
+    if (fb?.Expertise) {
+      cats.add(fb.Expertise);
+    }
   }
   return EXPERTISE_CATEGORIES.filter(c => cats.has(c));
 });
@@ -752,7 +824,9 @@ const activeExpertiseCategories = computed(() => {
 // 自动配平居住建筑：穷举搜索最小面积组合，支持复合住房。
 function onAutoBalance() {
   const allFio = fioBuildingsStore.buildings;
-  if (!allFio) return;
+  if (!allFio) {
+    return;
+  }
 
   // 先移除所有现有居住建筑，基于纯生产需求重新计算。
   const nonHabBuildings = buildings.value.filter(pb => !isHabitationBuilding(pb.ticker));
@@ -760,7 +834,9 @@ function onAutoBalance() {
   const needed = { Pioneers: 0, Settlers: 0, Technicians: 0, Engineers: 0, Scientists: 0 };
   for (const pb of nonHabBuildings) {
     const fb = findFioBuilding(pb.ticker);
-    if (!fb || !isProductionBuilding(pb.ticker)) continue;
+    if (!fb || !isProductionBuilding(pb.ticker)) {
+      continue;
+    }
     needed.Pioneers += fb.Pioneers * pb.count;
     needed.Settlers += fb.Settlers * pb.count;
     needed.Technicians += fb.Technicians * pb.count;
@@ -798,7 +874,9 @@ function onAutoBalance() {
       area: fb.AreaCost,
     }));
 
-  if (options.length === 0) return;
+  if (options.length === 0) {
+    return;
+  }
 
   // DFS 剪枝搜索最优解。
   // 只枚举实际有缺口层级涉及的建筑。
@@ -815,20 +893,26 @@ function onAutoBalance() {
     const greedyCounts = relevantOptions.map(() => 0);
     const rem = { ...baseDeficit };
     for (const tier of wfTiers) {
-      if (rem[tier] <= 0) continue;
+      if (rem[tier] <= 0) {
+        continue;
+      }
       // 单层住房中找容量/面积比最大的。
       let bestIdx = -1;
       let bestRatio = -1;
       for (let i = 0; i < relevantOptions.length; i++) {
         const cap = relevantOptions[i].caps[tier];
-        if (cap <= 0) continue;
+        if (cap <= 0) {
+          continue;
+        }
         const ratio = cap / relevantOptions[i].area;
         if (ratio > bestRatio) {
           bestRatio = ratio;
           bestIdx = i;
         }
       }
-      if (bestIdx < 0) continue;
+      if (bestIdx < 0) {
+        continue;
+      }
       const cap = relevantOptions[bestIdx].caps[tier];
       greedyCounts[bestIdx] += Math.ceil(rem[tier] / cap);
     }
@@ -843,14 +927,18 @@ function onAutoBalance() {
 
   function dfs(idx: number, rem: Record<WfTier, number>, usedArea: number) {
     // 剪枝：已超过当前最优。
-    if (usedArea >= bestArea) return;
+    if (usedArea >= bestArea) {
+      return;
+    }
     // 满足条件。
     if (wfTiers.every(t => rem[t] <= 0)) {
       bestArea = usedArea;
       bestCounts = relevantOptions.map((_, i) => counts[i]);
       return;
     }
-    if (idx >= relevantOptions.length) return;
+    if (idx >= relevantOptions.length) {
+      return;
+    }
 
     const opt = relevantOptions[idx];
     // 计算该建筑最多需要几个（满足所有它能覆盖的层级）。
@@ -867,7 +955,9 @@ function onAutoBalance() {
       counts[idx] = c;
       const newRem = { ...rem };
       for (const tier of wfTiers) {
-        if (opt.caps[tier] > 0) newRem[tier] = rem[tier] - opt.caps[tier] * c;
+        if (opt.caps[tier] > 0) {
+          newRem[tier] = rem[tier] - opt.caps[tier] * c;
+        }
       }
       dfs(idx + 1, newRem, usedArea + c * opt.area);
     }
@@ -915,7 +1005,9 @@ function onRemoveBuilding(idx: number) {
 
 // 非生产建筑（居住/仓储/核心）的数量修改。
 function onNonProdCountChange(idx: number, value: number) {
-  if (value === 0 || Number.isNaN(value) || value < 1) return;
+  if (value === 0 || Number.isNaN(value) || value < 1) {
+    return;
+  }
   const newList = [...buildings.value];
   newList[idx] = { ...newList[idx], count: Math.max(1, value) };
   buildings.value = newList;
@@ -923,7 +1015,9 @@ function onNonProdCountChange(idx: number, value: number) {
 
 // 生产建筑总数量修改。
 function onBuildingCountChange(idx: number, value: number) {
-  if (value === 0 || Number.isNaN(value) || value < 1) return;
+  if (value === 0 || Number.isNaN(value) || value < 1) {
+    return;
+  }
   const newList = [...buildings.value];
   newList[idx] = { ...newList[idx], count: Math.max(1, value) };
   buildings.value = newList;
@@ -1025,8 +1119,11 @@ function onSaveToJH(ev: Event) {
         customWfPrices: { ...customWfPrices.value },
       };
       const idx = userData.basePlans.findIndex(p => p.id === id);
-      if (idx >= 0) userData.basePlans[idx] = plan;
-      else userData.basePlans.push(plan);
+      if (idx >= 0) {
+        userData.basePlans[idx] = plan;
+      } else {
+        userData.basePlans.push(plan);
+      }
     },
   });
 }
@@ -1166,9 +1263,13 @@ function rowProfitText(pb: PlannedBuilding): string {
     return '--';
   }
   const migrated = migrateBuilding(pb);
-  if (migrated.recipes.length === 0) return '--';
+  if (migrated.recipes.length === 0) {
+    return '--';
+  }
   const profit = calcDailyProfit(fb, migrated.recipes, pb.count);
-  if (profit === undefined) return '?';
+  if (profit === undefined) {
+    return '?';
+  }
   return formatCurrency(profit);
 }
 

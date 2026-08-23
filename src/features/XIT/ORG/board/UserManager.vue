@@ -22,7 +22,9 @@ const sortedUsers = computed(() => {
 });
 
 function formatDateTime(s?: string): string {
-  if (!s) return '—';
+  if (!s) {
+    return '—';
+  }
   // 后端返回 "YYYY-MM-DD HH:MM:SS"（UTC），直接展示即可
   return s;
 }

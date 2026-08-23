@@ -15,7 +15,7 @@ import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { fixed0, fixed02 } from '@src/utils/format';
 import { getSellLimitPrice } from '@src/core/orders';
 import { companyStore } from '@src/infrastructure/prun-api/data/company';
-import { getMaterialNameByTicker } from '@src/util';
+import { getMaterialNameByTicker } from '@src/core/game-lookups';
 import { consumeDraggedTickers } from '@src/features/XIT/SELL/drag-import';
 
 // 四大交易所的 CX 仓库。

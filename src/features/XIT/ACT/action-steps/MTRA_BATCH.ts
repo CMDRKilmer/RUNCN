@@ -1,7 +1,7 @@
 import { act } from '@src/features/XIT/ACT/act-registry';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { fixed0 } from '@src/utils/format';
-import { changeInputValue, clickElement } from '@src/util';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { watchWhile } from '@src/utils/watch';

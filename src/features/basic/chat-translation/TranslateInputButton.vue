@@ -3,7 +3,7 @@ import fa from '@src/utils/font-awesome.module.css';
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import Tooltip from '@src/components/Tooltip.vue';
-import { changeInputValue } from '@src/util';
+import { changeInputValue } from '@src/utils/dom';
 import { userData } from '@src/store/user-data';
 import { getLanguageLabel } from './languages';
 import { translate } from './translate';
@@ -73,7 +73,9 @@ let parentOriginalPosition: string | null = null;
 let inputOriginalPaddingRight: string | null = null;
 onMounted(() => {
   const parent = input.parentElement;
-  if (!parent) return;
+  if (!parent) {
+    return;
+  }
   const style = window.getComputedStyle(parent);
   if (style.position === 'static') {
     parentOriginalPosition = parent.style.position || null;

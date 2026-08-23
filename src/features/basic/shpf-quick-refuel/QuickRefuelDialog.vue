@@ -9,7 +9,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { atSameLocation, serializeStorage, storageSort } from '@src/features/XIT/ACT/actions/utils';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { changeInputValue, clickElement, focusElement } from '@src/util';
+import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import type { RefuelResult } from './refuel-result';
 

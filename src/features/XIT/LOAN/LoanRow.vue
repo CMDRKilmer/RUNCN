@@ -20,14 +20,18 @@ const installments = computed(() => contract.conditions.filter(c => c.type === '
 // 本金金额
 const principal = computed(() => {
   const payout = payoutCondition.value;
-  if (!payout?.amount) return '';
+  if (!payout?.amount) {
+    return '';
+  }
   return formatAmount(payout.amount.amount, payout.amount.currency);
 });
 
 // 每期利息（取第一个分期的利息信息）
 const interest = computed(() => {
   const first = installments.value[0];
-  if (!first?.interest) return '-';
+  if (!first?.interest) {
+    return '-';
+  }
   return formatAmount(first.interest.amount, first.interest.currency);
 });
 
@@ -84,14 +88,18 @@ function formatDate(item: { timestamp: number }): string {
 const nextPaymentTime = computed(() => {
   // 找到第一个未完成的分期
   const nextInstallment = installments.value.find(c => c.status !== 'FULFILLED');
-  if (!nextInstallment?.deadline) return '-';
+  if (!nextInstallment?.deadline) {
+    return '-';
+  }
   return formatDate(nextInstallment.deadline);
 });
 
 // 下次还款/收款金额
 const nextPaymentAmount = computed(() => {
   const nextInstallment = installments.value.find(c => c.status !== 'FULFILLED');
-  if (!nextInstallment?.repayment || !nextInstallment?.interest) return '-';
+  if (!nextInstallment?.repayment || !nextInstallment?.interest) {
+    return '-';
+  }
   const totalAmount = nextInstallment.repayment.amount + nextInstallment.interest.amount;
   return formatAmount(totalAmount, nextInstallment.repayment.currency);
 });

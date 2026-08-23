@@ -88,7 +88,9 @@ function conditionsToItems(conditions: PrunApi.ContractCondition[]): ContractFin
 // 会导致指纹 mismtach。统一用 naturalId 对齐。
 // 例如 [{ entity: { naturalId: 'VH-331', name: 'Hortus' } }, { entity: { naturalId: 'HRT', name: 'Hortus Station' } }] → "HRT"
 function addressToLocation(address: PrunApi.Address | undefined): string | undefined {
-  if (!address || address.lines.length === 0) return undefined;
+  if (!address || address.lines.length === 0) {
+    return undefined;
+  }
   // 取最后一行（通常是站点）的 naturalId；如果不存在则取倒数第二行（星系）
   for (let i = address.lines.length - 1; i >= 0; i--) {
     const line = address.lines[i];
@@ -141,7 +143,9 @@ function inferContractTemplate(contract: PrunApi.Contract): TaskContractJson['te
   const hasPickup = contract.conditions.some(
     c => c.type === 'PICKUP' || c.type === 'PICKUP_SHIPMENT',
   );
-  if (hasPickup) return 'SHIP';
+  if (hasPickup) {
+    return 'SHIP';
+  }
   // name fallback：PrUn contract.create 输出的 name 通常带 "BUY"/"SELL" 前缀。
   const namePrefix = (contract.name ?? '').trim().split(/\s+/)[0]?.toUpperCase();
   if (namePrefix && PLAYER_CONTRACT_TYPES.has(namePrefix)) {
@@ -222,7 +226,9 @@ function taskJsonToFingerprint(json: TaskContractJson): ContractFingerprint {
         commodity: i.commodity,
         amount: i.amount,
       };
-      if (i.price !== undefined) item.price = i.price;
+      if (i.price !== undefined) {
+        item.price = i.price;
+      }
       return item;
     }),
     location: json.location,
@@ -237,7 +243,9 @@ function taskJsonToFingerprint(json: TaskContractJson): ContractFingerprint {
 // 从 items 计算总价（sum of price × amount）
 function totalPriceFromItems(items: TaskContractItem[]): number | undefined {
   const priced = items.filter(i => i.price !== undefined && i.price > 0);
-  if (priced.length === 0) return undefined;
+  if (priced.length === 0) {
+    return undefined;
+  }
   return priced.reduce((sum, i) => sum + i.price! * i.amount, 0);
 }
 
@@ -245,27 +253,41 @@ const PRICE_TOLERANCE = 0.005; // ±0.5%
 
 // 价格在容差内视为相等
 function priceEquals(a: number | undefined, b: number | undefined): boolean {
-  if (a == null && b == null) return true;
-  if (a == null || b == null) return false;
-  if (a === 0 && b === 0) return true;
+  if (a == null && b == null) {
+    return true;
+  }
+  if (a == null || b == null) {
+    return false;
+  }
+  if (a === 0 && b === 0) {
+    return true;
+  }
   const max = Math.max(Math.abs(a), Math.abs(b));
   return Math.abs(a - b) / max <= PRICE_TOLERANCE;
 }
 
 // items 集合相等（commodity 全等，amount 严格，price 容差）
 function itemsEqual(a: ContractFingerprint['items'], b: ContractFingerprint['items']): boolean {
-  if (a.length !== b.length) return false;
+  if (a.length !== b.length) {
+    return false;
+  }
   const sortedA = [...a].sort((x, y) => x.commodity.localeCompare(y.commodity));
   const sortedB = [...b].sort((x, y) => x.commodity.localeCompare(y.commodity));
   for (let i = 0; i < sortedA.length; i++) {
     const ia = sortedA[i];
     const ib = sortedB[i];
     const commodityMatch = ia.commodity === ib.commodity;
-    if (!commodityMatch) return false;
+    if (!commodityMatch) {
+      return false;
+    }
     const amountMatch = ia.amount === ib.amount;
-    if (!amountMatch) return false;
+    if (!amountMatch) {
+      return false;
+    }
     const pricesMatch: boolean = priceEquals(ia.price, ib.price);
-    if (!pricesMatch) return false;
+    if (!pricesMatch) {
+      return false;
+    }
   }
   return true;
 }

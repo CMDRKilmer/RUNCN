@@ -44,9 +44,15 @@ function createEl() {
 }
 
 function show() {
-  if (!tooltip) return;
-  if (!el) createEl();
-  if (!el || !containerRef.value) return;
+  if (!tooltip) {
+    return;
+  }
+  if (!el) {
+    createEl();
+  }
+  if (!el || !containerRef.value) {
+    return;
+  }
   el.textContent = tooltip;
   const rect = containerRef.value.getBoundingClientRect();
   const margin = 8;
@@ -104,7 +110,9 @@ function show() {
   }
 
   requestAnimationFrame(() => {
-    if (!el) return;
+    if (!el) {
+      return;
+    }
     el.style.opacity = '1';
     el.style.transform = 'translateY(0)';
     el.style.pointerEvents = 'auto';
@@ -120,7 +128,9 @@ function scheduleHide(delay = 80) {
       hideTimeout = null;
       return;
     }
-    if (!el) return;
+    if (!el) {
+      return;
+    }
     el.style.opacity = '0';
     el.style.transform = 'translateY(4px)';
     el.style.pointerEvents = 'none';
@@ -134,20 +144,26 @@ function hide() {
     clearTimeout(hideTimeout);
     hideTimeout = null;
   }
-  if (!el) return;
+  if (!el) {
+    return;
+  }
   el.style.opacity = '0';
   el.style.transform = 'translateY(4px)';
   el.style.pointerEvents = 'none';
 }
 
 function removeEl() {
-  if (el && el.parentElement) el.parentElement.removeChild(el);
+  if (el && el.parentElement) {
+    el.parentElement.removeChild(el);
+  }
   el = null;
 }
 
 onMounted(() => {
   const node = containerRef.value;
-  if (!node) return;
+  if (!node) {
+    return;
+  }
   node.addEventListener('mouseenter', () => {
     hoveringTarget = true;
     show();
@@ -194,7 +210,9 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener('scroll', hide, true);
   window.removeEventListener('resize', hide);
-  if (ro) ro.disconnect();
+  if (ro) {
+    ro.disconnect();
+  }
   removeEl();
 });
 </script>

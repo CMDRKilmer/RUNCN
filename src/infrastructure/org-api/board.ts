@@ -79,9 +79,17 @@ export async function listAuditLogs(
   params: ListAuditLogsParams = {},
 ): Promise<ListAuditLogsResult> {
   const search = new URLSearchParams();
-  if (params.limit !== undefined) search.set('limit', String(params.limit));
-  if (params.cursor) search.set('cursor', params.cursor);
-  if (params.action) search.set('action', params.action);
-  if (params.actorId) search.set('actorId', params.actorId);
+  if (params.limit !== undefined) {
+    search.set('limit', String(params.limit));
+  }
+  if (params.cursor) {
+    search.set('cursor', params.cursor);
+  }
+  if (params.action) {
+    search.set('action', params.action);
+  }
+  if (params.actorId) {
+    search.set('actorId', params.actorId);
+  }
   return request<ListAuditLogsResult>(`/board/audit-logs?${search.toString()}`);
 }

@@ -40,25 +40,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 // 与 CART 同源：trim + 大写 + 字面模式校验。失败返回 undefined 而非抛错，
 // 以便在聚合阶段静默丢弃错行，仅在最终 items 为空时统一报错。
 function normalizeTicker(ticker: unknown): string | undefined {
-  if (typeof ticker !== 'string') return undefined;
+  if (typeof ticker !== 'string') {
+    return undefined;
+  }
   const normalized = ticker.trim().toUpperCase();
-  if (!normalized || !TICKER_PATTERN.test(normalized)) return undefined;
+  if (!normalized || !TICKER_PATTERN.test(normalized)) {
+    return undefined;
+  }
   return normalized;
 }
 
 // 与 CART 同源：向上取整、非正数丢弃。
 function normalizeAmount(amount: unknown): number | undefined {
   const numeric = Number(amount);
-  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return undefined;
+  }
   return Math.ceil(numeric);
 }
 
 // price 不在 CART 的关注范围；按 PrUn 单价 2 位小数的步长四舍五入，避免
 // 浮点尾差落到 CONTD 表单上时被 validateConfig 拒。
 function normalizePrice(price: unknown): number | undefined {
-  if (price === undefined || price === null) return undefined;
+  if (price === undefined || price === null) {
+    return undefined;
+  }
   const numeric = Number(price);
-  if (!Number.isFinite(numeric) || numeric < 0) return undefined;
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return undefined;
+  }
   return Math.round(numeric * 100) / 100;
 }
 
@@ -66,14 +76,20 @@ function normalizePrice(price: unknown): number | undefined {
 // allowTopLevelTicker 用于"顶层数组"分支——若 entry 只有一个 ticker-shaped
 // key（形如 [ {"COF": 100} ]），也认作单行退化，避免误丢。
 function extractRow(entry: unknown): ImportedRow | undefined {
-  if (!isRecord(entry)) return undefined;
+  if (!isRecord(entry)) {
+    return undefined;
+  }
   const tickerRaw = entry.ticker ?? entry.commodity ?? entry.material ?? singleTickerHint(entry);
   const ticker = normalizeTicker(tickerRaw);
   const amount = normalizeAmount(entry.amount ?? entry.quantity);
-  if (!ticker || amount === undefined) return undefined;
+  if (!ticker || amount === undefined) {
+    return undefined;
+  }
   const price = normalizePrice(entry.price ?? entry.unitPrice);
   const row: ImportedRow = { ticker, amount };
-  if (price !== undefined) row.price = price;
+  if (price !== undefined) {
+    row.price = price;
+  }
   return row;
 }
 
@@ -81,19 +97,25 @@ function extractRow(entry: unknown): ImportedRow | undefined {
 // 这种情况不放进"items 数组"分支——后者已经是显式契约形态，不应再退化。
 function singleTickerHint(entry: Record<string, unknown>): string | undefined {
   const keys = Object.keys(entry);
-  if (keys.length !== 1) return undefined;
+  if (keys.length !== 1) {
+    return undefined;
+  }
   const key = keys[0];
   return TICKER_PATTERN.test(key.toUpperCase()) ? key : undefined;
 }
 
 // ticker 字典 → 行列表：典型输入是 { "COF": 100, "RAT": 50 } 或 groups[*].materials。
 function extractFromDict(dict: unknown): ImportedRow[] {
-  if (!isRecord(dict)) return [];
+  if (!isRecord(dict)) {
+    return [];
+  }
   const out: ImportedRow[] = [];
   for (const [k, v] of Object.entries(dict)) {
     const ticker = normalizeTicker(k);
     const amount = normalizeAmount(v);
-    if (!ticker || amount === undefined) continue;
+    if (!ticker || amount === undefined) {
+      continue;
+    }
     out.push({ ticker, amount });
   }
   return out;
@@ -109,7 +131,9 @@ function merge(rows: ImportedRow[]): ImportedRow[] {
       continue;
     }
     existing.amount += row.amount;
-    if (row.price !== undefined) existing.price = row.price;
+    if (row.price !== undefined) {
+      existing.price = row.price;
+    }
   }
   return Array.from(merged.values()).sort((a, b) => a.ticker.localeCompare(b.ticker));
 }
@@ -123,14 +147,18 @@ export function parseActJson(source: unknown): ImportedContractItems {
   if (Array.isArray(source)) {
     for (const entry of source) {
       const row = extractRow(entry);
-      if (row) rawRows.push(row);
+      if (row) {
+        rawRows.push(row);
+      }
     }
     sourceTag = 'array';
   } else if (isRecord(source)) {
     if (Array.isArray(source.items)) {
       for (const entry of source.items) {
         const row = extractRow(entry);
-        if (row) rawRows.push(row);
+        if (row) {
+          rawRows.push(row);
+        }
       }
       sourceTag = 'items';
     } else if (isRecord(source.materials)) {
@@ -138,7 +166,9 @@ export function parseActJson(source: unknown): ImportedContractItems {
       sourceTag = 'materials';
     } else if (Array.isArray(source.groups)) {
       for (const group of source.groups) {
-        if (isRecord(group)) rawRows.push(...extractFromDict(group.materials));
+        if (isRecord(group)) {
+          rawRows.push(...extractFromDict(group.materials));
+        }
       }
       sourceTag = 'actionPackage';
     } else {
@@ -162,12 +192,16 @@ export function parseActJson(source: unknown): ImportedContractItems {
     const topName = source.name;
     if (typeof topName === 'string') {
       const trimmed = topName.trim();
-      if (trimmed.length > 0) name = trimmed;
+      if (trimmed.length > 0) {
+        name = trimmed;
+      }
     } else if (isRecord(source.global)) {
       const globalName = source.global.name;
       if (typeof globalName === 'string') {
         const trimmed = globalName.trim();
-        if (trimmed.length > 0) name = trimmed;
+        if (trimmed.length > 0) {
+          name = trimmed;
+        }
       }
     }
   }
@@ -181,6 +215,8 @@ export function parseActJson(source: unknown): ImportedContractItems {
       withPrice: rows.filter(r => typeof r.price === 'number').length,
     },
   };
-  if (name !== undefined) result.name = name;
+  if (name !== undefined) {
+    result.name = name;
+  }
   return result;
 }

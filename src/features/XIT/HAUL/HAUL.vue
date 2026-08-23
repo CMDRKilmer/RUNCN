@@ -17,9 +17,13 @@ const showFilters = ref(true);
 function isCarrier(contract: PrunApi.Contract) {
   // 承运方负责 PICKUP_SHIPMENT 和 DELIVERY_SHIPMENT
   const pickup = contract.conditions.find(c => c.type === 'PICKUP_SHIPMENT');
-  if (pickup) return pickup.party === contract.party;
+  if (pickup) {
+    return pickup.party === contract.party;
+  }
   const delivery = contract.conditions.find(c => c.type === 'DELIVERY_SHIPMENT');
-  if (delivery) return delivery.party === contract.party;
+  if (delivery) {
+    return delivery.party === contract.party;
+  }
   return false;
 }
 
@@ -55,11 +59,15 @@ function getTransportSummary(contracts: PrunApi.Contract[]) {
   const shipTypes = ['PROVISION_SHIPMENT', 'PICKUP_SHIPMENT', 'DELIVERY_SHIPMENT'] as const;
 
   for (const contract of contracts) {
-    if (contract.status === 'FULFILLED') completedContracts++;
+    if (contract.status === 'FULFILLED') {
+      completedContracts++;
+    }
     for (const cond of contract.conditions) {
       if (cond.type === 'PAYMENT' && cond.amount) {
         totalPayment += cond.amount.amount;
-        if (!currency) currency = cond.amount.currency;
+        if (!currency) {
+          currency = cond.amount.currency;
+        }
       }
     }
     // 同一批货物出现在多种条件类型中，只取第一种有数据的类型累加。

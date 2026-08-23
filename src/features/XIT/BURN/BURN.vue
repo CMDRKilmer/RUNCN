@@ -2,7 +2,7 @@
 import CopyButton from '@src/components/CopyButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import { BurnValues, getPlanetBurn, MaterialBurn, PlanetBurn } from '@src/core/burn';
-import { comparePlanets } from '@src/util';
+import { comparePlanets } from '@src/core/game-lookups';
 import BurnSection from '@src/features/XIT/BURN/BurnSection.vue';
 import { useBurnTileState, useBurnFilters } from '@src/features/XIT/BURN/burn-state';
 import Tooltip from '@src/components/Tooltip.vue';

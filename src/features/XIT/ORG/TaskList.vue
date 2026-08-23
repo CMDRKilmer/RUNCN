@@ -118,7 +118,9 @@ const taskEvents = inject<{
 
 function isInScope(task: OrgTask): boolean {
   // shipping scope：只关心 SHIP 任务
-  if (props.scope === 'shipping') return task.type === 'SHIP';
+  if (props.scope === 'shipping') {
+    return task.type === 'SHIP';
+  }
   // published / claimed：用户作为 publisher 或 claimer 的任务
   // （实际 visibility 由后端控制；这里宽松匹配让 publish/claim 双向都收到）
   return true;
@@ -126,14 +128,20 @@ function isInScope(task: OrgTask): boolean {
 
 let unsubscribe: (() => void) | null = null;
 onMounted(() => {
-  if (!taskEvents) return;
+  if (!taskEvents) {
+    return;
+  }
   unsubscribe = taskEvents.subscribe(task => {
-    if (!isInScope(task)) return;
+    if (!isInScope(task)) {
+      return;
+    }
     onTaskUpdated(task);
   });
 });
 onBeforeUnmount(() => {
-  if (unsubscribe) unsubscribe();
+  if (unsubscribe) {
+    unsubscribe();
+  }
 });
 
 // 简单刷新：外部可通过轮询间接刷新；详情页关闭后重新拉取

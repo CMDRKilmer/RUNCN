@@ -68,12 +68,16 @@ provide('orgTaskEvents', {
     taskEventListeners.push(fn);
     return () => {
       const idx = taskEventListeners.indexOf(fn);
-      if (idx >= 0) taskEventListeners.splice(idx, 1);
+      if (idx >= 0) {
+        taskEventListeners.splice(idx, 1);
+      }
     };
   },
 });
 function notifyTaskUpdated(task: OrgTask) {
-  for (const fn of taskEventListeners) fn(task);
+  for (const fn of taskEventListeners) {
+    fn(task);
+  }
 }
 
 // 任务状态变化通知（架构 §12.11）
@@ -167,7 +171,9 @@ async function recoverActiveTasks(): Promise<void> {
     ]);
     const seen = new Set<string>();
     for (const task of [...claimed.items, ...published.items]) {
-      if (seen.has(task.id)) continue;
+      if (seen.has(task.id)) {
+        continue;
+      }
       seen.add(task.id);
       notifyTaskClaimed(task);
     }

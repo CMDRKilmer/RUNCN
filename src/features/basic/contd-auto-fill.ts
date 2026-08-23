@@ -1,7 +1,7 @@
 // Auto-fills a contract draft from a JSON config pasted into a textarea.
 // Adapted from the PrUn Operator user script (https://prop.auroras.xyz/prun-operator.user.js).
 
-import { changeInputValue, changeSelectIndex, clickElement, focusElement } from '@src/util';
+import { changeInputValue, changeSelectIndex, clickElement, focusElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';

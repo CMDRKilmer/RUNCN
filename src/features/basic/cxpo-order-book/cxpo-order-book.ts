@@ -1,5 +1,5 @@
 import OrderBook from './OrderBook.vue';
-import { changeInputValue } from '@src/util';
+import { changeInputValue } from '@src/utils/dom';
 import { increaseDefaultBufferSize } from '@src/infrastructure/prun-ui/buffer-sizes';
 import { fixed0, fixed02 } from '@src/utils/format';
 

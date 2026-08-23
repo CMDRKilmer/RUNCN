@@ -60,13 +60,23 @@ const publishedListingId = ref<string | null>(null);
 const isShip = computed(() => type.value === 'SHIP');
 
 const canSubmit = computed(() => {
-  if (loading.value) return false;
-  if (!item.value.ticker || item.value.amount <= 0) return false;
+  if (loading.value) {
+    return false;
+  }
+  if (!item.value.ticker || item.value.amount <= 0) {
+    return false;
+  }
   if (isShip.value) {
-    if (!origin.value || !destination.value || origin.value === destination.value) return false;
-    if (price.value === undefined || price.value <= 0) return false;
+    if (!origin.value || !destination.value || origin.value === destination.value) {
+      return false;
+    }
+    if (price.value === undefined || price.value <= 0) {
+      return false;
+    }
   } else {
-    if (!location.value) return false;
+    if (!location.value) {
+      return false;
+    }
     if (
       item.value.price === undefined ||
       item.value.price === null ||
@@ -85,7 +95,9 @@ watch(type, (next, prev) => {
 });
 
 async function onPublish() {
-  if (!canSubmit.value) return;
+  if (!canSubmit.value) {
+    return;
+  }
   loading.value = true;
   error.value = '';
   try {

@@ -1,5 +1,5 @@
 import { C } from '@src/infrastructure/prun-ui/prun-css';
-import { changeInputValue, clickElement, focusElement } from '@src/util';
+import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { closePrunWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';

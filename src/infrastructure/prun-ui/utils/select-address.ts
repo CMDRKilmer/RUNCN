@@ -1,4 +1,4 @@
-import { changeInputValue, clickElement, focusElement } from '@src/util';
+import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { sleep } from '@src/utils/sleep';
