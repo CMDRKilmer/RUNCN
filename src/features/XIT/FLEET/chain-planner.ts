@@ -774,7 +774,7 @@ export function buildChainActionPackages(
   }
 
   const mainPkg: UserData.ActionPackageData = {
-    global: { name: `CHAIN ${shipName}` },
+    global: { name: `环线派遣 ${shipName}` },
     groups,
     actions,
   };
@@ -794,7 +794,7 @@ export function buildChainActionPackages(
   const stopPkgs: ChainStopPackage[] = [];
   for (let i = 0; i < plan.stops.length; i++) {
     const stop = plan.stops[i]!;
-    const pkgName = `${stop.naturalId} RING ${shipName}`;
+    const pkgName = `${stop.planetName} 环线 ${shipName}`;
     const baseStore = `${stop.planetName} Base`;
 
     const unload: Record<string, number> = { ...stop.unloadCx };
@@ -853,7 +853,7 @@ export function buildChainActionPackages(
 
   let finalPkg: ChainStopPackage | undefined;
   if (Object.keys(plan.finalUnload).length > 0) {
-    const pkgName = `CHAIN-RETURN ${shipName}`;
+    const pkgName = `环线归航 ${shipName}`;
     finalPkg = {
       pkg: {
         global: { name: pkgName },
