@@ -703,6 +703,17 @@ export interface ChainActionPlan {
  * 卸货/提取 MTRA 始终成对存在（即使某侧为空），保证 OPEN SFC 能从「提取」
  * 动作解析出飞船。空的 MTRA 组会立即完成，无副作用。
  */
+// XIT 命令参数仅接受 ASCII（与 BPC/CART 生成 ACT 同款约束）：包名会拼进
+// `XIT ACT_${name}` 命令，含中文 / `()'"&` 等符号时 PrUn 端解析失败（提示无效指令）。
+// 仅保留 ASCII 字母 / 数字 / hyphen，其余符号与空白折叠为单个空格。
+function sanitizeActName(name: string): string {
+  return name
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/[^A-Za-z0-9-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function buildChainActionPackages(
   ship: DispatchShip,
   plan: ChainPlan,
@@ -711,7 +722,9 @@ export function buildChainActionPackages(
   if (!ship.warehouseStore || !ship.cargoStore) {
     return undefined;
   }
-  const shipName = ship.ship.name ?? ship.ship.registration;
+  // 船名净化后仍为空（如中文船名）时回退到注册号，保证包名非空。
+  const shipName =
+    sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
   const loadGroupName = `装载 ${shipName}`;
   const originWarehouse = serializeStorage(ship.warehouseStore);
   const shipCargo = serializeStorage(ship.cargoStore);
@@ -774,7 +787,7 @@ export function buildChainActionPackages(
   }
 
   const mainPkg: UserData.ActionPackageData = {
-    global: { name: `环线派遣 ${shipName}` },
+    global: { name: `Chain ${shipName}` },
     groups,
     actions,
   };
@@ -794,7 +807,9 @@ export function buildChainActionPackages(
   const stopPkgs: ChainStopPackage[] = [];
   for (let i = 0; i < plan.stops.length; i++) {
     const stop = plan.stops[i]!;
-    const pkgName = `${stop.planetName} 环线 ${shipName}`;
+    // 星球名净化后为空（如中文/含符号名）时回退到 naturalId，保证包名可被 ACT 命令解析。
+    const stopLabel = sanitizeActName(stop.planetName || stop.naturalId) || stop.naturalId;
+    const pkgName = `${stopLabel} Loop ${shipName}`;
     const baseStore = `${stop.planetName} Base`;
 
     const unload: Record<string, number> = { ...stop.unloadCx };
@@ -853,7 +868,7 @@ export function buildChainActionPackages(
 
   let finalPkg: ChainStopPackage | undefined;
   if (Object.keys(plan.finalUnload).length > 0) {
-    const pkgName = `环线归航 ${shipName}`;
+    const pkgName = `Chain Return ${shipName}`;
     finalPkg = {
       pkg: {
         global: { name: pkgName },
