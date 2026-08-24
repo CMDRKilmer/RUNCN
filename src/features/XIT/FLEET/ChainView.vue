@@ -21,7 +21,8 @@ import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
 import { stagedDispatch, dispatchFinished } from '@src/features/XIT/FLEET/staged';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
+import { queueTriggerRun, getPackageFinished } from '@src/features/XIT/ACT/trigger-queue';
+import { watchUntil } from '@src/utils/watch';
 import { createId } from '@src/store/create-id';
 import { stripDeletedActions } from '@src/features/XIT/ACT/utils';
 import { downloadJson } from '@src/utils/json-file';
@@ -289,13 +290,41 @@ function execute() {
   if (mainPkgs.length === 1) {
     stageMainPackage(mainPkgs[0]!);
   } else {
-    // 多船：各主包写入操作列表，暂存第一艘到 FLEETACT 供逐艘执行。
+    // 多船并行分段：全部主包一次性暂存到 FLEETACT（所有船可见可执行），
+    // 自动模式下按顺序自动执行；DEPART 后各船独立飞行，飞行阶段并行。
     for (const pkg of mainPkgs) {
       upsertPackage(pkg);
     }
-    stagedDispatch.value = { pkg: JSON.parse(JSON.stringify(mainPkgs[0]!)) };
-    showBuffer('XIT FLEETACT');
-    executeNotice.value = `已生成 ${mainPkgs.length} 艘船的主包到操作列表，请在 FLEETACT/ACT 逐艘执行。`;
+    const stagedPkgs = mainPkgs.map(p => JSON.parse(JSON.stringify(p)));
+    stagedDispatch.value = { pkgs: stagedPkgs };
+    if (chainAutoTrigger.value) {
+      void runStagedPkgs(stagedPkgs);
+    } else {
+      showBuffer('XIT FLEETACT');
+    }
+    executeNotice.value = `已生成 ${mainPkgs.length} 艘船的主包，全部暂存至 FLEETACT 逐艘执行（飞行阶段并行）。`;
+  }
+}
+
+// 多船自动执行：按顺序触发各主包（FLEETACT 窗口内多个执行实例），
+// 前一艘执行完成后再触发下一艘，避免多个 ActionRunner 并发抢占游戏窗口；
+// 所有包执行完后自动关闭 FLEETACT 窗口。
+async function runStagedPkgs(pkgs: UserData.ActionPackageData[]) {
+  dispatchFinished.value = false;
+  // getPackageFinished 复用已存在的 ref：上次执行留下的 true 会让
+  // watchUntil 立即 resolve（并发触发）并让 closeWhen 初始为 true（窗口早关）。
+  // 与 trigger-engine 一致，入队前重置为 false。
+  for (const pkg of pkgs) {
+    getPackageFinished(pkg.global.name).value = false;
+  }
+  void showBuffer('XIT FLEETACT', {
+    force: true,
+    autoClose: true,
+    closeWhen: computed(() => pkgs.every(p => getPackageFinished(p.global.name).value)),
+  });
+  for (const pkg of pkgs) {
+    queueTriggerRun({ triggerId: createId(), packageName: pkg.global.name });
+    await watchUntil(getPackageFinished(pkg.global.name));
   }
 }
 
@@ -482,18 +511,42 @@ function runProgress(run: UserData.ChainRun): RunProgress {
 }
 
 const activeRuns = computed(() => {
-  const result: { ship: DispatchShip; run: UserData.ChainRun; progress: RunProgress }[] = [];
+  const result: { shipId: string; run: UserData.ChainRun; progress: RunProgress }[] = [];
+  // 主：执行中的环线记录。不限于「可分配船只」——船 DEPART 后离开空间站，
+  // 已不在 ships props / eligibleShips 中，只要船仍存在就持续显示进度。
+  for (const run of Object.values(userData.chainRuns)) {
+    if (shipsStore.getById(run.shipId) === undefined) {
+      continue;
+    }
+    result.push({ shipId: run.shipId, run, progress: runProgress(run) });
+  }
+  if (result.length > 0) {
+    return result;
+  }
+  // 兜底：从触发器推导历史环线（chainRuns 记录丢失时）。
   for (const ship of selectedShips.value) {
-    const id = ship.ship.id;
-    const run: UserData.ChainRun | undefined =
-      id in userData.chainRuns ? userData.chainRuns[id] : deriveChainRun(id);
+    const run = deriveChainRun(ship.ship.id);
     if (run === undefined) {
       continue;
     }
-    result.push({ ship, run, progress: runProgress(run) });
+    result.push({ shipId: ship.ship.id, run, progress: runProgress(run) });
   }
   return result;
 });
+
+// 各船环线进度（执行后显示在出发前的计划列表上）。
+const progressByShip = computed(() => {
+  const map = new Map<string, RunProgress>();
+  for (const entry of activeRuns.value) {
+    map.set(entry.shipId, entry.progress);
+  }
+  return map;
+});
+
+// 计划列表附带进度，供模板在表格各站行直接展示状态标记。
+const shipPlanProgress = computed(() =>
+  shipPlans.value.map(sp => ({ ...sp, progress: progressByShip.value.get(sp.ship.ship.id) })),
+);
 
 // 环线完成后清理运行记录：遍历全部 chainRuns（不限于当前选中的船），
 // 站点与归航包都完成后移除。
@@ -649,25 +702,6 @@ function formatFinalUnloadNotes(plan: {
       <PrunButton dark @click="clearAllShips">清空</PrunButton>
     </div>
 
-    <!-- 环线执行进度 -->
-    <div v-if="activeRuns.length > 0" :class="$style.runPanel">
-      <div v-for="entry in activeRuns" :key="entry.ship.ship.id" :class="$style.runRow">
-        <span :class="$style.runName">{{ entry.run.shipName }}</span>
-        <span :class="$style.runRoute">
-          <span :class="$style.routeOrigin">{{ entry.run.originNaturalId }}</span>
-          <template v-for="stop in entry.progress.stops" :key="stop.naturalId">
-            <span :class="$style.routeArrow">→</span>
-            <span :class="[$style.marker, $style[markClassKey(stop.state)]]">
-              {{ stopMarker(stop.state) }}
-            </span>
-            <span :class="$style.runNode">{{ stop.planetName }}</span>
-          </template>
-          <span :class="$style.routeArrow">→</span>
-          <span :class="$style.routeOrigin">{{ entry.run.originNaturalId }}</span>
-        </span>
-      </div>
-    </div>
-
     <div v-if="executeNotice" :class="$style.notice">{{ executeNotice }}</div>
 
     <div v-if="!chainGroup" :class="$style.hint">
@@ -682,8 +716,8 @@ function formatFinalUnloadNotes(plan: {
     </div>
     <div v-else-if="selectedShips.length === 0" :class="$style.hint">请分配至少一艘船。</div>
     <LoadingSpinner v-else-if="loading" />
-    <div v-else-if="shipPlans.length > 0" :class="$style.content">
-      <div v-for="sp in shipPlans" :key="sp.ship.ship.id" :class="$style.shipPlan">
+    <div v-else-if="shipPlanProgress.length > 0" :class="$style.content">
+      <div v-for="sp in shipPlanProgress" :key="sp.ship.ship.id" :class="$style.shipPlan">
         <div :class="$style.shipHeader">{{ shipLabel(sp.ship) }}（{{ sp.ship.exchangeCode }}）</div>
         <div :class="$style.route">
           <span :class="$style.routeLabel">航线：</span>
@@ -730,7 +764,14 @@ function formatFinalUnloadNotes(plan: {
               }}</td>
             </tr>
             <tr v-for="(stop, i) in sp.plan.stops" :key="stop.naturalId">
-              <td :class="$style.narrowCol">{{ i + 1 }}</td>
+              <td :class="$style.narrowCol">
+                <span
+                  v-if="sp.progress?.stops[i]"
+                  :class="[$style.marker, $style[markClassKey(sp.progress.stops[i].state)]]">
+                  {{ stopMarker(sp.progress.stops[i].state) }}
+                </span>
+                {{ i + 1 }}
+              </td>
               <td :class="$style.narrowCol">{{ stop.planetName }}</td>
               <td :class="$style.matCell">
                 <div>
@@ -964,40 +1005,6 @@ function formatFinalUnloadNotes(plan: {
 .shipHeader {
   font-weight: 600;
   color: rgb(63, 162, 222);
-}
-
-.runPanel {
-  margin: 0 8px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  border: 1px solid #2b485a;
-  border-radius: 4px;
-  background: rgba(43, 72, 90, 0.2);
-}
-
-.runRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.runName {
-  color: rgb(171, 198, 128);
-  white-space: nowrap;
-}
-
-.runRoute {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-wrap: wrap;
-}
-
-.runNode {
-  color: rgb(171, 198, 128);
 }
 
 .marker {

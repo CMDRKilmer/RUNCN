@@ -10,5 +10,16 @@ const pkgKey = computed(() => stagedDispatch.value?.pkg);
 
 <template>
   <div v-if="!stagedDispatch">暂无暂存内容。请打开 XIT FLEET 并点击执行。</div>
-  <ExecuteActionPackage v-else :key="pkgKey" :pkg="stagedDispatch.pkg" />
+  <div v-else-if="stagedDispatch.pkgs" :class="$style.list">
+    <ExecuteActionPackage v-for="p in stagedDispatch.pkgs" :key="p.global.name" :pkg="p" />
+  </div>
+  <ExecuteActionPackage v-else :key="pkgKey" :pkg="stagedDispatch.pkg!" />
 </template>
+
+<style module>
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+</style>
