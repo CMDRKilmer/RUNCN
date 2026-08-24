@@ -720,6 +720,18 @@ function formatLoadCell(
   return `${fixed0(load.weight)}t ${wPct}%／${fixed0(load.volume)}m³ ${vPct}%`;
 }
 
+// 逆推模式（无计划快照）的载重列：显示船当前实时舱载。
+function liveLoadText(shipId: string): string {
+  const cargo = shipsStore.getById(shipId)?.cargoStore;
+  if (!cargo) {
+    return '';
+  }
+  return formatLoadCell(
+    { weight: cargo.weightLoad, volume: cargo.volumeLoad },
+    { weight: cargo.weightCapacity, volume: cargo.volumeCapacity },
+  );
+}
+
 function formatLoadDelta(stop: ChainStopPlan) {
   const dw = stop.loadOnDeparture.weight - stop.loadOnArrival.weight;
   const dv = stop.loadOnDeparture.volume - stop.loadOnArrival.volume;
@@ -888,6 +900,9 @@ function formatFinalUnloadNotes(plan: {
                 <template v-if="sp.plan">
                   {{ formatLoadCell(sp.plan.loadOnDeparture, sp.plan.capacity) }}
                 </template>
+                <template v-else-if="liveLoadText(sp.shipId)">
+                  实时 {{ liveLoadText(sp.shipId) }}
+                </template>
                 <span v-else>—</span>
               </td>
             </tr>
@@ -941,6 +956,9 @@ function formatFinalUnloadNotes(plan: {
                   }}</div>
                   <div :class="$style.loadSub">{{ formatLoadDelta(sp.plan.stops[i]) }}</div>
                 </template>
+                <template v-else-if="liveLoadText(sp.shipId)">
+                  实时 {{ liveLoadText(sp.shipId) }}
+                </template>
                 <span v-else>—</span>
               </td>
             </tr>
@@ -977,6 +995,9 @@ function formatFinalUnloadNotes(plan: {
               <td :class="$style.narrowCol">
                 <template v-if="sp.plan">
                   {{ formatLoadCell({ weight: 0, volume: 0 }, sp.plan.capacity) }}
+                </template>
+                <template v-else-if="liveLoadText(sp.shipId)">
+                  实时 {{ liveLoadText(sp.shipId) }}
                 </template>
                 <span v-else>—</span>
               </td>
