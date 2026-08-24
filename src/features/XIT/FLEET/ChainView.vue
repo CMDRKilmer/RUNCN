@@ -32,6 +32,7 @@ import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import ImportTriggerConfig from '@src/features/XIT/TRIGGER/ImportTriggerConfig.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import {
@@ -721,8 +722,13 @@ function formatLoadCell(
 }
 
 // 逆推模式（无计划快照）的载重列：显示船当前实时舱载。
+// Ship 本身不含货舱数据，需经 idShipStore 从 storagesStore 取 SHIP_STORE。
 function liveLoadText(shipId: string): string {
-  const cargo = shipsStore.getById(shipId)?.cargoStore;
+  const ship = shipsStore.getById(shipId);
+  if (!ship) {
+    return '';
+  }
+  const cargo = storagesStore.getById(ship.idShipStore);
   if (!cargo) {
     return '';
   }
