@@ -44,6 +44,14 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '24.08.2026 Add base groups',
+    userData => {
+      if (!userData.baseGroups || typeof userData.baseGroups !== 'object') {
+        userData.baseGroups = {};
+      }
+    },
+  ],
+  [
     '22.08.2026 Normalize FLEET dispatch base configs',
     userData => {
       const tileState: Record<string, any> = userData.tileState ?? {};

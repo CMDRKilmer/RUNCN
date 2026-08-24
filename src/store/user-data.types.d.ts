@@ -253,6 +253,11 @@ declare namespace UserData {
   // 未设置时，chain-planner 回落到 burn 推断（output > 0 且无下游边）。
   type BaseProducts = Record<string, string[]>;
 
+  // 基地供应链分组：siteId → 分组名数组。
+  // 在 BSN 面板为每基地标注所属分组（自由文本、逗号/空格分隔，数量不限）。
+  // XIT FLEET 产业链环线据此按「分组」载入基地，取代按船只分配基地的方式。
+  type BaseGroups = Record<string, string[]>;
+
   // 环线执行记录：以 shipId 为键，供 FLEET 环线页签展示「正在执行的环线」进度。
   // stops.pkgName 为净化后的站点操作包名，用于关联 FLIGHT_ENDED 触发器与操作包
   // 判定各站状态（包被 autoDelete 移除即完成）。

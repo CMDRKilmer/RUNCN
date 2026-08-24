@@ -2,7 +2,6 @@ import { userData } from '@src/store/user-data';
 import { App, Plugin } from 'vue';
 import { deepFreeze } from '@src/utils/deep-freeze';
 import { tilesStore } from '@src/infrastructure/prun-api/data/tiles';
-import { isEmpty } from 'ts-extras';
 
 type TileState = UserData.TileState;
 
@@ -112,10 +111,12 @@ export function computedTileState<T extends TileState, K extends keyof T>(
       return Object.hasOwn(state.value, key) ? value : defaultValue;
     },
     set: value => {
-      if (Array.isArray(value) && isEmpty(value)) {
-        delete state.value[key];
-        return;
-      } else if (typeof value === 'object' && Object.keys(value as object).length === 0) {
+      if (
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        Object.keys(value as object).length === 0
+      ) {
+        // 空对象视为未设置（避免持久化无意义数据）。
         delete state.value[key];
         return;
       }

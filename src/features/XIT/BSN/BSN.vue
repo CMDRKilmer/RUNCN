@@ -1,13 +1,14 @@
 <script setup lang="ts">
 // 基地别名管理面板：列出玩家所有基地，
 // 已设置别名的可在此修改或清除，未设置的可直接填写新别名。
-// 同步支持为每基地配置产物 ticker 列表，供 XIT FLEET 产业链环线读取。
+// 同步支持为每基地配置产物 ticker 列表与供应链分组，供 XIT FLEET 产业链环线读取。
 import { computed, reactive } from 'vue';
 import { userData } from '@src/store/user-data';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { getEntityNameFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { setBaseAlias, clearBaseAlias } from '@src/core/base-aliases';
 import { setBaseProducts, clearBaseProducts, formatBaseProducts } from '@src/core/base-products';
+import { setBaseGroups, clearBaseGroups, formatBaseGroups } from '@src/core/base-groups';
 import { getPlanetBurn } from '@src/core/burn';
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
@@ -19,6 +20,7 @@ interface BaseRow {
   planetName: string;
   alias: string;
   products: string[];
+  groups: string[];
 }
 
 const baseRows = computed<BaseRow[]>(() => {
@@ -35,6 +37,7 @@ const baseRows = computed<BaseRow[]>(() => {
       planetName: getEntityNameFromAddress(site.address) ?? naturalId,
       alias: userData.baseAliases[site.siteId] ?? '',
       products: userData.baseProducts[site.siteId] ?? [],
+      groups: userData.baseGroups[site.siteId] ?? [],
     });
   }
   // 有别名的基地按别名排序；其余按 naturalId 排在末尾。
@@ -55,6 +58,7 @@ const baseRows = computed<BaseRow[]>(() => {
 
 const aliasedCount = computed(() => baseRows.value.filter(x => x.alias.length > 0).length);
 const productsCount = computed(() => baseRows.value.filter(x => x.products.length > 0).length);
+const groupsCount = computed(() => baseRows.value.filter(x => x.groups.length > 0).length);
 
 // 产物占位文案：BURN 预读产出 (output > 0) 的 ticker。
 // 仅在产品列表未设置时使用，让玩家看见本基地产什么。
@@ -84,6 +88,7 @@ function productsPlaceholder(siteId: string): string {
 // 避免每次按键触发 baseRows 重排导致列表跳动、输入框失焦。
 const drafts = reactive<Record<string, string>>({});
 const productDrafts = reactive<Record<string, string>>({});
+const groupDrafts = reactive<Record<string, string>>({});
 
 function draftFor(siteId: string): string {
   return drafts[siteId] ?? userData.baseAliases[siteId] ?? '';
@@ -96,12 +101,23 @@ function productDraftFor(siteId: string): string {
   return formatBaseProducts(userData.baseProducts[siteId]);
 }
 
+function groupDraftFor(siteId: string): string {
+  if (groupDrafts[siteId] !== undefined) {
+    return groupDrafts[siteId];
+  }
+  return formatBaseGroups(userData.baseGroups[siteId]);
+}
+
 function onAliasInput(siteId: string, value: string) {
   drafts[siteId] = value;
 }
 
 function onProductsInput(siteId: string, value: string) {
   productDrafts[siteId] = value;
+}
+
+function onGroupsInput(siteId: string, value: string) {
+  groupDrafts[siteId] = value;
 }
 
 function commitAlias(siteId: string) {
@@ -126,12 +142,29 @@ function commitProducts(siteId: string) {
   delete productDrafts[siteId];
 }
 
+function commitGroups(siteId: string) {
+  const draft = groupDrafts[siteId];
+  if (draft === undefined) {
+    return;
+  }
+  const groups = draft
+    .split(/[,\s，、]+/)
+    .map(x => x.trim())
+    .filter(x => x.length > 0);
+  setBaseGroups(siteId, groups);
+  delete groupDrafts[siteId];
+}
+
 function onAliasBlur(siteId: string) {
   commitAlias(siteId);
 }
 
 function onProductsBlur(siteId: string) {
   commitProducts(siteId);
+}
+
+function onGroupsBlur(siteId: string) {
+  commitGroups(siteId);
 }
 
 function onAliasEnter(siteId: string, event: KeyboardEvent) {
@@ -141,6 +174,11 @@ function onAliasEnter(siteId: string, event: KeyboardEvent) {
 
 function onProductsEnter(siteId: string, event: KeyboardEvent) {
   commitProducts(siteId);
+  (event.target as HTMLInputElement).blur();
+}
+
+function onGroupsEnter(siteId: string, event: KeyboardEvent) {
+  commitGroups(siteId);
   (event.target as HTMLInputElement).blur();
 }
 
@@ -154,18 +192,25 @@ function onProductsEscape(siteId: string, event: KeyboardEvent) {
   (event.target as HTMLInputElement).blur();
 }
 
+function onGroupsEscape(siteId: string, event: KeyboardEvent) {
+  delete groupDrafts[siteId];
+  (event.target as HTMLInputElement).blur();
+}
+
 function onClear(siteId: string) {
   delete drafts[siteId];
   delete productDrafts[siteId];
+  delete groupDrafts[siteId];
   clearBaseAlias(siteId);
   clearBaseProducts(siteId);
+  clearBaseGroups(siteId);
 }
 </script>
 
 <template>
   <SectionHeader
-    >基地别名（{{ aliasedCount }} / {{ baseRows.length }}） · 产物（{{
-      productsCount
+    >基地别名（{{ aliasedCount }} / {{ baseRows.length }}） · 产物（{{ productsCount }}） · 分组（{{
+      groupsCount
     }}）</SectionHeader
   >
   <table v-if="baseRows.length > 0">
@@ -173,6 +218,7 @@ function onClear(siteId: string) {
       <tr>
         <th>别名</th>
         <th>产物</th>
+        <th>供应链分组</th>
         <th>基地</th>
         <th>星球标识符</th>
         <th />
@@ -207,6 +253,20 @@ function onClear(siteId: string) {
             @keydown.enter.prevent="onProductsEnter(row.siteId, $event)"
             @keydown.esc="onProductsEscape(row.siteId, $event)" />
         </td>
+        <td :class="$style.groupsCell">
+          <input
+            :value="groupDraftFor(row.siteId)"
+            :class="$style.aliasInput"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="输入分组…"
+            title="逗号或空格分隔的分组名；产业链环线按分组载入基地"
+            @input="onGroupsInput(row.siteId, ($event.target as HTMLInputElement).value)"
+            @blur="onGroupsBlur(row.siteId)"
+            @keydown.enter.prevent="onGroupsEnter(row.siteId, $event)"
+            @keydown.esc="onGroupsEscape(row.siteId, $event)" />
+        </td>
         <td>{{ row.planetName }}</td>
         <td>
           <PrunLink :command="`BS ${row.naturalId}`">{{ row.naturalId }}</PrunLink>
@@ -214,7 +274,7 @@ function onClear(siteId: string) {
         <td>
           <PrunButton
             danger
-            :disabled="!row.alias && !row.products.length"
+            :disabled="!row.alias && !row.products.length && !row.groups.length"
             @click="onClear(row.siteId)">
             清除
           </PrunButton>
@@ -238,6 +298,11 @@ function onClear(siteId: string) {
 
 .productsCell {
   width: 200px;
+  padding: 2px;
+}
+
+.groupsCell {
+  width: 160px;
   padding: 2px;
 }
 
