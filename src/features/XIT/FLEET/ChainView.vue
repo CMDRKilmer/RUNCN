@@ -446,7 +446,9 @@ function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
     shipId: ship.id,
     shipName: ship.name ?? ship.registration,
     startedAt: stopTriggers[0]!.createdAt,
-    originNaturalId: '',
+    // 归航触发器以出发地为 planet，取它作为出发地标记。
+    originNaturalId:
+      finalTrigger && finalTrigger.event.type === 'FLIGHT_ENDED' ? finalTrigger.event.planet : '',
     stops,
     finalPkgName: finalTrigger?.packageName,
   };
@@ -477,6 +479,19 @@ function markClassKey(state: StopState): string {
       return 'markTransit';
     default:
       return 'markPending';
+  }
+}
+
+function stopStateLabel(state: StopState): string {
+  switch (state) {
+    case 'done':
+      return '完成';
+    case 'arrived':
+      return '已到站';
+    case 'transit':
+      return '飞行中';
+    default:
+      return '未到';
   }
 }
 
@@ -520,33 +535,30 @@ const activeRuns = computed(() => {
     }
     result.push({ shipId: run.shipId, run, progress: runProgress(run) });
   }
-  if (result.length > 0) {
-    return result;
-  }
-  // 兜底：从触发器推导历史环线（chainRuns 记录丢失时）。
-  for (const ship of selectedShips.value) {
-    const run = deriveChainRun(ship.ship.id);
+  // 兜底：从触发器推导环线（旧版本执行 / chainRuns 记录丢失时）。
+  // 遍历全部船而非仅选中船——执行中的船已不在 CX，selectedShips 为空。
+  for (const ship of shipsStore.all.value ?? []) {
+    if (result.some(x => x.shipId === ship.id)) {
+      continue;
+    }
+    const run = deriveChainRun(ship.id);
     if (run === undefined) {
       continue;
     }
-    result.push({ shipId: ship.ship.id, run, progress: runProgress(run) });
+    const progress = runProgress(run);
+    // 全部站点与归航包都完成后视为已结束，不再显示（避免占用进度区）。
+    if (progress.done >= progress.total) {
+      const finalDone =
+        run.finalPkgName === undefined ||
+        !userData.actionPackages.some(p => p.global.name === run.finalPkgName);
+      if (finalDone) {
+        continue;
+      }
+    }
+    result.push({ shipId: ship.id, run, progress });
   }
   return result;
 });
-
-// 各船环线进度（执行后显示在出发前的计划列表上）。
-const progressByShip = computed(() => {
-  const map = new Map<string, RunProgress>();
-  for (const entry of activeRuns.value) {
-    map.set(entry.shipId, entry.progress);
-  }
-  return map;
-});
-
-// 计划列表附带进度，供模板在表格各站行直接展示状态标记。
-const shipPlanProgress = computed(() =>
-  shipPlans.value.map(sp => ({ ...sp, progress: progressByShip.value.get(sp.ship.ship.id) })),
-);
 
 // 环线完成后清理运行记录：遍历全部 chainRuns（不限于当前选中的船），
 // 站点与归航包都完成后移除。
@@ -704,149 +716,203 @@ function formatFinalUnloadNotes(plan: {
 
     <div v-if="executeNotice" :class="$style.notice">{{ executeNotice }}</div>
 
-    <div v-if="!chainGroup" :class="$style.hint">
-      选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
-    </div>
-    <div v-else-if="groupBases.length === 0" :class="$style.hint">
-      该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
-    </div>
-    <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
-    <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
-      没有停靠 CX 且有仓库/货舱的可用船只。
-    </div>
-    <div v-else-if="selectedShips.length === 0" :class="$style.hint">请分配至少一艘船。</div>
-    <LoadingSpinner v-else-if="loading" />
-    <div v-else-if="shipPlanProgress.length > 0" :class="$style.content">
-      <div v-for="sp in shipPlanProgress" :key="sp.ship.ship.id" :class="$style.shipPlan">
-        <div :class="$style.shipHeader">{{ shipLabel(sp.ship) }}（{{ sp.ship.exchangeCode }}）</div>
-        <div :class="$style.route">
-          <span :class="$style.routeLabel">航线：</span>
-          <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
-          <template v-for="stop in sp.plan.stops" :key="stop.naturalId">
-            <span :class="$style.routeArrow">→</span>
-            <span :class="$style.routeNode">{{ stop.planetName }}</span>
-          </template>
-          <span :class="$style.routeArrow">→</span>
-          <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
-        </div>
-
+    <!-- 环线执行中：规划区切换为环线进度，不再重新规划航线；
+         等所有船归航完成后（chainRuns 清理）自动恢复规划。 -->
+    <div v-if="activeRuns.length > 0" :class="$style.content">
+      <div v-for="entry in activeRuns" :key="entry.shipId" :class="$style.shipPlan">
+        <div :class="$style.shipHeader">{{ entry.run.shipName }}</div>
         <table :class="$style.table">
           <thead>
             <tr>
               <th :class="$style.narrowCol">序</th>
               <th :class="$style.narrowCol">星球/空间站</th>
-              <th>操作</th>
-              <th>飞行</th>
-              <th :class="$style.narrowCol">载重</th>
+              <th>状态</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td :class="$style.narrowCol">0</td>
               <td :class="$style.narrowCol">
-                <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+                <span :class="$style.routeOrigin">{{ entry.run.originNaturalId }}</span>
               </td>
               <td :class="$style.matCell">
-                <div>
-                  <span :class="$style.opsLabel">采购</span>
-                  [{{ formatMaterials(sp.plan.purchaseBill) || '无' }}]
-                </div>
-                <div v-if="Object.keys(sp.plan.originPickup).length > 0">
-                  <span :class="$style.opsLabel">取货</span>
-                  [{{ formatMaterials(sp.plan.originPickup) }}]
-                </div>
-              </td>
-              <td :class="$style.matCell">
-                → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId }}
-              </td>
-              <td :class="$style.narrowCol">{{
-                formatLoadCell(sp.plan.loadOnDeparture, sp.plan.capacity)
-              }}</td>
-            </tr>
-            <tr v-for="(stop, i) in sp.plan.stops" :key="stop.naturalId">
-              <td :class="$style.narrowCol">
                 <span
-                  v-if="sp.progress?.stops[i]"
-                  :class="[$style.marker, $style[markClassKey(sp.progress.stops[i].state)]]">
-                  {{ stopMarker(sp.progress.stops[i].state) }}
+                  v-if="entry.progress.stops[0] && entry.progress.stops[0].state !== 'pending'"
+                  :class="[$style.marker, $style.markTransit]"
+                  >✈</span
+                >
+                已出发
+              </td>
+            </tr>
+            <tr v-for="(stop, i) in entry.progress.stops" :key="stop.naturalId">
+              <td :class="$style.narrowCol">
+                <span :class="[$style.marker, $style[markClassKey(stop.state)]]">
+                  {{ stopMarker(stop.state) }}
                 </span>
                 {{ i + 1 }}
               </td>
               <td :class="$style.narrowCol">{{ stop.planetName }}</td>
-              <td :class="$style.matCell">
-                <div>
-                  <span :class="$style.opsLabel">卸货</span>
-                  [{{ formatUnloadAt(stop) || '无' }}]
-                </div>
-                <div>
-                  <span :class="$style.opsLabel">取货</span>
-                  [{{ formatLoad(stop) || '无' }}]
-                </div>
-                <span v-if="stop.clipped" :class="$style.opsWarn">（限载缩减）</span>
-              </td>
-              <td :class="$style.matCell"> → {{ nextStopName(sp.plan.stops, i) }} </td>
-              <td :class="$style.narrowCol">
-                <div>{{ formatLoadCell(stop.loadOnDeparture, sp.plan.capacity) }}</div>
-                <div :class="$style.loadSub">{{ formatLoadDelta(stop) }}</div>
-              </td>
+              <td :class="$style.matCell">{{ stopStateLabel(stop.state) }}</td>
             </tr>
             <tr>
-              <td :class="$style.narrowCol">{{ sp.plan.stops.length + 1 }}</td>
+              <td :class="$style.narrowCol">{{ entry.progress.stops.length + 1 }}</td>
               <td :class="$style.narrowCol">
-                <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+                <span :class="$style.routeOrigin">{{ entry.run.originNaturalId }}</span>
               </td>
               <td :class="$style.matCell">
-                <span :class="$style.opsLabel">卸货</span>
-                [{{ formatMaterials(sp.plan.finalUnload) || '无' }}]
+                <span
+                  v-if="entry.progress.done >= entry.progress.total"
+                  :class="[$style.marker, $style.markDone]"
+                  >✓</span
+                >
+                归航
               </td>
-              <td :class="$style.matCell">归航</td>
-              <td :class="$style.narrowCol">{{
-                formatLoadCell({ weight: 0, volume: 0 }, sp.plan.capacity)
-              }}</td>
             </tr>
           </tbody>
         </table>
-
-        <div :class="$style.summary">
-          <div :class="$style.summaryRow">
-            <span :class="$style.summaryLabel">装船：</span>
-            <span>
-              {{ fixed0(billTotals(sp.plan.cxBill).weight) }}t /
-              {{ fixed0(billTotals(sp.plan.cxBill).volume) }}m³
-            </span>
-          </div>
-          <div v-if="Object.keys(sp.plan.purchaseBill).length > 0" :class="$style.summaryRow">
-            <span :class="$style.summaryLabel">采购花费：</span>
-            <span>{{ formatCurrency(billCost(sp.plan.purchaseBill)) }}</span>
-          </div>
-          <div :class="$style.summaryRow">
-            <span :class="$style.summaryLabel">舱容峰值：</span>
-            <span>
-              {{ fixed0(sp.plan.peakLoad.weight) }}t / 剩余
-              {{ fixed0(sp.plan.freeCapacity.weight) }}t（
-              {{ formatPercent(sp.plan.peakLoad.weight, sp.plan.capacity.weight) }} 重量），
-              {{ fixed0(sp.plan.peakLoad.volume) }}m³ / 剩余
-              {{ fixed0(sp.plan.freeCapacity.volume) }}m³（
-              {{ formatPercent(sp.plan.peakLoad.volume, sp.plan.capacity.volume) }} 体积）
-            </span>
-          </div>
-          <div v-if="formatFinalUnloadNotes(sp.plan)" :class="$style.summaryRow">
-            <span :class="$style.summaryLabel">运回空间站：</span>
-            <span>{{ formatFinalUnloadNotes(sp.plan) }}</span>
-          </div>
-          <div v-if="sp.plan.overCapacity" :class="$style.warning">
-            该船装载超过剩余舱容，请减少货物或换大船。
-          </div>
-          <div v-for="warning in sp.plan.warnings" :key="warning" :class="$style.warning">
-            {{ warning }}
-          </div>
-        </div>
-      </div>
-
-      <div v-if="unusedShipCount > 0" :class="$style.notice">
-        已忽略 {{ unusedShipCount }} 艘未参与分配的船。
       </div>
     </div>
+
+    <template v-else>
+      <div v-if="!chainGroup" :class="$style.hint">
+        选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
+      </div>
+      <div v-else-if="groupBases.length === 0" :class="$style.hint">
+        该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
+      </div>
+      <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
+      <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
+        没有停靠 CX 且有仓库/货舱的可用船只。
+      </div>
+      <div v-else-if="selectedShips.length === 0" :class="$style.hint">请分配至少一艘船。</div>
+      <LoadingSpinner v-else-if="loading" />
+      <div v-else-if="shipPlans.length > 0" :class="$style.content">
+        <div v-for="sp in shipPlans" :key="sp.ship.ship.id" :class="$style.shipPlan">
+          <div :class="$style.shipHeader"
+            >{{ shipLabel(sp.ship) }}（{{ sp.ship.exchangeCode }}）</div
+          >
+          <div :class="$style.route">
+            <span :class="$style.routeLabel">航线：</span>
+            <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+            <template v-for="stop in sp.plan.stops" :key="stop.naturalId">
+              <span :class="$style.routeArrow">→</span>
+              <span :class="$style.routeNode">{{ stop.planetName }}</span>
+            </template>
+            <span :class="$style.routeArrow">→</span>
+            <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+          </div>
+
+          <table :class="$style.table">
+            <thead>
+              <tr>
+                <th :class="$style.narrowCol">序</th>
+                <th :class="$style.narrowCol">星球/空间站</th>
+                <th>操作</th>
+                <th>飞行</th>
+                <th :class="$style.narrowCol">载重</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td :class="$style.narrowCol">0</td>
+                <td :class="$style.narrowCol">
+                  <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+                </td>
+                <td :class="$style.matCell">
+                  <div>
+                    <span :class="$style.opsLabel">采购</span>
+                    [{{ formatMaterials(sp.plan.purchaseBill) || '无' }}]
+                  </div>
+                  <div v-if="Object.keys(sp.plan.originPickup).length > 0">
+                    <span :class="$style.opsLabel">取货</span>
+                    [{{ formatMaterials(sp.plan.originPickup) }}]
+                  </div>
+                </td>
+                <td :class="$style.matCell">
+                  → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId }}
+                </td>
+                <td :class="$style.narrowCol">{{
+                  formatLoadCell(sp.plan.loadOnDeparture, sp.plan.capacity)
+                }}</td>
+              </tr>
+              <tr v-for="(stop, i) in sp.plan.stops" :key="stop.naturalId">
+                <td :class="$style.narrowCol">{{ i + 1 }}</td>
+                <td :class="$style.narrowCol">{{ stop.planetName }}</td>
+                <td :class="$style.matCell">
+                  <div>
+                    <span :class="$style.opsLabel">卸货</span>
+                    [{{ formatUnloadAt(stop) || '无' }}]
+                  </div>
+                  <div>
+                    <span :class="$style.opsLabel">取货</span>
+                    [{{ formatLoad(stop) || '无' }}]
+                  </div>
+                  <span v-if="stop.clipped" :class="$style.opsWarn">（限载缩减）</span>
+                </td>
+                <td :class="$style.matCell"> → {{ nextStopName(sp.plan.stops, i) }} </td>
+                <td :class="$style.narrowCol">
+                  <div>{{ formatLoadCell(stop.loadOnDeparture, sp.plan.capacity) }}</div>
+                  <div :class="$style.loadSub">{{ formatLoadDelta(stop) }}</div>
+                </td>
+              </tr>
+              <tr>
+                <td :class="$style.narrowCol">{{ sp.plan.stops.length + 1 }}</td>
+                <td :class="$style.narrowCol">
+                  <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+                </td>
+                <td :class="$style.matCell">
+                  <span :class="$style.opsLabel">卸货</span>
+                  [{{ formatMaterials(sp.plan.finalUnload) || '无' }}]
+                </td>
+                <td :class="$style.matCell">归航</td>
+                <td :class="$style.narrowCol">{{
+                  formatLoadCell({ weight: 0, volume: 0 }, sp.plan.capacity)
+                }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div :class="$style.summary">
+            <div :class="$style.summaryRow">
+              <span :class="$style.summaryLabel">装船：</span>
+              <span>
+                {{ fixed0(billTotals(sp.plan.cxBill).weight) }}t /
+                {{ fixed0(billTotals(sp.plan.cxBill).volume) }}m³
+              </span>
+            </div>
+            <div v-if="Object.keys(sp.plan.purchaseBill).length > 0" :class="$style.summaryRow">
+              <span :class="$style.summaryLabel">采购花费：</span>
+              <span>{{ formatCurrency(billCost(sp.plan.purchaseBill)) }}</span>
+            </div>
+            <div :class="$style.summaryRow">
+              <span :class="$style.summaryLabel">舱容峰值：</span>
+              <span>
+                {{ fixed0(sp.plan.peakLoad.weight) }}t / 剩余
+                {{ fixed0(sp.plan.freeCapacity.weight) }}t（
+                {{ formatPercent(sp.plan.peakLoad.weight, sp.plan.capacity.weight) }} 重量），
+                {{ fixed0(sp.plan.peakLoad.volume) }}m³ / 剩余
+                {{ fixed0(sp.plan.freeCapacity.volume) }}m³（
+                {{ formatPercent(sp.plan.peakLoad.volume, sp.plan.capacity.volume) }} 体积）
+              </span>
+            </div>
+            <div v-if="formatFinalUnloadNotes(sp.plan)" :class="$style.summaryRow">
+              <span :class="$style.summaryLabel">运回空间站：</span>
+              <span>{{ formatFinalUnloadNotes(sp.plan) }}</span>
+            </div>
+            <div v-if="sp.plan.overCapacity" :class="$style.warning">
+              该船装载超过剩余舱容，请减少货物或换大船。
+            </div>
+            <div v-for="warning in sp.plan.warnings" :key="warning" :class="$style.warning">
+              {{ warning }}
+            </div>
+          </div>
+        </div>
+
+        <div v-if="unusedShipCount > 0" :class="$style.notice">
+          已忽略 {{ unusedShipCount }} 艘未参与分配的船。
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
