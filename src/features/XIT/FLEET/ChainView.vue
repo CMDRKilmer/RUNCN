@@ -462,6 +462,37 @@ function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
   };
 }
 
+// 逆推：从操作包还原站点操作清单（无快照时——页面刷新 / 旧版本环线）。
+// 已完成站的包已被 autoDelete 删除，无法还原（对应进度「完成」）。
+function deriveStopOps(pkgName: string): {
+  unload: Record<string, number>;
+  load: Record<string, number>;
+} {
+  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
+  return {
+    unload: pkg?.groups.find(g => g.name === '卸货')?.materials ?? {},
+    load: pkg?.groups.find(g => g.name === '提取')?.materials ?? {},
+  };
+}
+
+// 归航卸货：从归航包（Chain Return 船名）的「卸货」组还原。
+function deriveFinalOps(pkgName: string): Record<string, number> {
+  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
+  return pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+}
+
+// 出发行采购：从主包（Chain 船名）的「购买」组还原。
+// 主包名由站点包名反推（取最后一个「 Loop 」之后的部分作为船名）。
+function derivePurchaseBill(stopPkgName: string): Record<string, number> {
+  const idx = stopPkgName.lastIndexOf(' Loop ');
+  if (idx < 0) {
+    return {};
+  }
+  const shipName = stopPkgName.slice(idx + ' Loop '.length);
+  const mainPkg = userData.actionPackages.find(p => p.global.name === `Chain ${shipName}`);
+  return mainPkg?.groups.find(g => g.name.startsWith('购买 '))?.materials ?? {};
+}
+
 type StopState = 'done' | 'arrived' | 'transit' | 'pending';
 
 function stopMarker(state: StopState) {
@@ -581,6 +612,10 @@ const tables = computed<
     shipName?: string;
     plan?: ChainPlan;
     progress?: RunProgress;
+    // 无快照时的逆推操作（页面刷新 / 旧版本环线）。
+    derivedStops?: { unload: Record<string, number>; load: Record<string, number> }[];
+    derivedPurchase?: Record<string, number>;
+    derivedFinal?: Record<string, number>;
   }[]
 >(() => {
   if (activeRuns.value.length === 0) {
@@ -603,6 +638,10 @@ const tables = computed<
     shipId: entry.shipId,
     shipName: entry.run.shipName,
     progress: entry.progress,
+    derivedStops: entry.run.stops.map(stop => deriveStopOps(stop.pkgName)),
+    derivedPurchase:
+      entry.run.stops.length > 0 ? derivePurchaseBill(entry.run.stops[0]!.pkgName) : {},
+    derivedFinal: entry.run.finalPkgName ? deriveFinalOps(entry.run.finalPkgName) : {},
   }));
 });
 
@@ -619,6 +658,10 @@ watchEffect(() => {
         delete userData.chainRuns[shipId];
       }
     }
+  }
+  // 所有环线执行完成后清空计划快照，避免残留旧数据影响下次规划。
+  if (Object.keys(userData.chainRuns).length === 0) {
+    planSnapshot.value = [];
   }
 });
 
@@ -824,11 +867,20 @@ function formatFinalUnloadNotes(plan: {
                     [{{ formatMaterials(sp.plan.originPickup) }}]
                   </div>
                 </template>
+                <template v-else-if="sp.derivedPurchase">
+                  <div>
+                    <span :class="$style.opsLabel">采购</span>
+                    [{{ formatMaterials(sp.derivedPurchase) || '无' }}]
+                  </div>
+                </template>
                 <span v-else>—</span>
               </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
                   → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId }}
+                </template>
+                <template v-else-if="sp.progress">
+                  → {{ sp.progress.stops[0]?.planetName ?? sp.progress.originNaturalId }}
                 </template>
                 <span v-else>—</span>
               </td>
@@ -863,10 +915,23 @@ function formatFinalUnloadNotes(plan: {
                   </div>
                   <span v-if="sp.plan.stops[i].clipped" :class="$style.opsWarn">（限载缩减）</span>
                 </template>
+                <template v-else-if="sp.derivedStops">
+                  <div>
+                    <span :class="$style.opsLabel">卸货</span>
+                    [{{ formatMaterials(sp.derivedStops[i].unload) || '无' }}]
+                  </div>
+                  <div>
+                    <span :class="$style.opsLabel">取货</span>
+                    [{{ formatMaterials(sp.derivedStops[i].load) || '无' }}]
+                  </div>
+                </template>
                 <span v-else>—</span>
               </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan"> → {{ nextStopName(sp.plan.stops, i) }} </template>
+                <template v-else-if="sp.progress">
+                  → {{ sp.progress.stops[i + 1]?.planetName ?? sp.progress.originNaturalId }}
+                </template>
                 <span v-else>—</span>
               </td>
               <td :class="$style.narrowCol">
@@ -898,6 +963,12 @@ function formatFinalUnloadNotes(plan: {
                   <div>
                     <span :class="$style.opsLabel">卸货</span>
                     [{{ formatMaterials(sp.plan.finalUnload) || '无' }}]
+                  </div>
+                </template>
+                <template v-else-if="sp.derivedFinal">
+                  <div>
+                    <span :class="$style.opsLabel">卸货</span>
+                    [{{ formatMaterials(sp.derivedFinal) || '无' }}]
                   </div>
                 </template>
                 <span v-else>—</span>
