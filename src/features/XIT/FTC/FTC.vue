@@ -83,19 +83,30 @@ const exportDone = ref(0);
 const exportTotal = ref(0);
 const exportLog = ref<string[]>([]);
 const gatewayMessage = ref<string | undefined>(undefined);
-// 网关数据随游戏连接/初始加载自动下发（DATA_DATA[gateways]）；
+// 网关数据在打开星图（星系地图）后自动下发（DATA_DATA[gateways]）；
+// 网关跃迁连接（两端星系）在出现 JUMP_GATEWAY 飞行计划段后自动提取。
 // 这里提供状态检查与导出。
 function checkGateways() {
   const n = routesStore.gatewayCount;
+  const c = routesStore.gatewayConnectionCount;
+  if (n > 0 || c > 0) {
+    const parts: string[] = [];
+    if (n > 0) {
+      parts.push(`已加载 ${n} 个网关（打开星图后自动读取）`);
+    }
+    if (c > 0) {
+      parts.push(`已提取 ${c} 条网关连接（飞行计划 JUMP_GATEWAY 段自动记录）`);
+    }
+    gatewayMessage.value = parts.join('；') + '，可直接导出';
+    return;
+  }
   gatewayMessage.value =
-    n > 0
-      ? `已加载 ${n} 个网关（游戏连接时自动获取，可直接导出）`
-      : '暂无网关数据：网关随游戏初始加载自动下发，请刷新游戏后重试';
+    '暂无网关数据：请打开一次星图（星系地图）读取网关实体，或执行一次网关飞行（自动记录网关连接）';
 }
 function exportGateways() {
   const data = routesStore.getAllGateways();
   if (data.length === 0) {
-    gatewayMessage.value = '暂无网关数据：请先确保游戏已加载网关（刷新游戏后重试）';
+    gatewayMessage.value = '暂无网关数据：请先打开一次星图（星系地图），再导出';
     return;
   }
   downloadFile(data, 'prun-gateways.json', true);
@@ -519,7 +530,7 @@ function formatFuel(value: number) {
         </div>
         <PrunButton
           neutral
-          data-tooltip="网关（玩家建造的额外跃迁航线）在游戏连接/初始加载时自动读取。检查当前已加载状态。"
+          data-tooltip="网关（玩家建造的额外跃迁航线）在打开星图（星系地图）后自动读取。检查当前已加载状态。"
           @click="checkGateways">
           网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
         </PrunButton>
