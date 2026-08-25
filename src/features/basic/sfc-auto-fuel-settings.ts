@@ -1,5 +1,6 @@
 import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
+import { isTileReserved, setSliderValue } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 
 // 打开 SFC 时自动写入的燃料参数。
 const FUEL_CONSUMPTION = 0.1;
@@ -39,6 +40,10 @@ const configuredLabels = new WeakMap<Element, Map<string, number | 'done'>>();
 const pendingLabels = new WeakMap<Element, Set<string>>();
 
 async function configureSlider(tile: PrunTile, slider: Element) {
+  // FTC 查询引擎独占的窗口由引擎自己写滑块，这里跳过避免互相覆盖。
+  if (isTileReserved(tile.anchor)) {
+    return;
+  }
   // 星系内飞行时“反应堆使用量”不是轨道条（显示为 --），不会触发写入；燃料消耗仍会调整。
   const label = getSliderLabel(slider);
   let value: number;
@@ -98,82 +103,6 @@ async function configureSlider(tile: PrunTile, slider: Element) {
     await sleep(RETRY_DELAY_MS);
     await configureSlider(tile, slider);
   }
-}
-
-function getSliderRange(slider: Element) {
-  const handle = _$(slider, 'rc-slider-handle');
-  const min = Number(handle?.getAttribute('aria-valuemin'));
-  const max = Number(handle?.getAttribute('aria-valuemax'));
-  if (!Number.isFinite(min) || !Number.isFinite(max)) {
-    return undefined;
-  }
-  return { min, max };
-}
-
-// 在滑块轨道上按目标值对应的百分比位置模拟一次点击，
-// rc-slider 的 onMouseDown 会依据 clientX 计算并吸附到最近的步进值。
-// mousedown 与 mouseup 之间必须间隔一个微任务，让 React 先完成重渲染，
-// 否则 onChangeComplete 会拿到旧值，把刚写入的新值覆盖回去（console 实测验证）。
-async function clickSliderTrack(
-  slider: Element,
-  value: number,
-  range: { min: number; max: number },
-) {
-  const rect = slider.getBoundingClientRect();
-  const percent = (value - range.min) / (range.max - range.min);
-  const clientX = rect.left + rect.width * percent;
-  const clientY = rect.top + rect.height / 2;
-  slider.dispatchEvent(
-    new MouseEvent('mousedown', {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      clientX,
-      clientY,
-    }),
-  );
-  // 等 React flush 重渲染后再补发 mouseup，让 onChangeComplete 携带新值。
-  await Promise.resolve();
-  document.dispatchEvent(
-    new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }),
-  );
-}
-
-async function setSliderValue(slider: Element, value: number): Promise<boolean> {
-  if (slider.classList.contains('rc-slider-disabled')) {
-    return false;
-  }
-  const range = getSliderRange(slider);
-  if (!range) {
-    return false;
-  }
-  // 最大值：直接点击轨道最右端，不依赖 lastMark，更稳健
-  if (value >= range.max) {
-    const rect = slider.getBoundingClientRect();
-    // 留 2px 边距避免边界问题
-    const clientX = rect.right - 2;
-    const clientY = rect.top + rect.height / 2;
-    slider.dispatchEvent(
-      new MouseEvent('mousedown', {
-        bubbles: true,
-        cancelable: true,
-        view: window,
-        clientX,
-        clientY,
-      }),
-    );
-    await Promise.resolve();
-    document.dispatchEvent(
-      new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }),
-    );
-  } else {
-    await clickSliderTrack(slider, value, range);
-  }
-  // 等 React 重新渲染后校验写入结果，容差放宽到 0.01
-  await sleep(0);
-  const handle = _$(slider, 'rc-slider-handle');
-  const current = Number(handle?.getAttribute('aria-valuenow'));
-  return Number.isFinite(current) && Math.abs(current - value) < 0.01;
 }
 
 // 预留：按标签勾选指定单选选项（如“使用跃迁点”“抵达后卸货”）。

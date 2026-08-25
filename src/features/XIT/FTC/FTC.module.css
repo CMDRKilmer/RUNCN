@@ -1,0 +1,103 @@
+.container {
+  padding: 4px 8px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 640px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+
+  & span {
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  & textarea {
+    resize: vertical;
+  }
+}
+
+.fieldRow {
+  display: flex;
+  gap: 8px;
+}
+
+.select {
+  color: inherit;
+  background-color: inherit;
+  border: 1px solid rgba(128, 128, 128, 0.5);
+}
+
+.costDetails {
+  & summary {
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  & > div {
+    margin-top: 6px;
+  }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progress {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.error {
+  color: rgb(217, 83, 79);
+}
+
+.table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+
+  & th {
+    text-align: left;
+    opacity: 0.7;
+    padding: 2px 6px;
+    border-bottom: 1px solid rgba(128, 128, 128, 0.4);
+  }
+
+  & td {
+    padding: 2px 6px;
+  }
+}
+
+.row {
+  cursor: pointer;
+
+  &:hover {
+    background-color: rgba(128, 128, 128, 0.15);
+  }
+}
+
+.best {
+  background-color: rgba(92, 184, 92, 0.12);
+}
+
+.detail {
+  margin-top: 12px;
+}

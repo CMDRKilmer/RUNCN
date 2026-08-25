@@ -19,6 +19,7 @@ import './CXTS/CXTS';
 import './DEV/DEV';
 import './FLEET/FLEET';
 import './FLEET/FLEETACT';
+import './FTC/FTC';
 import './ELEC/ELEC';
 import './EXP/EXP';
 import './FIN/FIN';

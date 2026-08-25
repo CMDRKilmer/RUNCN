@@ -62,6 +62,20 @@ subscribe($$(tile.anchor, C.ColoredValue.negative), negative => {
 });
 ```
 
+### Numeric Truthiness
+
+When `0` is a legal value (slider positions, prices, rates), compare against `undefined` explicitly. Truthiness checks both fail ESLint (`Unexpected object value in conditional` on optional-chained/object-typed values) and silently treat `0` as "missing".
+
+```ts
+// Bad
+if (!fuel) { return; }
+const initial = combo.fuel ? getSliderValue(combo.fuel) : undefined;
+
+// Good
+if (fuel === undefined) { return; }
+const initial = combo.fuel !== undefined ? getSliderValue(combo.fuel) : undefined;
+```
+
 ### Type Annotations
 
 Don't add type definitions where TypeScript can infer the type.
