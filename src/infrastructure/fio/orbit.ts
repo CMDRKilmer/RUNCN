@@ -1,6 +1,8 @@
 import { ref } from 'vue';
 import { starsStore } from '@src/infrastructure/prun-api/data/stars';
 import { planetsStore } from '@src/infrastructure/prun-api/data/planets';
+import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
+import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import {
   gameClockOffsetMs,
   systemBodiesStore,
@@ -60,6 +62,11 @@ const inflight = new Map<string, Promise<void>>();
 export const orbitStore = {
   get version() {
     return orbitVersion.value;
+  },
+  // 已持有轨道根数的行星数（FIO 预取 + DATA_DATA 被动积累）。
+  get planetCount() {
+    void orbitVersion.value;
+    return planets.size;
   },
   isReliable(naturalId?: string | null) {
     void orbitVersion.value;
@@ -135,6 +142,38 @@ interface FioStar {
   Mass?: number;
 }
 
+// 写入一颗行星的轨道根数（FIO 与 DATA_DATA 共用），可附带星系关联。
+// semiMajorAxis 缺失/非正视为无效数据，直接忽略。
+function setPlanetOrbit(
+  naturalId: string,
+  orbit: {
+    semiMajorAxis?: number;
+    eccentricity?: number;
+    inclination?: number;
+    rightAscension?: number;
+    periapsis?: number;
+  },
+  mass: number,
+  systemId?: string,
+) {
+  if (orbit.semiMajorAxis === undefined || orbit.semiMajorAxis <= 0) {
+    return;
+  }
+  const key = naturalId.toUpperCase();
+  planets.set(key, {
+    semiMajorAxis: orbit.semiMajorAxis,
+    eccentricity: orbit.eccentricity ?? 0,
+    inclination: orbit.inclination ?? 0,
+    rightAscension: orbit.rightAscension ?? 0,
+    periapsis: orbit.periapsis ?? 0,
+    mass,
+  });
+  if (systemId) {
+    bodySystem.set(key, systemId.toUpperCase());
+  }
+  orbitVersion.value++;
+}
+
 async function fetchPlanet(naturalId: string) {
   const key = naturalId.toUpperCase();
   const data = await fetchJson<FioPlanet>(
@@ -148,15 +187,17 @@ async function fetchPlanet(naturalId: string) {
   ) {
     return;
   }
-  planets.set(key, {
-    semiMajorAxis: data.OrbitSemiMajorAxis,
-    eccentricity: data.OrbitEccentricity ?? 0,
-    inclination: data.OrbitInclination ?? 0,
-    rightAscension: data.OrbitRightAscension ?? 0,
-    periapsis: data.OrbitPeriapsis ?? 0,
-    mass: data.Mass,
-  });
-  orbitVersion.value++;
+  setPlanetOrbit(
+    key,
+    {
+      semiMajorAxis: data.OrbitSemiMajorAxis,
+      eccentricity: data.OrbitEccentricity,
+      inclination: data.OrbitInclination,
+      rightAscension: data.OrbitRightAscension,
+      periapsis: data.OrbitPeriapsis,
+    },
+    data.Mass,
+  );
 }
 
 async function fetchStar(starNaturalId: string) {
@@ -474,4 +515,94 @@ export function predictPosition(
 // 当前游戏世界时刻（本地时钟 + 偏差，偏差由飞行计划标定）。
 export function gameNow() {
   return Date.now() + gameClockOffsetMs.value;
+}
+
+// ---- 轨道数据被动积累与全量预取 ----
+
+// DATA_DATA 被动积累：用户在游戏里打开星系/行星详情时，客户端自动请求
+// 星系详情（含该星系所有行星轨道根数）与行星详情（含轨道根数），插件
+// 监听记录——相比 FIO 逐行星请求，这是批量且零网络开销的来源。
+interface DataDataSystemPlanet {
+  naturalId?: string;
+  orbit?: {
+    semiMajorAxis?: number;
+    eccentricity?: number;
+    inclination?: number;
+    rightAscension?: number;
+    periapsis?: number;
+  };
+  mass?: number;
+  address?: PrunApi.Address;
+}
+
+onApiMessage({
+  DATA_DATA(data: { path?: string[]; body?: unknown }) {
+    const path = data.path;
+    if (!Array.isArray(path) || path.length === 0) {
+      return;
+    }
+    if (path[0] === 'systems' && data.body !== null && typeof data.body === 'object') {
+      const body = data.body as {
+        naturalId?: string;
+        star?: { mass?: number };
+        planets?: DataDataSystemPlanet[];
+      };
+      if (body.naturalId && body.star?.mass !== undefined && body.star.mass > 0) {
+        stars.set(body.naturalId.toUpperCase(), { mass: body.star.mass });
+        orbitVersion.value++;
+      }
+      for (const planet of body.planets ?? []) {
+        const orbit = planet.orbit;
+        if (!planet.naturalId || orbit?.semiMajorAxis === undefined || orbit.semiMajorAxis <= 0) {
+          continue;
+        }
+        const systemId =
+          getSystemLineFromAddress(planet.address)?.entity.naturalId ?? body.naturalId;
+        setPlanetOrbit(planet.naturalId, orbit, planet.mass ?? 0, systemId);
+      }
+      persist();
+    } else if (path[0] === 'planets' && data.body !== null && typeof data.body === 'object') {
+      const body = data.body as {
+        naturalId?: string;
+        data?: {
+          orbit?: DataDataSystemPlanet['orbit'];
+          mass?: number;
+        };
+      };
+      const orbit = body.data?.orbit;
+      if (body.naturalId && orbit?.semiMajorAxis !== undefined && orbit.semiMajorAxis > 0) {
+        setPlanetOrbit(body.naturalId, orbit, body.data?.mass ?? 0);
+      }
+    }
+  },
+});
+
+// 渐进预取全部行星轨道根数：从本地 allplanets 列表（完整 4155 行星）出发，
+// 低并发逐个请求 FIO /planet/{id}，已缓存跳过。FIO 请求不稳定且量大，
+// 适合后台挂着跑（FTC 面板手动触发），期间不影响其他功能。
+let allPrefetch: Promise<void> | undefined;
+
+export function prefetchAllOrbits() {
+  if (allPrefetch === undefined) {
+    allPrefetch = (async () => {
+      const response = await fetch(config.url.allplanets);
+      const list = (await response.json()) as { PlanetNaturalId?: string }[];
+      const pending = list
+        .map(x => x.PlanetNaturalId)
+        .filter((id): id is string => id !== undefined && !planets.has(id.toUpperCase()));
+      const CONCURRENCY = 4;
+      let index = 0;
+      const worker = async () => {
+        while (index < pending.length) {
+          const id = pending[index++];
+          await fetchPlanet(id);
+        }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      persist();
+    })().finally(() => {
+      allPrefetch = undefined;
+    });
+  }
+  return allPrefetch;
 }

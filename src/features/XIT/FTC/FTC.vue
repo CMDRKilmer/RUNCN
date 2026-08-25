@@ -21,6 +21,7 @@ import {
   SweepCombo,
   SweepOutcome,
 } from './flight-query';
+import { orbitStore, prefetchAllOrbits } from '@src/infrastructure/fio/orbit';
 import {
   calibrate,
   estimateRoute,
@@ -65,6 +66,15 @@ const timeValue = ref<number | undefined>(0);
 
 const running = ref(false);
 const cancelRequested = ref(false);
+const prefetching = ref(false);
+async function prefetchOrbits() {
+  prefetching.value = true;
+  try {
+    await prefetchAllOrbits();
+  } finally {
+    prefetching.value = false;
+  }
+}
 const progressDone = ref(0);
 const progressTotal = ref(0);
 const errorMessage = ref<string | undefined>(undefined);
@@ -443,6 +453,13 @@ function formatFuel(value: number) {
           data-tooltip="通过离屏 SFC 窗口查询各航点的飞行计划，从轨迹数据捕获天体位置以改进多段估算精度（开始扫描时也会自动捕获）"
           @click="probe">
           捕获天体位置
+        </PrunButton>
+        <PrunButton
+          neutral
+          :disabled="prefetching"
+          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（约 4155 个，后台低并发渐进运行，可重复点击续跑）。配合已捕获的坐标观测，可离线预测任意时刻的行星位置；游戏内浏览星系/行星详情也会自动记录轨道（DATA_DATA）。"
+          @click="prefetchOrbits">
+          {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
         </PrunButton>
         <span v-if="running" :class="$style.progress">
           {{ progressDone }}/{{ progressTotal }}（后台查询中，请勿关闭游戏页面）

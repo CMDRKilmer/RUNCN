@@ -55,6 +55,7 @@ function recordBody(id: string, position: PrunApi.Position, messageType: string)
   if (!detectedPositionMessages.value.includes(messageType)) {
     detectedPositionMessages.value = [...detectedPositionMessages.value, messageType];
   }
+  persist();
 }
 
 function sniff(value: unknown, depth: number, messageType: string) {
@@ -135,6 +136,7 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
   }
   observations.set(key, list);
   bodiesVersion.value++;
+  persist();
 }
 
 onApiMessage({
@@ -170,3 +172,66 @@ export const systemBodiesStore = {
     return positions.size;
   },
 };
+
+// ---- 快照持久化 ----
+// 观测（位置 + 游戏世界时间戳）与静态位置跨会话保留：插件重启后
+// predictPosition 仍可用历史观测标定相位，无需重新捕获。观测时间是
+// 游戏世界时刻（跨会话连续），持久化安全。
+const CACHE_KEY = 'rprun.ftc.bodies.v1';
+
+let persistTimer: number | undefined;
+function persist() {
+  if (persistTimer !== undefined) {
+    return;
+  }
+  persistTimer = window.setTimeout(() => {
+    persistTimer = undefined;
+    try {
+      localStorage.setItem(
+        CACHE_KEY,
+        JSON.stringify({ positions: [...positions], observations: [...observations] }),
+      );
+    } catch {
+      // localStorage 不可用（隐私模式等）：仅内存缓存。
+    }
+  }, 1000);
+}
+
+function restore() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) {
+      return;
+    }
+    const data = JSON.parse(raw) as {
+      positions?: [string, PrunApi.Position][];
+      observations?: [string, BodyObservation[]][];
+    };
+    let restored = 0;
+    for (const [id, pos] of data.positions ?? []) {
+      if (typeof id === 'string' && isPosition(pos)) {
+        positions.set(id.toUpperCase(), pos);
+        restored++;
+      }
+    }
+    for (const [id, list] of data.observations ?? []) {
+      if (
+        typeof id === 'string' &&
+        Array.isArray(list) &&
+        list.some(x => isPosition(x?.position) && Number.isFinite(x.timestampMs))
+      ) {
+        observations.set(
+          id.toUpperCase(),
+          list.filter(x => isPosition(x.position) && Number.isFinite(x.timestampMs)),
+        );
+        restored++;
+      }
+    }
+    if (restored > 0) {
+      bodiesVersion.value++;
+    }
+  } catch {
+    // 缓存损坏：忽略，重新积累。
+  }
+}
+restore();
