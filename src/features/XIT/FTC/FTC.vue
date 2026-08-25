@@ -9,6 +9,7 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { detectedPositionMessages } from '@src/infrastructure/prun-api/data/system-bodies';
 import { getPrice } from '@src/infrastructure/fio/cx';
+import { ensureOrbitData } from '@src/infrastructure/fio/orbit';
 import { isEmpty } from 'ts-extras';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import { runSweep, captureBodyPositions, SweepCombo, SweepOutcome } from './flight-query';
@@ -190,6 +191,9 @@ async function start() {
   rows.value = [];
 
   try {
+    // 预取航点行星的 FIO 轨道根数（含缓存），供多段估算的轨道位置预测。
+    // 失败不阻塞扫描（估算自动降级为静态坐标）。
+    await ensureOrbitData(waypoints.value).catch(() => undefined);
     const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
       // 扫描结束后自动切换到后续航点，捕获天体位置供多段估算使用。
       probeDestinations: waypoints.value.slice(1),
@@ -242,6 +246,13 @@ async function probe() {
 
 function formatDuration(ms: number) {
   return formatCountdown(ms);
+}
+
+function precisionLabel(leg: RouteResult['legs'][number]) {
+  if (leg.precise) {
+    return '服务器精确';
+  }
+  return leg.orbitPredicted ? '轨道预测' : '外推估算';
 }
 
 function formatDamage(fraction: number) {
@@ -386,7 +397,7 @@ function formatFuel(value: number) {
             <td>{{ i + 1 }}</td>
             <td>{{ leg.from }} → {{ leg.to }}</td>
             <td>{{ leg.precise ? '' : '≈' }}{{ formatDuration(leg.durationMs) }}</td>
-            <td>{{ leg.precise ? '服务器精确' : '外推估算' }}</td>
+            <td>{{ precisionLabel(leg) }}</td>
           </tr>
         </tbody>
       </table>

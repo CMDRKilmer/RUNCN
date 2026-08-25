@@ -7,13 +7,26 @@ import { onAnyApiMessage, onApiMessage } from '@src/infrastructure/prun-api/data
 // 有界深度嗅探仅作补充来源。
 // 捕获结果用于 FTC 的跨星系飞行时间估算；未捕获到时估算层自动降级。
 
+// 带时间戳的观测（供轨道相位标定）：位置 + 对应的游戏世界时刻。
+export interface BodyObservation {
+  position: PrunApi.Position;
+  timestampMs: number;
+}
+
 // 触发响应式更新的版本号：任何天体位置新增/变化时自增。
 export const bodiesVersion = ref(0);
+
+// 游戏世界时间与本地时间的偏差（游戏时间戳 - Date.now()），由最近一份
+// 飞行计划的首段出发时刻标定（SFC 计划按立即出发计算）。轨道预测用同一时钟。
+export const gameClockOffsetMs = ref(0);
 
 // 已捕获到位置数据的消息类型（诊断用，显示在 FTC 探测结果里）。
 export const detectedPositionMessages = ref<string[]>([]);
 
 const positions = new Map<string, PrunApi.Position>();
+// 每个天体保留最近若干次带时间戳的观测（升序，最新在末尾）。
+const observations = new Map<string, BodyObservation[]>();
+const MAX_OBSERVATIONS_PER_BODY = 5;
 
 function isPosition(value: unknown): value is PrunApi.Position {
   if (typeof value !== 'object' || value === null) {
@@ -99,17 +112,39 @@ function recordFromFlightPlan(segments: PrunApi.FlightSegment[]) {
     const originId = locationEntityId(segment.origin);
     if (originId) {
       recordBody(originId, ellipse.startPosition, 'SHIP_FLIGHT_MISSION');
+      recordObservation(originId, ellipse.startPosition, segment.departure.timestamp);
     }
     const destinationId = locationEntityId(segment.destination);
     if (destinationId) {
       recordBody(destinationId, ellipse.targetPosition, 'SHIP_FLIGHT_MISSION');
+      recordObservation(destinationId, ellipse.targetPosition, segment.arrival.timestamp);
     }
   }
+}
+
+function recordObservation(id: string, position: PrunApi.Position, timestampMs: number) {
+  const key = id.toUpperCase();
+  const list = observations.get(key) ?? [];
+  const last = list.at(-1);
+  if (last && last.timestampMs === timestampMs) {
+    return;
+  }
+  list.push({ position, timestampMs });
+  while (list.length > MAX_OBSERVATIONS_PER_BODY) {
+    list.shift();
+  }
+  observations.set(key, list);
+  bodiesVersion.value++;
 }
 
 onApiMessage({
   SHIP_FLIGHT_MISSION(data: PrunApi.FlightPlan) {
     recordFromFlightPlan(data.segments);
+    // SFC 计划按立即出发计算：首段出发时刻 ≈ 服务器当前游戏时间。
+    const first = data.segments[0];
+    if (first !== undefined) {
+      gameClockOffsetMs.value = first.departure.timestamp - Date.now();
+    }
   },
 });
 
@@ -121,6 +156,14 @@ export const systemBodiesStore = {
       return undefined;
     }
     return positions.get(naturalId.toUpperCase());
+  },
+  // 带时间戳的观测列表（升序），供轨道相位标定。
+  getObservations(naturalId?: string | null): BodyObservation[] {
+    void bodiesVersion.value;
+    if (!naturalId) {
+      return [];
+    }
+    return observations.get(naturalId.toUpperCase()) ?? [];
   },
   get count(): number {
     void bodiesVersion.value;

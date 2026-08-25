@@ -2,13 +2,17 @@ import { starsStore, getStarNaturalId } from '@src/infrastructure/prun-api/data/
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { systemBodiesStore } from '@src/infrastructure/prun-api/data/system-bodies';
 import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import { gameNow, predictPosition } from '@src/infrastructure/fio/orbit';
 
 // 多段路线估算模型。
 // 首段（飞船当前位置 → 第一个航点）由 SFC 查询获得服务器精确结果，
-// 其余段用恒星星系坐标 + 天体位置（飞行计划 transferEllipse 捕获）外推：
+// 其余段用恒星星系坐标 + 天体位置外推：
 // - FTL 充能时间按距离线性缩放，跃迁时间视为固定值
 // - STL 时间按 sqrt(距离比) 缩放（匀加速转移轨道的一阶近似）
 // - 燃料/损伤按对应距离线性缩放
+// 天体位置优先按 FIO 轨道根数 + 观测相位预测该段出发/到达时刻的坐标
+// （行星在轨道上运动，静态坐标会随时间漂移），无轨道数据时降级为最近
+// 静态观测（transferEllipse 捕获）。
 // 位置坐标与游戏距离单位可能不一致，换算系数用首段计划自标定：
 // STL 用 TRANSIT 段 stlDistance/弦长，FTL 用 JUMP 段 ftlDistance/恒星距。
 // 所有不精确的段在结果中标记 precise=false，UI 显示「≈」。
@@ -33,6 +37,8 @@ export interface RouteLeg {
   from: string;
   to: string;
   precise: boolean;
+  // 该段天体位置来自 FIO 轨道预测（否则为静态观测或常数外推）。
+  orbitPredicted?: boolean;
   durationMs: number;
   stlFuel: number;
   ftlFuel: number;
@@ -174,30 +180,34 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
   };
 }
 
-// 同星系内两航点间的 STL 距离（需要天体位置数据；探测失败则无）。
-function intraSystemStlDistance(fromId: string, toId: string) {
-  const from = systemBodiesStore.getPosition(fromId);
-  const to = systemBodiesStore.getPosition(toId);
-  return from !== undefined && to !== undefined ? distance3d(from, to) : undefined;
+// 天体在指定游戏世界时刻的位置：优先 FIO 轨道预测，降级最近静态观测。
+interface BodyPosition {
+  position: PrunApi.Position;
+  orbitPredicted: boolean;
+}
+
+function bodyPositionAt(naturalId: string, timestampMs: number): BodyPosition | undefined {
+  const predicted = predictPosition(naturalId, timestampMs);
+  if (predicted !== undefined) {
+    return { position: predicted, orbitPredicted: true };
+  }
+  const position = systemBodiesStore.getPosition(naturalId);
+  if (position !== undefined) {
+    return { position, orbitPredicted: false };
+  }
+  return undefined;
 }
 
 // 跨星系段的 STL 距离：出发行星→本星恒星 + 目标恒星→目标行星。
 // 任一侧天体位置已知即可估算；两侧都缺时返回 undefined（估算层按常数外推）。
 function interSystemStlDistance(
-  fromId: string,
-  toId: string,
-  fromSystem: string,
-  toSystem: string,
+  fromPos: BodyPosition | undefined,
+  toPos: BodyPosition | undefined,
+  fromStar: PrunApi.Position,
+  toStar: PrunApi.Position,
 ) {
-  const fromBody = systemBodiesStore.getPosition(fromId);
-  const toBody = systemBodiesStore.getPosition(toId);
-  const fromStar = getStarPosition(fromSystem);
-  const toStar = getStarPosition(toSystem);
-  if (!fromStar || !toStar) {
-    return undefined;
-  }
-  const departure = fromBody !== undefined ? distance3d(fromBody, fromStar) : undefined;
-  const approach = toBody !== undefined ? distance3d(toStar, toBody) : undefined;
+  const departure = fromPos !== undefined ? distance3d(fromPos.position, fromStar) : undefined;
+  const approach = toPos !== undefined ? distance3d(toStar, toPos.position) : undefined;
   if (departure === undefined && approach === undefined) {
     return undefined;
   }
@@ -207,11 +217,13 @@ function interSystemStlDistance(
 /**
  * 用首段标定数据估算整条路线。waypoints 为完整航点序列（含首段目的地）；
  * 首段直接使用标定数据（精确），其余段外推（precise=false）。
+ * 各段按累计时长推进游戏世界时钟，天体位置取对应时刻的轨道预测值。
  */
 export function estimateRoute(cal: Calibration, waypoints: string[]): RouteResult {
   const legs: RouteLeg[] = [];
 
-  // 首段：标定数据即精确结果。
+  // 首段：标定数据即精确结果。出发时刻按当前游戏时间计——扫描是预估，
+  // 实际出发时刻由用户决定，偏差相对行星轨道周期可忽略。
   legs.push({
     from: '(当前位置)',
     to: waypoints[0],
@@ -222,12 +234,17 @@ export function estimateRoute(cal: Calibration, waypoints: string[]): RouteResul
     damage: cal.damage,
   });
 
+  let clock = gameNow() + cal.totalMs;
   for (let i = 1; i < waypoints.length; i++) {
     const from = waypoints[i - 1];
     const to = waypoints[i];
-    const leg = estimateLeg(cal, from, to);
+    const leg = estimateLeg(cal, from, to, clock);
     if (leg !== undefined) {
       legs.push(leg);
+      clock += leg.durationMs;
+    } else {
+      // 无法解析的段不输出，但时钟仍按首段时长推进，避免后续时刻严重偏早。
+      clock += cal.totalMs;
     }
   }
 
@@ -245,7 +262,12 @@ export function estimateRoute(cal: Calibration, waypoints: string[]): RouteResul
   };
 }
 
-function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | undefined {
+function estimateLeg(
+  cal: Calibration,
+  from: string,
+  to: string,
+  departureMs: number,
+): RouteLeg | undefined {
   const fromSystem = resolveSystemId(from);
   const toSystem = resolveSystemId(to);
   if (!fromSystem || !toSystem) {
@@ -258,9 +280,15 @@ function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | und
     return undefined;
   }
 
+  const fromPos = bodyPositionAt(from, departureMs);
+
   if (fromSystem === toSystem) {
-    // 同星系：纯 STL 段。
-    const raw = intraSystemStlDistance(from, to);
+    // 同星系：纯 STL 段，两端位置取出发时刻。
+    const toPos = bodyPositionAt(to, departureMs);
+    const raw =
+      fromPos !== undefined && toPos !== undefined
+        ? distance3d(fromPos.position, toPos.position)
+        : undefined;
     const d = raw !== undefined && cal.stlScale !== undefined ? raw * cal.stlScale : raw;
     const ratio = d !== undefined && cal.stlDistance > 0 ? d / cal.stlDistance : 1;
     const scale = Math.sqrt(ratio);
@@ -268,6 +296,7 @@ function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | und
       from,
       to,
       precise: false,
+      orbitPredicted: (fromPos?.orbitPredicted ?? false) || (toPos?.orbitPredicted ?? false),
       durationMs: cal.stlMs * scale,
       stlFuel: cal.stlFuel * ratio,
       ftlFuel: 0,
@@ -275,23 +304,32 @@ function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | und
     };
   }
 
-  // 跨星系段。
+  // 跨星系段：FTL 距离按恒星坐标线性缩放。
   const ftlD = distance3d(fromStar, toStar) * (cal.ftlScale ?? 1);
   const ftlRatio = cal.ftlDistance > 0 ? ftlD / cal.ftlDistance : 1;
-  const stlRaw = interSystemStlDistance(from, to, fromSystem, toSystem);
-  const stlD = stlRaw !== undefined && cal.stlScale !== undefined ? stlRaw * cal.stlScale : stlRaw;
-  const stlRatio = stlD !== undefined && cal.stlDistance > 0 ? stlD / cal.stlDistance : 1;
-  const stlScale = Math.sqrt(stlRatio);
+
+  // 目标天体位置取决于到达时刻：先按出发时刻估时长，再迭代一次收敛。
+  let toPos = bodyPositionAt(to, departureMs);
+  let stlRatio = 1;
+  let orbitPredicted = fromPos?.orbitPredicted ?? false;
+  for (let iter = 0; iter < 2; iter++) {
+    const stlRaw = interSystemStlDistance(fromPos, toPos, fromStar, toStar);
+    const stlD =
+      stlRaw !== undefined && cal.stlScale !== undefined ? stlRaw * cal.stlScale : stlRaw;
+    stlRatio = stlD !== undefined && cal.stlDistance > 0 ? stlD / cal.stlDistance : 1;
+    orbitPredicted = (fromPos?.orbitPredicted ?? false) || (toPos?.orbitPredicted ?? false);
+    const durationMs = cal.stlMs * Math.sqrt(stlRatio) + cal.chargeMs * ftlRatio + cal.jumpMs;
+    toPos = bodyPositionAt(to, departureMs + durationMs);
+  }
 
   // 充能时间按 FTL 距离线性缩放；跃迁时长视为固定。
-  const chargeMs = cal.chargeMs * ftlRatio;
-  const jumpMs = cal.jumpMs;
-  const stlMs = cal.stlMs * stlScale;
+  const stlScale = Math.sqrt(stlRatio);
   return {
     from,
     to,
     precise: false,
-    durationMs: stlMs + chargeMs + jumpMs,
+    orbitPredicted,
+    durationMs: cal.stlMs * stlScale + cal.chargeMs * ftlRatio + cal.jumpMs,
     stlFuel: cal.stlFuel * stlRatio,
     ftlFuel: cal.ftlFuel * ftlRatio,
     damage: (cal.damage * (stlRatio + ftlRatio)) / 2,
