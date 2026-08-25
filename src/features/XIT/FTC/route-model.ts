@@ -9,7 +9,7 @@ import { gameNow, predictPosition } from '@src/infrastructure/fio/orbit';
 // 其余段用恒星星系坐标 + 天体位置外推：
 // - FTL 充能时间按距离线性缩放，跃迁时间视为固定值
 // - STL 时间按 sqrt(距离比) 缩放（匀加速转移轨道的一阶近似）
-// - 燃料/损伤按对应距离线性缩放
+// - STL 燃料/损伤与时间同比例缩放（燃料 = 流量×时间，流量恒定 ∝ √距离）
 // 天体位置优先按 FIO 轨道根数 + 观测相位预测该段出发/到达时刻的坐标
 // （行星在轨道上运动，静态坐标会随时间漂移），无轨道数据时降级为最近
 // 静态观测（transferEllipse 捕获）。
@@ -286,54 +286,25 @@ function interSystemStlDistance(
   return (departure ?? 0) + (approach ?? 0);
 }
 
-export interface RouteOptions {
-  // 首段出发地 naturalId。提供时首段同样按距离外推估算（标定来自其他
-  // 航线/参数组合的本地计算模式）；缺省时首段直接使用标定数据（精确）。
-  fromLocation?: string;
-}
-
 /**
  * 用首段标定数据估算整条路线。waypoints 为完整航点序列（含首段目的地）；
- * 默认首段直接使用标定数据（精确），其余段外推（precise=false）。
+ * 首段直接使用标定数据（精确），其余段外推（precise=false）。
  * 各段按累计时长推进游戏世界时钟，天体位置取对应时刻的轨道预测值。
  */
-export function estimateRoute(
-  cal: Calibration,
-  waypoints: string[],
-  options?: RouteOptions,
-): RouteResult {
+export function estimateRoute(cal: Calibration, waypoints: string[]): RouteResult {
   const legs: RouteLeg[] = [];
 
-  if (options?.fromLocation !== undefined) {
-    // 本地计算模式：标定来自其他航线/参数，首段也按距离外推。
-    const leg = estimateLeg(cal, options.fromLocation, waypoints[0], gameNow());
-    if (leg !== undefined) {
-      legs.push(leg);
-    } else {
-      // 无法解析位置时退回标定数据整体（含 ≈ 标记）。
-      legs.push({
-        from: options.fromLocation,
-        to: waypoints[0],
-        precise: false,
-        durationMs: cal.totalMs,
-        stlFuel: cal.stlFuel,
-        ftlFuel: cal.ftlFuel,
-        damage: cal.damage,
-      });
-    }
-  } else {
-    // 首段：标定数据即精确结果。出发时刻按当前游戏时间计——扫描是预估，
-    // 实际出发时刻由用户决定，偏差相对行星轨道周期可忽略。
-    legs.push({
-      from: '(当前位置)',
-      to: waypoints[0],
-      precise: true,
-      durationMs: cal.totalMs,
-      stlFuel: cal.stlFuel,
-      ftlFuel: cal.ftlFuel,
-      damage: cal.damage,
-    });
-  }
+  // 首段：标定数据即精确结果（锚点按当前航线捕获）。出发时刻按当前游戏
+  // 时间计——扫描是预估，实际出发时刻由用户决定，偏差相对行星轨道周期可忽略。
+  legs.push({
+    from: '(当前位置)',
+    to: waypoints[0],
+    precise: true,
+    durationMs: cal.totalMs,
+    stlFuel: cal.stlFuel,
+    ftlFuel: cal.ftlFuel,
+    damage: cal.damage,
+  });
 
   let clock = gameNow() + (legs[0]?.durationMs ?? cal.totalMs);
   for (let i = 1; i < waypoints.length; i++) {
@@ -399,9 +370,9 @@ function estimateLeg(
       precise: false,
       orbitPredicted: (fromPos?.orbitPredicted ?? false) || (toPos?.orbitPredicted ?? false),
       durationMs: cal.stlMs * scale,
-      stlFuel: cal.stlFuel * ratio,
+      stlFuel: cal.stlFuel * scale,
       ftlFuel: 0,
-      damage: cal.damageStl * ratio,
+      damage: cal.damageStl * scale,
     };
   }
 
@@ -431,8 +402,8 @@ function estimateLeg(
     precise: false,
     orbitPredicted,
     durationMs: cal.stlMs * stlScale + (cal.chargeMs + cal.jumpMs) * ftlRatio,
-    stlFuel: cal.stlFuel * stlRatio,
+    stlFuel: cal.stlFuel * stlScale,
     ftlFuel: cal.ftlFuel * ftlRatio,
-    damage: cal.damageStl * stlRatio + cal.damageFtl * ftlRatio,
+    damage: cal.damageStl * stlScale + cal.damageFtl * ftlRatio,
   };
 }

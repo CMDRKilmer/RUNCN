@@ -11,6 +11,7 @@ import { detectedPositionMessages } from '@src/infrastructure/prun-api/data/syst
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { ensureOrbitData } from '@src/infrastructure/fio/orbit';
+import { convertToPlanetNaturalId } from '@src/core/planet-natural-id';
 import { isEmpty } from 'ts-extras';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import {
@@ -27,14 +28,15 @@ import {
   Calibration,
   RouteResult,
 } from './route-model';
-import { getAnchor, saveAnchor, ShipAnchor } from './anchor';
+import { anchorFromPlan, anchorMatchesRoute, getAnchor, saveAnchor, ShipAnchor } from './anchor';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞行时间与燃料参数性价比计算器。
 // 两种计算模式：
 // - 本地计算（默认）：一份「标定计划」+ 飞船性能物理关系（scaleCalibration）
-//   本地推算所有参数组合，不写滑块；标定优先取被动捕获/上次扫描的缓存，
-//   缺失时才打开一次离屏 SFC 窗口捕获（只选目的地，不写滑块）。
+//   本地推算所有参数组合，不写滑块。标定是针对「当前飞船位置 → 首航点」
+//   这条航线的服务器精确结果：航线一致（含被动捕获/上次扫描）时复用缓存，
+//   否则打开一次离屏 SFC 窗口重新捕获（只选目的地，不写滑块）。
 // - 服务器扫描：离屏 SFC 窗口逐组写入滑块获得服务器精确结果。
 
 interface ResultRow {
@@ -193,28 +195,26 @@ function buildRow(outcome: SweepOutcome): ResultRow {
   return buildRowFromRoute(outcome.combo, route, outcome.plan);
 }
 
-// 本地计算：标定锚点 + 飞船性能缩放到目标组合，所有段（含首段）按距离外推。
+// 本地计算：锚点是「当前航线」的服务器标定，首段直接使用标定数据
+// （精确），仅按参数组合缩放；续航段由 estimateRoute 距离外推（≈）。
 function buildLocalRow(anchor: ShipAnchor, combo: SweepCombo): ResultRow {
-  const shipValue = ship.value!;
   const cal = scaleCalibration(
     anchor.cal,
     { fuel: anchor.fuel, reactor: anchor.reactor ?? 1, mass: anchor.mass },
-    { fuel: combo.fuel, reactor: combo.reactor, mass: shipValue.mass },
+    { fuel: combo.fuel, reactor: combo.reactor, mass: ship.value!.mass },
   );
-  const shipLocation = getEntityNaturalIdFromAddress(shipValue.address);
-  const route = estimateRoute(cal, waypoints.value, {
-    fromLocation: shipLocation ?? '(当前位置)',
-  });
+  const route = estimateRoute(cal, waypoints.value);
   return buildRowFromRoute(combo, route);
 }
 
 function anchorStatusLabel(anchor: ShipAnchor, source: string) {
   const captured = new Date(anchor.capturedMs).toLocaleString();
+  const route = `${anchor.originEntity ?? '?'} → ${anchor.destinationEntity ?? '?'}`;
   const massNote =
     anchor.mass !== undefined && ship.value && ship.value.mass !== anchor.mass
       ? ` · 装载修正 √(${fixed2(ship.value.mass)}/${fixed2(anchor.mass)})`
       : '';
-  return `标定：燃料 ${anchor.fuel} / 反应堆 ${anchor.reactor ?? '--'} · ${source}（${captured}）${massNote}`;
+  return `标定航线 ${route}：燃料 ${anchor.fuel} / 反应堆 ${anchor.reactor ?? '--'} · ${source}（${captured}）${massNote}`;
 }
 
 async function start() {
@@ -249,25 +249,27 @@ async function start() {
     await ensureOrbitData(waypoints.value).catch(() => undefined);
 
     if (mode.value === 'local') {
-      // 本地计算：优先用缓存的标定锚点（被动捕获/上次扫描），缺失时
-      // 打开一次离屏 SFC 窗口捕获——只选目的地、被动读滑块，不写入。
+      // 本地计算：缓存锚点仅在航线匹配（飞船当前位置 + 首航点）时复用，
+      // 否则重新捕获——离屏窗口只选目的地、被动读滑块，不写入。
+      const shipLocation = getEntityNaturalIdFromAddress(ship.value.address);
+      const destId = convertToPlanetNaturalId(waypoints.value[0]) ?? waypoints.value[0];
       let anchor = getAnchor(registration.value);
       let source: string;
-      if (anchor !== undefined) {
+      if (anchor !== undefined && anchorMatchesRoute(anchor, shipLocation, destId)) {
         source = '缓存';
       } else {
+        anchor = undefined;
         progressTotal.value = 1;
         const captured = await captureAnchor(registration.value, waypoints.value[0], {
           isCancelled: () => cancelRequested.value,
         });
-        anchor = {
-          registration: registration.value,
-          capturedMs: Date.now(),
-          fuel: captured.fuel,
-          reactor: captured.reactor,
-          mass: ship.value!.mass,
-          cal: calibrate(captured.plan),
-        };
+        anchor = anchorFromPlan(
+          registration.value,
+          captured.plan,
+          captured.fuel,
+          captured.reactor,
+          ship.value!.mass,
+        );
         saveAnchor(anchor);
         source = '本次捕获';
         progressDone.value = 1;
@@ -288,14 +290,15 @@ async function start() {
       // 每组服务器精确结果都是高质量标定锚点，保存供本地计算复用。
       for (const outcome of outcomes) {
         if (outcome.plan !== undefined) {
-          saveAnchor({
-            registration: registration.value,
-            capturedMs: Date.now(),
-            fuel: outcome.combo.fuel,
-            reactor: outcome.combo.reactor,
-            mass: ship.value?.mass,
-            cal: calibrate(outcome.plan),
-          });
+          saveAnchor(
+            anchorFromPlan(
+              registration.value,
+              outcome.plan,
+              outcome.combo.fuel,
+              outcome.combo.reactor,
+              ship.value?.mass,
+            ),
+          );
         }
       }
       rows.value = outcomes.map(buildRow);
