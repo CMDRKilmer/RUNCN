@@ -15,7 +15,7 @@ import { systemBodiesStore } from '@src/infrastructure/prun-api/data/system-bodi
 import { getPrunId } from '@src/infrastructure/prun-ui/attributes';
 import { sleep } from '@src/utils/sleep';
 import { changeInputValue } from '@src/utils/dom';
-import { latestPlanForAddress } from './plan-tracker';
+import { latestPlanForAddress, planReceivedAt } from './plan-tracker';
 
 // FTC 参数扫描查询引擎。
 // 原理：离屏打开 SFC 窗口 → 自动填目的地 → 逐组写入「燃料消耗/反应堆使用量」
@@ -53,6 +53,10 @@ const SLIDER_WRITE_RETRIES = 5;
 const SLIDER_RETRY_DELAY_MS = 400;
 const DEFAULT_MISSION_TIMEOUT_MS = 15000;
 const MISSION_POLL_INTERVAL_MS = 150;
+// 主动捕获标定锚点时的燃料滑块标定值：写入一个确定值，保证读到的
+// 计划与该滑块值严格对应（被动读取存在 sfc-auto-fuel-settings 异步写
+// 0.1 的竞态，可能读到与计划不符的值）。
+const FUEL_CALIBRATION = 0.1;
 
 async function waitFor(condition: () => boolean, timeoutMs: number, intervalMs = 100) {
   const deadline = Date.now() + timeoutMs;
@@ -90,16 +94,21 @@ function missionSignature(tile: PrunTile) {
   return `${table !== undefined ? (getPrunId(table) ?? '') : ''}|${stats?.textContent ?? ''}`;
 }
 
-// 读取当前飞行计划：优先 DOM 表格 prun-id（精确关联），失败时降级为
-// 按飞船地址匹配最近到达的计划（离屏窗口的 prun-id 读取可能失败）。
-function readPlan(tile: PrunTile, ship: PrunApi.Ship, sinceMs?: number) {
+// 读取当前飞行计划：优先 DOM 表格 prun-id（精确关联，且必须为新下发），
+// 失败或读到旧计划时降级为按飞船地址 + 目的地 + 到达时间匹配最近计划。
+// destinationId 用于限定计划目的地，避免同一飞船地址的多份历史计划错配。
+function readPlan(tile: PrunTile, ship: PrunApi.Ship, sinceMs?: number, destinationId?: string) {
   const table = _$(tile.anchor, C.MissionPlan.table);
   const missionId = table !== undefined ? getPrunId(table) : null;
-  const plan = missionId ? flightPlansStore.getById(missionId) : undefined;
-  if (plan !== undefined) {
-    return plan;
+  if (missionId) {
+    const plan = flightPlansStore.getById(missionId);
+    const receivedAt = planReceivedAt(missionId);
+    const fresh = sinceMs === undefined || (receivedAt !== undefined && receivedAt >= sinceMs);
+    if (plan !== undefined && fresh) {
+      return plan;
+    }
   }
-  return latestPlanForAddress(ship.address, sinceMs);
+  return latestPlanForAddress(ship.address, sinceMs, destinationId);
 }
 
 async function writeSliders(tile: PrunTile, combo: SweepCombo) {
@@ -383,32 +392,55 @@ export async function captureAnchor(
     const destId = convertToPlanetNaturalId(destination) ?? destination;
 
     // 填写目的地（触发飞行计划下发）。
+    const selectMs = Date.now() - 1000;
     const addressContainer = await $(tile.anchor, C.AddressSelector.container);
     const selected = await selectAddress(addressContainer, destId);
     if (!selected) {
       throw new Error(`目的地「${destId}」选择失败，未找到匹配建议`);
     }
 
-    // 等待本飞船 → 目的地的计划到达（按地址 + 目的地实体匹配，排除残留）。
-    const sinceMs = Date.now() - 1000;
-    const ready = await waitFor(
-      () => latestPlanForAddress(ship.address, sinceMs, destId) !== undefined,
+    // 等待飞行计划渲染（MissionPlan 统计区）。
+    const missionReady = await waitFor(
+      () => _$(tile.anchor, C.MissionPlan.stats) !== undefined,
       missionTimeout,
-      MISSION_POLL_INTERVAL_MS,
     );
-    if (!ready) {
+    if (!missionReady) {
       throw new Error('飞行计划加载超时（目的地可能无效）');
     }
-    await sleep(50);
-    const plan = latestPlanForAddress(ship.address, sinceMs, destId)!;
 
-    // 被动读取当前滑块值：这份计划正是在这些参数下计算的。
+    // 主动把燃料滑块写到确定值，保证读到的计划与该滑块值严格对应——
+    // 被动读取存在与 sfc-auto-fuel-settings 的竞态：计划可能是旧滑块值
+    // 生成的，而读到的滑块已是新值，二者错位导致后续缩放全错。
     const { fuel, reactor } = findSfcSliders(tile.anchor);
-    const fuelValue = fuel !== undefined ? getSliderValue(fuel) : undefined;
-    const reactorValue = reactor !== undefined ? getSliderValue(reactor) : undefined;
-    if (fuelValue === undefined) {
-      throw new Error('未能读取燃料消耗滑块当前值');
+    if (fuel === undefined) {
+      throw new Error('未能找到燃料消耗滑块');
     }
-    return { plan, fuel: fuelValue, reactor: reactorValue };
+    const curFuel = getSliderValue(fuel);
+    let plan: PrunApi.FlightPlan | undefined;
+    if (curFuel !== undefined && Math.abs(curFuel - FUEL_CALIBRATION) < 0.01) {
+      // 当前滑块已是标定值，直接读选目的地时下发的计划。
+      plan = readPlan(tile, ship, selectMs, destId);
+    } else {
+      const beforeWriteMs = Date.now();
+      const signature = missionSignature(tile);
+      const written = await setSliderValue(fuel, FUEL_CALIBRATION);
+      if (!written) {
+        throw new Error('未能写入燃料消耗滑块');
+      }
+      // 等服务器按新滑块值重算并下发新计划。
+      await waitFor(
+        () => missionSignature(tile) !== signature,
+        missionTimeout,
+        MISSION_POLL_INTERVAL_MS,
+      );
+      await sleep(50);
+      plan = readPlan(tile, ship, beforeWriteMs, destId);
+    }
+    if (!plan) {
+      throw new Error('未能读取飞行计划');
+    }
+
+    const reactorValue = reactor !== undefined ? getSliderValue(reactor) : undefined;
+    return { plan, fuel: FUEL_CALIBRATION, reactor: reactorValue };
   });
 }

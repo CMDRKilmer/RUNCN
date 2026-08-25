@@ -33,6 +33,17 @@ function planFor(tracked: TrackedPlan) {
   return plan !== undefined && plan.segments.length > 0 ? plan : undefined;
 }
 
+// 某份计划的消息到达时间（毫秒）。用于在按 prun-id 精确读取时校验
+// 计划是否为新下发，排除旧查询残留（同一飞船地址可能有多份历史计划）。
+export function planReceivedAt(missionId: string): number | undefined {
+  for (let i = received.length - 1; i >= 0; i--) {
+    if (received[i].missionId === missionId) {
+      return received[i].receivedMs;
+    }
+  }
+  return undefined;
+}
+
 /**
  * 查找最近一份首段起点与指定地址一致的飞行计划（按消息到达时间倒序）。
  * sinceMs：只接受到达时间不早于该时间的计划（排除更早查询的残留）。
