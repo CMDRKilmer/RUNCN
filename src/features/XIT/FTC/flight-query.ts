@@ -48,10 +48,13 @@ export interface SweepOptions {
 
 const FIND_TILE_ATTEMPTS = 20;
 const FIND_TILE_INTERVAL_MS = 100;
-const SLIDER_WRITE_RETRIES = 3;
-const SLIDER_RETRY_DELAY_MS = 200;
+const SLIDER_WRITE_RETRIES = 5;
+const SLIDER_RETRY_DELAY_MS = 400;
+// 写入后等 React 重渲染稳定的时间（节点可能被重建，校验前必须重新查询）。
+const SLIDER_SETTLE_MS = 150;
 const DEFAULT_MISSION_TIMEOUT_MS = 15000;
 const MISSION_POLL_INTERVAL_MS = 150;
+const PLAN_READ_TIMEOUT_MS = 5000;
 
 async function waitFor(condition: () => boolean, timeoutMs: number, intervalMs = 100) {
   const deadline = Date.now() + timeoutMs;
