@@ -223,11 +223,12 @@ export function scaleCalibration(
 ): Calibration {
   const massRatio =
     from.mass !== undefined && to.mass !== undefined && from.mass > 0 && to.mass > 0
-      ? Math.sqrt(to.mass / from.mass)
+      ? Math.pow(to.mass / from.mass, 0.8)
       : 1;
-  // STL 时间 ∝ √(f0/f)·√(m/m0)；STL 燃料 ∝ √(f/f0)·√(m/m0)。
-  const stlTimeRatio = Math.sqrt(from.fuel / to.fuel) * massRatio;
-  const stlFuelRatio = Math.sqrt(to.fuel / from.fuel) * massRatio;
+  // STL 燃料 ∝ 燃料滑块 f（线性），与质量基本无关。
+  const stlFuelRatio = from.fuel > 0 ? to.fuel / from.fuel : 1;
+  // STL 时长 ∝ 质量^0.8 · 滑块^−0.85（实测指数，非 √(m/m0)·√(f0/f)）。
+  const stlTimeRatio = Math.pow(from.fuel / to.fuel, 0.85) * massRatio;
   // FTL 时间 ∝ r0/r；FTL 燃料/损伤 ∝ r/r0。
   const reactor = to.reactor ?? from.reactor;
   const ftlTimeRatio = from.reactor > 0 ? from.reactor / reactor : 1;
@@ -238,7 +239,8 @@ export function scaleCalibration(
   const jumpMs = cal.jumpMs * ftlTimeRatio;
   // totalMs 中可能含未归类的段（residual），按原样保留。
   const residualMs = Math.max(0, cal.totalMs - cal.stlMs - cal.chargeMs - cal.jumpMs);
-  const damageStl = cal.damageStl * stlTimeRatio;
+  // STL 损伤由航线环境决定，不随滑块/质量/时长缩放。
+  const damageStl = cal.damageStl;
   const damageFtl = cal.damageFtl * ftlCostRatio;
   return {
     ...cal,
@@ -372,7 +374,8 @@ function estimateLeg(
       precise: false,
       orbitPredicted: (fromPos?.orbitPredicted ?? false) || (toPos?.orbitPredicted ?? false),
       durationMs: cal.stlMs * scale,
-      stlFuel: cal.stlFuel * scale,
+      // STL 燃料 ∝ 距离（线性），与时长（√距离）无关。
+      stlFuel: cal.stlFuel * ratio,
       ftlFuel: 0,
       damage: cal.damageStl * scale,
     };
@@ -404,7 +407,8 @@ function estimateLeg(
     precise: false,
     orbitPredicted,
     durationMs: cal.stlMs * stlScale + (cal.chargeMs + cal.jumpMs) * ftlRatio,
-    stlFuel: cal.stlFuel * stlScale,
+    // STL 燃料 ∝ 距离（线性），与时长（√距离）无关。
+    stlFuel: cal.stlFuel * stlRatio,
     ftlFuel: cal.ftlFuel * ftlRatio,
     damage: cal.damageStl * stlScale + cal.damageFtl * ftlRatio,
   };
