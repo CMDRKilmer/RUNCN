@@ -222,6 +222,13 @@ export function planChainRoute(input: {
         for (const order of line.orders) {
           for (const mat of order.inputs ?? []) {
             const ticker = mat.material.ticker;
+            // 仅当 burn 表明该基地确实消耗此 ticker 时才标记为下游（input>0 或
+            // workforce>0）。订单正在跑但 burn 未含时忽略，否则 rawEdges 会把
+            // 这些站点作为下游带入 need/avail，造成 `mat` 为 undefined 而崩溃。
+            const siteBurn = burn.burn[ticker];
+            if (siteBurn === undefined || (siteBurn.input <= 0 && siteBurn.workforce <= 0)) {
+              continue;
+            }
             const list = consumers.get(ticker) ?? [];
             if (!list.includes(naturalId)) {
               list.push(naturalId);
@@ -336,6 +343,10 @@ export function planChainRoute(input: {
   // need: 下游 ticker 需求 = 目标天数 × 日耗（原料+消耗品）− 库存。
   const need = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
+    // ticker 不在该基地 burn 中（极少见，例如生产订单刚启动 burn 尚未刷新）→ 按 0 计。
+    if (mat === undefined) {
+      return 0;
+    }
     return Math.max(
       0,
       Math.ceil(targetDays.get(id)! * (mat.input + mat.workforce) - mat.inventory),
@@ -344,6 +355,9 @@ export function planChainRoute(input: {
   // avail: 上游可提取 = 库存 − 自用预留（目标天数 × 自身日耗）。
   const avail = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
+    if (mat === undefined) {
+      return 0;
+    }
     return Math.max(
       0,
       Math.floor(mat.inventory - targetDays.get(id)! * (mat.input + mat.workforce)),
