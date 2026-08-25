@@ -73,6 +73,9 @@ const selected = ref<ResultRow | undefined>(undefined);
 const probeMessage = ref<string | undefined>(undefined);
 const probing = ref(false);
 const anchorMessage = ref<string | undefined>(undefined);
+// 对照诊断用：当前生效的标定锚点（本地模式）。展示其原始服务器值，
+// 与当前飞船性能并列，用于定位本地计算与服务器不一致的来源。
+const activeAnchor = ref<ShipAnchor | undefined>(undefined);
 
 const dockedShips = computed(() =>
   (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
@@ -242,6 +245,7 @@ async function start() {
   progressDone.value = 0;
   progressTotal.value = combos.value.length;
   rows.value = [];
+  activeAnchor.value = undefined;
 
   try {
     // 预取航点行星的 FIO 轨道根数（含缓存），供多段估算的轨道位置预测。
@@ -276,6 +280,7 @@ async function start() {
         progressTotal.value = combos.value.length;
       }
       anchorMessage.value = anchorStatusLabel(anchor, source);
+      activeAnchor.value = anchor;
       rows.value = combos.value.map(combo => buildLocalRow(anchor!, combo));
     } else {
       const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
@@ -450,6 +455,90 @@ function formatFuel(value: number) {
         data-tooltip="本地计算基于一份已知参数的服务器标定计划，按飞船性能物理关系（推力∝燃料滑块、充能/跃迁速度∝反应堆使用量）缩放到各参数组合"
         >{{ anchorMessage }}</div
       >
+      <details v-if="activeAnchor" :class="$style.diagnostic">
+        <summary>对照诊断（锚点原始服务器值 vs 当前飞船）</summary>
+        <table :class="$style.table">
+          <thead>
+            <tr>
+              <th>项目</th>
+              <th>锚点（捕获时）</th>
+              <th>当前飞船</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>燃料消耗滑块</td>
+              <td>{{ activeAnchor.fuel }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>反应堆使用量</td>
+              <td>{{ activeAnchor.reactor ?? '--' }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>质量 (t)</td>
+              <td>{{ activeAnchor.mass ?? '--' }}</td>
+              <td>{{ ship?.mass ?? '--' }}</td>
+            </tr>
+            <tr>
+              <td>STL 燃料消耗</td>
+              <td>{{ formatFuel(activeAnchor.cal.stlFuel) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>FTL 燃料消耗</td>
+              <td>{{ formatFuel(activeAnchor.cal.ftlFuel) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>STL 时长</td>
+              <td>{{ formatDuration(activeAnchor.cal.stlMs) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>充能时长</td>
+              <td>{{ formatDuration(activeAnchor.cal.chargeMs) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>跃迁时长</td>
+              <td>{{ formatDuration(activeAnchor.cal.jumpMs) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>总时长</td>
+              <td>{{ formatDuration(activeAnchor.cal.totalMs) }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>STL 距离</td>
+              <td>{{ activeAnchor.cal.stlDistance }}</td>
+              <td>--</td>
+            </tr>
+            <tr>
+              <td>stlFuelFlowRate</td>
+              <td>--</td>
+              <td>{{ ship?.stlFuelFlowRate ?? '--' }}</td>
+            </tr>
+            <tr>
+              <td>加速度 (m/s²)</td>
+              <td>--</td>
+              <td>{{ ship?.acceleration ?? '--' }}</td>
+            </tr>
+            <tr>
+              <td>整备质量 (t)</td>
+              <td>--</td>
+              <td>{{ ship?.operatingEmptyMass ?? '--' }}</td>
+            </tr>
+            <tr>
+              <td>船体条件</td>
+              <td>--</td>
+              <td>{{ ship?.condition ?? '--' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
       <div v-if="probeMessage" :class="$style.hint">{{ probeMessage }}</div>
       <div v-if="errorMessage" :class="$style.error">{{ errorMessage }}</div>
     </div>
