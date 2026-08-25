@@ -24,7 +24,7 @@ import { findSfcSliders } from './flight-query';
 // 2. 主动捕获：FTC 本地计算模式航线不匹配时的 captureAnchor 查询。
 // 3. 服务器扫描：runSweep 每组成功结果都是精确锚点（由 FTC.vue 保存）。
 
-const CACHE_KEY = 'rprun.ftc.anchors.v1';
+const CACHE_KEY = 'rprun.ftc.anchors.v2';
 
 export interface ShipAnchor {
   registration: string;
