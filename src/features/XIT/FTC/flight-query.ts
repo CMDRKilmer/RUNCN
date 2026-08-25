@@ -1,6 +1,7 @@
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { closePrunWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
 import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
+import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import {
   getSliderValue,
   releaseTile,
@@ -37,6 +38,9 @@ export interface SweepOutcome {
 }
 
 export interface SweepOptions {
+  // 扫描结束后依次切换到的后续航点：仅用于触发飞行计划、捕获天体位置
+  // （transferEllipse 坐标由 system-bodies store 自动记录），不影响扫描结果。
+  probeDestinations?: string[];
   onProgress?: (done: number, total: number) => void;
   isCancelled?: () => boolean;
   missionTimeoutMs?: number;
@@ -133,15 +137,11 @@ async function submitCommand(window: HTMLElement, command: string) {
 }
 
 /**
- * 对指定飞船执行「目的地 × 参数组合」扫描，返回每组组合的服务器精确飞行计划。
- * 任一组合失败不中断整体扫描（记录 error 继续下一组）。
+ * 在离屏 SFC 窗口中执行回调：打开窗口 → 提交命令 → 定位 tile → 独占滑块 →
+ * 执行 fn → 释放并关窗。窗口用 transform 移出屏幕但保留布局（滑块坐标计算
+ * 依赖 getBoundingClientRect 的非零矩形）。
  */
-export async function runSweep(
-  registration: string,
-  destination: string,
-  combos: SweepCombo[],
-  options?: SweepOptions,
-): Promise<SweepOutcome[]> {
+async function withSfcWindow<T>(registration: string, fn: (tile: PrunTile) => Promise<T>) {
   const ship = shipsStore.getByRegistration(registration);
   if (!ship) {
     throw new Error(`未找到飞船 ${registration}`);
@@ -149,10 +149,6 @@ export async function runSweep(
   if (ship.flightId !== null) {
     throw new Error(`${registration} 正在飞行中，仅支持停靠中的飞船`);
   }
-
-  const missionTimeout = options?.missionTimeoutMs ?? DEFAULT_MISSION_TIMEOUT_MS;
-  const destId = convertToPlanetNaturalId(destination) ?? destination;
-  const results: SweepOutcome[] = [];
 
   const window = (await showBuffer(`SFC ${registration}`, {
     force: true,
@@ -171,6 +167,47 @@ export async function runSweep(
     }
     reservedAnchor = tile.anchor;
     reserveTile(tile.anchor);
+    return await fn(tile);
+  } finally {
+    if (reservedAnchor !== undefined) {
+      releaseTile(reservedAnchor);
+    }
+    window.style.transform = prevTransform;
+    closePrunWindow(window);
+  }
+}
+
+// 切换 SFC 目的地并等待新的飞行计划下发（missionId 变化）。
+async function selectDestination(tile: PrunTile, destination: string, timeoutMs: number) {
+  const container = _$(tile.anchor, C.AddressSelector.container);
+  if (!container) {
+    return false;
+  }
+  const signature = missionSignature(tile);
+  const selected = await selectAddress(container, destination);
+  if (!selected) {
+    return false;
+  }
+  await waitFor(() => missionSignature(tile) !== signature, timeoutMs, MISSION_POLL_INTERVAL_MS);
+  await sleep(50);
+  return true;
+}
+
+/**
+ * 对指定飞船执行「目的地 × 参数组合」扫描，返回每组组合的服务器精确飞行计划。
+ * 任一组合失败不中断整体扫描（记录 error 继续下一组）。
+ * 扫描结束后依次切换到 probeDestinations 各航点，捕获天体位置供多段估算使用。
+ */
+export async function runSweep(
+  registration: string,
+  destination: string,
+  combos: SweepCombo[],
+  options?: SweepOptions,
+): Promise<SweepOutcome[]> {
+  return withSfcWindow(registration, async tile => {
+    const missionTimeout = options?.missionTimeoutMs ?? DEFAULT_MISSION_TIMEOUT_MS;
+    const destId = convertToPlanetNaturalId(destination) ?? destination;
+    const results: SweepOutcome[] = [];
 
     // 填写目的地（触发首份飞行计划）。
     const addressContainer = await $(tile.anchor, C.AddressSelector.container);
@@ -196,6 +233,18 @@ export async function runSweep(
       initial.reactor !== undefined ? getSliderValue(initial.reactor) : undefined;
     const initialPlan = readPlan(tile);
 
+    // 后续航点（去重，排除扫描目的地本身）：仅用于触发飞行计划、捕获位置。
+    const probeDests: string[] = [];
+    const seen = new Set([destId.toUpperCase()]);
+    for (const waypoint of options?.probeDestinations ?? []) {
+      const id = convertToPlanetNaturalId(waypoint) ?? waypoint;
+      if (!seen.has(id.toUpperCase())) {
+        seen.add(id.toUpperCase());
+        probeDests.push(id);
+      }
+    }
+    const total = combos.length + probeDests.length;
+
     let done = 0;
     for (const combo of combos) {
       if (options?.isCancelled?.()) {
@@ -219,7 +268,7 @@ export async function runSweep(
         if (!written) {
           results.push({ combo, error: '滑块写入失败' });
           done++;
-          options?.onProgress?.(done, combos.length);
+          options?.onProgress?.(done, total);
           continue;
         }
         // 等待游戏重算下发新的飞行计划（MissionPlan 统计文本变化）。
@@ -231,7 +280,7 @@ export async function runSweep(
         if (!changed) {
           results.push({ combo, error: '等待飞行计划更新超时' });
           done++;
-          options?.onProgress?.(done, combos.length);
+          options?.onProgress?.(done, total);
           continue;
         }
         // 等一拍让 store 消化消息后再读取。
@@ -245,34 +294,58 @@ export async function runSweep(
         results.push({ combo, error: '未能读取飞行计划' });
       }
       done++;
-      options?.onProgress?.(done, combos.length);
+      options?.onProgress?.(done, total);
+    }
+
+    // 依次切换到后续航点：每次地址变更触发服务器下发新飞行计划，
+    // 计划各段的 transferEllipse 坐标由 system-bodies store 自动记录。
+    for (const dest of probeDests) {
+      if (options?.isCancelled?.()) {
+        break;
+      }
+      await selectDestination(tile, dest, missionTimeout);
+      done++;
+      options?.onProgress?.(done, total);
     }
 
     return results;
-  } finally {
-    if (reservedAnchor !== undefined) {
-      releaseTile(reservedAnchor);
-    }
-    window.style.transform = prevTransform;
-    closePrunWindow(window);
-  }
+  });
 }
 
 /**
- * 打开隐藏的 MS 星系地图窗口探测行星位置数据（供估算层使用）。
- * MS 无需交互，display:none 隐藏即可。
- * 返回探测期间新捕获的天体位置数量。
+ * 打开离屏 SFC 窗口，依次选择各航点触发飞行计划下发，从计划的
+ * transferEllipse 捕获天体位置（system-bodies store 自动记录）。
+ * 返回捕获期间新增的天体位置数量。
  */
-export async function probeSystemMap(systemId: string, waitMs = 5000) {
+export async function captureBodyPositions(
+  registration: string,
+  destinations: string[],
+  options?: SweepOptions,
+): Promise<number> {
   const before = systemBodiesStore.count;
-  const close = ref(false);
-  void showBuffer(`MS ${systemId}`, {
-    force: true,
-    autoSubmit: true,
-    autoClose: true,
-    closeWhen: close,
+  await withSfcWindow(registration, async tile => {
+    const missionTimeout = options?.missionTimeoutMs ?? DEFAULT_MISSION_TIMEOUT_MS;
+    // 飞船当前位置无需捕获（选择相同目的地不会触发新计划）。
+    const shipAddress = shipsStore.getByRegistration(registration)?.address;
+    const shipLocation =
+      shipAddress !== null && shipAddress !== undefined
+        ? getEntityNaturalIdFromAddress(shipAddress)
+        : undefined;
+    const seen = new Set<string>();
+    if (shipLocation !== undefined) {
+      seen.add(shipLocation.toUpperCase());
+    }
+    for (const dest of destinations) {
+      if (options?.isCancelled?.()) {
+        break;
+      }
+      const id = convertToPlanetNaturalId(dest) ?? dest;
+      if (seen.has(id.toUpperCase())) {
+        continue;
+      }
+      seen.add(id.toUpperCase());
+      await selectDestination(tile, id, missionTimeout);
+    }
   });
-  await sleep(waitMs);
-  close.value = true;
   return systemBodiesStore.count - before;
 }

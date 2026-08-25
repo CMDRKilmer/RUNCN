@@ -11,8 +11,8 @@ import { detectedPositionMessages } from '@src/infrastructure/prun-api/data/syst
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { isEmpty } from 'ts-extras';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
-import { runSweep, probeSystemMap, SweepCombo, SweepOutcome } from './flight-query';
-import { calibrate, estimateRoute, resolveSystemId, Calibration, RouteResult } from './route-model';
+import { runSweep, captureBodyPositions, SweepCombo, SweepOutcome } from './flight-query';
+import { calibrate, estimateRoute, Calibration, RouteResult } from './route-model';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞行时间与燃料参数性价比计算器。
@@ -191,6 +191,8 @@ async function start() {
 
   try {
     const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
+      // 扫描结束后自动切换到后续航点，捕获天体位置供多段估算使用。
+      probeDestinations: waypoints.value.slice(1),
       onProgress: (done, total) => {
         progressDone.value = done;
         progressTotal.value = total;
@@ -220,20 +222,17 @@ const sortedRows = computed(() => {
   return [...ok, ...failed];
 });
 
-const probeSystem = computed(() => resolveSystemId(waypoints.value[0] ?? ''));
-
 async function probe() {
-  const systemId = probeSystem.value;
-  if (!systemId || probing.value) {
+  if (!registration.value || waypoints.value.length === 0 || probing.value) {
     return;
   }
   probing.value = true;
   try {
-    const found = await probeSystemMap(systemId);
+    const found = await captureBodyPositions(registration.value, waypoints.value);
     probeMessage.value =
       found > 0
-        ? `在 ${systemId} 捕获 ${found} 个天体位置（消息类型：${detectedPositionMessages.value.join(', ')}），多段估算已启用行星位置修正`
-        : `在 ${systemId} 未捕获到天体位置数据（MS 可能不下发位置，或多段估算已降级为常数外推）`;
+        ? `捕获 ${found} 个天体位置（来源：${detectedPositionMessages.value.join(', ')}），多段估算已启用行星位置修正`
+        : '未捕获到天体位置（飞行计划中可能不含轨迹数据，多段估算按常数外推）';
   } catch (e: unknown) {
     probeMessage.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -315,10 +314,10 @@ function formatFuel(value: number) {
         <PrunButton v-if="running" danger @click="cancel">取消</PrunButton>
         <PrunButton
           neutral
-          :disabled="probing || probeSystem === undefined"
-          data-tooltip="打开隐藏的星系地图窗口，捕获行星位置数据以改进多段估算精度"
+          :disabled="probing || registration === '' || waypoints.length === 0"
+          data-tooltip="通过离屏 SFC 窗口查询各航点的飞行计划，从轨迹数据捕获天体位置以改进多段估算精度（开始扫描时也会自动捕获）"
           @click="probe">
-          探测行星位置
+          捕获天体位置
         </PrunButton>
         <span v-if="running" :class="$style.progress">
           {{ progressDone }}/{{ progressTotal }}（后台查询中，请勿关闭游戏页面）

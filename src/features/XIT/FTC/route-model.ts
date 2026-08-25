@@ -5,10 +5,12 @@ import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addr
 
 // 多段路线估算模型。
 // 首段（飞船当前位置 → 第一个航点）由 SFC 查询获得服务器精确结果，
-// 其余段用恒星星系坐标 + 天体位置（探测到的场合）外推：
+// 其余段用恒星星系坐标 + 天体位置（飞行计划 transferEllipse 捕获）外推：
 // - FTL 充能时间按距离线性缩放，跃迁时间视为固定值
 // - STL 时间按 sqrt(距离比) 缩放（匀加速转移轨道的一阶近似）
 // - 燃料/损伤按对应距离线性缩放
+// 位置坐标与游戏距离单位可能不一致，换算系数用首段计划自标定：
+// STL 用 TRANSIT 段 stlDistance/弦长，FTL 用 JUMP 段 ftlDistance/恒星距。
 // 所有不精确的段在结果中标记 precise=false，UI 显示「≈」。
 
 export interface Calibration {
@@ -21,6 +23,10 @@ export interface Calibration {
   stlFuel: number;
   ftlFuel: number;
   damage: number;
+  // 位置坐标 → 游戏 STL 距离单位的换算系数（无法标定时为 undefined）。
+  stlScale?: number;
+  // 位置坐标 → 游戏 FTL 距离单位的换算系数（无法标定时为 undefined）。
+  ftlScale?: number;
 }
 
 export interface RouteLeg {
@@ -96,12 +102,19 @@ const STL_SEGMENT_TYPES = new Set([
   'DECAY',
 ]);
 
+function starPositionFromAddress(address: PrunApi.Address): PrunApi.Position | undefined {
+  const line = getSystemLineFromAddress(address);
+  return line ? starsStore.getByNaturalId(line.entity.naturalId)?.position : undefined;
+}
+
 // 从服务器精确飞行计划提取标定数据。
 export function calibrate(plan: PrunApi.FlightPlan): Calibration {
   let stlMs = 0;
   let chargeMs = 0;
   let jumpMs = 0;
   let damage = 0;
+  let stlScale: number | undefined;
+  let ftlScale: number | undefined;
   for (const segment of plan.segments) {
     const duration = segment.arrival.timestamp - segment.departure.timestamp;
     if (segment.type === 'CHARGE') {
@@ -112,6 +125,39 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
       stlMs += duration;
     }
     damage += segment.damage;
+
+    // 标定位置坐标与游戏距离单位的换算系数（各用首个可用段）。
+    const stlDistance = segment.stlDistance;
+    if (
+      stlScale === undefined &&
+      segment.transferEllipse !== null &&
+      stlDistance !== null &&
+      stlDistance > 0
+    ) {
+      const chord = distance3d(
+        segment.transferEllipse.startPosition,
+        segment.transferEllipse.targetPosition,
+      );
+      if (chord > 0) {
+        stlScale = stlDistance / chord;
+      }
+    }
+    const ftlDistance = segment.ftlDistance;
+    if (
+      ftlScale === undefined &&
+      (segment.type === 'JUMP' || segment.type === 'JUMP_GATEWAY') &&
+      ftlDistance !== null &&
+      ftlDistance > 0
+    ) {
+      const fromStar = starPositionFromAddress(segment.origin);
+      const toStar = starPositionFromAddress(segment.destination);
+      if (fromStar !== undefined && toStar !== undefined) {
+        const starDistance = distance3d(fromStar, toStar);
+        if (starDistance > 0) {
+          ftlScale = ftlDistance / starDistance;
+        }
+      }
+    }
   }
   return {
     totalMs: plan.eta.millis,
@@ -123,6 +169,8 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
     stlFuel: plan.stlFuelConsumption ?? 0,
     ftlFuel: plan.ftlFuelConsumption ?? 0,
     damage,
+    stlScale,
+    ftlScale,
   };
 }
 
@@ -134,6 +182,7 @@ function intraSystemStlDistance(fromId: string, toId: string) {
 }
 
 // 跨星系段的 STL 距离：出发行星→本星恒星 + 目标恒星→目标行星。
+// 任一侧天体位置已知即可估算；两侧都缺时返回 undefined（估算层按常数外推）。
 function interSystemStlDistance(
   fromId: string,
   toId: string,
@@ -147,8 +196,11 @@ function interSystemStlDistance(
   if (!fromStar || !toStar) {
     return undefined;
   }
-  const departure = fromBody ? distance3d(fromBody, fromStar) : undefined;
-  const approach = toBody ? distance3d(toStar, toBody) : undefined;
+  const departure = fromBody !== undefined ? distance3d(fromBody, fromStar) : undefined;
+  const approach = toBody !== undefined ? distance3d(toStar, toBody) : undefined;
+  if (departure === undefined && approach === undefined) {
+    return undefined;
+  }
   return (departure ?? 0) + (approach ?? 0);
 }
 
@@ -208,7 +260,8 @@ function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | und
 
   if (fromSystem === toSystem) {
     // 同星系：纯 STL 段。
-    const d = intraSystemStlDistance(from, to);
+    const raw = intraSystemStlDistance(from, to);
+    const d = raw !== undefined && cal.stlScale !== undefined ? raw * cal.stlScale : raw;
     const ratio = d !== undefined && cal.stlDistance > 0 ? d / cal.stlDistance : 1;
     const scale = Math.sqrt(ratio);
     return {
@@ -223,9 +276,10 @@ function estimateLeg(cal: Calibration, from: string, to: string): RouteLeg | und
   }
 
   // 跨星系段。
-  const ftlD = distance3d(fromStar, toStar);
+  const ftlD = distance3d(fromStar, toStar) * (cal.ftlScale ?? 1);
   const ftlRatio = cal.ftlDistance > 0 ? ftlD / cal.ftlDistance : 1;
-  const stlD = interSystemStlDistance(from, to, fromSystem, toSystem);
+  const stlRaw = interSystemStlDistance(from, to, fromSystem, toSystem);
+  const stlD = stlRaw !== undefined && cal.stlScale !== undefined ? stlRaw * cal.stlScale : stlRaw;
   const stlRatio = stlD !== undefined && cal.stlDistance > 0 ? stlD / cal.stlDistance : 1;
   const stlScale = Math.sqrt(stlRatio);
 
