@@ -7,12 +7,15 @@ import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addr
 //
 // 数据来源：
 // - 内置 star-connections.json：SYSTEM_STARS_DATA 的 connections（恒星天然跃迁航线）。
-// - 在线网关：打开星图（星系地图）后客户端自动请求 DATA_DATA["gateways"]，
-//   一次性下发全部网关实体（naturalId、所属星系/行星、名称、状态）。
+// - 在线网关实体两条来源：
+//   1) DATA_DATA["gateways"]：打开星图（星系地图）后客户端一次性下发全部网关
+//      （naturalId、所属星系/行星、名称、状态），全量刷新。
+//   2) NOMENCLATURE_ADDRESSES_QUERY_DATA：地址查询响应中可能含 SATELLITE 行
+//      （网关实体），增量补充（网关是玩家动态建造/拆毁的，零散查询也能积累）。
 // - 网关跃迁连接两条来源：
 //   1) 名称配对（主要，一次性）：网关名称格式 "本地端 -> 远程端"，成对网关的
 //      名称两端互为匹配（如 "Promitor -> Amethyst B" ⇄ "Amethyst B -> Promitor"），
-//      配对即得连接两端星系，无需解析行星别名到星系；打开一次星图即可建图。
+//      配对即得连接两端星系，无需解析行星别名到星系；
 //   2) SHIP_FLIGHT_MISSION 的 JUMP_GATEWAY 段（补充/校验）：该段 origin/destination
 //      各含一条 SYSTEM 行，可直接建立连接并记录精确跃迁距离（pc）。
 
@@ -189,10 +192,16 @@ export const routesStore = {
   get bundledLoaded() {
     return bundledLoaded;
   },
-  // 某星系的邻接星系（内置跃迁连接）。
+  // 某星系的邻接星系（内置跃迁连接 + 网关连接）。
   getNeighbors(systemNaturalId: string): string[] {
     void routesVersion.value;
     return [...(neighbors.get(systemNaturalId.toUpperCase()) ?? [])];
+  },
+  // 两星系间是否存在网关跃迁连接（无向）。
+  isGatewayEdge(a: string, b: string): boolean {
+    void routesVersion.value;
+    const key = [a.toUpperCase(), b.toUpperCase()].sort().join('|');
+    return gatewayConnections.has(key);
   },
   // BFS 最短跃迁路径（星系 naturalId 序列，含起终点）；不可达返回 undefined。
   // 路径可同时使用内置跃迁连接与已观测的网关连接。
@@ -319,6 +328,43 @@ onApiMessage({
     // 一次性配对：从全部网关实体的名称提取连接（无需飞行）。
     pairGatewayConnections();
     routesVersion.value++;
+  },
+  // 地址查询响应中可能含网关实体（SATELLITE 行）：增量补充网关列表并重新配对。
+  // 网关是玩家动态建造/拆毁的，每次查询都能发现新网关（如换线后的新网关）。
+  NOMENCLATURE_ADDRESSES_QUERY_DATA(data: {
+    addresses?: Array<{
+      lines?: Array<{ type: string; entity?: { naturalId?: string; name?: string } }>;
+    }>;
+  }) {
+    let added = false;
+    for (const addr of data.addresses ?? []) {
+      const lines = addr.lines ?? [];
+      const sysLine = lines.find(l => l.type === 'SYSTEM');
+      const satLine = lines.find(l => l.type === 'SATELLITE');
+      const sys = sysLine?.entity?.naturalId;
+      const gid = satLine?.entity?.naturalId;
+      if (!sys || !gid) {
+        continue;
+      }
+      const key = sys.toUpperCase();
+      const list = gateways.get(key) ?? [];
+      if (!list.some(g => g.naturalId === gid)) {
+        list.push({
+          naturalId: gid,
+          name: satLine.entity?.name ?? gid,
+          systemId: key,
+          planetId: lines.find(l => l.type === 'PLANET')?.entity?.naturalId,
+          // 地址查询不含运营状态，默认视为运营中。
+          operational: true,
+        });
+        gateways.set(key, list);
+        added = true;
+      }
+    }
+    if (added) {
+      pairGatewayConnections();
+      routesVersion.value++;
+    }
   },
   // 从飞行计划补充网关跃迁连接（配对遗漏时兜底，并记录精确跃迁距离）：
   // JUMP_GATEWAY 段的 origin/destination 各含一条 SYSTEM 行 = 网关两端星系。

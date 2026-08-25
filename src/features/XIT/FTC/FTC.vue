@@ -32,6 +32,16 @@ import {
   Calibration,
   RouteResult,
 } from './route-model';
+import {
+  planRoutes,
+  optimizeRoute,
+  routeTime,
+  DEFAULT_FUELS,
+  DEFAULT_REACTORS,
+  PlannedRoute,
+  FuelPlan,
+  RouteTime,
+} from './route-planner';
 import { anchorFromPlan, anchorMatchesRoute, getAnchor, saveAnchor, ShipAnchor } from './anchor';
 import $style from './FTC.module.css';
 
@@ -59,7 +69,8 @@ const MAX_COMBOS = 30;
 const registration = ref('');
 const mode = ref<'local' | 'server'>('local');
 const waypointsText = ref('');
-const fuelText = ref('0.1,0.3,0.5,1');
+// 默认滑块组合：燃料含 0.05（最省燃料档，同星系/短途常用），反应堆默认档。
+const fuelText = ref('0.05,0.1,0.3,0.5,1');
 const reactorText = ref('0.25,0.5,1');
 
 const stlFuelPrice = ref<number | undefined>(undefined);
@@ -110,6 +121,80 @@ function exportGateways() {
     return;
   }
   downloadFile(data, 'prun-gateways.json', true);
+}
+
+// ---- 航线规划与燃料优化（自然 vs 网关）----
+const routeFrom = ref('');
+const routeTo = ref('');
+const routeMessage = ref<string | undefined>(undefined);
+const routePlans = ref<RoutePlanResult[]>([]);
+
+interface RoutePlanResult {
+  label: string;
+  route: PlannedRoute;
+  best: FuelPlan;
+  time: RouteTime;
+}
+
+// 规划起终点航线（自然/网关），并对每条航线扫描滑块求综合成本最低方案。
+function planAndOptimize() {
+  routeMessage.value = undefined;
+  routePlans.value = [];
+  if (!routeFrom.value.trim() || !routeTo.value.trim()) {
+    routeMessage.value = '请输入起点和终点';
+    return;
+  }
+  if (!ship.value) {
+    routeMessage.value = '请选择飞船';
+    return;
+  }
+  const anchor = getAnchor(registration.value);
+  if (!anchor) {
+    routeMessage.value =
+      '无标定锚点：以下为纯时间估算（燃料/成本不可用），建议先本地计算一次建立飞船燃料标定';
+  }
+  const result = planRoutes(routeFrom.value, routeTo.value);
+  if (!result.natural) {
+    routeMessage.value = '无法解析起终点，或航线不可达（需恒星位置数据，请先打开星图）';
+    return;
+  }
+  const candidates = [result.natural, result.gateway].filter(
+    (x): x is PlannedRoute => x !== undefined,
+  );
+  const plans: RoutePlanResult[] = [];
+  for (const route of candidates) {
+    const best =
+      optimizeRoute(route, {
+        anchor,
+        shipMass: ship.value?.mass,
+        stlPrice: stlFuelPrice.value ?? 0,
+        ftlPrice: ftlFuelPrice.value ?? 0,
+        timeValue: timeValue.value ?? 0,
+        fuels: DEFAULT_FUELS,
+        reactors: DEFAULT_REACTORS,
+      })[0] ?? undefined;
+    if (best !== undefined) {
+      plans.push({ label: route.label, route, best, time: routeTime(route) });
+    }
+  }
+  if (plans.length === 0) {
+    routeMessage.value = '航线规划失败';
+    return;
+  }
+  plans.sort((a, b) => a.best.totalCost - b.best.totalCost);
+  routePlans.value = plans;
+  const best = plans[0];
+  const natural = plans.find(p => p.label === '自然');
+  const needsFtl =
+    natural !== undefined && natural.route.gatewayCount === 0 && !natural.best.ftlCalibrated;
+  routeMessage.value =
+    `推荐：${best.label}航线，预计 ${formatDuration(best.best.totalHours * 3600000)}` +
+    (best.best.calibrated
+      ? `（燃料 ${best.best.fuel} / 反应堆 ${best.best.reactor}）`
+      : '（纯时间估算）') +
+    (needsFtl
+      ? '。注意：当前标定锚点为网关航线，自然航线 FTL 燃料无法估算——先本地计算一条自然航线获取 FTL 标定，或设置 FTL 燃料单价后再对比。'
+      : '');
 }
 async function exportPlanets() {
   exporting.value = true;
@@ -496,6 +581,88 @@ function formatFuel(value: number) {
             <NumberInput v-model="timeValue" optional />
           </label>
         </div>
+      </details>
+
+      <details :class="$style.costDetails">
+        <summary>航线燃料对比（自然 vs 网关）</summary>
+        <div :class="$style.fieldRow">
+          <label :class="$style.field">
+            <span>起点（空间站/行星/星系）</span>
+            <TextInput v-model="routeFrom" placeholder="如：HRT 或 VH-331" />
+          </label>
+          <label :class="$style.field">
+            <span>终点</span>
+            <TextInput v-model="routeTo" placeholder="如：MOR 或 OT-580" />
+          </label>
+        </div>
+        <div :class="$style.actions">
+          <PrunButton
+            neutral
+            :disabled="registration === ''"
+            data-tooltip="规划自然与网关两条候选航线，并基于当前飞船标定锚点扫描燃料/反应堆滑块，给出每条航线综合成本（燃料费+时间价值）最低的滑块方案。需先打开星图（恒星坐标+网关）并本地计算过一次建立标定。"
+            @click="planAndOptimize">
+            规划并优化
+          </PrunButton>
+        </div>
+        <div v-if="routeMessage" :class="$style.hint">{{ routeMessage }}</div>
+        <table v-if="routePlans.length > 0" :class="$style.table">
+          <thead>
+            <tr>
+              <th>航线</th>
+              <th>跳数</th>
+              <th>FTL 距离</th>
+              <th>网关段</th>
+              <th>总时长</th>
+              <th>最优燃料滑块</th>
+              <th>最优反应堆</th>
+              <th>STL 燃料</th>
+              <th>FTL 燃料</th>
+              <th>燃料费</th>
+              <th>时间成本</th>
+              <th>总成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="(p, i) in routePlans"
+              :key="p.label"
+              :class="[$style.row, { [$style.best]: i === 0 }]">
+              <td>{{ p.label }}</td>
+              <td>{{ p.route.systemIds.length - 1 }}</td>
+              <td>{{ fixed2(p.route.totalPc) }} pc</td>
+              <td>{{ p.route.gatewayCount }}</td>
+              <td>{{ formatDuration(p.best.totalHours * 3600000) }}</td>
+              <td>{{ p.best.fuel }}</td>
+              <td>{{ p.best.reactor }}</td>
+              <td>{{ p.best.calibrated ? formatFuel(p.best.stlFuel) : '需标定' }}</td>
+              <td>
+                {{
+                  !p.best.calibrated
+                    ? '需标定'
+                    : !p.best.ftlCalibrated
+                      ? '需自然标定'
+                      : formatFuel(p.best.ftlFuel)
+                }}
+              </td>
+              <td>{{ formatCurrency(p.best.fuelCost) }}</td>
+              <td>{{ formatCurrency(p.best.timeCost) }}</td>
+              <td>{{ formatCurrency(p.best.totalCost) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <details v-if="routePlans.length > 0" :class="$style.costDetails">
+          <summary>航线明细</summary>
+          <div v-for="p in routePlans" :key="`detail-${p.label}`">
+            <SectionHeader>{{ p.label }}航线</SectionHeader>
+            <div :class="$style.hint">
+              {{ p.route.systemIds.join(' → ') }}
+            </div>
+            <div :class="$style.hint">
+              估算时长 ≈ {{ formatDuration(p.time.totalHours * 3600000) }}（FTL
+              {{ fixed2(p.time.ftlHours) }}h + STL {{ fixed2(p.time.stlHours) }}h）
+            </div>
+          </div>
+        </details>
       </details>
 
       <div :class="$style.actions">

@@ -428,11 +428,16 @@ export async function captureAnchor(
         throw new Error('未能写入燃料消耗滑块');
       }
       // 等服务器按新滑块值重算并下发新计划。
-      await waitFor(
+      const recalculated = await waitFor(
         () => missionSignature(tile) !== signature,
         missionTimeout,
         MISSION_POLL_INTERVAL_MS,
       );
+      if (!recalculated) {
+        // 滑块已写入但服务器未重算：计划仍是旧滑块值，若继续会得到
+        // 「旧滑块计划 + 新滑块 f0」的错位锚点，导致本地缩放全错。
+        throw new Error('写入燃料滑块后服务器未重算计划，请重试');
+      }
       await sleep(50);
       plan = readPlan(tile, ship, beforeWriteMs, destId);
     }
@@ -440,7 +445,10 @@ export async function captureAnchor(
       throw new Error('未能读取飞行计划');
     }
 
+    // 用写入后的实际滑块值作为 f0（而非硬编码标定值）：即使实际生效值
+    // 与标定值有偏差，锚点也与计划严格对应。
+    const actualFuel = getSliderValue(fuel) ?? FUEL_CALIBRATION;
     const reactorValue = reactor !== undefined ? getSliderValue(reactor) : undefined;
-    return { plan, fuel: FUEL_CALIBRATION, reactor: reactorValue };
+    return { plan, fuel: actualFuel, reactor: reactorValue };
   });
 }
