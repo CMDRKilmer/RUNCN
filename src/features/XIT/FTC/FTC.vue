@@ -483,7 +483,7 @@ function formatFuel(value: number) {
         <PrunButton
           neutral
           :disabled="prefetching"
-          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（约 4155 个，后台低并发渐进运行，可重复点击续跑）。配合已捕获的坐标观测，可离线预测任意时刻的行星位置；游戏内浏览星系/行星详情也会自动记录轨道（DATA_DATA）。"
+          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进，可重复点击续跑）。游戏内浏览星系/行星详情也会自动记录轨道（DATA_DATA）；空间站轨道（celestialBodies）同样被记录，计入总缓存。配合游戏轨道模型可离线预测任意时刻的行星/空间站位置。"
           @click="prefetchOrbits">
           {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
         </PrunButton>

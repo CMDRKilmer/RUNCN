@@ -56,12 +56,29 @@ const bodySystem = new Map<string, string>();
 
 const inflight = new Map<string, Promise<void>>();
 
+// 已持有轨道的行星数（排除空间站——空间站轨道存于同一 planets Map，但
+// 预取目标只针对 FIO 4155 行星）。
+function countPlanets() {
+  let count = 0;
+  for (const key of planets.keys()) {
+    if (stationsStore.getByNaturalId(key) === undefined) {
+      count++;
+    }
+  }
+  return count;
+}
+
 export const orbitStore = {
   get version() {
     return orbitVersion.value;
   },
-  // 已持有轨道根数的行星数（FIO 预取 + DATA_DATA 被动积累）。
+  // 已持有轨道根数的行星数（不含空间站；内置 4155 行星为目标）。
   get planetCount() {
+    void orbitVersion.value;
+    return countPlanets();
+  },
+  // 已持有轨道的全部天体数（行星 + 空间站）。
+  get bodyCount() {
     void orbitVersion.value;
     return planets.size;
   },
