@@ -98,6 +98,15 @@ export const routesStore = {
     void routesVersion.value;
     return gateways.get(systemNaturalId.toUpperCase()) ?? [];
   },
+  // 全部已加载网关（跨星系合并），供导出。
+  getAllGateways(): GatewayInfo[] {
+    void routesVersion.value;
+    const all: GatewayInfo[] = [];
+    for (const list of gateways.values()) {
+      all.push(...list);
+    }
+    return all;
+  },
   get gatewayCount() {
     void routesVersion.value;
     let count = 0;

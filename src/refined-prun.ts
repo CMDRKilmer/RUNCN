@@ -2,6 +2,8 @@ import '@src/refined-prun.css';
 
 import '@src/infrastructure/shell';
 
+import '@src/infrastructure/fio/routes';
+
 import '@src/utils/dayjs';
 import '@src/utils/chartjs-dayjs';
 

@@ -22,6 +22,7 @@ import {
   SweepOutcome,
 } from './flight-query';
 import { orbitStore, prefetchAllOrbits, exportAllPlanetData } from '@src/infrastructure/fio/orbit';
+import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
 import {
@@ -81,6 +82,24 @@ const exporting = ref(false);
 const exportDone = ref(0);
 const exportTotal = ref(0);
 const exportLog = ref<string[]>([]);
+const gatewayMessage = ref<string | undefined>(undefined);
+// 网关数据随游戏连接/初始加载自动下发（DATA_DATA[gateways]）；
+// 这里提供状态检查与导出。
+function checkGateways() {
+  const n = routesStore.gatewayCount;
+  gatewayMessage.value =
+    n > 0
+      ? `已加载 ${n} 个网关（游戏连接时自动获取，可直接导出）`
+      : '暂无网关数据：网关随游戏初始加载自动下发，请刷新游戏后重试';
+}
+function exportGateways() {
+  const data = routesStore.getAllGateways();
+  if (data.length === 0) {
+    gatewayMessage.value = '暂无网关数据：请先确保游戏已加载网关（刷新游戏后重试）';
+    return;
+  }
+  downloadFile(data, 'prun-gateways.json', true);
+}
 async function exportPlanets() {
   exporting.value = true;
   exportDone.value = 0;
@@ -498,6 +517,19 @@ function formatFuel(value: number) {
           <ProgressBar :value="exportDone" :max="exportTotal || 1" />
           <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
         </div>
+        <PrunButton
+          neutral
+          data-tooltip="网关（玩家建造的额外跃迁航线）在游戏连接/初始加载时自动读取。检查当前已加载状态。"
+          @click="checkGateways">
+          网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
+        </PrunButton>
+        <PrunButton
+          neutral
+          data-tooltip="导出当前已加载的网关数据（naturalId/名称/所属星系/行星/状态）为 JSON。"
+          @click="exportGateways">
+          导出网关
+        </PrunButton>
+        <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
         <div v-if="exportLog.length > 0" :class="$style.exportLog">
           <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
         </div>
