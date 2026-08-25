@@ -191,16 +191,18 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
   };
 }
 
-// ---- 本地物理缩放模型 ----
+// ---- 本地缩放模型 ----
 //
-// 依据飞船性能的物理关系，把一份标定（在滑块 f0/r0、质量 m0 下测得）
-// 缩放到任意参数组合（f/r、当前质量 m）：
-// - STL 推力 ∝ 燃料滑块 f，加速度 = 推力/质量：
-//     t(f, m) = t0·√(f0/f)·√(m/m0)（Brachistochrone：t = 2√(d/a)）
-//     fuel(f, m) = flow·f·t ∝ f·√(1/f)·√m → fuel0·√(f/f0)·√(m/m0)
-// - FTL 充能速率与跃迁速度 ∝ 反应堆使用量 r（论坛实测：速度随 r 线性）：
-//     t_ftl(r) = t_ftl0·r0/r；FTL 燃料与损伤随速度线性增加 → ∝ r/r0
-// - STL 损伤按燃烧时长缩放（√(f0/f)·√(m/m0)），FTL 损伤按 r/r0。
+// 把一份标定（滑块 f0/r0、质量 m0 下测得的服务器精确计划）缩放到任意参数组合。
+// 规律来自 Hortus 同航线服务器数据实测（游戏未公开精确公式，仍属逼近）：
+// - STL 燃料 ∝ 燃料滑块 f（线性）、∝ 航行距离，与质量基本无关：
+//     fuel(f) = fuel0·(f/f0)。之前误用 √（Brachistochrone），0.1→1 少算了 √10 倍。
+// - STL 时长 ∝ 质量^0.8 · 滑块^−0.85（空载 vs 满载、0.05 vs 0.1 实测指数），
+//   而非 Brachistochrone 的 √(m/m0)·√(f0/f)。游戏 STL 不是 F=ma 匀加速，
+//   有效航速远高于蓝图加速度（89.7 m/s²）所能解释。
+// - STL 损伤由航线环境（小行星密度/辐射）决定，实测同航线不同滑块/质量下
+//   转移损伤恒定 → 不随滑块/质量/时长缩放。
+// - FTL 充能/跃迁速度 ∝ 反应堆使用量 r：t ∝ r0/r；FTL 燃料/损伤 ∝ r/r0。
 
 export interface ComboScaleFrom {
   fuel: number;
