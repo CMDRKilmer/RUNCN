@@ -8,16 +8,34 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { detectedPositionMessages } from '@src/infrastructure/prun-api/data/system-bodies';
+import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { ensureOrbitData } from '@src/infrastructure/fio/orbit';
 import { isEmpty } from 'ts-extras';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
-import { runSweep, captureBodyPositions, SweepCombo, SweepOutcome } from './flight-query';
-import { calibrate, estimateRoute, Calibration, RouteResult } from './route-model';
+import {
+  runSweep,
+  captureBodyPositions,
+  captureAnchor,
+  SweepCombo,
+  SweepOutcome,
+} from './flight-query';
+import {
+  calibrate,
+  estimateRoute,
+  scaleCalibration,
+  Calibration,
+  RouteResult,
+} from './route-model';
+import { getAnchor, saveAnchor, ShipAnchor } from './anchor';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞行时间与燃料参数性价比计算器。
-// 首段通过离屏 SFC 窗口获得服务器精确结果，多段路线用恒星坐标外推。
+// 两种计算模式：
+// - 本地计算（默认）：一份「标定计划」+ 飞船性能物理关系（scaleCalibration）
+//   本地推算所有参数组合，不写滑块；标定优先取被动捕获/上次扫描的缓存，
+//   缺失时才打开一次离屏 SFC 窗口捕获（只选目的地，不写滑块）。
+// - 服务器扫描：离屏 SFC 窗口逐组写入滑块获得服务器精确结果。
 
 interface ResultRow {
   combo: SweepCombo;
@@ -33,6 +51,7 @@ interface ResultRow {
 const MAX_COMBOS = 30;
 
 const registration = ref('');
+const mode = ref<'local' | 'server'>('local');
 const waypointsText = ref('');
 const fuelText = ref('0.1,0.3,0.5,1');
 const reactorText = ref('0.25,0.5,1');
@@ -51,6 +70,7 @@ const rows = ref<ResultRow[]>([]);
 const selected = ref<ResultRow | undefined>(undefined);
 const probeMessage = ref<string | undefined>(undefined);
 const probing = ref(false);
+const anchorMessage = ref<string | undefined>(undefined);
 
 const dockedShips = computed(() =>
   (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
@@ -140,6 +160,27 @@ function singleLegRoute(cal: Calibration, destination: string): RouteResult {
   };
 }
 
+function buildRowFromRoute(
+  combo: SweepCombo,
+  route: RouteResult,
+  plan?: PrunApi.FlightPlan,
+): ResultRow {
+  const fuelCost =
+    route.totalStlFuel * (stlFuelPrice.value ?? 0) + route.totalFtlFuel * (ftlFuelPrice.value ?? 0);
+  // 损伤按船体条件百分比计费（segment.damage 为 0–1 分数）。
+  const damageCost = route.totalDamage * 100 * (damageRate.value ?? 0);
+  const timeCost = (route.totalMs / 3600000) * (timeValue.value ?? 0);
+  return {
+    combo,
+    route,
+    plan,
+    fuelCost,
+    damageCost,
+    timeCost,
+    score: fuelCost + damageCost + timeCost,
+  };
+}
+
 function buildRow(outcome: SweepOutcome): ResultRow {
   if (!outcome.plan) {
     return { combo: outcome.combo, error: outcome.error ?? '查询失败' };
@@ -149,20 +190,31 @@ function buildRow(outcome: SweepOutcome): ResultRow {
     waypoints.value.length > 1
       ? estimateRoute(cal, waypoints.value)
       : singleLegRoute(cal, waypoints.value[0]);
-  const fuelCost =
-    route.totalStlFuel * (stlFuelPrice.value ?? 0) + route.totalFtlFuel * (ftlFuelPrice.value ?? 0);
-  // 损伤按船体条件百分比计费（segment.damage 为 0–1 分数）。
-  const damageCost = route.totalDamage * 100 * (damageRate.value ?? 0);
-  const timeCost = (route.totalMs / 3600000) * (timeValue.value ?? 0);
-  return {
-    combo: outcome.combo,
-    route,
-    plan: outcome.plan,
-    fuelCost,
-    damageCost,
-    timeCost,
-    score: fuelCost + damageCost + timeCost,
-  };
+  return buildRowFromRoute(outcome.combo, route, outcome.plan);
+}
+
+// 本地计算：标定锚点 + 飞船性能缩放到目标组合，所有段（含首段）按距离外推。
+function buildLocalRow(anchor: ShipAnchor, combo: SweepCombo): ResultRow {
+  const shipValue = ship.value!;
+  const cal = scaleCalibration(
+    anchor.cal,
+    { fuel: anchor.fuel, reactor: anchor.reactor ?? 1, mass: anchor.mass },
+    { fuel: combo.fuel, reactor: combo.reactor, mass: shipValue.mass },
+  );
+  const shipLocation = getEntityNaturalIdFromAddress(shipValue.address);
+  const route = estimateRoute(cal, waypoints.value, {
+    fromLocation: shipLocation ?? '(当前位置)',
+  });
+  return buildRowFromRoute(combo, route);
+}
+
+function anchorStatusLabel(anchor: ShipAnchor, source: string) {
+  const captured = new Date(anchor.capturedMs).toLocaleString();
+  const massNote =
+    anchor.mass !== undefined && ship.value && ship.value.mass !== anchor.mass
+      ? ` · 装载修正 √(${fixed2(ship.value.mass)}/${fixed2(anchor.mass)})`
+      : '';
+  return `标定：燃料 ${anchor.fuel} / 反应堆 ${anchor.reactor ?? '--'} · ${source}（${captured}）${massNote}`;
 }
 
 async function start() {
@@ -170,6 +222,7 @@ async function start() {
     return;
   }
   errorMessage.value = undefined;
+  anchorMessage.value = undefined;
   selected.value = undefined;
   if (!ship.value) {
     errorMessage.value = '请选择飞船';
@@ -194,16 +247,59 @@ async function start() {
     // 预取航点行星的 FIO 轨道根数（含缓存），供多段估算的轨道位置预测。
     // 失败不阻塞扫描（估算自动降级为静态坐标）。
     await ensureOrbitData(waypoints.value).catch(() => undefined);
-    const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
-      // 扫描结束后自动切换到后续航点，捕获天体位置供多段估算使用。
-      probeDestinations: waypoints.value.slice(1),
-      onProgress: (done, total) => {
-        progressDone.value = done;
-        progressTotal.value = total;
-      },
-      isCancelled: () => cancelRequested.value,
-    });
-    rows.value = outcomes.map(buildRow);
+
+    if (mode.value === 'local') {
+      // 本地计算：优先用缓存的标定锚点（被动捕获/上次扫描），缺失时
+      // 打开一次离屏 SFC 窗口捕获——只选目的地、被动读滑块，不写入。
+      let anchor = getAnchor(registration.value);
+      let source: string;
+      if (anchor !== undefined) {
+        source = '缓存';
+      } else {
+        progressTotal.value = 1;
+        const captured = await captureAnchor(registration.value, waypoints.value[0], {
+          isCancelled: () => cancelRequested.value,
+        });
+        anchor = {
+          registration: registration.value,
+          capturedMs: Date.now(),
+          fuel: captured.fuel,
+          reactor: captured.reactor,
+          mass: ship.value!.mass,
+          cal: calibrate(captured.plan),
+        };
+        saveAnchor(anchor);
+        source = '本次捕获';
+        progressDone.value = 1;
+        progressTotal.value = combos.value.length;
+      }
+      anchorMessage.value = anchorStatusLabel(anchor, source);
+      rows.value = combos.value.map(combo => buildLocalRow(anchor!, combo));
+    } else {
+      const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
+        // 扫描结束后自动切换到后续航点，捕获天体位置供多段估算使用。
+        probeDestinations: waypoints.value.slice(1),
+        onProgress: (done, total) => {
+          progressDone.value = done;
+          progressTotal.value = total;
+        },
+        isCancelled: () => cancelRequested.value,
+      });
+      // 每组服务器精确结果都是高质量标定锚点，保存供本地计算复用。
+      for (const outcome of outcomes) {
+        if (outcome.plan !== undefined) {
+          saveAnchor({
+            registration: registration.value,
+            capturedMs: Date.now(),
+            fuel: outcome.combo.fuel,
+            reactor: outcome.combo.reactor,
+            mass: ship.value?.mass,
+            cal: calibrate(outcome.plan),
+          });
+        }
+      }
+      rows.value = outcomes.map(buildRow);
+    }
   } catch (e: unknown) {
     errorMessage.value = e instanceof Error ? e.message : String(e);
   } finally {
@@ -281,6 +377,14 @@ function formatFuel(value: number) {
       </label>
 
       <label :class="$style.field">
+        <span>计算模式</span>
+        <select v-model="mode" :class="$style.select">
+          <option value="local">本地计算（飞船性能缩放，不写滑块）</option>
+          <option value="server">服务器扫描（逐组精确查询）</option>
+        </select>
+      </label>
+
+      <label :class="$style.field">
         <span>航点（逗号或换行分隔，首个为精确查询目的地）</span>
         <textarea v-model="waypointsText" rows="2" placeholder="如：KW-655c, KW-013c" />
       </label>
@@ -321,7 +425,9 @@ function formatFuel(value: number) {
       </details>
 
       <div :class="$style.actions">
-        <PrunButton primary :disabled="running" @click="start">开始扫描</PrunButton>
+        <PrunButton primary :disabled="running" @click="start">
+          {{ mode === 'local' ? '开始计算' : '开始扫描' }}
+        </PrunButton>
         <PrunButton v-if="running" danger @click="cancel">取消</PrunButton>
         <PrunButton
           neutral
@@ -335,6 +441,12 @@ function formatFuel(value: number) {
         </span>
       </div>
 
+      <div
+        v-if="anchorMessage"
+        :class="$style.hint"
+        data-tooltip="本地计算基于一份已知参数的服务器标定计划，按飞船性能物理关系（推力∝燃料滑块、充能/跃迁速度∝反应堆使用量）缩放到各参数组合"
+        >{{ anchorMessage }}</div
+      >
       <div v-if="probeMessage" :class="$style.hint">{{ probeMessage }}</div>
       <div v-if="errorMessage" :class="$style.error">{{ errorMessage }}</div>
     </div>

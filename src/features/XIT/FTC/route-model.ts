@@ -27,6 +27,10 @@ export interface Calibration {
   stlFuel: number;
   ftlFuel: number;
   damage: number;
+  // STL 段损伤合计（STL 飞行产生，随燃烧时长缩放）。
+  damageStl: number;
+  // FTL 段（充能/跃迁）损伤合计（随反应堆使用量缩放）。
+  damageFtl: number;
   // 位置坐标 → 游戏 STL 距离单位的换算系数（无法标定时为 undefined）。
   stlScale?: number;
   // 位置坐标 → 游戏 FTL 距离单位的换算系数（无法标定时为 undefined）。
@@ -118,7 +122,8 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
   let stlMs = 0;
   let chargeMs = 0;
   let jumpMs = 0;
-  let damage = 0;
+  let damageStl = 0;
+  let damageFtl = 0;
   let stlScale: number | undefined;
   let ftlScale: number | undefined;
   for (const segment of plan.segments) {
@@ -130,7 +135,11 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
     } else if (STL_SEGMENT_TYPES.has(segment.type)) {
       stlMs += duration;
     }
-    damage += segment.damage;
+    if (segment.type === 'CHARGE' || segment.type === 'JUMP' || segment.type === 'JUMP_GATEWAY') {
+      damageFtl += segment.damage;
+    } else {
+      damageStl += segment.damage;
+    }
 
     // 标定位置坐标与游戏距离单位的换算系数（各用首个可用段）。
     const stlDistance = segment.stlDistance;
@@ -174,9 +183,72 @@ export function calibrate(plan: PrunApi.FlightPlan): Calibration {
     ftlDistance: plan.ftlDistance ?? 0,
     stlFuel: plan.stlFuelConsumption ?? 0,
     ftlFuel: plan.ftlFuelConsumption ?? 0,
-    damage,
+    damage: damageStl + damageFtl,
+    damageStl,
+    damageFtl,
     stlScale,
     ftlScale,
+  };
+}
+
+// ---- 本地物理缩放模型 ----
+//
+// 依据飞船性能的物理关系，把一份标定（在滑块 f0/r0、质量 m0 下测得）
+// 缩放到任意参数组合（f/r、当前质量 m）：
+// - STL 推力 ∝ 燃料滑块 f，加速度 = 推力/质量：
+//     t(f, m) = t0·√(f0/f)·√(m/m0)（Brachistochrone：t = 2√(d/a)）
+//     fuel(f, m) = flow·f·t ∝ f·√(1/f)·√m → fuel0·√(f/f0)·√(m/m0)
+// - FTL 充能速率与跃迁速度 ∝ 反应堆使用量 r（论坛实测：速度随 r 线性）：
+//     t_ftl(r) = t_ftl0·r0/r；FTL 燃料与损伤随速度线性增加 → ∝ r/r0
+// - STL 损伤按燃烧时长缩放（√(f0/f)·√(m/m0)），FTL 损伤按 r/r0。
+
+export interface ComboScaleFrom {
+  fuel: number;
+  reactor: number;
+  mass?: number;
+}
+
+export interface ComboScaleTo {
+  fuel: number;
+  reactor?: number;
+  mass?: number;
+}
+
+export function scaleCalibration(
+  cal: Calibration,
+  from: ComboScaleFrom,
+  to: ComboScaleTo,
+): Calibration {
+  const massRatio =
+    from.mass !== undefined && to.mass !== undefined && from.mass > 0 && to.mass > 0
+      ? Math.sqrt(to.mass / from.mass)
+      : 1;
+  // STL 时间 ∝ √(f0/f)·√(m/m0)；STL 燃料 ∝ √(f/f0)·√(m/m0)。
+  const stlTimeRatio = Math.sqrt(from.fuel / to.fuel) * massRatio;
+  const stlFuelRatio = Math.sqrt(to.fuel / from.fuel) * massRatio;
+  // FTL 时间 ∝ r0/r；FTL 燃料/损伤 ∝ r/r0。
+  const reactor = to.reactor ?? from.reactor;
+  const ftlTimeRatio = from.reactor > 0 ? from.reactor / reactor : 1;
+  const ftlCostRatio = from.reactor > 0 ? reactor / from.reactor : 1;
+
+  const stlMs = cal.stlMs * stlTimeRatio;
+  const chargeMs = cal.chargeMs * ftlTimeRatio;
+  const jumpMs = cal.jumpMs * ftlTimeRatio;
+  // totalMs 中可能含未归类的段（residual），按原样保留。
+  const residualMs = Math.max(0, cal.totalMs - cal.stlMs - cal.chargeMs - cal.jumpMs);
+  const damageStl = cal.damageStl * stlTimeRatio;
+  const damageFtl = cal.damageFtl * ftlCostRatio;
+  return {
+    ...cal,
+    totalMs: residualMs + stlMs + chargeMs + jumpMs,
+    stlMs,
+    chargeMs,
+    jumpMs,
+    stlFuel: cal.stlFuel * stlFuelRatio,
+    ftlFuel: cal.ftlFuel * ftlCostRatio,
+    damage: damageStl + damageFtl,
+    damageStl,
+    damageFtl,
   };
 }
 
@@ -214,27 +286,56 @@ function interSystemStlDistance(
   return (departure ?? 0) + (approach ?? 0);
 }
 
+export interface RouteOptions {
+  // 首段出发地 naturalId。提供时首段同样按距离外推估算（标定来自其他
+  // 航线/参数组合的本地计算模式）；缺省时首段直接使用标定数据（精确）。
+  fromLocation?: string;
+}
+
 /**
  * 用首段标定数据估算整条路线。waypoints 为完整航点序列（含首段目的地）；
- * 首段直接使用标定数据（精确），其余段外推（precise=false）。
+ * 默认首段直接使用标定数据（精确），其余段外推（precise=false）。
  * 各段按累计时长推进游戏世界时钟，天体位置取对应时刻的轨道预测值。
  */
-export function estimateRoute(cal: Calibration, waypoints: string[]): RouteResult {
+export function estimateRoute(
+  cal: Calibration,
+  waypoints: string[],
+  options?: RouteOptions,
+): RouteResult {
   const legs: RouteLeg[] = [];
 
-  // 首段：标定数据即精确结果。出发时刻按当前游戏时间计——扫描是预估，
-  // 实际出发时刻由用户决定，偏差相对行星轨道周期可忽略。
-  legs.push({
-    from: '(当前位置)',
-    to: waypoints[0],
-    precise: true,
-    durationMs: cal.totalMs,
-    stlFuel: cal.stlFuel,
-    ftlFuel: cal.ftlFuel,
-    damage: cal.damage,
-  });
+  if (options?.fromLocation !== undefined) {
+    // 本地计算模式：标定来自其他航线/参数，首段也按距离外推。
+    const leg = estimateLeg(cal, options.fromLocation, waypoints[0], gameNow());
+    if (leg !== undefined) {
+      legs.push(leg);
+    } else {
+      // 无法解析位置时退回标定数据整体（含 ≈ 标记）。
+      legs.push({
+        from: options.fromLocation,
+        to: waypoints[0],
+        precise: false,
+        durationMs: cal.totalMs,
+        stlFuel: cal.stlFuel,
+        ftlFuel: cal.ftlFuel,
+        damage: cal.damage,
+      });
+    }
+  } else {
+    // 首段：标定数据即精确结果。出发时刻按当前游戏时间计——扫描是预估，
+    // 实际出发时刻由用户决定，偏差相对行星轨道周期可忽略。
+    legs.push({
+      from: '(当前位置)',
+      to: waypoints[0],
+      precise: true,
+      durationMs: cal.totalMs,
+      stlFuel: cal.stlFuel,
+      ftlFuel: cal.ftlFuel,
+      damage: cal.damage,
+    });
+  }
 
-  let clock = gameNow() + cal.totalMs;
+  let clock = gameNow() + (legs[0]?.durationMs ?? cal.totalMs);
   for (let i = 1; i < waypoints.length; i++) {
     const from = waypoints[i - 1];
     const to = waypoints[i];
@@ -300,7 +401,7 @@ function estimateLeg(
       durationMs: cal.stlMs * scale,
       stlFuel: cal.stlFuel * ratio,
       ftlFuel: 0,
-      damage: cal.damage * ratio,
+      damage: cal.damageStl * ratio,
     };
   }
 
@@ -318,20 +419,20 @@ function estimateLeg(
       stlRaw !== undefined && cal.stlScale !== undefined ? stlRaw * cal.stlScale : stlRaw;
     stlRatio = stlD !== undefined && cal.stlDistance > 0 ? stlD / cal.stlDistance : 1;
     orbitPredicted = (fromPos?.orbitPredicted ?? false) || (toPos?.orbitPredicted ?? false);
-    const durationMs = cal.stlMs * Math.sqrt(stlRatio) + cal.chargeMs * ftlRatio + cal.jumpMs;
+    const durationMs = cal.stlMs * Math.sqrt(stlRatio) + (cal.chargeMs + cal.jumpMs) * ftlRatio;
     toPos = bodyPositionAt(to, departureMs + durationMs);
   }
 
-  // 充能时间按 FTL 距离线性缩放；跃迁时长视为固定。
+  // 充能与跃迁时长均按 FTL 距离线性缩放（速度恒定，时间 ∝ 距离）。
   const stlScale = Math.sqrt(stlRatio);
   return {
     from,
     to,
     precise: false,
     orbitPredicted,
-    durationMs: cal.stlMs * stlScale + cal.chargeMs * ftlRatio + cal.jumpMs,
+    durationMs: cal.stlMs * stlScale + (cal.chargeMs + cal.jumpMs) * ftlRatio,
     stlFuel: cal.stlFuel * stlRatio,
     ftlFuel: cal.ftlFuel * ftlRatio,
-    damage: (cal.damage * (stlRatio + ftlRatio)) / 2,
+    damage: cal.damageStl * stlRatio + cal.damageFtl * ftlRatio,
   };
 }
