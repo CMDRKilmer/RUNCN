@@ -67,6 +67,8 @@ async function startup() {
     url: {
       manifest: chrome.runtime.getURL('manifest.json'),
       allplanets: chrome.runtime.getURL('json/fallback-fio-responses/allplanets.json'),
+      planetsOrbit: chrome.runtime.getURL('json/planets-orbit.json'),
+      starMasses: chrome.runtime.getURL('json/star-masses.json'),
     },
   };
   // Keep the module script and the config payload in separate <script>

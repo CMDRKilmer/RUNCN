@@ -1,13 +1,10 @@
 import { ref } from 'vue';
 import { starsStore } from '@src/infrastructure/prun-api/data/stars';
-import { planetsStore } from '@src/infrastructure/prun-api/data/planets';
+import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
 import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
-import {
-  gameClockOffsetMs,
-  systemBodiesStore,
-  BodyObservation,
-} from '@src/infrastructure/prun-api/data/system-bodies';
+import { gameClockOffsetMs } from '@src/infrastructure/prun-api/data/system-bodies';
+import { sleep } from '@src/utils/sleep';
 
 // FIO 轨道数据 + 开普勒位置预测。
 //
@@ -38,24 +35,24 @@ interface StarInfo {
   mass: number; // kg
 }
 
-const G = 6.674e-11;
 const DEFAULT_MOTION_FACTOR = 20;
 const CACHE_KEY = 'rprun.fio.orbit.v1';
-const VALIDATION_RADIUS_RATIO = 0.25;
-const SCALE_TOLERANCE = 2;
+// 游戏轨道模型（从游戏 bundle 逆向 + 日志观测验证）：
+// - M0 = 0：所有天体在世界时间 0 时平近点角为 0。
+// - worldTime = GAME_REF + (t_s - GAME_REF) * GAME_MOTION_FACTOR。
+// - M = n * worldTime，n = √(G*M_center / a³)，G = 6.67384e-11。
+// - 输出：轨道面 → R3(-Ω)·R1(-i)·R3(-ω) → /1e3（米→千米）+ x/y 交换，
+//   与服务器 transferEllipse 坐标同一坐标系（日志观测验证误差 <1%）。
+const GAME_G = 6.67384e-11;
+const GAME_REF = 1451690603; // 游戏世界时间参考历元（Unix 秒）
+const GAME_MOTION_FACTOR = 20; // PlanetaryMotionFactor（FIO /global/simulationdata）
 
 const orbitVersion = ref(0);
 const planets = new Map<string, PlanetOrbit>();
 const stars = new Map<string, StarInfo>();
 let motionFactor = DEFAULT_MOTION_FACTOR;
-// 星系缩放系数（位置单位/米）：同星系应一致，用于交叉验证帧一致性。
-const systemScales = new Map<string, number>();
-// 同步缩放系数表：天体 naturalId → 星系 naturalId。
+// 天体 → 星系 naturalId 关联（用于中心质量解析）。
 const bodySystem = new Map<string, string>();
-// 星系坐标与 transferEllipse 坐标是否判定为不一致（拒绝全部预测）。
-const unreliableSystems = new Set<string>();
-// 天体级拒绝（观测回验失败等）。
-const unreliableBodies = new Set<string>();
 
 const inflight = new Map<string, Promise<void>>();
 
@@ -67,18 +64,6 @@ export const orbitStore = {
   get planetCount() {
     void orbitVersion.value;
     return planets.size;
-  },
-  isReliable(naturalId?: string | null) {
-    void orbitVersion.value;
-    if (!naturalId) {
-      return false;
-    }
-    const key = naturalId.toUpperCase();
-    if (unreliableBodies.has(key)) {
-      return false;
-    }
-    const system = bodySystem.get(key);
-    return system === undefined || !unreliableSystems.has(system);
   },
 };
 
@@ -121,12 +106,91 @@ function restore() {
 }
 restore();
 
+// ---- 内置数据（离线种子） ----
+
+// 内置 JSON 的压缩键名格式（scripts/build-planet-data.mjs / build-star-masses.mjs 生成）：
+//   n=naturalId, a=semiMajorAxis, e=eccentricity, i=inclination,
+//   o=rightAscension, p=periapsis, m=mass, s=systemId
+interface BundledPlanet {
+  n: string;
+  a: number;
+  e: number;
+  i: number;
+  o: number;
+  p: number;
+  m: number;
+  s?: string;
+}
+interface BundledStar {
+  n: string;
+  m: number;
+}
+
+// 启动时加载内置数据作为种子：首次使用/无缓存时提供全量离线轨道与恒星质量。
+// localStorage 缓存（在线积累）优先，内置仅填充缺失项。
+async function loadBundledData() {
+  try {
+    const [planetResp, starResp] = await Promise.all([
+      fetch(config.url.planetsOrbit),
+      fetch(config.url.starMasses),
+    ]);
+    const bundledPlanets = (await planetResp.json()) as BundledPlanet[];
+    for (const p of bundledPlanets) {
+      const key = p.n.toUpperCase();
+      if (!planets.has(key)) {
+        planets.set(key, {
+          semiMajorAxis: p.a,
+          eccentricity: p.e,
+          inclination: p.i,
+          rightAscension: p.o,
+          periapsis: p.p,
+          mass: p.m,
+        });
+      }
+    }
+    const bundledStars = (await starResp.json()) as BundledStar[];
+    for (const s of bundledStars) {
+      const key = s.n.toUpperCase();
+      if (!stars.has(key)) {
+        stars.set(key, { mass: s.m });
+      }
+    }
+    orbitVersion.value++;
+  } catch {
+    // 内置数据加载失败：忽略，靠在线数据（DATA_DATA/FIO）。
+  }
+}
+void loadBundledData();
+
 async function fetchJson<T>(url: string): Promise<T | undefined> {
   const response = await fetch(url);
   if (!response.ok) {
     return undefined;
   }
   return (await response.json()) as T;
+}
+
+// 带重试的 FIO 请求：网络错误/非 200 时重试，指数退避（300ms、600ms…）。
+async function fetchJsonWithRetry<T>(
+  url: string,
+  retries = 2,
+  onRetry?: (attempt: number, reason: string) => void,
+): Promise<T | undefined> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url);
+      if (response.ok) {
+        return (await response.json()) as T;
+      }
+      onRetry?.(attempt + 1, `HTTP ${response.status}`);
+    } catch {
+      onRetry?.(attempt + 1, '网络错误');
+    }
+    if (attempt < retries) {
+      await sleep(300 * (attempt + 1));
+    }
+  }
+  return undefined;
 }
 
 interface FioPlanet {
@@ -222,21 +286,23 @@ async function fetchMotionFactor() {
   }
 }
 
-// 解析天体的中心天体：行星 → 恒星；卫星（如 VH-331gb）→ 母行星。
-// PrUn 行星/卫星 naturalId 以小写字母结尾（VH-331g、VH-331gb），恒星系
-// naturalId 以数字结尾，空间站全大写——剥一个结尾小写字母即可得中心天体。
+// 解析天体的中心天体：行星（naturalId 为 XX-XXX + 单个小写字母，如 VH-331g）
+// → 所属星系恒星；空间站（naturalId 全大写，如 HRT）→ 所属星系恒星。
+// PrUn 无卫星：所有行星都直接绕恒星公转，剥一个结尾小写字母即得恒星。
 function resolveParent(naturalId: string): { id: string; isStar: boolean } | undefined {
   const key = naturalId.toUpperCase();
+  // 空间站：绕所属星系恒星公转（星系详情 celestialBodies 提供其轨道根数）。
+  const station = stationsStore.getByNaturalId(key);
+  if (station !== undefined) {
+    const systemLine = getSystemLineFromAddress(station.address);
+    return systemLine ? { id: systemLine.entity.naturalId, isStar: true } : undefined;
+  }
   const stripped = naturalId.replace(/[a-z]$/, '').toUpperCase();
   if (stripped === key) {
     return undefined;
   }
   if (starsStore.getByNaturalId(stripped) !== undefined) {
     return { id: stripped, isStar: true };
-  }
-  // 剥一层后是行星 → 原 id 是其卫星。
-  if (planetsStore.getByNaturalId(stripped) !== undefined) {
-    return { id: stripped, isStar: false };
   }
   return undefined;
 }
@@ -251,8 +317,9 @@ function ensureFetched(naturalId: string, task: () => Promise<void>) {
   return promise;
 }
 
-// 预取一组天体（含卫星的母行星、行星的恒星）的轨道数据。容错：任一失败
-// 不抛异常，仅该天体无预测。
+// 预取一组天体（行星/空间站及其所属恒星）的轨道数据。容错：任一失败
+// 不抛异常，仅该天体无预测。内置数据已覆盖全部行星轨道与恒星质量，
+// 此处仅补齐在线新增/缺失项。
 export async function ensureOrbitData(naturalIds: string[]) {
   await fetchMotionFactor();
   await Promise.all(
@@ -265,9 +332,6 @@ export async function ensureOrbitData(naturalIds: string[]) {
           tasks.push(ensureFetched(parent.id, () => fetchStar(parent.id)));
         }
         bodySystem.set(key, parent.id);
-      } else if (parent !== undefined && !planets.has(parent.id)) {
-        // 卫星：还需母行星的轨道数据（中心位置与质量）。
-        tasks.push(ensureFetched(parent.id, () => fetchPlanet(parent.id)));
       }
       if (!planets.has(key)) {
         tasks.push(ensureFetched(key, () => fetchPlanet(key)));
@@ -279,12 +343,6 @@ export async function ensureOrbitData(naturalIds: string[]) {
 }
 
 // ---- 开普勒数学 ----
-
-function orbitalPeriodMs(semiMajorAxisM: number, centralMassKg: number) {
-  const seconds =
-    (2 * Math.PI * Math.sqrt(semiMajorAxisM ** 3 / (G * centralMassKg))) / motionFactor;
-  return seconds * 1000;
-}
 
 // 牛顿迭代解开普勒方程 M = E - e·sin(E)。
 function solveKepler(meanAnomaly: number, e: number) {
@@ -304,145 +362,67 @@ function trueAnomalyFromEccentric(E: number, e: number) {
   return Math.atan2(Math.sqrt(1 - e * e) * Math.sin(E), Math.cos(E) - e);
 }
 
-function eccentricFromTrueAnomaly(nu: number, e: number) {
-  return 2 * Math.atan(Math.sqrt((1 - e) / (1 + e)) * Math.tan(nu / 2));
-}
-
-// 轨道平面 → 世界坐标的旋转（Ω 升交点赤经、i 倾角、ω 近拱点）。
-function orbitalToWorld(
+// 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(-inc)·R3(-ra)。
+// 注意：历史 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，
+// 是旧相位标定不准的根源。此实现与游戏 bundle 的 _le 完全一致。
+function gameOrbitalToWorld(
   p: { x: number; y: number; z: number },
   orbit: PlanetOrbit,
 ): PrunApi.Position {
   const { inclination: i, rightAscension: o, periapsis: w } = orbit;
-  const cosO = Math.cos(o);
-  const sinO = Math.sin(o);
-  const cosI = Math.cos(i);
-  const sinI = Math.sin(i);
-  const cosW = Math.cos(w);
-  const sinW = Math.sin(w);
-  const x = cosW * p.x - sinW * p.y;
-  const y = sinW * p.x + cosW * p.y;
-  return {
-    x: cosO * x - sinO * cosI * y,
-    y: sinO * x + cosO * cosI * y,
-    z: sinI * y,
+  const rotZ = (v: { x: number; y: number; z: number }, th: number) => {
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    return { x: c * v.x - s * v.y, y: s * v.x + c * v.y, z: v.z };
   };
-}
-
-// 世界方向 → 轨道平面方向（逆旋转：Rz(-w)·Rx(-i)·Rz(-o)）。
-function worldToOrbital(d: PrunApi.Position, orbit: PlanetOrbit): PrunApi.Position {
-  const { inclination: i, rightAscension: o, periapsis: w } = orbit;
-  const cosO = Math.cos(o);
-  const sinO = Math.sin(o);
-  const cosI = Math.cos(i);
-  const sinI = Math.sin(i);
-  const cosW = Math.cos(w);
-  const sinW = Math.sin(w);
-  const x1 = cosO * d.x + sinO * d.y;
-  const y1 = -sinO * d.x + cosO * d.y;
-  const y2 = cosI * y1 + sinI * d.z;
-  const z2 = -sinI * y1 + cosI * d.z;
-  return {
-    x: cosW * x1 + sinW * y2,
-    y: -sinW * x1 + cosW * y2,
-    z: z2,
+  const rotX = (v: { x: number; y: number; z: number }, th: number) => {
+    const c = Math.cos(th);
+    const s = Math.sin(th);
+    return { x: v.x, y: c * v.y - s * v.z, z: s * v.y + c * v.z };
   };
+  let v = rotZ(p, -w);
+  v = rotX(v, -i);
+  return rotZ(v, -o);
 }
 
-// ---- 相位标定与预测 ----
+// ---- 游戏轨道模型预测 ----
 
-interface Phase {
-  // 历元 0 时刻的平近点角。
-  M0: number;
-  // 平均角速度（rad/ms）。
-  n: number;
-  // 位置单位/米（轨道半径换算）。
-  scale: number;
-}
-
-function centralBodyPosition(parentId: string, isStar: boolean, timestampMs: number) {
-  if (isStar) {
-    void orbitVersion.value;
-    return starsStore.getByNaturalId(parentId)?.position;
-  }
-  return predictPosition(parentId, timestampMs);
-}
-
-function calibratePhase(
+// 用游戏同款公式预测天体在指定游戏世界时刻的位置（相对其轨道中心，千米）。
+// 依赖：轨道根数 + 中心天体质量。与服务器 transferEllipse 坐标同一坐标系，
+// 无需观测标定即可全量离线预测。
+function predictWithGameModel(
   orbit: PlanetOrbit,
-  centralMassKg: number,
-  centerAtObs: PrunApi.Position,
-  obs: BodyObservation,
-): Phase | undefined {
-  const offsetX = obs.position.x - centerAtObs.x;
-  const offsetY = obs.position.y - centerAtObs.y;
-  const offsetZ = obs.position.z - centerAtObs.z;
-  const offsetLength = Math.hypot(offsetX, offsetY, offsetZ);
-  if (!Number.isFinite(offsetLength) || offsetLength <= 0) {
-    return undefined;
-  }
-
-  const e = orbit.eccentricity;
-  const dir = worldToOrbital(
-    { x: offsetX / offsetLength, y: offsetY / offsetLength, z: offsetZ / offsetLength },
-    orbit,
-  );
-  if (Math.abs(dir.z) > 0.05) {
-    // 观测方向明显偏离轨道面 → 帧或根数不一致。
-    return undefined;
-  }
-  const nu = Math.atan2(dir.y, dir.x);
-  const E = eccentricFromTrueAnomaly(nu, e);
-  const M = E - e * Math.sin(E);
-  const radiusM = orbit.semiMajorAxis * (1 - e * Math.cos(E));
-  if (radiusM <= 0) {
-    return undefined;
-  }
-  const scale = offsetLength / radiusM;
-  if (!Number.isFinite(scale) || scale <= 0) {
-    return undefined;
-  }
-
-  const periodMs = orbitalPeriodMs(orbit.semiMajorAxis, centralMassKg);
-  if (!Number.isFinite(periodMs) || periodMs <= 0) {
-    return undefined;
-  }
-  const n = (2 * Math.PI) / periodMs;
-  return { M0: M - n * obs.timestampMs, n, scale };
-}
-
-function predictWithPhase(
-  orbit: PlanetOrbit,
-  phase: Phase,
-  center: PrunApi.Position,
+  parentMassKg: number,
   timestampMs: number,
 ): PrunApi.Position {
+  const t_s = timestampMs / 1000;
+  const worldTime = GAME_REF + (t_s - GAME_REF) * GAME_MOTION_FACTOR;
+  const n = Math.sqrt((GAME_G * parentMassKg) / Math.pow(orbit.semiMajorAxis, 3));
+  const M = n * worldTime;
   const e = orbit.eccentricity;
-  const E = solveKepler(phase.M0 + phase.n * timestampMs, e);
+  const E = solveKepler(M, e);
   const nu = trueAnomalyFromEccentric(E, e);
   const radiusM = orbit.semiMajorAxis * (1 - e * Math.cos(E));
-  const r = radiusM * phase.scale;
-  const offset = orbitalToWorld({ x: r * Math.cos(nu), y: r * Math.sin(nu), z: 0 }, orbit);
+  const offset = gameOrbitalToWorld(
+    { x: radiusM * Math.cos(nu), y: radiusM * Math.sin(nu), z: 0 },
+    orbit,
+  );
+  // 游戏输出：x/y 交换 + /1e3（米 → 千米）。
   return {
-    x: center.x + offset.x,
-    y: center.y + offset.y,
-    z: center.z + offset.z,
+    x: offset.y / 1e3,
+    y: offset.x / 1e3,
+    z: offset.z / 1e3,
   };
 }
 
-// 预测天体在指定游戏世界时刻的位置。任何环节缺失/校验失败返回 undefined，
-// 调用方降级为最近静态观测。
+// 预测天体在指定游戏世界时刻的位置（游戏轨道模型，无需观测）。
+// 任何环节缺失返回 undefined，调用方降级为最近静态观测。
 export function predictPosition(
   naturalId: string,
   timestampMs: number,
 ): PrunApi.Position | undefined {
   void orbitVersion.value;
-  void systemBodiesStore.count; // 建立对观测数据的响应式依赖。
-
   const key = naturalId.toUpperCase();
-  if (!orbitStore.isReliable(key)) {
-    return undefined;
-  }
   const orbit = planets.get(key);
   if (orbit === undefined) {
     return undefined;
@@ -455,61 +435,7 @@ export function predictPosition(
   if (parentMass === undefined || parentMass <= 0) {
     return undefined;
   }
-
-  const observations = systemBodiesStore.getObservations(key);
-  const latest = observations.at(-1);
-  if (latest === undefined) {
-    return undefined;
-  }
-  const centerAtObs = centralBodyPosition(parent.id, parent.isStar, latest.timestampMs);
-  if (centerAtObs === undefined) {
-    return undefined;
-  }
-  const phase = calibratePhase(orbit, parentMass, centerAtObs, latest);
-  if (phase === undefined) {
-    unreliableBodies.add(key);
-    return undefined;
-  }
-
-  // 帧一致性：同星系缩放系数必须一致（位置单位/米）。
-  const systemKey = bodySystem.get(key);
-  if (systemKey !== undefined) {
-    const reference = systemScales.get(systemKey);
-    if (reference === undefined) {
-      systemScales.set(systemKey, phase.scale);
-    } else if (
-      phase.scale > reference * SCALE_TOLERANCE ||
-      phase.scale < reference / SCALE_TOLERANCE
-    ) {
-      unreliableSystems.add(systemKey);
-      return undefined;
-    }
-  }
-
-  // 观测回验：用较早的观测验证预测精度。
-  if (observations.length >= 2) {
-    const earlier = observations[observations.length - 2];
-    const centerEarlier = centralBodyPosition(parent.id, parent.isStar, earlier.timestampMs);
-    if (centerEarlier !== undefined) {
-      const predicted = predictWithPhase(orbit, phase, centerEarlier, earlier.timestampMs);
-      const radius = orbit.semiMajorAxis * phase.scale;
-      const error = Math.hypot(
-        predicted.x - earlier.position.x,
-        predicted.y - earlier.position.y,
-        predicted.z - earlier.position.z,
-      );
-      if (error > radius * VALIDATION_RADIUS_RATIO) {
-        unreliableBodies.add(key);
-        return undefined;
-      }
-    }
-  }
-
-  const center = centralBodyPosition(parent.id, parent.isStar, timestampMs);
-  if (center === undefined) {
-    return undefined;
-  }
-  return predictWithPhase(orbit, phase, center, timestampMs);
+  return predictWithGameModel(orbit, parentMass, timestampMs);
 }
 
 // 当前游戏世界时刻（本地时钟 + 偏差，偏差由飞行计划标定）。
@@ -535,6 +461,9 @@ interface DataDataSystemPlanet {
   address?: PrunApi.Address;
 }
 
+// 星系详情的 celestialBodies：空间站（绕恒星公转，含轨道根数，无 mass）。
+type DataDataSystemBody = Pick<DataDataSystemPlanet, 'naturalId' | 'orbit' | 'address'>;
+
 onApiMessage({
   DATA_DATA(data: { path?: string[]; body?: unknown }) {
     const path = data.path;
@@ -546,6 +475,7 @@ onApiMessage({
         naturalId?: string;
         star?: { mass?: number };
         planets?: DataDataSystemPlanet[];
+        celestialBodies?: DataDataSystemBody[];
       };
       if (body.naturalId && body.star?.mass !== undefined && body.star.mass > 0) {
         stars.set(body.naturalId.toUpperCase(), { mass: body.star.mass });
@@ -559,6 +489,20 @@ onApiMessage({
         const systemId =
           getSystemLineFromAddress(planet.address)?.entity.naturalId ?? body.naturalId;
         setPlanetOrbit(planet.naturalId, orbit, planet.mass ?? 0, systemId);
+      }
+      // 空间站（celestialBodies）：同样绕恒星公转，含轨道根数。
+      for (const spaceBody of body.celestialBodies ?? []) {
+        const orbit = spaceBody.orbit;
+        if (
+          !spaceBody.naturalId ||
+          orbit?.semiMajorAxis === undefined ||
+          orbit.semiMajorAxis <= 0
+        ) {
+          continue;
+        }
+        const systemId =
+          getSystemLineFromAddress(spaceBody.address)?.entity.naturalId ?? body.naturalId;
+        setPlanetOrbit(spaceBody.naturalId, orbit, 0, systemId);
       }
       persist();
     } else if (path[0] === 'planets' && data.body !== null && typeof data.body === 'object') {
@@ -590,7 +534,7 @@ export function prefetchAllOrbits() {
       const pending = list
         .map(x => x.PlanetNaturalId)
         .filter((id): id is string => id !== undefined && !planets.has(id.toUpperCase()));
-      const CONCURRENCY = 4;
+      const CONCURRENCY = 10;
       let index = 0;
       const worker = async () => {
         while (index < pending.length) {
@@ -605,4 +549,103 @@ export function prefetchAllOrbits() {
     });
   }
   return allPrefetch;
+}
+
+// ---- 全量行星参数导出 ----
+
+// FIO 完整行星参数（一次性批量拉取 + 本地导出）。
+export interface FioPlanetFull {
+  PlanetNaturalId: string;
+  PlanetName?: string;
+  SystemId?: string;
+  Mass?: number;
+  MassEarth?: number;
+  Gravity?: number;
+  Radius?: number;
+  Surface?: boolean;
+  Temperature?: number;
+  Pressure?: number;
+  Radiation?: number;
+  MagneticField?: number;
+  Sunlight?: number;
+  Fertility?: number;
+  OrbitSemiMajorAxis?: number;
+  OrbitEccentricity?: number;
+  OrbitInclination?: number;
+  OrbitRightAscension?: number;
+  OrbitPeriapsis?: number;
+  OrbitIndex?: number;
+  PlanetTier?: number;
+  FactionCode?: string;
+  FactionName?: string;
+  Timestamp?: string;
+}
+
+export interface PlanetExportResult {
+  data: FioPlanetFull[];
+  success: number;
+  failed: number;
+}
+
+let fullExport: Promise<PlanetExportResult> | undefined;
+
+// 一次性拉取全部行星完整参数（低并发批量 FIO 请求，失败自动重试），
+// 返回结果供本地导出；同时把轨道根数写入缓存（供 predictPosition）并持久化。
+export function exportAllPlanetData(
+  onProgress?: (done: number, total: number) => void,
+  onLog?: (message: string) => void,
+): Promise<PlanetExportResult> {
+  if (fullExport === undefined) {
+    fullExport = (async () => {
+      const response = await fetch(config.url.allplanets);
+      const list = (await response.json()) as { PlanetNaturalId?: string }[];
+      const ids = list
+        .map(x => x.PlanetNaturalId)
+        .filter((id): id is string => id !== undefined && id !== '');
+      onLog?.(`开始拉取全部行星参数（共 ${ids.length} 个，并发 10，失败自动重试 2 次）`);
+      const results: FioPlanetFull[] = [];
+      let success = 0;
+      let failed = 0;
+      const CONCURRENCY = 10;
+      let index = 0;
+      const worker = async () => {
+        while (index < ids.length) {
+          const id = ids[index++];
+          const data = await fetchJsonWithRetry<FioPlanetFull>(
+            `https://rest.fnar.net/planet/${encodeURIComponent(id.toUpperCase())}`,
+            2,
+            (attempt, reason) => onLog?.(`[重试 ${attempt}] ${id}：${reason}`),
+          );
+          if (data?.PlanetNaturalId !== undefined) {
+            results.push(data);
+            success++;
+            // 同步更新轨道缓存（供 predictPosition 使用）。
+            if (data.OrbitSemiMajorAxis !== undefined && data.OrbitSemiMajorAxis > 0) {
+              setPlanetOrbit(
+                data.PlanetNaturalId,
+                {
+                  semiMajorAxis: data.OrbitSemiMajorAxis,
+                  eccentricity: data.OrbitEccentricity,
+                  inclination: data.OrbitInclination,
+                  rightAscension: data.OrbitRightAscension,
+                  periapsis: data.OrbitPeriapsis,
+                },
+                data.Mass ?? 0,
+              );
+            }
+          } else {
+            failed++;
+          }
+          onProgress?.(index, ids.length);
+        }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      persist();
+      onLog?.(`完成：成功 ${success} 个，失败 ${failed} 个`);
+      return { data: results, success, failed };
+    })().finally(() => {
+      fullExport = undefined;
+    });
+  }
+  return fullExport;
 }

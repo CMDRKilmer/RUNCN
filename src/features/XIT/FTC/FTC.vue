@@ -21,7 +21,9 @@ import {
   SweepCombo,
   SweepOutcome,
 } from './flight-query';
-import { orbitStore, prefetchAllOrbits } from '@src/infrastructure/fio/orbit';
+import { orbitStore, prefetchAllOrbits, exportAllPlanetData } from '@src/infrastructure/fio/orbit';
+import { downloadFile } from '@src/utils/dom';
+import ProgressBar from '@src/components/ProgressBar.vue';
 import {
   calibrate,
   estimateRoute,
@@ -73,6 +75,30 @@ async function prefetchOrbits() {
     await prefetchAllOrbits();
   } finally {
     prefetching.value = false;
+  }
+}
+const exporting = ref(false);
+const exportDone = ref(0);
+const exportTotal = ref(0);
+const exportLog = ref<string[]>([]);
+async function exportPlanets() {
+  exporting.value = true;
+  exportDone.value = 0;
+  exportTotal.value = 0;
+  exportLog.value = [];
+  try {
+    const result = await exportAllPlanetData(
+      (done, total) => {
+        exportDone.value = done;
+        exportTotal.value = total;
+      },
+      message => {
+        exportLog.value = [...exportLog.value, message];
+      },
+    );
+    downloadFile(result.data, 'prun-all-planets.json', true);
+  } finally {
+    exporting.value = false;
   }
 }
 const progressDone = ref(0);
@@ -461,6 +487,20 @@ function formatFuel(value: number) {
           @click="prefetchOrbits">
           {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
         </PrunButton>
+        <PrunButton
+          neutral
+          :disabled="exporting"
+          data-tooltip="一次性拉取所有行星（约 4155 个）的完整参数（轨道根数/质量/行星属性等），下载为 JSON 保存到本地；同时更新轨道缓存供离线位置预测。"
+          @click="exportPlanets">
+          {{ exporting ? '导出中…' : '导出全部行星参数' }}
+        </PrunButton>
+        <div v-if="exporting" :class="$style.exportBar">
+          <ProgressBar :value="exportDone" :max="exportTotal || 1" />
+          <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
+        </div>
+        <div v-if="exportLog.length > 0" :class="$style.exportLog">
+          <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
+        </div>
         <span v-if="running" :class="$style.progress">
           {{ progressDone }}/{{ progressTotal }}（后台查询中，请勿关闭游戏页面）
         </span>

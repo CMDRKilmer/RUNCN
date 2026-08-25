@@ -5,5 +5,7 @@ interface RefinedPrunConfig {
   url: {
     manifest: string;
     allplanets: string;
+    planetsOrbit: string;
+    starMasses: string;
   };
 }

@@ -68,6 +68,23 @@
   gap: 8px;
 }
 
+.exportBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 160px;
+}
+
+.exportLog {
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 11px;
+  opacity: 0.85;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+
 .progress {
   font-size: 12px;
   opacity: 0.8;
