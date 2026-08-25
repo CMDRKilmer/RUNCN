@@ -747,5 +747,6 @@ return formatCurrency(price, format);
 
 - 单路线由 `planChainRoute` 规划：拓扑排序定航线 → 按目标天数平衡链上运量 → 沿航线模拟舱容。
 - **组内产出的闭环**：BSN 白名单 + output>0 的 ticker 为「组内产出」，一律不进 CX 采购清单；缺口优先由出发地空间站仓库库存以「取货」（`originPickup`）补足，仍不足则警告。
+- **进度与脚本**：执行时把计划快照持久化到 `userData.chainRuns.*.plan`，页面刷新后仍按规划样式显示各阶段载重/操作；生成的 ACT 操作包带阶段号（`0 Chain 船名`、`N 站点 Loop 船名`、`M Chain Return 船名`）并在执行成功后自动删除，避免 ACT/TRIGGER 列表残留过期脚本。
 - **多船 = 并行分段（唯一方案，已废弃 A/B/C 三策略）**：`splitChainPlanAcrossShips(plan, ships, bases)` 按拓扑序把站点切为连续段，每船独立规划其段并同时出动，总耗时 ≈ 单环线 / 船数。切分按**剩余舱容逐站装箱**（当前船装不下重量或体积任一才换下一艘，最后一艘兜底），产物密度（大重量小体积 / 大体积小重量）自然决定段边界，避免某船段载荷超出其容量。跨段产物经出发地仓库接力。传全局 `groupProducedTickers` 保证跨段产物在任何段都不被误采。
 - 无货舱（或剩余舱容 0）的船不参与分段。

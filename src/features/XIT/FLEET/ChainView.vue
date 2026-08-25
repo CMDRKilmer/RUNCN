@@ -41,6 +41,7 @@ import {
 } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 
 const props = defineProps<{
   ships: DispatchShip[];
@@ -242,11 +243,69 @@ function upsertTrigger(trigger: UserData.TriggerData) {
   }
 }
 
+// 清理该船旧版/已完成的环线脚本与一次性触发器：防止改名或取消执行后
+// ACT / TRIGGER 列表残留过期脚本（旧版主包 `Chain 船名` 无 autoDelete 曾会残留）。
+function removeLegacyChainScripts(shipName: string) {
+  for (let i = userData.actionPackages.length - 1; i >= 0; i--) {
+    const name = userData.actionPackages[i]!.global.name;
+    if (
+      (isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
+      name === `环线派遣 ${shipName}`
+    ) {
+      userData.actionPackages.splice(i, 1);
+    }
+  }
+  for (let i = userData.triggers.length - 1; i >= 0; i--) {
+    const trigger = userData.triggers[i]!;
+    const name = trigger.packageName;
+    if (
+      trigger.autoDelete &&
+      ((isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
+        name === `环线派遣 ${shipName}`)
+    ) {
+      userData.triggers.splice(i, 1);
+    }
+  }
+}
+
 const executeNotice = ref<string | undefined>(undefined);
 
 // 执行时的计划快照：环线执行中船离港后 shipPlans 为空，
 // 用快照保持「与规划一致」的表格显示，仅在序列叠加进度图标。
+// 快照同时持久化到 chainRuns.plan，页面刷新后仍可显示阶段载重。
 const planSnapshot = ref<ShipChainPlan[]>([]);
+
+// 环线完成（含归航）后短暂保留运行记录，让「✓」标记可见，随后自动清理。
+const finishedCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearFinishedCleanup(shipId: string) {
+  const timer = finishedCleanupTimers.get(shipId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    finishedCleanupTimers.delete(shipId);
+  }
+}
+
+onBeforeUnmount(() => {
+  for (const timer of finishedCleanupTimers.values()) {
+    clearTimeout(timer);
+  }
+  finishedCleanupTimers.clear();
+});
+
+// 清理计划：清空当前分组/基地/船只选择与计划快照，并移除全部环线运行记录，
+// 用于导入旧 JSON 或删除全部 ACT/触发器后一键清掉残留的预留列表。
+function clearPlan() {
+  chainGroup.value = undefined;
+  chainBaseIds.value = undefined;
+  chainShipIds.value = undefined;
+  planSnapshot.value = [];
+  executeNotice.value = undefined;
+  for (const shipId of Object.keys(userData.chainRuns)) {
+    clearFinishedCleanup(shipId);
+    delete userData.chainRuns[shipId];
+  }
+}
 
 function execute() {
   const plans = shipPlans.value;
@@ -265,19 +324,65 @@ function execute() {
     if (!actionPlan) {
       continue;
     }
-    // 记录环线运行进度（以船为键）。
+    // 重新执行时清掉旧完成清理定时器，避免误删新记录；
+    // 先清掉该船旧版/已完成的环线脚本，防止 ACT 列表残留过期包。
+    clearFinishedCleanup(ship.ship.id);
+    const shipName =
+      sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
+    removeLegacyChainScripts(shipName);
+
+    // 记录环线运行进度（以船为键），并持久化计划快照：
+    // 页面刷新后仍按规划样式显示各阶段操作与「当前阶段载重」。
     userData.chainRuns[ship.ship.id] = {
       shipId: ship.ship.id,
       shipName: ship.ship.name ?? ship.ship.registration,
       startedAt: Date.now(),
       originNaturalId: shipPlan.originNaturalId,
-      stops: shipPlan.stops.map((stop, i) => ({
-        naturalId: stop.naturalId,
-        planetName: stop.planetName,
-        pkgName: actionPlan.stopPkgs[i]!.pkg.global.name,
-      })),
+      stops: shipPlan.stops.map((stop, i) => {
+        const unloadAt: Record<string, number> = { ...stop.unloadCx };
+        for (const [ticker, entry] of stop.unloadChain) {
+          unloadAt[ticker] = (unloadAt[ticker] ?? 0) + entry.amount;
+        }
+        const loadAt: Record<string, number> = {};
+        const loadTo: Record<string, string> = {};
+        for (const [ticker, entry] of stop.load) {
+          loadAt[ticker] = entry.amount;
+          loadTo[ticker] = entry.to;
+        }
+        return {
+          naturalId: stop.naturalId,
+          planetName: stop.planetName,
+          pkgName: actionPlan.stopPkgs[i]!.pkg.global.name,
+          // 持久化进度状态：删除 ACT/触发器后列表仍能正确展示。
+          state: 'pending',
+          plan: {
+            unloadAt,
+            loadAt,
+            loadTo,
+            loadOnArrival: stop.loadOnArrival,
+            loadOnDeparture: stop.loadOnDeparture,
+            clipped: stop.clipped,
+          },
+        };
+      }),
       finalPkgName: actionPlan.finalPkg?.pkg.global.name,
+      mainPkgName: actionPlan.mainPkg.global.name,
+      originState: 'pending',
+      finalState: 'pending',
+      plan: {
+        capacity: shipPlan.capacity,
+        originLoadOnDeparture: shipPlan.loadOnDeparture,
+        loadOnReturn: shipPlan.loadOnReturn,
+        purchaseBill: shipPlan.purchaseBill,
+        originPickup: shipPlan.originPickup,
+        finalUnload: shipPlan.finalUnload,
+        finalUnloadNotes: shipPlan.finalUnloadNotes,
+      },
     };
+
+    // 阶段脚本按序写入 ACT 列表：0 主包 → 1..N 站点包 → N+1 归航包；
+    // 各包执行成功后自动删除（主包改由 autoDelete 处理）。
+    upsertPackage(actionPlan.mainPkg);
     for (const { pkg, trigger } of actionPlan.stopPkgs) {
       upsertPackage(pkg);
       upsertTrigger(trigger);
@@ -354,12 +459,13 @@ function stageMainPackage(pkg: UserData.ActionPackageData) {
 
 // ── 环线触发器配置导入/导出 ─────────────────────────────────
 // 环线相关 = 本面板生成的到港触发器与其操作包（主包/站点包/归航包）。
-// 命名约定与 buildChainActionPackages / sanitizeActName 一致：
-//   主包       `Chain ${船名}`
-//   站点包     `${站点} Loop ${船名}`（旧版 `${站点} 环线 ${船名}`）
-//   归航包     `Chain Return ${船名}`（旧版 `环线归航 ${船名}`）
+// 命名约定与 buildChainActionPackages / sanitizeActName 一致（阶段号与进度表「序」列一致）：
+//   主包       `0 Chain ${船名}`（旧版 `Chain ${船名}`）
+//   站点包     `${序号} ${站点} Loop ${船名}`（旧版 `${站点} Loop/环线 ${船名}`）
+//   归航包     `${序号} Chain Return ${船名}`（旧版 `Chain Return/环线归航 ${船名}`）
 function isChainPackageName(name: string): boolean {
   return (
+    /(?:^|\s)\d+\s+Chain(?: Return)?\s/.test(name) ||
     name.startsWith('Chain ') ||
     name.startsWith('环线归航 ') ||
     name.includes(' Loop ') ||
@@ -381,9 +487,19 @@ function onExportChainConfigClick() {
     packageNames.add(t.packageName);
   }
   const actionPackages = userData.actionPackages.filter(p => packageNames.has(p.global.name));
-  downloadJson({ version: 1, triggers, actionPackages }, `chain-config-${Date.now()}.json`, {
-    pretty: true,
-  });
+  downloadJson(
+    {
+      version: 1,
+      triggers,
+      actionPackages,
+      // 列表全局状态：站点/操作/进度快照，导入后不依赖 ACT 与触发器是否还在。
+      chainRuns: Object.values(userData.chainRuns).map(run => JSON.parse(JSON.stringify(run))),
+    },
+    `chain-config-${Date.now()}.json`,
+    {
+      pretty: true,
+    },
+  );
 }
 
 // 事件为扁平对象，按键排序归一化后序列化，避免键序差异导致同一触发器签名不同。
@@ -414,6 +530,12 @@ function onImportChainConfigClick(e: Event) {
         userData.triggers.push({ ...trigger, id: createId() });
         existing.add(signature(trigger));
       }
+      // 恢复列表全局状态（按 shipId 覆盖）：站点/操作/进度不再受 ACT/触发器删除影响。
+      for (const run of config.chainRuns ?? []) {
+        if (run && run.shipId) {
+          userData.chainRuns[run.shipId] = run;
+        }
+      }
       triggerEngine.start();
     },
   });
@@ -442,14 +564,17 @@ function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
     const site = naturalId ? sitesStore.getByPlanetNaturalId(naturalId) : undefined;
     return {
       naturalId: naturalId ?? '',
-      planetName: site ? getEntityNameFromAddress(site.address) : (naturalId ?? t.packageName),
+      planetName: site
+        ? (getEntityNameFromAddress(site.address) ?? naturalId ?? t.packageName)
+        : (naturalId ?? t.packageName),
       pkgName: t.packageName,
     };
   });
   const finalTrigger = userData.triggers.find(
     t =>
       t.event.type === 'FLIGHT_ENDED' &&
-      (t.packageName === `Chain Return ${shipName}` || t.packageName === `环线归航 ${shipName}`),
+      (t.packageName.endsWith(`Chain Return ${shipName}`) ||
+        t.packageName === `环线归航 ${shipName}`),
   );
   return {
     shipId: ship.id,
@@ -457,7 +582,9 @@ function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
     startedAt: stopTriggers[0]!.createdAt,
     // 归航触发器以出发地为 planet，取它作为出发地标记。
     originNaturalId:
-      finalTrigger && finalTrigger.event.type === 'FLIGHT_ENDED' ? finalTrigger.event.planet : '',
+      finalTrigger && finalTrigger.event.type === 'FLIGHT_ENDED'
+        ? (finalTrigger.event.planet ?? '')
+        : '',
     stops,
     finalPkgName: finalTrigger?.packageName,
   };
@@ -482,6 +609,175 @@ function deriveFinalOps(pkgName: string): Record<string, number> {
   return pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
 }
 
+// 持久化快照 → 计划对象：页面刷新后仍按规划样式显示阶段操作与载重。
+function chainPlanFromRun(run: UserData.ChainRun): ChainPlan | undefined {
+  const snap = run.plan;
+  if (snap === undefined) {
+    return undefined;
+  }
+  const stops: ChainStopPlan[] = run.stops.map(s => {
+    const unloadAt = s.plan?.unloadAt ?? {};
+    const loadAt = s.plan?.loadAt ?? {};
+    return {
+      naturalId: s.naturalId,
+      planetName: s.planetName,
+      days: 0,
+      cxBuy: false,
+      unloadCx: unloadAt,
+      unloadChain: new Map(),
+      load: new Map(
+        Object.entries(loadAt).map(([ticker, amount]) => [
+          ticker,
+          { amount, to: s.plan?.loadTo?.[ticker] ?? '' },
+        ]),
+      ),
+      clipped: s.plan?.clipped ?? false,
+      loadOnArrival: s.plan?.loadOnArrival ?? { weight: 0, volume: 0 },
+      loadOnDeparture: s.plan?.loadOnDeparture ?? { weight: 0, volume: 0 },
+    };
+  });
+  const cxBill: Record<string, number> = { ...snap.purchaseBill };
+  for (const [ticker, amount] of Object.entries(snap.originPickup)) {
+    cxBill[ticker] = (cxBill[ticker] ?? 0) + amount;
+  }
+  const loads = [snap.originLoadOnDeparture, ...stops.map(s => s.loadOnDeparture)];
+  const peak = loads.reduce(
+    (acc, l) => ({
+      weight: Math.max(acc.weight, l.weight),
+      volume: Math.max(acc.volume, l.volume),
+    }),
+    { weight: 0, volume: 0 },
+  );
+  return {
+    originNaturalId: run.originNaturalId,
+    stops,
+    finalUnload: snap.finalUnload,
+    cxBill,
+    purchaseBill: snap.purchaseBill,
+    originPickup: snap.originPickup,
+    warnings: [],
+    peakLoad: peak,
+    freeCapacity: {
+      weight: Math.max(0, snap.capacity.weight - peak.weight),
+      volume: Math.max(0, snap.capacity.volume - peak.volume),
+    },
+    capacity: snap.capacity,
+    loadOnDeparture: snap.originLoadOnDeparture,
+    loadOnReturn: snap.loadOnReturn,
+    overCapacity: false,
+    finalUnloadNotes: snap.finalUnloadNotes,
+  };
+}
+
+// 计算一批材料的重量/体积（用于从旧 ACT 包还原阶段载重）。
+function materialsLoad(record: Record<string, number>) {
+  let weight = 0;
+  let volume = 0;
+  for (const [ticker, amount] of Object.entries(record)) {
+    const mat = materialsStore.getByTicker(ticker);
+    if (mat) {
+      weight += mat.weight * amount;
+      volume += mat.volume * amount;
+    }
+  }
+  return { weight, volume };
+}
+
+// 旧版/导入的环线记录没有 plan 快照时，从现有 ACT 包（主包/站点包/归航包）
+// 反推一份计划载重快照，让「载重」列显示阶段载重而非实时舱载。
+function buildPlanFromPackages(
+  run: UserData.ChainRun,
+): { plan: UserData.ChainRunPlan; stops: UserData.ChainRunStop[] } | undefined {
+  const firstPkgName = run.stops[0]?.pkgName ?? '';
+  const idx = firstPkgName.lastIndexOf(' Loop ');
+  if (idx < 0) {
+    return undefined;
+  }
+  const shipName = firstPkgName.slice(idx + ' Loop '.length);
+  const mainPkg = userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+  const buyGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '));
+  const loadGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('装载 '));
+  const purchaseBill = buyGroup?.materials ?? {};
+  const cxBill = loadGroup?.materials ?? {};
+  const originPickup: Record<string, number> = {};
+  for (const [ticker, amount] of Object.entries(cxBill)) {
+    const pickup = amount - (purchaseBill[ticker] ?? 0);
+    if (pickup > 0) {
+      originPickup[ticker] = pickup;
+    }
+  }
+  const finalPkg = run.finalPkgName
+    ? userData.actionPackages.find(p => p.global.name === run.finalPkgName)
+    : undefined;
+  const finalUnload = finalPkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+  // 旧版单船主包未写入 ACT 列表：用站点包「卸货」之和近似原始装载量。
+  const fallbackBill: Record<string, number> = {};
+  if (Object.keys(cxBill).length === 0) {
+    for (const stop of run.stops) {
+      const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
+      const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+      for (const [ticker, amount] of Object.entries(unload)) {
+        fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
+      }
+    }
+    for (const [ticker, amount] of Object.entries(finalUnload)) {
+      fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
+    }
+  }
+  const originBill = Object.keys(cxBill).length > 0 ? cxBill : fallbackBill;
+  const ship = shipsStore.getById(run.shipId);
+  const cargo = ship ? storagesStore.getById(ship.idShipStore) : undefined;
+  const capacity = cargo
+    ? { weight: cargo.weightCapacity, volume: cargo.volumeCapacity }
+    : { weight: 0, volume: 0 };
+  let current = materialsLoad(originBill);
+  const stops: UserData.ChainRunStop[] = run.stops.map((stop, i) => {
+    if (stop.plan !== undefined) {
+      return stop;
+    }
+    const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
+    const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+    const load = pkg?.groups.find(g => g.name === '提取')?.materials ?? {};
+    const unloadLoad = materialsLoad(unload);
+    const loadLoad = materialsLoad(load);
+    const next = run.stops[i + 1]?.planetName ?? run.originNaturalId;
+    const loadOnArrival = {
+      weight: Math.max(0, current.weight - unloadLoad.weight),
+      volume: Math.max(0, current.volume - unloadLoad.volume),
+    };
+    current = {
+      weight: loadOnArrival.weight + loadLoad.weight,
+      volume: loadOnArrival.volume + loadLoad.volume,
+    };
+    const loadTo: Record<string, string> = {};
+    for (const ticker of Object.keys(load)) {
+      loadTo[ticker] = next;
+    }
+    return {
+      ...stop,
+      plan: {
+        unloadAt: unload,
+        loadAt: load,
+        loadTo,
+        loadOnArrival,
+        loadOnDeparture: current,
+        clipped: false,
+      },
+    };
+  });
+  return {
+    plan: {
+      capacity,
+      originLoadOnDeparture: materialsLoad(originBill),
+      loadOnReturn: current,
+      purchaseBill,
+      originPickup,
+      finalUnload,
+    },
+    stops,
+  };
+}
+
 // 出发行采购：从主包（Chain 船名）的「购买」组还原。
 // 主包名由站点包名反推（取最后一个「 Loop 」之后的部分作为船名）。
 function derivePurchaseBill(stopPkgName: string): Record<string, number> {
@@ -490,11 +786,11 @@ function derivePurchaseBill(stopPkgName: string): Record<string, number> {
     return {};
   }
   const shipName = stopPkgName.slice(idx + ' Loop '.length);
-  const mainPkg = userData.actionPackages.find(p => p.global.name === `Chain ${shipName}`);
-  return mainPkg?.groups.find(g => g.name.startsWith('购买 '))?.materials ?? {};
+  const mainPkg = userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+  return mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '))?.materials ?? {};
 }
 
-type StopState = 'done' | 'arrived' | 'transit' | 'pending';
+type StopState = UserData.ChainRunStopState;
 
 function stopMarker(state: StopState) {
   switch (state) {
@@ -527,9 +823,13 @@ interface RunProgress {
   stops: { naturalId: string; planetName: string; state: StopState }[];
   done: number;
   total: number;
+  originState: StopState;
+  finalState: StopState;
 }
 
 // 单船各站状态：与执行前一致，沿「origin → 各站 → origin」给出每站进度。
+// 新版本将状态持久化到 chainRuns：删除 ACT/触发器后列表仍能展示站点与操作；
+// 旧记录（无持久化状态）回退到「包消失 = 完成」的推导。
 function runProgress(run: UserData.ChainRun): RunProgress {
   const ship = shipsStore.getById(run.shipId);
   const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
@@ -539,22 +839,53 @@ function runProgress(run: UserData.ChainRun): RunProgress {
     const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
     const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
     let state: StopState;
-    if (!pkgExists) {
+    if (stop.state === 'done') {
       state = 'done';
-    } else if (fired || dockedAt === stop.naturalId) {
+    } else if (dockedAt === stop.naturalId || (pkgExists && fired)) {
       state = 'arrived';
     } else if (flightDest === stop.naturalId) {
       state = 'transit';
+    } else if (stop.state !== undefined) {
+      // 持久化状态优先：删除 ACT/触发器不会把未完成站误判为「完成」。
+      state = stop.state;
+    } else if (!pkgExists) {
+      state = 'done';
     } else {
       state = 'pending';
     }
     return { naturalId: stop.naturalId, planetName: stop.planetName, state };
   });
+  const done = stops.filter(s => s.state === 'done').length;
+  const allStopsDone = stops.every(s => s.state === 'done');
+  const originState: StopState =
+    run.originState === 'done' || (stops.length > 0 && stops[0]!.state !== 'pending')
+      ? 'done'
+      : 'pending';
+  const finalPkgExists =
+    run.finalPkgName !== undefined &&
+    userData.actionPackages.some(p => p.global.name === run.finalPkgName);
+  let finalState: StopState;
+  if (run.finalState === 'done') {
+    finalState = 'done';
+  } else if (allStopsDone) {
+    if (dockedAt === run.originNaturalId) {
+      // 新记录保留持久化状态（避免删除归航包被误判完成）；旧记录按原逻辑处理。
+      finalState = run.finalState === undefined ? (finalPkgExists ? 'arrived' : 'done') : 'arrived';
+    } else if (flightDest === run.originNaturalId) {
+      finalState = 'transit';
+    } else {
+      finalState = run.finalState ?? 'pending';
+    }
+  } else {
+    finalState = run.finalState ?? 'pending';
+  }
   return {
     originNaturalId: run.originNaturalId,
     stops,
-    done: stops.filter(s => s.state === 'done').length,
+    done,
     total: stops.length,
+    originState,
+    finalState,
   };
 }
 
@@ -602,6 +933,70 @@ const progressByShip = computed(() => {
   return map;
 });
 
+// 把推导出的进度状态持久化到 chainRuns：列表全局状态与 ACT/触发器解耦，
+// 删除 ACT 脚本或触发器后，站点与操作内容仍能完整展示。
+watchEffect(() => {
+  for (const run of Object.values(userData.chainRuns)) {
+    const progress = runProgress(run);
+    if (run.originState !== progress.originState) {
+      run.originState = progress.originState;
+    }
+    if (run.finalState !== progress.finalState) {
+      run.finalState = progress.finalState;
+    }
+    for (let i = 0; i < run.stops.length; i++) {
+      const stop = run.stops[i]!;
+      const state = progress.stops[i]!.state;
+      if (stop.state !== state) {
+        stop.state = state;
+      }
+    }
+  }
+});
+
+// 兜底：逆推出的旧版环线记录直接持久化，删除触发器后站点列表不再丢失。
+watchEffect(() => {
+  for (const ship of shipsStore.all.value ?? []) {
+    if (userData.chainRuns[ship.id] !== undefined) {
+      continue;
+    }
+    const derived = deriveChainRun(ship.id);
+    if (derived === undefined) {
+      continue;
+    }
+    const progress = runProgress(derived);
+    const finished = progress.finalState === 'done' && progress.done >= progress.total;
+    if (!finished) {
+      userData.chainRuns[ship.id] = derived;
+    }
+  }
+});
+
+// 旧版/导入记录无 plan 快照时，从现有 ACT 包反推并持久化计划载重，
+// 使「载重」列显示阶段载重而不是实时舱载。
+watchEffect(() => {
+  for (const run of Object.values(userData.chainRuns)) {
+    if (run.plan !== undefined) {
+      continue;
+    }
+    const built = buildPlanFromPackages(run);
+    if (built === undefined) {
+      continue;
+    }
+    // 舱容数据未加载前不落盘，等数据就绪后再重建（避免 0 容量占位）。
+    if (built.plan.capacity.weight <= 0 && built.plan.capacity.volume <= 0) {
+      continue;
+    }
+    run.plan = built.plan;
+    for (let i = 0; i < run.stops.length; i++) {
+      const stopPlan = built.stops[i]?.plan;
+      if (stopPlan !== undefined) {
+        run.stops[i]!.plan = stopPlan;
+      }
+    }
+  }
+});
+
 // 规划区 / 进度区统一表格数据：
 // - 规划模式：实时计划（无进度）。
 // - 环线执行中：显示执行前的计划快照，仅在「序」列叠加进度图标；
@@ -628,37 +1023,98 @@ const tables = computed<
     }));
   }
   if (planSnapshot.value.length > 0) {
-    return planSnapshot.value.map(sp => ({
-      shipId: sp.ship.ship.id,
-      ship: sp.ship,
-      plan: sp.plan,
-      progress: progressByShip.value.get(sp.ship.ship.id),
-    }));
+    return planSnapshot.value
+      .filter(sp => progressByShip.value.has(sp.ship.ship.id))
+      .map(sp => ({
+        shipId: sp.ship.ship.id,
+        ship: sp.ship,
+        plan: sp.plan,
+        progress: progressByShip.value.get(sp.ship.ship.id),
+      }));
   }
-  return activeRuns.value.map(entry => ({
-    shipId: entry.shipId,
-    shipName: entry.run.shipName,
-    progress: entry.progress,
-    derivedStops: entry.run.stops.map(stop => deriveStopOps(stop.pkgName)),
-    derivedPurchase:
-      entry.run.stops.length > 0 ? derivePurchaseBill(entry.run.stops[0]!.pkgName) : {},
-    derivedFinal: entry.run.finalPkgName ? deriveFinalOps(entry.run.finalPkgName) : {},
-  }));
+  return activeRuns.value.map(entry => {
+    // 新版本环线：持久化计划快照可完整还原阶段载重/操作。
+    const plan = chainPlanFromRun(entry.run);
+    if (plan) {
+      return {
+        shipId: entry.shipId,
+        shipName: entry.run.shipName,
+        plan,
+        progress: entry.progress,
+      };
+    }
+    // 旧版本环线（无快照）：退回逆推模式，载重列显示实时舱载。
+    return {
+      shipId: entry.shipId,
+      shipName: entry.run.shipName,
+      progress: entry.progress,
+      derivedStops: entry.run.stops.map(stop => deriveStopOps(stop.pkgName)),
+      derivedPurchase:
+        entry.run.stops.length > 0 ? derivePurchaseBill(entry.run.stops[0]!.pkgName) : {},
+      derivedFinal: entry.run.finalPkgName ? deriveFinalOps(entry.run.finalPkgName) : {},
+    };
+  });
 });
 
-// 环线完成后清理运行记录：遍历全部 chainRuns（不限于当前选中的船），
-// 站点与归航包都完成后移除。
+// 环线完成后清理运行记录：遍历全部 chainRuns（不限于当前选中的船）。
+// 完成（含归航卸载）后短暂保留记录展示 ✓ 标记，随后自动移除；
+// 若重新开始同一艘船的新环线，execute() 会先清掉对应定时器。
+// 另外：若某条记录的 ACT 脚本与触发器已全部删除（孤立预留列表），直接移除，
+// 避免导入旧 JSON 后删除全部脚本/触发器时残留空列表。
 watchEffect(() => {
   for (const [shipId, run] of Object.entries(userData.chainRuns)) {
     const progress = runProgress(run);
-    if (progress.done >= progress.total) {
-      const finalDone =
-        run.finalPkgName === undefined ||
-        !userData.actionPackages.some(p => p.global.name === run.finalPkgName);
-      if (finalDone) {
-        delete userData.chainRuns[shipId];
+    const hasAnyScript =
+      (run.mainPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.mainPkgName) ||
+          userData.triggers.some(t => t.packageName === run.mainPkgName))) ||
+      run.stops.some(
+        s =>
+          userData.actionPackages.some(p => p.global.name === s.pkgName) ||
+          userData.triggers.some(t => t.packageName === s.pkgName),
+      ) ||
+      (run.finalPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.finalPkgName) ||
+          userData.triggers.some(t => t.packageName === run.finalPkgName)));
+    const finished = progress.finalState === 'done' && progress.done >= progress.total;
+    if (!hasAnyScript) {
+      // 新格式正常完成的运行保留 10 秒展示 ✓；其余孤立预留列表立即移除。
+      const completedNewRun =
+        run.mainPkgName !== undefined &&
+        run.originState === 'done' &&
+        run.finalState === 'done' &&
+        progress.done >= progress.total;
+      if (completedNewRun) {
+        if (!finishedCleanupTimers.has(shipId)) {
+          const timer = setTimeout(() => {
+            delete userData.chainRuns[shipId];
+            finishedCleanupTimers.delete(shipId);
+            if (Object.keys(userData.chainRuns).length === 0) {
+              planSnapshot.value = [];
+            }
+          }, 10_000);
+          finishedCleanupTimers.set(shipId, timer);
+        }
+        continue;
       }
+      delete userData.chainRuns[shipId];
+      clearFinishedCleanup(shipId);
+      continue;
     }
+    if (finished) {
+      if (!finishedCleanupTimers.has(shipId)) {
+        const timer = setTimeout(() => {
+          delete userData.chainRuns[shipId];
+          finishedCleanupTimers.delete(shipId);
+          if (Object.keys(userData.chainRuns).length === 0) {
+            planSnapshot.value = [];
+          }
+        }, 10_000);
+        finishedCleanupTimers.set(shipId, timer);
+      }
+      continue;
+    }
+    clearFinishedCleanup(shipId);
   }
   // 所有环线执行完成后清空计划快照，避免残留旧数据影响下次规划。
   if (Object.keys(userData.chainRuns).length === 0) {
@@ -778,6 +1234,7 @@ function formatFinalUnloadNotes(plan: {
       <div :class="$style.separator" />
       <PrunButton dark @click="onExportChainConfigClick">导出配置</PrunButton>
       <PrunButton dark @click="onImportChainConfigClick">导入配置</PrunButton>
+      <PrunButton dark @click="clearPlan">清理计划</PrunButton>
       <div :class="$style.spacer" />
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
@@ -850,6 +1307,13 @@ function formatFinalUnloadNotes(plan: {
         </div>
 
         <table :class="$style.table">
+          <colgroup>
+            <col :class="$style.colSeq" />
+            <col :class="$style.colStation" />
+            <col :class="$style.colOps" />
+            <col :class="$style.colFlight" />
+            <col :class="$style.colLoad" />
+          </colgroup>
           <thead>
             <tr>
               <th :class="$style.narrowCol">序</th>
@@ -863,9 +1327,9 @@ function formatFinalUnloadNotes(plan: {
             <tr>
               <td :class="$style.narrowCol">
                 <span
-                  v-if="sp.progress?.stops[0] && sp.progress.stops[0].state !== 'pending'"
-                  :class="[$style.marker, $style.markTransit]"
-                  >✈</span
+                  v-if="sp.progress?.originState"
+                  :class="[$style.marker, $style[markClassKey(sp.progress.originState)]]"
+                  >{{ stopMarker(sp.progress.originState) }}</span
                 >
                 0
               </td>
@@ -971,9 +1435,9 @@ function formatFinalUnloadNotes(plan: {
             <tr>
               <td :class="$style.narrowCol">
                 <span
-                  v-if="sp.progress && sp.progress.done >= sp.progress.total"
-                  :class="[$style.marker, $style.markDone]"
-                  >✓</span
+                  v-if="sp.progress?.finalState"
+                  :class="[$style.marker, $style[markClassKey(sp.progress.finalState)]]"
+                  >{{ stopMarker(sp.progress.finalState) }}</span
                 >
                 {{ (sp.plan?.stops.length ?? sp.progress?.stops.length ?? 0) + 1 }}
               </td>
@@ -1149,6 +1613,28 @@ function formatFinalUnloadNotes(plan: {
 .table {
   border-collapse: collapse;
   width: 100%;
+  /* 固定列宽：所有船的进度表保持同一列宽，避免按内容自适应导致宽度不一致。 */
+  table-layout: fixed;
+}
+
+.colSeq {
+  width: 36px;
+}
+
+.colStation {
+  width: 150px;
+}
+
+.colOps {
+  width: auto;
+}
+
+.colFlight {
+  width: 120px;
+}
+
+.colLoad {
+  width: 180px;
 }
 
 .table thead tr {
@@ -1169,7 +1655,9 @@ function formatFinalUnloadNotes(plan: {
 }
 
 .narrowCol {
-  white-space: nowrap;
+  /* 固定列宽后允许换行，避免超长星球名/载重文本溢出。 */
+  white-space: normal;
+  word-break: break-word;
 }
 
 .matCell {

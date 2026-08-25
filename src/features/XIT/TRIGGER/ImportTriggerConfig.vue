@@ -23,6 +23,8 @@ const typeOptions: { label: string; value: ImportType }[] = [
 interface TriggerConfig {
   triggers: UserData.TriggerData[];
   actionPackages: UserData.ActionPackageData[];
+  // 可选：环线执行列表全局状态（站点/操作/进度快照）。
+  chainRuns?: UserData.ChainRun[];
 }
 
 const { onImport } = defineProps<{ onImport: (config: TriggerConfig) => void }>();
@@ -64,7 +66,12 @@ function onUploadClick() {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function validateJson(json: any): json is TriggerConfig {
-  return json.version === 1 && Array.isArray(json.triggers) && Array.isArray(json.actionPackages);
+  return (
+    json.version === 1 &&
+    Array.isArray(json.triggers) &&
+    Array.isArray(json.actionPackages) &&
+    (json.chainRuns === undefined || Array.isArray(json.chainRuns))
+  );
 }
 </script>
 

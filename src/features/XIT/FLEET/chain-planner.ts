@@ -1143,7 +1143,9 @@ export function buildChainActionPackages(
   }
 
   const mainPkg: UserData.ActionPackageData = {
-    global: { name: `Chain ${shipName}` },
+    global: { name: `0 Chain ${shipName}` },
+    // 阶段 0（空间站出发）完成即删除，避免 ACT 列表残留过期脚本。
+    autoDelete: true,
     groups,
     actions,
   };
@@ -1165,7 +1167,8 @@ export function buildChainActionPackages(
     const stop = plan.stops[i]!;
     // 星球名净化后为空（如中文/含符号名）时回退到 naturalId，保证包名可被 ACT 命令解析。
     const stopLabel = sanitizeActName(stop.planetName || stop.naturalId) || stop.naturalId;
-    const pkgName = `${stopLabel} Loop ${shipName}`;
+    // 阶段号与进度表「序」列一致：1..N 为各站点。
+    const pkgName = `${i + 1} ${stopLabel} Loop ${shipName}`;
     const baseStore = `${stop.planetName} Base`;
 
     const unload: Record<string, number> = { ...stop.unloadCx };
@@ -1218,13 +1221,13 @@ export function buildChainActionPackages(
     };
     stopPkgs.push({
       pkg,
-      trigger: makeTrigger(`${stop.planetName} 环线站`, pkgName, stop.naturalId),
+      trigger: makeTrigger(`${i + 1} ${stop.planetName} 环线站`, pkgName, stop.naturalId),
     });
   }
 
   let finalPkg: ChainStopPackage | undefined;
   if (Object.keys(plan.finalUnload).length > 0) {
-    const pkgName = `Chain Return ${shipName}`;
+    const pkgName = `${plan.stops.length + 1} Chain Return ${shipName}`;
     finalPkg = {
       pkg: {
         global: { name: pkgName },
@@ -1240,7 +1243,11 @@ export function buildChainActionPackages(
           },
         ],
       },
-      trigger: makeTrigger(`${plan.originNaturalId} 归航卸货`, pkgName, plan.originNaturalId),
+      trigger: makeTrigger(
+        `${plan.stops.length + 1} ${plan.originNaturalId} 归航卸货`,
+        pkgName,
+        plan.originNaturalId,
+      ),
     };
   }
 

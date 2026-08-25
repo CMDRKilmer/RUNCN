@@ -16,6 +16,7 @@ import {
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
 import { dispatchFinished } from '@src/features/XIT/FLEET/staged';
+import { markChainStageDone } from '@src/features/XIT/FLEET/chain-state';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -122,6 +123,8 @@ const runner = new ActionRunner({
           userData.triggers.splice(i, 1);
         }
       }
+      // 环线阶段完成：写入持久化 chainRuns，删除 ACT/触发器后列表仍保持完整。
+      markChainStageDone(pkg.global.name);
     }
   },
   onStatusChanged: (title, keepReady) => {

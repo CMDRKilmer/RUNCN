@@ -261,10 +261,41 @@ declare namespace UserData {
   // 环线执行记录：以 shipId 为键，供 FLEET 环线页签展示「正在执行的环线」进度。
   // stops.pkgName 为净化后的站点操作包名，用于关联 FLIGHT_ENDED 触发器与操作包
   // 判定各站状态（包被 autoDelete 移除即完成）。
+  // 环线快照载荷：页面刷新后仍可按规划样式显示「当前阶段载重/操作」。
+  interface ChainRunLoad {
+    weight: number;
+    volume: number;
+  }
+
+  // 环线单站/出发/归航进度状态（持久化到运行记录，删除 ACT/触发器后仍可展示）。
+  type ChainRunStopState = 'done' | 'arrived' | 'transit' | 'pending';
+
   interface ChainRunStop {
     naturalId: string;
     planetName: string;
     pkgName: string;
+    // 持久化的站点进度状态（新版本环线写入；旧记录无此字段时回退推导）。
+    state?: ChainRunStopState;
+    // 计划快照（新版本环线写入）：还原阶段装卸量与阶段载重。
+    plan?: {
+      unloadAt: Record<string, number>;
+      loadAt: Record<string, number>;
+      // 每项提取的目的地标签（如下游星球名 / 出发地），用于表格展示。
+      loadTo?: Record<string, string>;
+      loadOnArrival: ChainRunLoad;
+      loadOnDeparture: ChainRunLoad;
+      clipped?: boolean;
+    };
+  }
+
+  interface ChainRunPlan {
+    capacity: ChainRunLoad;
+    originLoadOnDeparture: ChainRunLoad;
+    loadOnReturn: ChainRunLoad;
+    purchaseBill: Record<string, number>;
+    originPickup: Record<string, number>;
+    finalUnload: Record<string, number>;
+    finalUnloadNotes?: Record<string, string>;
   }
 
   interface ChainRun {
@@ -274,5 +305,11 @@ declare namespace UserData {
     originNaturalId: string;
     stops: ChainRunStop[];
     finalPkgName?: string;
+    // 当前阶段脚本名：主包执行成功后据此把「出发」标记为完成。
+    mainPkgName?: string;
+    originState?: ChainRunStopState;
+    finalState?: ChainRunStopState;
+    // 执行时的计划快照（持久化）：页面刷新后仍显示阶段载重而非实时载重。
+    plan?: ChainRunPlan;
   }
 }
