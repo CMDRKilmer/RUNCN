@@ -20,15 +20,6 @@
 
 本扩展仅访问 Prosperous Universe 游戏页面（`apex.prosperousuniverse.com`），用于注入界面优化功能。不会访问或读取任何其他网站的数据。
 
-## 浏览器内置 AI（Chrome Built-in AI / Gemini Nano）
-
-本扩展的部分智能功能（聊天翻译增强、笔记摘要、财务解读、合同风险提示等）调用 **Chrome 浏览器内置的 Gemini Nano 模型**。该机制具有以下隐私特性：
-
-- **数据完全在本机处理**：所有 prompt 与 response 不经过任何外部服务器，扩展不会将任何内容转发至本机 Chrome 之外；
-- **由浏览器原生提供**：本扩展不内置、不打包、不分发任何 AI 模型权重文件；模型由用户本机 Chrome（148 及以上版本）提供；
-- **能力可选**：本扩展仅在用户主动点击相应 AI 按钮时调用内置 AI；扩展不会在后台静默调用；
-- **不可用时不退化隐私**：当用户设备不支持 Chrome 内置 AI 时，扩展会自动 fallback 至用户已配置的云端翻译服务商（仅翻译功能）或在功能入口处明确提示"当前浏览器不支持本地 AI"。
-
 ## 第三方翻译服务（用户可选）
 
 当用户主动启用聊天翻译功能并在 XIT SET 翻译设置中配置第三方翻译服务（如 Microsoft Translator、Google Translate、DeepL、Anthropic Claude、Google Gemini、OpenAI、DeepSeek、MiniMax、智谱 GLM、通义千问、Moonshot、百度千帆、腾讯混元、零一万物、阶跃星辰、Hugging Face 或自定义 HTTP 翻译接口）时：
@@ -49,4 +40,4 @@
 ## 联系方式
 
 如有任何隐私相关问题，请通过 GitHub Issues 联系：  
-https://github.com/Aivking/RUNCN/issues
+https://github.com/CMDRKilmer/RUNCN/issues
