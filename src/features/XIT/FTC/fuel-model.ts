@@ -182,19 +182,25 @@ function conditionFactor(condition: number): number {
 // 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB 四船 14 航线实测 + FIO 行星环境）：
 // - 离港 = 0.49 × STL罐 × f（7 次验证，与距离/航线无关；仅自然跃迁航线）
 // - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
+// - 起飞（行星出发特有）= 船体系数 × 0.455 × √(半径_km × P^(+0.2))   ★3 点 ±3%
+// - 离港 = 0.49 × STL罐 × f（8 次验证，与距离/航线/出发地无关；仅自然跃迁航线）
+// - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
 // - 着陆 = 船体系数 × 0.47 × √(半径_km × P^(-0.2))    ★终极模型（7/7 点 ±0.7u）
 //   实测 WCB 7 行星（Boucher/Ashland/LS-231a/UQ-328b/Mimar/Euu/Sabaton）着陆燃料 =
 //   0.578×√(着陆距离km)，着陆距离 = 0.66×R×P^(-0.2)（厚大气→短着陆段，进近段更长）。
+//   起飞与着陆 P 指数符号相反（厚大气→起飞长/着陆短），起飞+着陆 ≈ 84 恒定（WCB f=0.1）。
 //   推翻"大气阈值"假说：Euu/Mimar/Sabaton 着陆低是距离短所致（LS-231a P1.98 着陆 42
 //   更高直接证伪阈值）；"G 重力模型"是距离与 g/P 巧合相关的假象。
 // ⚠️ 已知局限：罐模型仅对自然跃迁航线成立；网关航线（跃门）的离港/进近显著更低
 //   （WCB Sabaton 进近 117/Mimar 90 vs 模型 171.5），结构不同待研究。
-// 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + 进近差 + 着陆
+// 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + 进近差 + 着陆 + 起飞（行星出发时）
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
 const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_DIST_C = 0.47; // 着陆燃料系数：fuel = C×√(R_km × P^-0.2)（WCB 实测 7 点 ±0.7u）
 const STL_LANDING_P_EXP = 0.2; // 气压缩短着陆段指数（着陆距离 = 0.66×R×P^-0.2）
+const STL_TAKEOFF_FUEL_C = 0.455; // 起飞燃料系数：fuel = C×√(R_km × P^+0.2)（3 点 ±3%）
+const STL_TAKEOFF_P_EXP = 0.2; // 大气延长起飞段指数（起飞距离 = 0.62×R×P^0.2，厚大气冲出更长）
 const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船）
 const STL_LANDING_G_EXP = 0.6; // 船体系数 G 指数：HCB(G15) 1.456≈(15/8)^0.6、WCB(G8) 1.0
 const STL_SEGMENTS_EXTRA = 40; // 无重力数据时的回退近似（旧常数）
@@ -220,6 +226,10 @@ export interface ModelSettings {
   landingRadius?: number;
   // 目的地行星气压（大气缩短着陆段；P^-0.2，缺省按 1）。
   landingPressure?: number;
+  // 出发行星半径（km；定义时计入起飞段，行星出发特有）。
+  departureRadius?: number;
+  // 出发行星气压（大气延长起飞段；P^+0.2，缺省按 1）。
+  departurePressure?: number;
   // 着陆船体系数覆盖（默认 (G/8)^0.6）。
   stlLandingFactor?: number;
   // 进近差近似（默认 8）。
@@ -246,9 +256,9 @@ export function computeFuelOption(
   const d = metrics.stlDistanceKm;
   const v = stlSpeedFor(ship, fuel);
   const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
-  // STL 燃料：跨星系（有跃迁）用罐模型（离港+进近 = 0.98×罐×f + 进近差 + 着陆）。
-  // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（FIO 半径/气压查询，失败回退旧常数；
-  // ⚠️罐模型仅对自然跃迁航线成立，网关航线偏低。）
+  // STL 燃料：跨星系（有跃迁）用罐模型（离港+进近 = 0.98×罐×f + 进近差 + 着陆 + 起飞）。
+  // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)；起飞（行星出发特有）= 船体系数 × 0.455 × √(半径_km × P^+0.2)
+  // （FIO 半径/气压查询，失败回退旧常数；⚠️罐模型仅对自然跃迁航线成立，网关航线偏低。）
   // 同星系用 C_F×f×d（转移段，已校准）。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -263,10 +273,25 @@ export function computeFuelOption(
           ? settings.landingPressure
           : 1;
       const landing = STL_LANDING_DIST_C * Math.sqrt(R * Math.pow(P, -STL_LANDING_P_EXP));
+      // 出发地为行星时计入起飞段（厚大气→起飞更长）。
+      const R0 = settings.departureRadius;
+      const takeoff =
+        R0 !== undefined && R0 > 0
+          ? STL_TAKEOFF_FUEL_C *
+            Math.sqrt(
+              R0 *
+                Math.pow(
+                  settings.departurePressure !== undefined && settings.departurePressure > 0
+                    ? settings.departurePressure
+                    : 1,
+                  STL_TAKEOFF_P_EXP,
+                ),
+            )
+          : 0;
       stlFuel =
         STL_TANK_FUEL_COEF * tank * fuel +
         (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
-        lf * landing;
+        lf * (landing + takeoff);
     } else {
       stlFuel = STL_TANK_FUEL_COEF * tank * fuel + (settings.stlSegmentExtra ?? STL_SEGMENTS_EXTRA);
     }

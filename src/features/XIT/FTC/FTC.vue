@@ -276,12 +276,12 @@ async function planAndCompute() {
     return;
   }
   const metrics = routeMetrics(route);
-  // 跨星系航线的目的地行星环境（FIO /planet/{id}），用于精确着陆燃料（半径 + 气压）。
+  // 跨星系航线的起/终点行星环境（FIO /planet/{id}）：着陆（半径+气压）与起飞段（出发行星）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
-  const landingEnv =
-    isCrossSystem && metrics.toBody !== undefined
-      ? await fetchPlanetEnv(metrics.toBody)
-      : undefined;
+  const [landingEnv, departEnv] = await Promise.all([
+    isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
+    isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,
+  ]);
   const options = scanFuelOptions(
     perf,
     metrics,
@@ -295,6 +295,8 @@ async function planAndCompute() {
     {
       landingRadius: landingEnv?.radiusKm,
       landingPressure: landingEnv?.pressure,
+      departureRadius: departEnv?.radiusKm,
+      departurePressure: departEnv?.pressure,
     },
   );
   if (options.length === 0) {
