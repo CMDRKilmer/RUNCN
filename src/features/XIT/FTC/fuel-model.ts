@@ -179,23 +179,27 @@ function conditionFactor(condition: number): number {
   return Math.max(0.2, condition / CONDITION_THRESHOLD);
 }
 
-// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB 多航线实测 + 2026-08-27 FIO 行星重力关联）：
-// - 离港 = 0.49 × STL罐 × f（5 次验证，与距离/航线无关）
-// - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、HCB 10-16，默认 5）
+// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB 三船实测 + FIO 行星重力）：
+// - 离港 = 0.49 × STL罐 × f（7 次验证，与距离/航线无关）
+// - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
 // - 着陆 = 船体系数 × (24.2 + 18.4 × 行星重力)
-//   重力驱动确认（6/7 数据点误差 <0.5u）：Boucher(g1.237)≈Eos(g1.232) 着陆完全相同，
-//   气压/温度/日光差 5-15 倍却无影响；Euu(厚大气 P=5.72) 异常待重测。
+//   重力驱动确认（3 船 9/10 数据点）：Boucher(g1.237)≈Eos(g1.232) 着陆完全相同，
+//   气压/温度/日光差 5-15 倍却无影响；WCB(G8,m1271,t3500) 着陆≈新手船(G8,m828,t1500)
+//   → 质量模型(^0.57 预测 +28%)死亡，G 模型确认。WCB 残留 +2(+5%) 疑微弱质量效应。
+//   ⚠️ Euu(P=5.72 超厚大气) 着陆偏低 ~28% 已双船证实（新手船 28/WCB 30 vs 预测 40.5），
+//   只影响着陆段（进近差正常）→ 厚大气制动减燃料，阈值待更多高 P 行星验证。
 // 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + 进近差 + 着陆
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
 const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
-const STL_APPROACH_EXTRA = 5; // 进近差近似（新手船标定，HCB 实测 10-16 略高）
+const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_G_BASE = 24.2; // 着陆重力项截距（船体系数=1.0，即 G=8 新手船）
 const STL_LANDING_G_SLOPE = 18.4; // 着陆重力项斜率（u/地球g）
 const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船）
-const STL_LANDING_G_EXP = 0.68; // 船体系数 G 指数：HCB(G15) 实测 1.535≈(15/8)^0.68（待第三船判别 vs 质量^0.57）
+const STL_LANDING_G_EXP = 0.68; // 船体系数 G 指数：HCB(G15) 1.535≈(15/8)^0.68、WCB(G8) 1.0 双验证
 const STL_SEGMENTS_EXTRA = 40; // 无重力数据时的回退近似（旧常数）
 
-// 着陆船体系数：新手船(G=8)为 1.0，HCB(G=15)实测 1.535 ≈ (15/8)^0.68。
+// 着陆船体系数：新手船/WCB(G=8)为 1.0，HCB(G=15)实测 1.535 ≈ (15/8)^0.68。
+// 三船确认：质量(^0.57)与加速度均不能解释（WCB 同 G 不同质量着陆几乎相同）。
 // G 力从蓝图读取（maxGFactor），无需每船校准。
 export function stlLandingFactor(ship: ShipPerformance): number {
   const g = ship.maxGFactor;
