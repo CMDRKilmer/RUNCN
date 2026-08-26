@@ -113,6 +113,9 @@ const blueprintInfo = computed(() => {
   }
   const ftlMaxSpeed =
     bp.performance.ftlMaxSpeed > 0 ? bp.performance.ftlMaxSpeed * 3600 : undefined;
+  // 蓝图 STL 燃料罐容量（跨星系离港/进近燃料按罐比例算）。
+  const stlFuelCapacity =
+    bp.performance.stlFuelCapacity > 0 ? bp.performance.stlFuelCapacity : undefined;
   // 蓝图最小反应堆使用量 / 发射器充能时间（充能时间 = eT/m × r）。
   const minReactorUsage =
     bp.performance.minReactorUsage > 0 ? bp.performance.minReactorUsage : undefined;
@@ -137,7 +140,15 @@ const blueprintInfo = computed(() => {
       }
     }
   }
-  return { ftlMaxSpeed, stlEngine, reactorPower, minReactorUsage, emitterChargeTime, maxGFactor };
+  return {
+    ftlMaxSpeed,
+    stlEngine,
+    reactorPower,
+    stlFuelCapacity,
+    minReactorUsage,
+    emitterChargeTime,
+    maxGFactor,
+  };
 });
 
 // 从飞船燃料仓自动识别燃料材料 ticker，用于自动填价。
@@ -198,6 +209,7 @@ function shipPerformance(): ShipPerformance | undefined {
     maxGFactor: blueprintInfo.value?.maxGFactor,
     minReactorUsage: blueprintInfo.value?.minReactorUsage,
     emitterChargeTime: blueprintInfo.value?.emitterChargeTime,
+    stlFuelCapacity: blueprintInfo.value?.stlFuelCapacity,
   };
 }
 

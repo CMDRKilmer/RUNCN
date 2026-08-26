@@ -33,6 +33,8 @@ export interface ShipPerformance {
   condition: number;
   // 蓝图 STL 引擎选项（如 STL_ENGINE_HYPERTHRUST），用于查引擎特性表。
   stlEngineOption?: string;
+  // 蓝图 STL 燃料罐容量（跨星系离港/进近燃料按罐比例算）。
+  stlFuelCapacity?: number;
   // 蓝图最小反应堆使用量（= 发射器功率需求/反应堆功率，HYR 超跑 0.076、STD 新手船 0.302）。
   minReactorUsage?: number;
   // 蓝图发射器充能时间（秒，基础充能；充能时间 = eT/m × r）。
@@ -175,11 +177,22 @@ function conditionFactor(condition: number): number {
   return Math.max(0.2, condition / CONDITION_THRESHOLD);
 }
 
+// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB 多航线实测）：
+// - 离港 = 0.49 × STL罐 × f（5 次验证，与距离/航线无关）
+// - 进近 ≈ 0.49 × STL罐 × f + 行星差值
+// - 着陆 = 行星相关（无引力数据，用常数近似）
+// 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + STL_SEGMENTS_EXTRA
+// 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
+const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
+const STL_SEGMENTS_EXTRA = 40; // 进近差值+着陆近似（新手船35-53、HCB 75-92，随行星/船体）
+
 export interface ModelSettings {
   // 可校准系数（默认标定值）。
   stlTimeC?: number;
   stlFuelC?: number;
   ftlFuelC?: number;
+  // 跨星系 STL 分段燃料的进近差值+着陆近似（可校准）。
+  stlSegmentExtra?: number;
   // 参考 STL 燃料流量（用于跨飞船按 stlFuelFlowRate 缩放）。
   refFlowRate?: number;
   // 参考质量（时间质量缩放基准）。
@@ -202,9 +215,17 @@ export function computeFuelOption(
   const d = metrics.stlDistanceKm;
   const v = stlSpeedFor(ship, fuel);
   const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
-  // STL 燃料（∝ f × d；按引擎燃料系数）。
+  // STL 燃料：跨星系（有跃迁）用罐模型（离港+进近 = 0.98×罐×f + 着陆近似），
+  // 同星系用 C_F×f×d（转移段，已校准）。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
-  const stlFuel = d !== undefined ? cF * fuel * d : 0;
+  const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
+  const tank = ship.stlFuelCapacity;
+  let stlFuel: number;
+  if (isCrossSystem && tank !== undefined && tank > 0) {
+    stlFuel = STL_TANK_FUEL_COEF * tank * fuel + (settings.stlSegmentExtra ?? STL_SEGMENTS_EXTRA);
+  } else {
+    stlFuel = d !== undefined ? cF * fuel * d : 0;
+  }
 
   // 自然 FTL：
   // - JUMP 速度 = ftlMax × r^(a(1+1.5r))，a = 0.40×ln(ftlMax) − 0.10
