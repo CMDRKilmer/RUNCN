@@ -224,35 +224,38 @@ interface PlanResult {
 const result = ref<PlanResult | undefined>(undefined);
 const calcMessage = ref<string | undefined>(undefined);
 
-// FIO 行星环境缓存（目的地行星 naturalId → 半径/气压）。FIO 请求不稳定，失败回退常数近似。
-const planetEnvCache = new Map<string, { radiusKm: number; pressure?: number }>();
+// 行星环境数据（半径 km / 气压）内置静态 JSON（FIO 全量导出，避免运行时查询）。
+// 格式：{ "PG-241H": { r: 8000, p: 1.2 }, ... }。
+type PlanetEnvEntry = { r: number; p?: number };
+let planetEnvData: Record<string, PlanetEnvEntry> | undefined;
+let planetEnvLoading: Promise<void> | undefined;
+
+async function loadPlanetEnv(): Promise<void> {
+  if (planetEnvData !== undefined || planetEnvLoading !== undefined) {
+    return planetEnvLoading;
+  }
+  planetEnvLoading = (async () => {
+    try {
+      const resp = await fetch(config.url.planetEnv);
+      planetEnvData = (await resp.json()) as Record<string, PlanetEnvEntry>;
+    } catch {
+      // 内置文件加载失败：回退常数近似（无起降精确项）。
+      planetEnvData = {};
+    }
+  })();
+  return planetEnvLoading;
+}
+
+// 从内置数据查行星环境（半径 km + 气压）。找不到（空间站/星系/无数据）返回 undefined。
 async function fetchPlanetEnv(
   naturalId: string,
 ): Promise<{ radiusKm: number; pressure?: number } | undefined> {
-  const key = naturalId.toUpperCase();
-  const cached = planetEnvCache.get(key);
-  if (cached !== undefined) {
-    return cached;
+  await loadPlanetEnv();
+  const env = planetEnvData?.[naturalId.toUpperCase()];
+  if (env === undefined) {
+    return undefined;
   }
-  try {
-    const resp = await fetch(`https://rest.fnar.net/planet/${encodeURIComponent(naturalId)}`);
-    if (!resp.ok) {
-      return undefined;
-    }
-    const data = (await resp.json()) as { Radius?: number; Pressure?: number };
-    if (typeof data.Radius === 'number' && data.Radius > 0) {
-      const env = {
-        radiusKm: data.Radius / 1000,
-        pressure:
-          typeof data.Pressure === 'number' && data.Pressure > 0 ? data.Pressure : undefined,
-      };
-      planetEnvCache.set(key, env);
-      return env;
-    }
-  } catch {
-    // FIO 不稳定，回退常数近似。
-  }
-  return undefined;
+  return { radiusKm: env.r, pressure: env.p };
 }
 
 async function planAndCompute() {
