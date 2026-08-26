@@ -178,6 +178,8 @@ export function routeMetrics(route: PlannedRoute): {
   gwPc: number;
   gwCount: number;
   natJumpCount: number;
+  // 目的地实体 naturalId（跨星系时用于 FIO 行星重力查询，精确着陆燃料）。
+  toBody?: string;
 } {
   const depart = liftOffKm(route.fromBody);
   const approach = liftOffKm(route.toBody);
@@ -196,5 +198,5 @@ export function routeMetrics(route: PlannedRoute): {
   }
   const stlDistanceKm =
     depart !== undefined && approach !== undefined ? depart + approach : undefined;
-  return { stlDistanceKm, natPc, gwPc, gwCount, natJumpCount };
+  return { stlDistanceKm, natPc, gwPc, gwCount, natJumpCount, toBody: route.toBody };
 }

@@ -224,7 +224,31 @@ interface PlanResult {
 const result = ref<PlanResult | undefined>(undefined);
 const calcMessage = ref<string | undefined>(undefined);
 
-function planAndCompute() {
+// FIO 行星重力缓存（目的地行星 naturalId → 地球 g）。FIO 请求不稳定，失败回退常数近似。
+const planetGravityCache = new Map<string, number>();
+async function fetchPlanetGravity(naturalId: string): Promise<number | undefined> {
+  const key = naturalId.toUpperCase();
+  const cached = planetGravityCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    const resp = await fetch(`https://rest.fnar.net/planet/${encodeURIComponent(naturalId)}`);
+    if (!resp.ok) {
+      return undefined;
+    }
+    const data = (await resp.json()) as { Gravity?: number };
+    if (typeof data.Gravity === 'number' && data.Gravity > 0) {
+      planetGravityCache.set(key, data.Gravity);
+      return data.Gravity;
+    }
+  } catch {
+    // FIO 不稳定，回退常数近似。
+  }
+  return undefined;
+}
+
+async function planAndCompute() {
   calcMessage.value = undefined;
   result.value = undefined;
   const from = routeFrom.value.trim();
@@ -245,19 +269,35 @@ function planAndCompute() {
     return;
   }
   const metrics = routeMetrics(route);
-  const options = scanFuelOptions(perf, metrics, fuels.value, reactors.value, {
-    stlPrice: stlFuelPrice.value ?? 0,
-    ftlPrice: ftlFuelPrice.value ?? 0,
-    timeValue: timeValue.value ?? 0,
-  });
+  // 跨星系航线的目的地行星重力（FIO /planet/{id}），用于精确着陆燃料。
+  const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
+  const landingGravity =
+    isCrossSystem && metrics.toBody !== undefined
+      ? await fetchPlanetGravity(metrics.toBody)
+      : undefined;
+  const options = scanFuelOptions(
+    perf,
+    metrics,
+    fuels.value,
+    reactors.value,
+    {
+      stlPrice: stlFuelPrice.value ?? 0,
+      ftlPrice: ftlFuelPrice.value ?? 0,
+      timeValue: timeValue.value ?? 0,
+    },
+    { landingGravity },
+  );
   if (options.length === 0) {
     calcMessage.value = '请输入有效的滑块组合（0–1 之间）';
     return;
   }
   result.value = { label: route.label, route, metrics, options, best: options[0] };
   const b = options[0];
+  const gravityText =
+    landingGravity !== undefined ? `，目的地重力 ${fixed2v(landingGravity)}g` : '';
   calcMessage.value =
     `最优方案：燃料滑块 ${b.fuel} / 反应堆 ${b.reactor}，预计 ${formatDuration(b.totalHours * 3600000)}，总成本 ${formatCurrency(b.totalCost)}` +
+    gravityText +
     (useGateway.value && metrics.gatewayCount > 0
       ? '（网关航线：FTL 燃料为 0）'
       : useGateway.value
