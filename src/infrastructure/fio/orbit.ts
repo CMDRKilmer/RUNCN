@@ -59,6 +59,9 @@ const bodySystem = new Map<string, string>();
 // 内置空间站 → 星系映射（public/json/stations.json；FIO 无空间站数据端点，
 // 轨道/归属来自游戏内星系详情 DATA_DATA 的 celestialBodies，导出后内置）。
 const stationSystem = new Map<string, string>();
+// 本会话已通过星系详情 DATA_DATA 打开过的星系（naturalId 大写）。
+// FTC 自动浏览星系时轮询此值，确认整个星系数据（恒星质量 + 行星/空间站轨道）到达。
+const systemData = new Set<string>();
 
 const inflight = new Map<string, Promise<void>>();
 
@@ -96,10 +99,16 @@ export function getStationSystem(naturalId: string): string | undefined {
 }
 
 // 空间站是否已持有轨道根数（predictPosition 可用）。
-// FTC 自动浏览星系时轮询此值，确认 DATA_DATA 积累完成后关闭窗口。
 export function hasStationOrbit(stationNaturalId: string): boolean {
   const orbit = planets.get(stationNaturalId.toUpperCase());
   return orbit !== undefined && orbit.semiMajorAxis > 0;
+}
+
+// 是否已打开过某星系的星系详情（DATA_DATA["systems", id] 到达）。
+// FTC 自动浏览星系时轮询此值，确认整个星系数据（恒星质量 + 行星/空间站轨道）
+// 积累完成后关闭窗口——不止空间站，整个星系数据都算浏览完成。
+export function hasSystemData(systemId: string): boolean {
+  return systemData.has(systemId.toUpperCase());
 }
 
 function persist() {
@@ -549,6 +558,10 @@ onApiMessage({
       if (body.naturalId && body.star?.mass !== undefined && body.star.mass > 0) {
         stars.set(body.naturalId.toUpperCase(), { mass: body.star.mass });
         orbitVersion.value++;
+      }
+      // 记录已浏览的星系（无论恒星质量是否在场，行星/空间站轨道都已随包处理）。
+      if (body.naturalId) {
+        systemData.add(body.naturalId.toUpperCase());
       }
       for (const planet of body.planets ?? []) {
         const orbit = planet.orbit;

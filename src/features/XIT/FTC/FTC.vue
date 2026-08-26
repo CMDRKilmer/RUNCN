@@ -16,13 +16,14 @@ import {
   prefetchAllOrbits,
   exportAllPlanetData,
   exportStationOrbits,
-  hasStationOrbit,
+  hasSystemData,
 } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import { planRoutes, routeMetrics, PlannedRoute } from './route-planner';
+import { resolveSystemId } from './route-model';
 import { scanFuelOptions, FuelOption, ShipPerformance } from './fuel-model';
 import $style from './FTC.module.css';
 
@@ -106,68 +107,92 @@ function exportStations() {
   downloadFile(data, 'prun-stations.json', true);
   gatewayMessage.value = `已导出 ${data.length} 个空间站（轨道+归属星系）；运行 build-station-data.mjs 精简后内置`;
 }
-// 自动浏览无轨道空间站的归属星系：逐个执行游戏命令 `MS <systemId>`
-// （Map: Star System，打开星系详情），客户端自动请求 DATA_DATA["systems", id]，
-// orbit.ts 监听积累 celestialBodies（含空间站轨道）。轨道积累后自动关闭窗口。
-// FIO 无空间站数据，这是唯一能离线补全空间站轨道的方式（模拟用户浏览星系）。
-const autoBrowsing = ref(false);
-const autoBrowseDone = ref(0);
-const autoBrowseTotal = ref(0);
-const autoBrowseLog = ref<string[]>([]);
-async function autoBrowseSystems() {
-  if (autoBrowsing.value) {
-    return;
-  }
-  const stations = exportStationOrbits().filter(x => !x.orbit);
-  if (stations.length === 0) {
-    gatewayMessage.value = '所有空间站已有轨道，无需自动浏览';
-    return;
-  }
-  autoBrowsing.value = true;
-  autoBrowseDone.value = 0;
-  autoBrowseTotal.value = stations.length;
-  autoBrowseLog.value = [];
-  try {
-    for (const st of stations) {
-      const done = ref(false);
-      const timeout = window.setTimeout(() => {
-        done.value = true;
-      }, 25000);
-      let ok = false;
-      try {
-        // 打开星系详情并提交命令（竞速保护：地图渲染慢时不等窗口，DATA_DATA 已触发）。
-        await Promise.race([
-          showBuffer(`MS ${st.systemId}`, {
-            autoClose: true,
-            closeWhen: done,
-          }).catch(() => {
-            done.value = true;
-          }),
-          sleep(10000),
-        ]);
-        // 轮询轨道积累（DATA_DATA 到达即完成；done=true 让 closeWhenDone 关闭窗口）。
-        while (!done.value && !hasStationOrbit(st.naturalId)) {
-          await sleep(400);
-        }
-        ok = hasStationOrbit(st.naturalId);
-      } catch {
-        // 单站失败不中断：标记完成，继续下一站。
-      } finally {
-        done.value = true;
-        window.clearTimeout(timeout);
-      }
-      autoBrowseDone.value++;
-      autoBrowseLog.value = [
-        ...autoBrowseLog.value,
-        ok
-          ? `${st.naturalId}（${st.systemId}）✓ 轨道已积累`
-          : `${st.naturalId}（${st.systemId}）未获得轨道`,
-      ];
+// 自动浏览星系（不止空间站）：逐个打开目标星系的星系详情（游戏命令
+// `MS <systemId>`，Map: Star System），客户端自动请求 DATA_DATA["systems", id]，
+// orbit.ts 监听积累该星系全部数据——恒星质量 + 行星/空间站轨道（celestialBodies），
+// 不只空间站。DATA_DATA 到达后自动关闭窗口。FIO 无空间站数据，这是唯一能离线
+// 补全空间站轨道的方式（模拟用户浏览星系，符合"插件不主动请求数据"约束）。
+// 在计算时调用：起终点星系阻塞等待（保证本次计算 STL 起降距离可用），
+// 其余无轨道空间站的归属星系后台渐进（不阻塞，为后续计算积累）。
+async function browseSystems(systemIds: string[]): Promise<string[]> {
+  const seen = new Set<string>();
+  const list: string[] = [];
+  for (const id of systemIds) {
+    const key = id.trim().toUpperCase();
+    if (key !== '' && !seen.has(key)) {
+      seen.add(key);
+      list.push(key);
     }
-    gatewayMessage.value = `自动浏览完成：${autoBrowseDone.value}/${autoBrowseTotal.value}；可点「导出空间站」获取最新数据`;
-  } finally {
-    autoBrowsing.value = false;
   }
+  const browsed: string[] = [];
+  for (const systemId of list) {
+    // 本会话已浏览过（DATA_DATA 已积累）：跳过，避免重复打开窗口。
+    if (hasSystemData(systemId)) {
+      browsed.push(systemId);
+      continue;
+    }
+    const done = ref(false);
+    const timeout = window.setTimeout(() => {
+      done.value = true;
+    }, 25000);
+    let ok = false;
+    try {
+      // 打开星系详情并提交命令（竞速保护：地图渲染慢时不等窗口，DATA_DATA 已触发）。
+      await Promise.race([
+        showBuffer(`MS ${systemId}`, {
+          autoClose: true,
+          closeWhen: done,
+        }).catch(() => {
+          done.value = true;
+        }),
+        sleep(10000),
+      ]);
+      // 轮询数据积累（DATA_DATA 到达即完成；done=true 让 closeWhenDone 关闭窗口）。
+      while (!done.value && !hasSystemData(systemId)) {
+        await sleep(400);
+      }
+      ok = hasSystemData(systemId);
+    } catch {
+      // 单星系失败不中断：标记完成，继续下一个。
+    } finally {
+      done.value = true;
+      window.clearTimeout(timeout);
+    }
+    if (ok) {
+      browsed.push(systemId);
+    }
+  }
+  return browsed;
+}
+
+// 收集计算需要浏览的星系：起终点所在星系（关键，阻塞）+ 无轨道空间站的归属星系（后台）。
+// 不止空间站：起终点为行星/星系时同样浏览其星系，积累恒星质量与行星轨道。
+function collectBrowseTargets(
+  from: string,
+  to: string,
+): {
+  critical: string[];
+  background: string[];
+} {
+  const critical = new Set<string>();
+  const fromSys = resolveSystemId(from);
+  const toSys = resolveSystemId(to);
+  if (fromSys !== undefined) {
+    critical.add(fromSys);
+  }
+  if (toSys !== undefined) {
+    critical.add(toSys);
+  }
+  const background = new Set<string>();
+  for (const st of exportStationOrbits()) {
+    if (!st.orbit) {
+      background.add(st.systemId);
+    }
+  }
+  return {
+    critical: [...critical],
+    background: [...background].filter(s => !critical.has(s)),
+  };
 }
 
 // ---- 燃料性价比计算器 ----
@@ -357,6 +382,16 @@ async function planAndCompute() {
     calcMessage.value = '请选择停靠中的飞船';
     return;
   }
+  // 计算时自动浏览星系（无需手动按钮）：起终点星系阻塞获取轨道/恒星质量数据，
+  // 其余无轨道空间站星系后台渐进。浏览后可离线预测起降位置，STL 距离更准。
+  const targets = collectBrowseTargets(from, to);
+  if (targets.critical.length > 0) {
+    calcMessage.value = `正在获取起终点星系轨道数据（${targets.critical.join('、')}）…`;
+    await browseSystems(targets.critical);
+  }
+  if (targets.background.length > 0) {
+    void browseSystems(targets.background);
+  }
   const planned = planRoutes(from, to);
   const route = useGateway.value ? (planned.gateway ?? planned.natural) : planned.natural;
   if (!route) {
@@ -519,26 +554,12 @@ function fixed2v(value: number) {
           @click="exportStations">
           导出空间站
         </PrunButton>
-        <PrunButton
-          neutral
-          :disabled="autoBrowsing"
-          data-tooltip="自动逐个打开无轨道空间站的归属星系（游戏命令 MS &lt;星系&gt;），客户端自动请求 DATA_DATA，orbit.ts 积累空间站轨道。完成后可「导出空间站」获取数据。"
-          @click="autoBrowseSystems">
-          {{ autoBrowsing ? `浏览中 ${autoBrowseDone}/${autoBrowseTotal}…` : '自动浏览星系' }}
-        </PrunButton>
       </div>
       <div v-if="exporting" :class="$style.exportBar">
         <ProgressBar :value="exportDone" :max="exportTotal || 1" />
         <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
       </div>
-      <div v-if="autoBrowsing" :class="$style.exportBar">
-        <ProgressBar :value="autoBrowseDone" :max="autoBrowseTotal || 1" />
-        <span :class="$style.progress">{{ autoBrowseDone }}/{{ autoBrowseTotal }}</span>
-      </div>
       <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
-      <div v-if="autoBrowseLog.length > 0" :class="$style.exportLog">
-        <div v-for="(line, i) in autoBrowseLog" :key="i">{{ line }}</div>
-      </div>
       <div v-if="exportLog.length > 0" :class="$style.exportLog">
         <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
       </div>
