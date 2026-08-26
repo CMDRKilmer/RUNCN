@@ -95,6 +95,13 @@ export function getStationSystem(naturalId: string): string | undefined {
   return stationSystem.get(naturalId.toUpperCase());
 }
 
+// 空间站是否已持有轨道根数（predictPosition 可用）。
+// FTC 自动浏览星系时轮询此值，确认 DATA_DATA 积累完成后关闭窗口。
+export function hasStationOrbit(stationNaturalId: string): boolean {
+  const orbit = planets.get(stationNaturalId.toUpperCase());
+  return orbit !== undefined && orbit.semiMajorAxis > 0;
+}
+
 function persist() {
   const data = {
     motionFactor,
