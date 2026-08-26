@@ -52,6 +52,8 @@ Each planet has properties affecting base viability. Any extremes require specia
 - **Pressure**: SEA for low, HSE for high.
 - **Type**: Rocky or gas giant. Rocky require MCG, gas giants require AEF.
 
+FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星重力还影响**飞船着陆燃料**（FTC 已接入）：着陆 ≈ 船体系数 × (24.2 + 18.4×g)（6/7 实测点误差 <0.5u，Boucher/Eos 同重力着陆相同）；气压/温度/日光不影响着陆燃料，但极厚大气（P≫1，如 Euu P=5.72）可能例外（待重测）。
+
 Additionally, planets have properties affecting production:
 - **Fertility**: Affects FRM/ORC efficiency. Range roughly -33% to +33%. Fully infertile planets cannot build farms.
 - **Resources**: Extractable minerals, ores, liquids, gases. Different planetary conditions determine extraction building type (RIG for liquids, EXT for solids, COL for gases).
