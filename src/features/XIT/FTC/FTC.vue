@@ -333,7 +333,7 @@ async function planAndCompute() {
   calcMessage.value =
     `最优方案：燃料滑块 ${b.fuel} / 反应堆 ${b.reactor}，预计 ${formatDuration(b.totalHours * 3600000)}，总成本 ${formatCurrency(b.totalCost)}` +
     radiusText +
-    (useGateway.value && metrics.gatewayCount > 0
+    (useGateway.value && metrics.gwCount > 0
       ? '（网关航线：FTL 燃料为 0）'
       : useGateway.value
         ? '（未找到可用网关，已按自然航线计算）'
