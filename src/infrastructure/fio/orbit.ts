@@ -2,7 +2,10 @@ import { ref } from 'vue';
 import { starsStore } from '@src/infrastructure/prun-api/data/stars';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
-import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import {
+  getSystemLineFromAddress,
+  getEntityNaturalIdFromAddress,
+} from '@src/infrastructure/prun-api/data/addresses';
 import { gameClockOffsetMs } from '@src/infrastructure/prun-api/data/system-bodies';
 import { sleep } from '@src/utils/sleep';
 
@@ -53,6 +56,9 @@ const stars = new Map<string, StarInfo>();
 let motionFactor = DEFAULT_MOTION_FACTOR;
 // 天体 → 星系 naturalId 关联（用于中心质量解析）。
 const bodySystem = new Map<string, string>();
+// 内置空间站 → 星系映射（public/json/stations.json；FIO 无空间站数据端点，
+// 轨道/归属来自游戏内星系详情 DATA_DATA 的 celestialBodies，导出后内置）。
+const stationSystem = new Map<string, string>();
 
 const inflight = new Map<string, Promise<void>>();
 
@@ -83,6 +89,11 @@ export const orbitStore = {
     return planets.size;
   },
 };
+
+// 内置空间站 → 星系映射查询（FTC 离线解析空间站起终点；未内置返回 undefined）。
+export function getStationSystem(naturalId: string): string | undefined {
+  return stationSystem.get(naturalId.toUpperCase());
+}
 
 function persist() {
   const data = {
@@ -142,6 +153,16 @@ interface BundledStar {
   n: string;
   m: number;
 }
+// 内置空间站（public/json/stations.json）：键=空间站 naturalId（大写），
+// s=所属星系（空间站绕恒星公转），a/e/i/o/p=轨道根数（与行星同构，mass=0）。
+interface BundledStation {
+  s: string;
+  a: number;
+  e: number;
+  i: number;
+  o: number;
+  p: number;
+}
 
 // 启动时加载内置数据作为种子：首次使用/无缓存时提供全量离线轨道与恒星质量。
 // localStorage 缓存（在线积累）优先，内置仅填充缺失项。
@@ -170,6 +191,25 @@ async function loadBundledData() {
       const key = s.n.toUpperCase();
       if (!stars.has(key)) {
         stars.set(key, { mass: s.m });
+      }
+    }
+    // 内置空间站（轨道 + 归属星系）：FIO 无空间站数据，轨道来自游戏星系详情
+    // celestialBodies 导出；填充 planets Map（mass=0）供 predictPosition，
+    // stationSystem 供 resolveParent / FTC 离线解析空间站起终点。
+    const stationResp = await fetch(config.url.stationData);
+    const bundledStations = (await stationResp.json()) as Record<string, BundledStation>;
+    for (const [id, st] of Object.entries(bundledStations ?? {})) {
+      const key = id.toUpperCase();
+      stationSystem.set(key, st.s.toUpperCase());
+      if (!planets.has(key) && st.a !== undefined && st.a > 0) {
+        planets.set(key, {
+          semiMajorAxis: st.a,
+          eccentricity: st.e ?? 0,
+          inclination: st.i ?? 0,
+          rightAscension: st.o ?? 0,
+          periapsis: st.p ?? 0,
+          mass: 0,
+        });
       }
     }
     orbitVersion.value++;
@@ -309,6 +349,11 @@ async function fetchMotionFactor() {
 function resolveParent(naturalId: string): { id: string; isStar: boolean } | undefined {
   const key = naturalId.toUpperCase();
   // 空间站：绕所属星系恒星公转（星系详情 celestialBodies 提供其轨道根数）。
+  // 内置映射优先（离线可用），其次游戏内 stationsStore（defaultStations + 访问过的站）。
+  const bundledSystem = stationSystem.get(key);
+  if (bundledSystem !== undefined) {
+    return { id: bundledSystem, isStar: true };
+  }
   const station = stationsStore.getByNaturalId(key);
   if (station !== undefined) {
     const systemLine = getSystemLineFromAddress(station.address);
@@ -569,6 +614,70 @@ export function prefetchAllOrbits() {
 }
 
 // ---- 全量行星参数导出 ----
+
+// 已积累/内置空间站的轨道 + 归属星系（FTC 面板导出，供 build-station-data.mjs 精简内置）。
+// 空间站识别：naturalId 全大写（行星均带小写后缀，如 VH-331g），且有关联星系。
+// orbit 缺失只说明仅有归属映射（defaultStations），无轨道根数。
+export interface StationOrbitExport {
+  naturalId: string;
+  systemId: string;
+  orbit?: {
+    semiMajorAxis: number;
+    eccentricity: number;
+    inclination: number;
+    rightAscension: number;
+    periapsis: number;
+  };
+}
+
+export function exportStationOrbits(): StationOrbitExport[] {
+  const out: StationOrbitExport[] = [];
+  const seen = new Set<string>();
+  for (const [key, orbit] of planets) {
+    // 行星 naturalId 均带小写字母后缀（如 VH-331g）；空间站全大写（HRT）。
+    if (/[a-z]/.test(key)) {
+      continue;
+    }
+    const systemId = stationSystem.get(key) ?? bodySystem.get(key);
+    if (systemId === undefined) {
+      continue;
+    }
+    seen.add(key);
+    out.push({
+      naturalId: key,
+      systemId,
+      orbit: {
+        semiMajorAxis: orbit.semiMajorAxis,
+        eccentricity: orbit.eccentricity,
+        inclination: orbit.inclination,
+        rightAscension: orbit.rightAscension,
+        periapsis: orbit.periapsis,
+      },
+    });
+  }
+  // 仅有归属映射（无轨道）的空间站：内置 stationSystem。
+  for (const [key, systemId] of stationSystem) {
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ naturalId: key, systemId });
+    }
+  }
+  // defaultStations / 游戏内访问过的空间站（仅归属，无轨道）：地址 SYSTEM 行。
+  for (const station of stationsStore.all.value ?? []) {
+    const naturalId = getEntityNaturalIdFromAddress(station.address);
+    if (naturalId === undefined || seen.has(naturalId.toUpperCase())) {
+      continue;
+    }
+    const systemId = getSystemLineFromAddress(station.address)?.entity.naturalId;
+    if (systemId === undefined) {
+      continue;
+    }
+    seen.add(naturalId.toUpperCase());
+    out.push({ naturalId, systemId });
+  }
+  out.sort((a, b) => a.naturalId.localeCompare(b.naturalId));
+  return out;
+}
 
 // FIO 完整行星参数（一次性批量拉取 + 本地导出）。
 export interface FioPlanetFull {

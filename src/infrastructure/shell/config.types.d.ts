@@ -9,5 +9,6 @@ interface RefinedPrunConfig {
     starMasses: string;
     starConnections: string;
     planetEnv: string;
+    stationData: string;
   };
 }

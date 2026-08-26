@@ -1,4 +1,5 @@
 import { routesStore } from '@src/infrastructure/fio/routes';
+import { predictPosition, gameNow } from '@src/infrastructure/fio/orbit';
 import { systemBodiesStore } from '@src/infrastructure/prun-api/data/system-bodies';
 import { getStarPosition, distance3d, resolveSystemId } from './route-model';
 
@@ -158,14 +159,19 @@ export function planRoutes(
 }
 
 // 行星/空间站到本星恒星的近似距离（游戏坐标单位，与恒星坐标同源）。
+// 优先实时观测（SFC 飞行计划标定，最准）；无观测时用轨道离线预测
+// （行星轨道全量内置；空间站轨道内置后亦可离线预测，无需游戏内观测）。
 export function liftOffKm(bodyNatural: string | undefined): number | undefined {
   if (bodyNatural === undefined) {
     return undefined;
   }
   const sys = resolveSystemId(bodyNatural);
   const star = sys !== undefined ? getStarPosition(sys) : undefined;
-  const pos = systemBodiesStore.getPosition(bodyNatural);
-  if (star !== undefined && pos !== undefined) {
+  if (star === undefined) {
+    return undefined;
+  }
+  const pos = systemBodiesStore.getPosition(bodyNatural) ?? predictPosition(bodyNatural, gameNow());
+  if (pos !== undefined) {
     return distance3d(pos, star);
   }
   return undefined;

@@ -193,7 +193,8 @@ function conditionFactor(condition: number): number {
 //   更高直接证伪阈值）；"G 重力模型"是距离与 g/P 巧合相关的假象。
 // ⚠️ 已知局限：罐模型仅对自然跃迁航线成立；网关航线（跃门）的离港/进近显著更低
 //   （WCB Sabaton 进近 117/Mimar 90 vs 模型 171.5），结构不同待研究。
-// 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + 进近差 + 着陆 + 起飞（行星出发时）
+// 跨星系（有跃迁）航线：stlFuel = 0.98×罐×f + 进近差 + 着陆 + 起飞。
+// 空间站无大气：到站无着陆、出发无起飞（起降段相互独立，R 缺失只影响自身段）。
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
 const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
@@ -203,7 +204,6 @@ const STL_TAKEOFF_FUEL_C = 0.455; // 起飞燃料系数：fuel = C×√(R_km × 
 const STL_TAKEOFF_P_EXP = 0.2; // 大气延长起飞段指数（起飞距离 = 0.62×R×P^0.2，厚大气冲出更长）
 const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船）
 const STL_LANDING_G_EXP = 0.6; // 船体系数 G 指数：HCB(G15) 1.456≈(15/8)^0.6、WCB(G8) 1.0
-const STL_SEGMENTS_EXTRA = 40; // 无重力数据时的回退近似（旧常数）
 
 // 着陆船体系数：新手船/WCB(G=8)为 1.0，HCB(G=15)实测 1.456 ≈ (15/8)^0.6。
 // 新手船实测 0.94 偏低 6%（特例，疑轻船效应），G 力从蓝图读取（maxGFactor），无需每船校准。
@@ -220,13 +220,11 @@ export interface ModelSettings {
   stlTimeC?: number;
   stlFuelC?: number;
   ftlFuelC?: number;
-  // 跨星系 STL 分段燃料的进近差值+着陆近似（可校准）。
-  stlSegmentExtra?: number;
-  // 目的地行星半径（km，FIO /planet/{id}；undefined 时用 stlSegmentExtra 回退）。
+  // 目的地行星半径（km；空间站/未知→undefined → 无着陆段）。
   landingRadius?: number;
   // 目的地行星气压（大气缩短着陆段；P^-0.2，缺省按 1）。
   landingPressure?: number;
-  // 出发行星半径（km；定义时计入起飞段，行星出发特有）。
+  // 出发行星半径（km；空间站/未知→undefined → 无起飞段）。
   departureRadius?: number;
   // 出发行星气压（大气延长起飞段；P^+0.2，缺省按 1）。
   departurePressure?: number;
@@ -256,9 +254,10 @@ export function computeFuelOption(
   const d = metrics.stlDistanceKm;
   const v = stlSpeedFor(ship, fuel);
   const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
-  // STL 燃料：跨星系（有跃迁）用罐模型（离港+进近 = 0.98×罐×f + 进近差 + 着陆 + 起飞）。
-  // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)；起飞（行星出发特有）= 船体系数 × 0.455 × √(半径_km × P^+0.2)
-  // （FIO 半径/气压查询，失败回退旧常数；⚠️罐模型仅对自然跃迁航线成立，网关航线偏低。）
+  // STL 燃料：跨星系（有跃迁）用罐模型。
+  // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（仅行星目的地，有大气减速）
+  // 起飞 = 船体系数 × 0.455 × √(半径_km × P^+0.2)（仅行星出发地，有大气冲出）
+  // 空间站无大气：到站无着陆、出发无起飞；两段相互独立（R 缺失只影响自身段）。
   // 同星系用 C_F×f×d（转移段，已校准）。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -266,35 +265,28 @@ export function computeFuelOption(
   let stlFuel: number;
   if (isCrossSystem && tank !== undefined && tank > 0) {
     const R = settings.landingRadius;
-    if (R !== undefined && R > 0) {
-      const lf = settings.stlLandingFactor ?? stlLandingFactor(ship);
-      const P =
-        settings.landingPressure !== undefined && settings.landingPressure > 0
-          ? settings.landingPressure
-          : 1;
-      const landing = STL_LANDING_DIST_C * Math.sqrt(R * Math.pow(P, -STL_LANDING_P_EXP));
-      // 出发地为行星时计入起飞段（厚大气→起飞更长）。
-      const R0 = settings.departureRadius;
-      const takeoff =
-        R0 !== undefined && R0 > 0
-          ? STL_TAKEOFF_FUEL_C *
-            Math.sqrt(
-              R0 *
-                Math.pow(
-                  settings.departurePressure !== undefined && settings.departurePressure > 0
-                    ? settings.departurePressure
-                    : 1,
-                  STL_TAKEOFF_P_EXP,
-                ),
-            )
-          : 0;
-      stlFuel =
-        STL_TANK_FUEL_COEF * tank * fuel +
-        (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
-        lf * (landing + takeoff);
-    } else {
-      stlFuel = STL_TANK_FUEL_COEF * tank * fuel + (settings.stlSegmentExtra ?? STL_SEGMENTS_EXTRA);
-    }
+    const R0 = settings.departureRadius;
+    const hasLanding = R !== undefined && R > 0;
+    const hasTakeoff = R0 !== undefined && R0 > 0;
+    const lf = settings.stlLandingFactor ?? stlLandingFactor(ship);
+    const P =
+      settings.landingPressure !== undefined && settings.landingPressure > 0
+        ? settings.landingPressure
+        : 1;
+    const landing = hasLanding
+      ? STL_LANDING_DIST_C * Math.sqrt(R * Math.pow(P, -STL_LANDING_P_EXP))
+      : 0;
+    const P0 =
+      settings.departurePressure !== undefined && settings.departurePressure > 0
+        ? settings.departurePressure
+        : 1;
+    const takeoff = hasTakeoff
+      ? STL_TAKEOFF_FUEL_C * Math.sqrt(R0 * Math.pow(P0, STL_TAKEOFF_P_EXP))
+      : 0;
+    stlFuel =
+      STL_TANK_FUEL_COEF * tank * fuel +
+      (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
+      lf * (landing + takeoff);
   } else {
     stlFuel = d !== undefined ? cF * fuel * d : 0;
   }

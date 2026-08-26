@@ -9,7 +9,12 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getPrice } from '@src/infrastructure/fio/cx';
-import { orbitStore, prefetchAllOrbits, exportAllPlanetData } from '@src/infrastructure/fio/orbit';
+import {
+  orbitStore,
+  prefetchAllOrbits,
+  exportAllPlanetData,
+  exportStationOrbits,
+} from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
@@ -83,6 +88,20 @@ function exportGateways() {
     return;
   }
   downloadFile(data, 'prun-gateways.json', true);
+}
+// 导出已积累的空间站数据（轨道 + 归属星系），供 build-station-data.mjs 精简内置。
+// FIO 无空间站数据端点，空间站轨道只能靠游戏内星系详情（DATA_DATA celestialBodies）
+// 与访问过的空间站（stationsStore）积累；导出后内置到 public/json/stations.json，
+// FTC 即可离线解析空间站起终点并预测其位置。
+function exportStations() {
+  const data = exportStationOrbits();
+  if (data.length === 0) {
+    gatewayMessage.value =
+      '暂无空间站数据：请先在游戏里打开含空间站的星系详情（积累轨道），或访问空间站后重试';
+    return;
+  }
+  downloadFile(data, 'prun-stations.json', true);
+  gatewayMessage.value = `已导出 ${data.length} 个空间站（轨道+归属星系）；运行 build-station-data.mjs 精简后内置`;
 }
 
 // ---- 燃料性价比计算器 ----
@@ -279,7 +298,8 @@ async function planAndCompute() {
     return;
   }
   const metrics = routeMetrics(route);
-  // 跨星系航线的起/终点行星环境（FIO /planet/{id}）：着陆（半径+气压）与起飞段（出发行星）。
+  // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
+  // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
   const [landingEnv, departEnv] = await Promise.all([
     isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
@@ -426,6 +446,12 @@ function fixed2v(value: number) {
           data-tooltip="导出当前已加载的网关数据（naturalId/名称/所属星系/行星/状态）为 JSON。"
           @click="exportGateways">
           导出网关
+        </PrunButton>
+        <PrunButton
+          neutral
+          data-tooltip="从已积累数据导出空间站轨道+归属星系（FIO 无空间站数据，需先在游戏里打开含空间站的星系详情/访问空间站积累）。导出后运行 build-station-data.mjs 精简，即可离线预测空间站位置。"
+          @click="exportStations">
+          导出空间站
         </PrunButton>
       </div>
       <div v-if="exporting" :class="$style.exportBar">

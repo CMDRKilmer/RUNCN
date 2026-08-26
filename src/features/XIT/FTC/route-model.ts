@@ -1,5 +1,6 @@
 import { starsStore, getStarNaturalId } from '@src/infrastructure/prun-api/data/stars';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
+import { getStationSystem } from '@src/infrastructure/fio/orbit';
 import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 
 // 航线几何基础（XIT FTC 燃料计算器使用）。
@@ -8,7 +9,8 @@ import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addr
 
 // 将任意航点 naturalId 解析为所属星系 id：恒星级 id 直接命中，
 // 空间站查其地址的 SYSTEM 行，行星去掉一颗卫星后缀，卫星再剥离
-// 小写字母开头的后缀。
+// 小写字母开头的后缀。空间站 → 星系映射优先查内置数据（FIO 无空间站
+// 数据，离线可用），其次游戏内 stationsStore（defaultStations + 访问过的站）。
 export function resolveSystemId(naturalId: string): string | undefined {
   const upper = naturalId.trim().toUpperCase();
   if (upper === '') {
@@ -17,6 +19,10 @@ export function resolveSystemId(naturalId: string): string | undefined {
   const star = starsStore.getByNaturalId(upper);
   if (star) {
     return getStarNaturalId(star);
+  }
+  const bundledSystem = getStationSystem(upper);
+  if (bundledSystem !== undefined) {
+    return bundledSystem;
   }
   const station = stationsStore.getByNaturalId(upper);
   const systemLine = station ? getSystemLineFromAddress(station.address) : undefined;
