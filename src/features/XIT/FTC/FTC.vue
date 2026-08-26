@@ -6,80 +6,25 @@ import TextInput from '@src/components/forms/TextInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
-import { detectedPositionMessages } from '@src/infrastructure/prun-api/data/system-bodies';
-import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { getPrice } from '@src/infrastructure/fio/cx';
-import { ensureOrbitData } from '@src/infrastructure/fio/orbit';
-import { convertToPlanetNaturalId } from '@src/core/planet-natural-id';
-import { isEmpty } from 'ts-extras';
-import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
-import {
-  runSweep,
-  captureBodyPositions,
-  captureAnchor,
-  SweepCombo,
-  SweepOutcome,
-} from './flight-query';
 import { orbitStore, prefetchAllOrbits, exportAllPlanetData } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
-import {
-  calibrate,
-  estimateRoute,
-  scaleCalibration,
-  Calibration,
-  RouteResult,
-} from './route-model';
-import {
-  planRoutes,
-  optimizeRoute,
-  routeTime,
-  DEFAULT_FUELS,
-  DEFAULT_REACTORS,
-  PlannedRoute,
-  FuelPlan,
-  RouteTime,
-} from './route-planner';
-import { anchorFromPlan, anchorMatchesRoute, getAnchor, saveAnchor, ShipAnchor } from './anchor';
+import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
+import { planRoutes, routeMetrics, PlannedRoute } from './route-planner';
+import { scanFuelOptions, FuelOption, ShipPerformance } from './fuel-model';
 import $style from './FTC.module.css';
 
-// XIT FTC：飞行时间与燃料参数性价比计算器。
-// 两种计算模式：
-// - 本地计算（默认）：一份「标定计划」+ 飞船性能物理关系（scaleCalibration）
-//   本地推算所有参数组合，不写滑块。标定是针对「当前飞船位置 → 首航点」
-//   这条航线的服务器精确结果：航线一致（含被动捕获/上次扫描）时复用缓存，
-//   否则打开一次离屏 SFC 窗口重新捕获（只选目的地，不写滑块）。
-// - 服务器扫描：离屏 SFC 窗口逐组写入滑块获得服务器精确结果。
+// XIT FTC：飞船性能驱动的飞行燃料性价比计算器。
+// - 输入起终点 + 网关开关（玩家自选），规划航线（自然/网关）
+// - 用飞船实时性能（质量/加速度/船体条件）+ 经验模型扫描燃料/反应堆滑块
+// - 输出最优最性价比的燃料消耗方案（燃料费 + 时间价值）
+// - 保留星球/网关数据获取与导出工具
 
-interface ResultRow {
-  combo: SweepCombo;
-  route?: RouteResult;
-  plan?: PrunApi.FlightPlan;
-  fuelCost?: number;
-  damageCost?: number;
-  timeCost?: number;
-  score?: number;
-  error?: string;
-}
-
-const MAX_COMBOS = 30;
-
-const registration = ref('');
-const mode = ref<'local' | 'server'>('local');
-const waypointsText = ref('');
-// 默认滑块组合：燃料含 0.05（最省燃料档，同星系/短途常用），反应堆默认档。
-const fuelText = ref('0.05,0.1,0.3,0.5,1');
-const reactorText = ref('0.25,0.5,1');
-
-const stlFuelPrice = ref<number | undefined>(undefined);
-const ftlFuelPrice = ref<number | undefined>(undefined);
-const damageRate = ref<number | undefined>(0);
-const timeValue = ref<number | undefined>(0);
-
-const running = ref(false);
-const cancelRequested = ref(false);
+// ---- 数据工具（保留）----
 const prefetching = ref(false);
 async function prefetchOrbits() {
   prefetching.value = true;
@@ -93,109 +38,6 @@ const exporting = ref(false);
 const exportDone = ref(0);
 const exportTotal = ref(0);
 const exportLog = ref<string[]>([]);
-const gatewayMessage = ref<string | undefined>(undefined);
-// 网关数据在打开星图（星系地图）后自动下发（DATA_DATA[gateways]）；
-// 网关跃迁连接（两端星系）在出现 JUMP_GATEWAY 飞行计划段后自动提取。
-// 这里提供状态检查与导出。
-function checkGateways() {
-  const n = routesStore.gatewayCount;
-  const c = routesStore.gatewayConnectionCount;
-  if (n > 0 || c > 0) {
-    const parts: string[] = [];
-    if (n > 0) {
-      parts.push(`已加载 ${n} 个网关（打开星图后自动读取）`);
-    }
-    if (c > 0) {
-      parts.push(`已提取 ${c} 条网关连接（飞行计划 JUMP_GATEWAY 段自动记录）`);
-    }
-    gatewayMessage.value = parts.join('；') + '，可直接导出';
-    return;
-  }
-  gatewayMessage.value =
-    '暂无网关数据：请打开一次星图（星系地图）读取网关实体，或执行一次网关飞行（自动记录网关连接）';
-}
-function exportGateways() {
-  const data = routesStore.getAllGateways();
-  if (data.length === 0) {
-    gatewayMessage.value = '暂无网关数据：请先打开一次星图（星系地图），再导出';
-    return;
-  }
-  downloadFile(data, 'prun-gateways.json', true);
-}
-
-// ---- 航线规划与燃料优化（自然 vs 网关）----
-const routeFrom = ref('');
-const routeTo = ref('');
-const routeMessage = ref<string | undefined>(undefined);
-const routePlans = ref<RoutePlanResult[]>([]);
-
-interface RoutePlanResult {
-  label: string;
-  route: PlannedRoute;
-  best: FuelPlan;
-  time: RouteTime;
-}
-
-// 规划起终点航线（自然/网关），并对每条航线扫描滑块求综合成本最低方案。
-function planAndOptimize() {
-  routeMessage.value = undefined;
-  routePlans.value = [];
-  if (!routeFrom.value.trim() || !routeTo.value.trim()) {
-    routeMessage.value = '请输入起点和终点';
-    return;
-  }
-  if (!ship.value) {
-    routeMessage.value = '请选择飞船';
-    return;
-  }
-  const anchor = getAnchor(registration.value);
-  if (!anchor) {
-    routeMessage.value =
-      '无标定锚点：以下为纯时间估算（燃料/成本不可用），建议先本地计算一次建立飞船燃料标定';
-  }
-  const result = planRoutes(routeFrom.value, routeTo.value);
-  if (!result.natural) {
-    routeMessage.value = '无法解析起终点，或航线不可达（需恒星位置数据，请先打开星图）';
-    return;
-  }
-  const candidates = [result.natural, result.gateway].filter(
-    (x): x is PlannedRoute => x !== undefined,
-  );
-  const plans: RoutePlanResult[] = [];
-  for (const route of candidates) {
-    const best =
-      optimizeRoute(route, {
-        anchor,
-        shipMass: ship.value?.mass,
-        stlPrice: stlFuelPrice.value ?? 0,
-        ftlPrice: ftlFuelPrice.value ?? 0,
-        timeValue: timeValue.value ?? 0,
-        fuels: DEFAULT_FUELS,
-        reactors: DEFAULT_REACTORS,
-      })[0] ?? undefined;
-    if (best !== undefined) {
-      plans.push({ label: route.label, route, best, time: routeTime(route) });
-    }
-  }
-  if (plans.length === 0) {
-    routeMessage.value = '航线规划失败';
-    return;
-  }
-  plans.sort((a, b) => a.best.totalCost - b.best.totalCost);
-  routePlans.value = plans;
-  const best = plans[0];
-  const natural = plans.find(p => p.label === '自然');
-  const needsFtl =
-    natural !== undefined && natural.route.gatewayCount === 0 && !natural.best.ftlCalibrated;
-  routeMessage.value =
-    `推荐：${best.label}航线，预计 ${formatDuration(best.best.totalHours * 3600000)}` +
-    (best.best.calibrated
-      ? `（燃料 ${best.best.fuel} / 反应堆 ${best.best.reactor}）`
-      : '（纯时间估算）') +
-    (needsFtl
-      ? '。注意：当前标定锚点为网关航线，自然航线 FTL 燃料无法估算——先本地计算一条自然航线获取 FTL 标定，或设置 FTL 燃料单价后再对比。'
-      : '');
-}
 async function exportPlanets() {
   exporting.value = true;
   exportDone.value = 0;
@@ -216,25 +58,75 @@ async function exportPlanets() {
     exporting.value = false;
   }
 }
-const progressDone = ref(0);
-const progressTotal = ref(0);
-const errorMessage = ref<string | undefined>(undefined);
-const rows = ref<ResultRow[]>([]);
-const selected = ref<ResultRow | undefined>(undefined);
-const probeMessage = ref<string | undefined>(undefined);
-const probing = ref(false);
-const anchorMessage = ref<string | undefined>(undefined);
-// 对照诊断用：当前生效的标定锚点（本地模式）。展示其原始服务器值，
-// 与当前飞船性能并列，用于定位本地计算与服务器不一致的来源。
-const activeAnchor = ref<ShipAnchor | undefined>(undefined);
+const gatewayMessage = ref<string | undefined>(undefined);
+function checkGateways() {
+  const n = routesStore.gatewayCount;
+  const c = routesStore.gatewayConnectionCount;
+  if (n > 0 || c > 0) {
+    const parts: string[] = [];
+    if (n > 0) {
+      parts.push(`已加载 ${n} 个网关（打开星图后自动读取）`);
+    }
+    if (c > 0) {
+      parts.push(`已提取 ${c} 条网关连接（飞行计划/名称配对自动记录）`);
+    }
+    gatewayMessage.value = parts.join('；') + '，可直接导出';
+    return;
+  }
+  gatewayMessage.value =
+    '暂无网关数据：请打开一次星图（星系地图）读取网关实体，或执行一次网关飞行（自动记录网关连接）';
+}
+function exportGateways() {
+  const data = routesStore.getAllGateways();
+  if (data.length === 0) {
+    gatewayMessage.value = '暂无网关数据：请先打开一次星图（星系地图），再导出';
+    return;
+  }
+  downloadFile(data, 'prun-gateways.json', true);
+}
+
+// ---- 燃料性价比计算器 ----
+const registration = ref('');
+const routeFrom = ref('');
+const routeTo = ref('');
+// 网关开关：玩家自选是否走网关跃迁（网关不耗 FTL 燃料，但可能收现金）。
+const useGateway = ref(false);
+const fuelText = ref('0.05,0.1,0.3,0.5,0.8,1');
+const reactorText = ref('0.25,0.5,0.75,1');
+const stlFuelPrice = ref<number | undefined>(undefined);
+const ftlFuelPrice = ref<number | undefined>(undefined);
+const timeValue = ref<number | undefined>(0);
 
 const dockedShips = computed(() =>
   (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
 );
-
 const ship = computed(() => shipsStore.getByRegistration(registration.value));
+// 蓝图性能（FTL 最大航速、STL 引擎类型）。
+const blueprintInfo = computed(() => {
+  const s = ship.value;
+  if (!s) {
+    return undefined;
+  }
+  const bp = blueprintsStore.getByNaturalId(s.blueprintNaturalId);
+  if (!bp) {
+    return undefined;
+  }
+  const ftlMaxSpeed =
+    bp.performance.ftlMaxSpeed > 0 ? bp.performance.ftlMaxSpeed * 3600 : undefined;
+  // 蓝图最大 G力过载因子（用于 STL v_cruise 经验公式）。
+  const maxGFactor = bp.performance.maxGFactor;
+  // 从 selections 中查 STL_ENGINE 选项。
+  let stlEngine: string | undefined;
+  for (const sel of bp.selections) {
+    if (sel.type === 'STL_ENGINE' && sel.amount > 0) {
+      stlEngine = sel.option;
+      break;
+    }
+  }
+  return { ftlMaxSpeed, stlEngine, maxGFactor };
+});
 
-// 从飞船燃料仓自动识别燃料材料 ticker。
+// 从飞船燃料仓自动识别燃料材料 ticker，用于自动填价。
 function storageTicker(storeId?: string | null) {
   if (!storeId) {
     return undefined;
@@ -243,13 +135,10 @@ function storageTicker(storeId?: string | null) {
   const item = store?.items.find(x => x.quantity?.material?.ticker !== undefined);
   return item?.quantity?.material.ticker;
 }
-
 const fuelTickers = computed(() => ({
   stl: storageTicker(ship.value?.stlFuelStoreId),
   ftl: storageTicker(ship.value?.ftlFuelStoreId),
 }));
-
-// 燃料单价自动填充（FIO 价格，按用户定价设置），仅在为空时填一次，允许手动覆盖。
 watchEffect(() => {
   if (stlFuelPrice.value === undefined && fuelTickers.value.stl !== undefined) {
     const price = getPrice(fuelTickers.value.stl);
@@ -271,262 +160,101 @@ function parseNumbers(text: string) {
     .map(x => parseFloat(x))
     .filter(x => Number.isFinite(x) && x > 0 && x <= 1);
 }
+const fuels = computed(() => parseNumbers(fuelText.value));
+const reactors = computed(() => parseNumbers(reactorText.value));
 
-const waypoints = computed(() =>
-  waypointsText.value
-    .split(/[,，\n]+/)
-    .map(x => x.trim())
-    .filter(x => x !== ''),
-);
-
-const combos = computed<SweepCombo[]>(() => {
-  const fuels = parseNumbers(fuelText.value);
-  const reactors = parseNumbers(reactorText.value);
-  const list: SweepCombo[] = [];
-  for (const fuel of fuels) {
-    if (reactors.length > 0) {
-      for (const reactor of reactors) {
-        list.push({ fuel, reactor });
-      }
-    } else {
-      list.push({ fuel });
-    }
+// 飞船实时性能 → 模型输入。
+function shipPerformance(): ShipPerformance | undefined {
+  const s = ship.value;
+  if (!s) {
+    return undefined;
   }
-  return list.slice(0, MAX_COMBOS);
-});
-
-function singleLegRoute(cal: Calibration, destination: string): RouteResult {
+  // FTL 最大航速优先从蓝图读取（pc/s → pc/h），无蓝图时回退到 2.26 pc/h。
+  const ftlMaxSpeed = blueprintInfo.value?.ftlMaxSpeed ?? 2.26;
   return {
-    legs: [
-      {
-        from: '(当前位置)',
-        to: destination,
-        precise: true,
-        durationMs: cal.totalMs,
-        stlFuel: cal.stlFuel,
-        ftlFuel: cal.ftlFuel,
-        damage: cal.damage,
-      },
-    ],
-    totalMs: cal.totalMs,
-    totalStlFuel: cal.stlFuel,
-    totalFtlFuel: cal.ftlFuel,
-    totalDamage: cal.damage,
-    allPrecise: true,
+    mass: s.mass,
+    operatingEmptyMass: s.operatingEmptyMass,
+    acceleration: s.acceleration,
+    ftlMaxSpeed,
+    stlFuelFlowRate: s.stlFuelFlowRate,
+    reactorPower: s.reactorPower,
+    condition: s.condition,
+    stlEngineOption: blueprintInfo.value?.stlEngine,
+    maxGFactor: blueprintInfo.value?.maxGFactor,
   };
 }
 
-function buildRowFromRoute(
-  combo: SweepCombo,
-  route: RouteResult,
-  plan?: PrunApi.FlightPlan,
-): ResultRow {
-  const fuelCost =
-    route.totalStlFuel * (stlFuelPrice.value ?? 0) + route.totalFtlFuel * (ftlFuelPrice.value ?? 0);
-  // 损伤按船体条件百分比计费（segment.damage 为 0–1 分数）。
-  const damageCost = route.totalDamage * 100 * (damageRate.value ?? 0);
-  const timeCost = (route.totalMs / 3600000) * (timeValue.value ?? 0);
-  return {
-    combo,
-    route,
-    plan,
-    fuelCost,
-    damageCost,
-    timeCost,
-    score: fuelCost + damageCost + timeCost,
-  };
+interface PlanResult {
+  label: string;
+  route: PlannedRoute;
+  metrics: ReturnType<typeof routeMetrics>;
+  options: FuelOption[];
+  best: FuelOption;
 }
 
-function buildRow(outcome: SweepOutcome): ResultRow {
-  if (!outcome.plan) {
-    return { combo: outcome.combo, error: outcome.error ?? '查询失败' };
-  }
-  const cal = calibrate(outcome.plan);
-  const route =
-    waypoints.value.length > 1
-      ? estimateRoute(cal, waypoints.value)
-      : singleLegRoute(cal, waypoints.value[0]);
-  return buildRowFromRoute(outcome.combo, route, outcome.plan);
-}
+const result = ref<PlanResult | undefined>(undefined);
+const calcMessage = ref<string | undefined>(undefined);
 
-// 本地计算：锚点是「当前航线」的服务器标定，首段直接使用标定数据
-// （精确），仅按参数组合缩放；续航段由 estimateRoute 距离外推（≈）。
-function buildLocalRow(anchor: ShipAnchor, combo: SweepCombo): ResultRow {
-  const cal = scaleCalibration(
-    anchor.cal,
-    { fuel: anchor.fuel, reactor: anchor.reactor ?? 1, mass: anchor.mass },
-    { fuel: combo.fuel, reactor: combo.reactor, mass: ship.value!.mass },
-  );
-  const route = estimateRoute(cal, waypoints.value);
-  return buildRowFromRoute(combo, route);
-}
-
-function anchorStatusLabel(anchor: ShipAnchor, source: string) {
-  const captured = new Date(anchor.capturedMs).toLocaleString();
-  const route = `${anchor.originEntity ?? '?'} → ${anchor.destinationEntity ?? '?'}`;
-  const massNote =
-    anchor.mass !== undefined && ship.value && ship.value.mass !== anchor.mass
-      ? ` · 装载修正 √(${fixed2(ship.value.mass)}/${fixed2(anchor.mass)})`
-      : '';
-  return `标定航线 ${route}：燃料 ${anchor.fuel} / 反应堆 ${anchor.reactor ?? '--'} · ${source}（${captured}）${massNote}`;
-}
-
-async function start() {
-  if (running.value) {
+function planAndCompute() {
+  calcMessage.value = undefined;
+  result.value = undefined;
+  const from = routeFrom.value.trim();
+  const to = routeTo.value.trim();
+  if (!from || !to) {
+    calcMessage.value = '请输入起点和终点';
     return;
   }
-  errorMessage.value = undefined;
-  anchorMessage.value = undefined;
-  selected.value = undefined;
-  if (!ship.value) {
-    errorMessage.value = '请选择飞船';
+  const perf = shipPerformance();
+  if (!perf) {
+    calcMessage.value = '请选择停靠中的飞船';
     return;
   }
-  if (waypoints.value.length === 0) {
-    errorMessage.value = '请至少输入一个目的地航点';
+  const planned = planRoutes(from, to);
+  const route = useGateway.value ? (planned.gateway ?? planned.natural) : planned.natural;
+  if (!route) {
+    calcMessage.value = '无法解析起终点或航线不可达（需恒星位置数据，请先打开星图）';
     return;
   }
-  if (combos.value.length === 0) {
-    errorMessage.value = '请输入有效的参数组合（0–1 之间）';
+  const metrics = routeMetrics(route);
+  const options = scanFuelOptions(perf, metrics, fuels.value, reactors.value, {
+    stlPrice: stlFuelPrice.value ?? 0,
+    ftlPrice: ftlFuelPrice.value ?? 0,
+    timeValue: timeValue.value ?? 0,
+  });
+  if (options.length === 0) {
+    calcMessage.value = '请输入有效的滑块组合（0–1 之间）';
     return;
   }
-
-  running.value = true;
-  cancelRequested.value = false;
-  progressDone.value = 0;
-  progressTotal.value = combos.value.length;
-  rows.value = [];
-  activeAnchor.value = undefined;
-
-  try {
-    // 预取航点行星的 FIO 轨道根数（含缓存），供多段估算的轨道位置预测。
-    // 失败不阻塞扫描（估算自动降级为静态坐标）。
-    await ensureOrbitData(waypoints.value).catch(() => undefined);
-
-    if (mode.value === 'local') {
-      // 本地计算：缓存锚点仅在航线匹配（飞船当前位置 + 首航点）时复用，
-      // 否则重新捕获——离屏窗口只选目的地、被动读滑块，不写入。
-      const shipLocation = getEntityNaturalIdFromAddress(ship.value.address);
-      const destId = convertToPlanetNaturalId(waypoints.value[0]) ?? waypoints.value[0];
-      let anchor = getAnchor(registration.value);
-      let source: string;
-      if (anchor !== undefined && anchorMatchesRoute(anchor, shipLocation, destId)) {
-        source = '缓存';
-      } else {
-        anchor = undefined;
-        progressTotal.value = 1;
-        const captured = await captureAnchor(registration.value, waypoints.value[0], {
-          isCancelled: () => cancelRequested.value,
-        });
-        anchor = anchorFromPlan(
-          registration.value,
-          captured.plan,
-          captured.fuel,
-          captured.reactor,
-          ship.value!.mass,
-        );
-        saveAnchor(anchor);
-        source = '本次捕获';
-        progressDone.value = 1;
-        progressTotal.value = combos.value.length;
-      }
-      anchorMessage.value = anchorStatusLabel(anchor, source);
-      activeAnchor.value = anchor;
-      rows.value = combos.value.map(combo => buildLocalRow(anchor!, combo));
-    } else {
-      const outcomes = await runSweep(registration.value, waypoints.value[0], combos.value, {
-        // 扫描结束后自动切换到后续航点，捕获天体位置供多段估算使用。
-        probeDestinations: waypoints.value.slice(1),
-        onProgress: (done, total) => {
-          progressDone.value = done;
-          progressTotal.value = total;
-        },
-        isCancelled: () => cancelRequested.value,
-      });
-      // 每组服务器精确结果都是高质量标定锚点，保存供本地计算复用。
-      for (const outcome of outcomes) {
-        if (outcome.plan !== undefined) {
-          saveAnchor(
-            anchorFromPlan(
-              registration.value,
-              outcome.plan,
-              outcome.combo.fuel,
-              outcome.combo.reactor,
-              ship.value?.mass,
-            ),
-          );
-        }
-      }
-      rows.value = outcomes.map(buildRow);
-    }
-  } catch (e: unknown) {
-    errorMessage.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    running.value = false;
-  }
-}
-
-function cancel() {
-  cancelRequested.value = true;
-}
-
-// 行排序：无错误且评分最小的排最前；评分全为 0（未配置成本）时按时长排序。
-const sortedRows = computed(() => {
-  const ok = rows.value.filter(x => x.error === undefined);
-  const failed = rows.value.filter(x => x.error !== undefined);
-  const hasScore = ok.some(x => (x.score ?? 0) > 0);
-  ok.sort((a, b) =>
-    hasScore ? (a.score ?? 0) - (b.score ?? 0) : (a.route?.totalMs ?? 0) - (b.route?.totalMs ?? 0),
-  );
-  return [...ok, ...failed];
-});
-
-async function probe() {
-  if (!registration.value || waypoints.value.length === 0 || probing.value) {
-    return;
-  }
-  probing.value = true;
-  try {
-    const found = await captureBodyPositions(registration.value, waypoints.value);
-    probeMessage.value =
-      found > 0
-        ? `捕获 ${found} 个天体位置（来源：${detectedPositionMessages.value.join(', ')}），多段估算已启用行星位置修正`
-        : '未捕获到天体位置（飞行计划中可能不含轨迹数据，多段估算按常数外推）';
-  } catch (e: unknown) {
-    probeMessage.value = e instanceof Error ? e.message : String(e);
-  } finally {
-    probing.value = false;
-  }
+  result.value = { label: route.label, route, metrics, options, best: options[0] };
+  const b = options[0];
+  calcMessage.value =
+    `最优方案：燃料滑块 ${b.fuel} / 反应堆 ${b.reactor}，预计 ${formatDuration(b.totalHours * 3600000)}，总成本 ${formatCurrency(b.totalCost)}` +
+    (useGateway.value && metrics.gatewayCount > 0
+      ? '（网关航线：FTL 燃料为 0）'
+      : useGateway.value
+        ? '（未找到可用网关，已按自然航线计算）'
+        : '');
 }
 
 function formatDuration(ms: number) {
   return formatCountdown(ms);
 }
-
-function precisionLabel(leg: RouteResult['legs'][number]) {
-  if (leg.precise) {
-    return '服务器精确';
-  }
-  return leg.orbitPredicted ? '轨道预测' : '外推估算';
-}
-
-function formatDamage(fraction: number) {
-  return `${fixed2(fraction * 100)}%`;
-}
-
 function formatFuel(value: number) {
   return fixed4(value);
+}
+function fixed2v(value: number) {
+  return fixed2(value);
 }
 </script>
 
 <template>
   <LoadingSpinner v-if="!shipsStore.fetched" />
   <div v-else :class="[$style.container, C.type.typeRegular, C.fonts.fontRegular]">
-    <SectionHeader>飞行时间计算器（FTC）</SectionHeader>
+    <SectionHeader>飞行燃料性价比计算器（FTC）</SectionHeader>
 
     <div :class="$style.form">
       <label :class="$style.field">
-        <span>飞船</span>
+        <span>飞船（自动读取性能：质量/加速度/船体条件）</span>
         <select v-model="registration" :class="$style.select">
           <option value="" disabled>选择停靠中的飞船</option>
           <option v-for="s in dockedShips" :key="s.id" :value="s.registration">
@@ -535,32 +263,40 @@ function formatFuel(value: number) {
         </select>
       </label>
 
-      <label :class="$style.field">
-        <span>计算模式</span>
-        <select v-model="mode" :class="$style.select">
-          <option value="local">本地计算（飞船性能缩放，不写滑块）</option>
-          <option value="server">服务器扫描（逐组精确查询）</option>
-        </select>
-      </label>
+      <div :class="$style.fieldRow">
+        <label :class="$style.field">
+          <span>起点（空间站/行星/星系）</span>
+          <TextInput v-model="routeFrom" placeholder="如：HRT 或 VH-331" />
+        </label>
+        <label :class="$style.field">
+          <span>终点</span>
+          <TextInput v-model="routeTo" placeholder="如：MOR 或 OT-580" />
+        </label>
+      </div>
 
       <label :class="$style.field">
-        <span>航点（逗号或换行分隔，首个为精确查询目的地）</span>
-        <textarea v-model="waypointsText" rows="2" placeholder="如：KW-655c, KW-013c" />
+        <span>
+          使用网关跃迁（玩家自选；网关不消耗 FTL 燃料、速度 3.0 pc/h，但可能收现金过路费）
+        </span>
+        <span>
+          <input v-model="useGateway" type="checkbox" />
+          启用网关（{{ routesStore.gatewayConnectionCount }} 条已记录连接）
+        </span>
       </label>
 
       <div :class="$style.fieldRow">
         <label :class="$style.field">
-          <span>燃料消耗组合（0–1）</span>
+          <span>燃料消耗滑块组合（0–1）</span>
           <TextInput v-model="fuelText" />
         </label>
         <label :class="$style.field">
-          <span>反应堆使用量组合（0–1）</span>
+          <span>反应堆使用量组合（0–1，仅自然跃迁相关）</span>
           <TextInput v-model="reactorText" />
         </label>
       </div>
 
       <details :class="$style.costDetails">
-        <summary>成本参数（性价比评分）</summary>
+        <summary>成本参数（性价比评分 = 燃料费 + 时间价值）</summary>
         <div :class="$style.fieldRow">
           <label :class="$style.field">
             <span>STL 燃料单价{{ fuelTickers.stl ? `（${fuelTickers.stl}）` : '' }}</span>
@@ -573,131 +309,31 @@ function formatFuel(value: number) {
         </div>
         <div :class="$style.fieldRow">
           <label :class="$style.field">
-            <span>损伤修理费（₳/1% 船体）</span>
-            <NumberInput v-model="damageRate" optional />
-          </label>
-          <label :class="$style.field">
             <span>时间价值（₳/小时）</span>
             <NumberInput v-model="timeValue" optional />
           </label>
         </div>
       </details>
 
-      <details :class="$style.costDetails">
-        <summary>航线燃料对比（自然 vs 网关）</summary>
-        <div :class="$style.fieldRow">
-          <label :class="$style.field">
-            <span>起点（空间站/行星/星系）</span>
-            <TextInput v-model="routeFrom" placeholder="如：HRT 或 VH-331" />
-          </label>
-          <label :class="$style.field">
-            <span>终点</span>
-            <TextInput v-model="routeTo" placeholder="如：MOR 或 OT-580" />
-          </label>
-        </div>
-        <div :class="$style.actions">
-          <PrunButton
-            neutral
-            :disabled="registration === ''"
-            data-tooltip="规划自然与网关两条候选航线，并基于当前飞船标定锚点扫描燃料/反应堆滑块，给出每条航线综合成本（燃料费+时间价值）最低的滑块方案。需先打开星图（恒星坐标+网关）并本地计算过一次建立标定。"
-            @click="planAndOptimize">
-            规划并优化
-          </PrunButton>
-        </div>
-        <div v-if="routeMessage" :class="$style.hint">{{ routeMessage }}</div>
-        <table v-if="routePlans.length > 0" :class="$style.table">
-          <thead>
-            <tr>
-              <th>航线</th>
-              <th>跳数</th>
-              <th>FTL 距离</th>
-              <th>网关段</th>
-              <th>总时长</th>
-              <th>最优燃料滑块</th>
-              <th>最优反应堆</th>
-              <th>STL 燃料</th>
-              <th>FTL 燃料</th>
-              <th>燃料费</th>
-              <th>时间成本</th>
-              <th>总成本</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="(p, i) in routePlans"
-              :key="p.label"
-              :class="[$style.row, { [$style.best]: i === 0 }]">
-              <td>{{ p.label }}</td>
-              <td>{{ p.route.systemIds.length - 1 }}</td>
-              <td>{{ fixed2(p.route.totalPc) }} pc</td>
-              <td>{{ p.route.gatewayCount }}</td>
-              <td>{{ formatDuration(p.best.totalHours * 3600000) }}</td>
-              <td>{{ p.best.fuel }}</td>
-              <td>{{ p.best.reactor }}</td>
-              <td>{{ p.best.calibrated ? formatFuel(p.best.stlFuel) : '需标定' }}</td>
-              <td>
-                {{
-                  !p.best.calibrated
-                    ? '需标定'
-                    : !p.best.ftlCalibrated
-                      ? '需自然标定'
-                      : formatFuel(p.best.ftlFuel)
-                }}
-              </td>
-              <td>{{ formatCurrency(p.best.fuelCost) }}</td>
-              <td>{{ formatCurrency(p.best.timeCost) }}</td>
-              <td>{{ formatCurrency(p.best.totalCost) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <details v-if="routePlans.length > 0" :class="$style.costDetails">
-          <summary>航线明细</summary>
-          <div v-for="p in routePlans" :key="`detail-${p.label}`">
-            <SectionHeader>{{ p.label }}航线</SectionHeader>
-            <div :class="$style.hint">
-              {{ p.route.systemIds.join(' → ') }}
-            </div>
-            <div :class="$style.hint">
-              估算时长 ≈ {{ formatDuration(p.time.totalHours * 3600000) }}（FTL
-              {{ fixed2(p.time.ftlHours) }}h + STL {{ fixed2(p.time.stlHours) }}h）
-            </div>
-          </div>
-        </details>
-      </details>
-
       <div :class="$style.actions">
-        <PrunButton primary :disabled="running" @click="start">
-          {{ mode === 'local' ? '开始计算' : '开始扫描' }}
-        </PrunButton>
-        <PrunButton v-if="running" danger @click="cancel">取消</PrunButton>
-        <PrunButton
-          neutral
-          :disabled="probing || registration === '' || waypoints.length === 0"
-          data-tooltip="通过离屏 SFC 窗口查询各航点的飞行计划，从轨迹数据捕获天体位置以改进多段估算精度（开始扫描时也会自动捕获）"
-          @click="probe">
-          捕获天体位置
-        </PrunButton>
+        <PrunButton primary :disabled="!ship" @click="planAndCompute">计算最优方案</PrunButton>
         <PrunButton
           neutral
           :disabled="prefetching"
-          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进，可重复点击续跑）。游戏内浏览星系/行星详情也会自动记录轨道（DATA_DATA）；空间站轨道（celestialBodies）同样被记录，计入总缓存。配合游戏轨道模型可离线预测任意时刻的行星/空间站位置。"
+          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进）。配合游戏轨道模型可离线预测任意时刻的天体位置。"
           @click="prefetchOrbits">
           {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
         </PrunButton>
         <PrunButton
           neutral
           :disabled="exporting"
-          data-tooltip="一次性拉取所有行星（约 4155 个）的完整参数（轨道根数/质量/行星属性等），下载为 JSON 保存到本地；同时更新轨道缓存供离线位置预测。"
+          data-tooltip="一次性拉取所有行星的完整参数（轨道根数/质量等），下载为 JSON；同时更新轨道缓存。"
           @click="exportPlanets">
           {{ exporting ? '导出中…' : '导出全部行星参数' }}
         </PrunButton>
-        <div v-if="exporting" :class="$style.exportBar">
-          <ProgressBar :value="exportDone" :max="exportTotal || 1" />
-          <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
-        </div>
         <PrunButton
           neutral
-          data-tooltip="网关（玩家建造的额外跃迁航线）在打开星图（星系地图）后自动读取。检查当前已加载状态。"
+          data-tooltip="网关在打开星图（星系地图）后自动读取，名称配对/飞行计划自动记录连接。检查当前已加载状态。"
           @click="checkGateways">
           网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
         </PrunButton>
@@ -707,174 +343,63 @@ function formatFuel(value: number) {
           @click="exportGateways">
           导出网关
         </PrunButton>
-        <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
-        <div v-if="exportLog.length > 0" :class="$style.exportLog">
-          <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
-        </div>
-        <span v-if="running" :class="$style.progress">
-          {{ progressDone }}/{{ progressTotal }}（后台查询中，请勿关闭游戏页面）
-        </span>
       </div>
-
-      <div
-        v-if="anchorMessage"
-        :class="$style.hint"
-        data-tooltip="本地计算基于一份已知参数的服务器标定计划，按飞船性能物理关系（推力∝燃料滑块、充能/跃迁速度∝反应堆使用量）缩放到各参数组合"
-        >{{ anchorMessage }}</div
-      >
-      <details v-if="activeAnchor" :class="$style.diagnostic">
-        <summary>对照诊断（锚点原始服务器值 vs 当前飞船）</summary>
-        <table :class="$style.table">
-          <thead>
-            <tr>
-              <th>项目</th>
-              <th>锚点（捕获时）</th>
-              <th>当前飞船</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>燃料消耗滑块</td>
-              <td>{{ activeAnchor.fuel }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>反应堆使用量</td>
-              <td>{{ activeAnchor.reactor ?? '--' }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>质量 (t)</td>
-              <td>{{ activeAnchor.mass ?? '--' }}</td>
-              <td>{{ ship?.mass ?? '--' }}</td>
-            </tr>
-            <tr>
-              <td>STL 燃料消耗</td>
-              <td>{{ formatFuel(activeAnchor.cal.stlFuel) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>FTL 燃料消耗</td>
-              <td>{{ formatFuel(activeAnchor.cal.ftlFuel) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>STL 时长</td>
-              <td>{{ formatDuration(activeAnchor.cal.stlMs) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>充能时长</td>
-              <td>{{ formatDuration(activeAnchor.cal.chargeMs) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>跃迁时长</td>
-              <td>{{ formatDuration(activeAnchor.cal.jumpMs) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>总时长</td>
-              <td>{{ formatDuration(activeAnchor.cal.totalMs) }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>STL 距离</td>
-              <td>{{ activeAnchor.cal.stlDistance }}</td>
-              <td>--</td>
-            </tr>
-            <tr>
-              <td>stlFuelFlowRate</td>
-              <td>--</td>
-              <td>{{ ship?.stlFuelFlowRate ?? '--' }}</td>
-            </tr>
-            <tr>
-              <td>加速度 (m/s²)</td>
-              <td>--</td>
-              <td>{{ ship?.acceleration ?? '--' }}</td>
-            </tr>
-            <tr>
-              <td>整备质量 (t)</td>
-              <td>--</td>
-              <td>{{ ship?.operatingEmptyMass ?? '--' }}</td>
-            </tr>
-            <tr>
-              <td>船体条件</td>
-              <td>--</td>
-              <td>{{ ship?.condition ?? '--' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </details>
-      <div v-if="probeMessage" :class="$style.hint">{{ probeMessage }}</div>
-      <div v-if="errorMessage" :class="$style.error">{{ errorMessage }}</div>
+      <div v-if="exporting" :class="$style.exportBar">
+        <ProgressBar :value="exportDone" :max="exportTotal || 1" />
+        <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
+      </div>
+      <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
+      <div v-if="exportLog.length > 0" :class="$style.exportLog">
+        <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
+      </div>
+      <div v-if="calcMessage" :class="$style.hint">{{ calcMessage }}</div>
     </div>
 
-    <table v-if="!isEmpty(sortedRows)" :class="$style.table">
-      <thead>
-        <tr>
-          <th>燃料消耗</th>
-          <th>反应堆</th>
-          <th>总时长</th>
-          <th>STL 燃料</th>
-          <th>FTL 燃料</th>
-          <th>损伤</th>
-          <th>燃料费</th>
-          <th>修理费</th>
-          <th>时间成本</th>
-          <th>评分</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="(row, i) in sortedRows"
-          :key="`${row.combo.fuel}-${row.combo.reactor ?? ''}`"
-          :class="[$style.row, { [$style.best]: i === 0 && row.error === undefined }]"
-          @click="selected = row">
-          <template v-if="row.error === undefined && row.route">
-            <td>{{ row.combo.fuel }}</td>
-            <td>{{ row.combo.reactor ?? '--' }}</td>
-            <td>{{ row.route.allPrecise ? '' : '≈' }}{{ formatDuration(row.route.totalMs) }}</td>
-            <td>{{ formatFuel(row.route.totalStlFuel) }}</td>
-            <td>{{ formatFuel(row.route.totalFtlFuel) }}</td>
-            <td>{{ formatDamage(row.route.totalDamage) }}</td>
-            <td>{{ formatCurrency(row.fuelCost ?? 0) }}</td>
-            <td>{{ formatCurrency(row.damageCost ?? 0) }}</td>
-            <td>{{ formatCurrency(row.timeCost ?? 0) }}</td>
-            <td>{{ formatCurrency(row.score ?? 0) }}</td>
-          </template>
-          <td v-else colspan="10" :class="$style.error">
-            燃料 {{ row.combo.fuel }} / 反应堆 {{ row.combo.reactor ?? '--' }}：{{ row.error }}
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <div v-if="selected && selected.route" :class="$style.detail">
-      <SectionHeader>
-        组合详情：燃料 {{ selected.combo.fuel }} / 反应堆 {{ selected.combo.reactor ?? '--' }}
-      </SectionHeader>
+    <template v-if="result">
+      <SectionHeader>最优燃料方案（{{ result.label }}航线）</SectionHeader>
       <table :class="$style.table">
         <thead>
           <tr>
-            <th>段</th>
-            <th>起点 → 终点</th>
-            <th>时长</th>
-            <th>精度</th>
+            <th>燃料滑块</th>
+            <th>反应堆</th>
+            <th>总时长</th>
+            <th>STL 燃料</th>
+            <th>FTL 燃料</th>
+            <th>燃料费</th>
+            <th>时间成本</th>
+            <th>总成本</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="(leg, i) in selected.route.legs" :key="i">
-            <td>{{ i + 1 }}</td>
-            <td>{{ leg.from }} → {{ leg.to }}</td>
-            <td>{{ leg.precise ? '' : '≈' }}{{ formatDuration(leg.durationMs) }}</td>
-            <td>{{ precisionLabel(leg) }}</td>
+          <tr
+            v-for="(o, i) in result.options"
+            :key="`${o.fuel}-${o.reactor}`"
+            :class="[$style.row, { [$style.best]: i === 0 }]">
+            <td>{{ o.fuel }}</td>
+            <td>{{ o.reactor }}</td>
+            <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
+            <td>{{ o.fuelEstimated ? formatFuel(o.stlFuel) : '需位置观测' }}</td>
+            <td>{{ formatFuel(o.ftlFuel) }}</td>
+            <td>{{ formatCurrency(o.fuelCost) }}</td>
+            <td>{{ formatCurrency(o.timeCost) }}</td>
+            <td>{{ formatCurrency(o.totalCost) }}</td>
           </tr>
         </tbody>
       </table>
-      <div v-if="selected.plan" :class="$style.hint">
-        首段分段明细（服务器）：{{ selected.plan.segments.map(s => s.type).join(' → ') }}
-      </div>
-    </div>
+      <details :class="$style.costDetails">
+        <summary>航线明细</summary>
+        <div :class="$style.hint">
+          {{ result.route.systemIds.join(' → ') }}
+        </div>
+        <div :class="$style.hint">
+          跳数 {{ result.route.systemIds.length - 1 }} ｜ FTL
+          {{ fixed2v(result.route.totalPc) }} pc（自然 {{ fixed2v(result.metrics.natPc) }} + 网关
+          {{ fixed2v(result.metrics.gwPc) }}， 网关 {{ result.metrics.gwCount }} 段）
+          <template v-if="result.metrics.stlDistanceKm !== undefined">
+            ｜ STL 起降 ≈ {{ formatFuel(result.metrics.stlDistanceKm / 1e6) }}M km
+          </template>
+        </div>
+      </details>
+    </template>
   </div>
 </template>
