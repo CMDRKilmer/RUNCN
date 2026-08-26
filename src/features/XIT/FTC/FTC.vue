@@ -9,11 +9,14 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getPrice } from '@src/infrastructure/fio/cx';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { sleep } from '@src/utils/sleep';
 import {
   orbitStore,
   prefetchAllOrbits,
   exportAllPlanetData,
   exportStationOrbits,
+  hasStationOrbit,
 } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
@@ -102,6 +105,69 @@ function exportStations() {
   }
   downloadFile(data, 'prun-stations.json', true);
   gatewayMessage.value = `已导出 ${data.length} 个空间站（轨道+归属星系）；运行 build-station-data.mjs 精简后内置`;
+}
+// 自动浏览无轨道空间站的归属星系：逐个执行游戏命令 `MS <systemId>`
+// （Map: Star System，打开星系详情），客户端自动请求 DATA_DATA["systems", id]，
+// orbit.ts 监听积累 celestialBodies（含空间站轨道）。轨道积累后自动关闭窗口。
+// FIO 无空间站数据，这是唯一能离线补全空间站轨道的方式（模拟用户浏览星系）。
+const autoBrowsing = ref(false);
+const autoBrowseDone = ref(0);
+const autoBrowseTotal = ref(0);
+const autoBrowseLog = ref<string[]>([]);
+async function autoBrowseSystems() {
+  if (autoBrowsing.value) {
+    return;
+  }
+  const stations = exportStationOrbits().filter(x => !x.orbit);
+  if (stations.length === 0) {
+    gatewayMessage.value = '所有空间站已有轨道，无需自动浏览';
+    return;
+  }
+  autoBrowsing.value = true;
+  autoBrowseDone.value = 0;
+  autoBrowseTotal.value = stations.length;
+  autoBrowseLog.value = [];
+  try {
+    for (const st of stations) {
+      const done = ref(false);
+      const timeout = window.setTimeout(() => {
+        done.value = true;
+      }, 25000);
+      let ok = false;
+      try {
+        // 打开星系详情并提交命令（竞速保护：地图渲染慢时不等窗口，DATA_DATA 已触发）。
+        await Promise.race([
+          showBuffer(`MS ${st.systemId}`, {
+            autoClose: true,
+            closeWhen: done,
+          }).catch(() => {
+            done.value = true;
+          }),
+          sleep(10000),
+        ]);
+        // 轮询轨道积累（DATA_DATA 到达即完成；done=true 让 closeWhenDone 关闭窗口）。
+        while (!done.value && !hasStationOrbit(st.naturalId)) {
+          await sleep(400);
+        }
+        ok = hasStationOrbit(st.naturalId);
+      } catch {
+        // 单站失败不中断：标记完成，继续下一站。
+      } finally {
+        done.value = true;
+        window.clearTimeout(timeout);
+      }
+      autoBrowseDone.value++;
+      autoBrowseLog.value = [
+        ...autoBrowseLog.value,
+        ok
+          ? `${st.naturalId}（${st.systemId}）✓ 轨道已积累`
+          : `${st.naturalId}（${st.systemId}）未获得轨道`,
+      ];
+    }
+    gatewayMessage.value = `自动浏览完成：${autoBrowseDone.value}/${autoBrowseTotal.value}；可点「导出空间站」获取最新数据`;
+  } finally {
+    autoBrowsing.value = false;
+  }
 }
 
 // ---- 燃料性价比计算器 ----
@@ -453,12 +519,26 @@ function fixed2v(value: number) {
           @click="exportStations">
           导出空间站
         </PrunButton>
+        <PrunButton
+          neutral
+          :disabled="autoBrowsing"
+          data-tooltip="自动逐个打开无轨道空间站的归属星系（游戏命令 MS &lt;星系&gt;），客户端自动请求 DATA_DATA，orbit.ts 积累空间站轨道。完成后可「导出空间站」获取数据。"
+          @click="autoBrowseSystems">
+          {{ autoBrowsing ? `浏览中 ${autoBrowseDone}/${autoBrowseTotal}…` : '自动浏览星系' }}
+        </PrunButton>
       </div>
       <div v-if="exporting" :class="$style.exportBar">
         <ProgressBar :value="exportDone" :max="exportTotal || 1" />
         <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
       </div>
+      <div v-if="autoBrowsing" :class="$style.exportBar">
+        <ProgressBar :value="autoBrowseDone" :max="autoBrowseTotal || 1" />
+        <span :class="$style.progress">{{ autoBrowseDone }}/{{ autoBrowseTotal }}</span>
+      </div>
       <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
+      <div v-if="autoBrowseLog.length > 0" :class="$style.exportLog">
+        <div v-for="(line, i) in autoBrowseLog" :key="i">{{ line }}</div>
+      </div>
       <div v-if="exportLog.length > 0" :class="$style.exportLog">
         <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
       </div>
