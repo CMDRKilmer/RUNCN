@@ -101,7 +101,7 @@ const dockedShips = computed(() =>
   (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
 );
 const ship = computed(() => shipsStore.getByRegistration(registration.value));
-// 蓝图性能（FTL 最大航速、STL 引擎类型）。
+// 蓝图性能（FTL 最大航速、STL 引擎、FTL 充能/燃料参数）。
 const blueprintInfo = computed(() => {
   const s = ship.value;
   if (!s) {
@@ -113,17 +113,31 @@ const blueprintInfo = computed(() => {
   }
   const ftlMaxSpeed =
     bp.performance.ftlMaxSpeed > 0 ? bp.performance.ftlMaxSpeed * 3600 : undefined;
+  // 蓝图最小反应堆使用量 / 发射器充能时间（充能时间 = eT/m × r）。
+  const minReactorUsage =
+    bp.performance.minReactorUsage > 0 ? bp.performance.minReactorUsage : undefined;
+  const emitterChargeTime =
+    bp.performance.emitterChargeTime > 0 ? bp.performance.emitterChargeTime : undefined;
   // 蓝图最大 G力过载因子（用于 STL v_cruise 经验公式）。
   const maxGFactor = bp.performance.maxGFactor;
-  // 从 selections 中查 STL_ENGINE 选项。
+  // 从 selections 中查 STL_ENGINE 选项与反应堆功率（FTL_POWER，燃料系数用）。
   let stlEngine: string | undefined;
+  let reactorPower: number | undefined;
   for (const sel of bp.selections) {
-    if (sel.type === 'STL_ENGINE' && sel.amount > 0) {
+    if (sel.amount <= 0) {
+      continue;
+    }
+    if (sel.type === 'STL_ENGINE') {
       stlEngine = sel.option;
-      break;
+    } else if (sel.type === 'FTL_REACTOR') {
+      for (const mod of sel.modifiers) {
+        if (mod.type === 'FTL_POWER') {
+          reactorPower = mod.value;
+        }
+      }
     }
   }
-  return { ftlMaxSpeed, stlEngine, maxGFactor };
+  return { ftlMaxSpeed, stlEngine, reactorPower, minReactorUsage, emitterChargeTime, maxGFactor };
 });
 
 // 从飞船燃料仓自动识别燃料材料 ticker，用于自动填价。
@@ -175,12 +189,15 @@ function shipPerformance(): ShipPerformance | undefined {
     mass: s.mass,
     operatingEmptyMass: s.operatingEmptyMass,
     acceleration: s.acceleration,
+    thrust: s.thrust,
     ftlMaxSpeed,
     stlFuelFlowRate: s.stlFuelFlowRate,
-    reactorPower: s.reactorPower,
+    reactorPower: blueprintInfo.value?.reactorPower ?? s.reactorPower,
     condition: s.condition,
     stlEngineOption: blueprintInfo.value?.stlEngine,
     maxGFactor: blueprintInfo.value?.maxGFactor,
+    minReactorUsage: blueprintInfo.value?.minReactorUsage,
+    emitterChargeTime: blueprintInfo.value?.emitterChargeTime,
   };
 }
 

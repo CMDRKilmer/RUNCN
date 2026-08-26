@@ -1,22 +1,29 @@
 // 飞船性能驱动的燃料/时间模型（纯本地，不依赖标定锚点/飞行数据）。
 //
 // 游戏飞行计算在服务器（SHIP_FLIGHT_CALCULATE_TEST_FLIGHT），客户端无公式；
-// 本模型用真实服务器数据校准的经验公式 + 飞船实时性能参数动态计算：
-// - STL 时间 = d / (v_cruise × f^1.4)，v_cruise 由引擎类型决定
-//   （超跑 + hyperthrustEngine：v_cruise ≈ 150,000 km/s @ f=1.0）
-// - STL 燃料 ∝ 燃料滑块 f × STL 距离（线性，跨飞船按 stlFuelFlowRate 缩放）
-// - STL 时间含质量^0.8 与船体条件修正
-// - 自然 FTL：速度 = 飞船 ftlMaxSpeed × 反应堆 r，燃料 ∝ r × 距离
-// - 网关 FTL：速度 3.0 pc/h 固定，燃料 = 0，每段 +20min 锁定/衰减
-// 飞船动态：质量（装载）、加速度、FTL 最大航速、船体条件实时参与计算。
-// 绝对系数为标定默认（可校准），滑块间相对优化不受系数误差影响。
+// 本模型用真实服务器数据校准的经验公式 + 飞船实时性能参数动态计算。
+//
+// STL 速度（引擎特性表，蓝图试航多档 f 实测校准，2026-08-26）：
+//   v(f) = min(V_BASE_engine × f^K_engine, V_SAT_engine)
+//   —— 整条曲线（含速度上限 V_SAT）由 STL 引擎类型决定，与飞船质量/G力无关：
+//      引擎类型仅 5 种，每种校准一次即可，无需每艘飞船校准。
+//      实测：hyperthrust(HCB)→V_SAT 90800；advanced/glass(BP-OHMI)→V_SAT 74500。
+//      （曾尝试 V_SAT=7500×sqrt(加速度) 通用公式，被 glass 船 G27/a36.9 却 vSat74500 推翻：
+//       glass 与 advanced 的 G/a 完全不同但 vSat 相同 → vSat 由引擎而非 G 决定。）
+//   T_stl = d / (v(f) × 3600)
+//   STL 燃料：F = C_F_engine × f × d（线性，随引擎类型不同）
+// 自然 FTL（蓝图性能驱动，2026-08-26 多船/多配置实测校准）：
+//   速度 v = ftlMax×r^(a(1+1.5r))、充能 = (eT/m)×r 秒/跳、燃料 = 0.00293×功率×r×pc
+// 网关 FTL：速度 3.0 pc/h 固定，燃料 0，每段 +20min 锁定/衰减。
 
 export interface ShipPerformance {
   // 当前质量（含装载，t）。
   mass: number;
   operatingEmptyMass: number;
-  // 最大加速度（m/s²）。
+  // 最大加速度（m/s²，游戏已含推力/G力限制）。
   acceleration: number;
+  // 引擎推力（N，用于 acceleration 缺失时推导）。
+  thrust?: number;
   // FTL 最大航速（pc/h，满反应堆）。
   ftlMaxSpeed: number;
   // STL 燃料流量（未知时为 undefined，用标定默认）。
@@ -24,9 +31,13 @@ export interface ShipPerformance {
   reactorPower: number;
   // 船体条件 0–1（<0.8 时性能衰减）。
   condition: number;
-  // 蓝图 STL 引擎选项（如 STL_ENGINE_HYPERTHRUST），用于查 v_cruise 表。
+  // 蓝图 STL 引擎选项（如 STL_ENGINE_HYPERTHRUST），用于查引擎特性表。
   stlEngineOption?: string;
-  // 蓝图最大 G力过载因子（用于 v_cruise 经验公式）。
+  // 蓝图最小反应堆使用量（= 发射器功率需求/反应堆功率，HYR 超跑 0.076、STD 新手船 0.302）。
+  minReactorUsage?: number;
+  // 蓝图发射器充能时间（秒，基础充能；充能时间 = eT/m × r）。
+  emitterChargeTime?: number;
+  // 蓝图最大 G力过载因子（加速度上限 maxGFactor×9.81）。
   maxGFactor?: number;
 }
 
@@ -60,60 +71,100 @@ export interface FuelOption {
   fuelEstimated: boolean;
 }
 
-// ---- 标定常量（来自两艘飞船同航线 HRT→VH-331g 实测）----
-// 超跑 BP-SYKQ（hyperthrustEngine）：v_cruise=150,000 km/s @ f=1.0
-// OOG LCB（fuelSavingEngine）：v_cruise=112,500 km/s @ f=1.0
-// STL 时间 = d / (v_cruise × f^1.4) × massScale / cond
-const REF_MASS = 1088;
-const STL_CRUISE_HYPERTHRUST = 150000; // km/s @ f=1.0
-// OOG LCB fuelSavingEngine v_cruise（由 STL_ENGINE_CRUISE 表引用）。
-const STL_FUEL_EXP = 1.4; // 燃料滑块对巡航速度的指数
-// 默认 STL 巡航速度（hyperthrust），其他引擎按蓝图引擎类型取不同常数。
-const STL_CRUISE_BASE = STL_CRUISE_HYPERTHRUST;
-// STL 燃料系数（每 km·滑块）：F = C_F × f × d。
-// 标定自超跑 MIN (f=0.0764, d=341.8M km, fuel=16u) 与 OOG LCB 默认 (f=0.525, d=338.5M, fuel=173u)。
-// 取平均以兼容两种引擎。
-const STL_FUEL_C = (16 / (0.0764 * 341.8e6) + 173 / (0.525 * 338.5e6)) / 2; // ≈ 7.93e-7
-// 自然 FTL 模型（BP-OHMI-3472 蓝图试航实测校准，glass 引擎+标准反应堆）：
-// - FTL 燃料 ≈ FTL_FUEL_C × r × pc（含充能段；旧默认 0.25 严重低估）
-// - 充能时间 = CHARGE_SECONDS × r（每跳固定充能；实测 4m53s@r≈0.68、6m12s@r≈0.83 → 基准≈440s@r=1）
-const FTL_FUEL_C = 7.1; // 每 pc·r（BP-OHMI 实测：CHARGE 4.75u/pc@r=0.68 + DEPARTURE）
-const FTL_CHARGE_SECONDS = 440; // 每跳充能基准（秒 @ r=1.0）
+// ---- STL 引擎特性表（v(f) = min(V_BASE×f^K, V_SAT)，km/s）----
+// 整条曲线（V_BASE/K/V_SAT/C_F）由引擎类型决定，与飞船质量、G力、船板等配置无关
+// （已用 advanced 引擎在 G8/G15 两种船板实测验证：vSat 相同，误差<0.15%）。
+// 引擎类型仅 5 种，已全部实测确认（每种用任一该引擎的船校准一次）：
+//   hyperthrust(HCB): f=0.05→43441、f=0.1→73359、f≥0.2 饱和 90800。
+//   advanced/standard(BP-OHMI AEN): f=0.05→53611、f=0.1→74011、f≥0.2 饱和 75200（同参数）。
+//   glass(BP-OHMI 玻璃): f=0.03→35401、f=0.05→53176、f≈0.1 饱和 74500。
+//   fuelSaving: f=0.05→11540、f=0.1→22517、f≈0.45 饱和 74500，省油 C_F=5.2e-6。
+const STL_ENGINE_SPEED: Record<string, { vBase: number; k: number; vSat: number; fuelC: number }> =
+  {
+    STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5 }, // HCB 实测
+    STL_ENGINE_FUEL_SAVING: { vBase: 167000, k: 0.885, vSat: 74500, fuelC: 5.2e-6 }, // 实测（省油）
+    STL_ENGINE_STANDARD: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5 }, // BP-OHMI 实测（≈advanced）
+    STL_ENGINE_ADVANCED: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5 }, // BP-OHMI(AEN) 实测
+    STL_ENGINE_GLASS: { vBase: 357000, k: 0.648, vSat: 74500, fuelC: 2.84e-5 }, // BP-OHMI(玻璃) 实测
+  };
+const DEFAULT_STL_SPEED = STL_ENGINE_SPEED.STL_ENGINE_HYPERTHRUST;
+// 自然 FTL 模型（2026-08-26 多船/多配置实测校准，蓝图性能驱动）：
+// - JUMP 速度：v = ftlMaxSpeed × r^(a(1+1.6r))，a = 0.40×ln(ftlMaxSpeed) − 0.10
+//   实测 3 艘正常船 13 点（超跑/新手船/修改版HCB）平均误差 3.0%，b/a≈1.6 全船一致。
+//   （早期“k 依赖反应堆类型”的 FTL_REACTOR_K 表被修改版 HCB 实测推翻。）
+// - 充能时间：charge = (emitterChargeTime ÷ minReactorUsage) × r 秒/跳
+//   5 配置精确验证（超跑/HCB=90、新手船=450 秒/单位 r）。
+// - FTL 燃料：C_F = 0.00293 × 反应堆功率(GW)；fuel = C_F × r × 总pc
+//   实测 HYR(7200GW)=21.45、STD(2400GW)=7.0，与功率成正比。
+const FTL_FUEL_C_PER_GW = 0.00293; // 每 pc·r·GW
+const FTL_SPEED_A_SLOPE = 0.4;
+const FTL_SPEED_A_OFFSET = 0.1;
+const FTL_SPEED_B_RATIO = 1.6;
+
+// FTL 跃迁速度指数 a（曲线 v = ftlMax×r^(a(1+1.5r))，随 ln(ftlMax) 增长）。
+function ftlSpeedExponentA(ftlMaxSpeed: number): number {
+  const ftl = Math.max(0.1, ftlMaxSpeed);
+  return Math.max(0.05, FTL_SPEED_A_SLOPE * Math.log(ftl) - FTL_SPEED_A_OFFSET);
+}
+
+// FTL 跃迁速度（pc/h）：v = ftlMax × r^(a(1+1.5r))。
+function ftlSpeedFor(ship: ShipPerformance, reactor: number): number {
+  const ftlMax = Math.max(0.1, ship.ftlMaxSpeed);
+  const r = Math.max(0.001, reactor);
+  const a = ftlSpeedExponentA(ftlMax);
+  const k = a * (1 + FTL_SPEED_B_RATIO * r);
+  return ftlMax * Math.pow(r, k);
+}
+
+// FTL 充能时间（秒/跳）：charge = (emitterChargeTime ÷ minReactorUsage) × r。
+// 缺蓝图参数时回退到 90×r（HYR 校准值）。
+function ftlChargeSecondsFor(ship: ShipPerformance, reactor: number): number {
+  const m = ship.minReactorUsage;
+  const eT = ship.emitterChargeTime;
+  if (m !== undefined && eT !== undefined && m > 0) {
+    return (eT / m) * reactor;
+  }
+  return 90 * reactor;
+}
+
+// FTL 燃料系数（每 pc·r）：C_F = 0.00293 × 反应堆功率(GW)。缺功率时回退 HYR 21.4。
+function ftlFuelCFor(ship: ShipPerformance): number {
+  const power = ship.reactorPower;
+  if (power !== undefined && power > 0) {
+    return FTL_FUEL_C_PER_GW * power;
+  }
+  return 21.4;
+}
 // 网关跃迁速度（pc/h）与每段锁定+衰减（h），真实服务器数据校准。
 const GW_PC_PER_H = 3.0;
 const GW_LOCK_HOURS = 20 / 60;
 // 船体条件衰减阈值（<80% 性能下降）与衰减强度。
 const CONDITION_THRESHOLD = 0.8;
 
-// STL 巡航速度（km/s @ f=1.0）。
-// 实测（同航线 HRT→VH-331g，蓝图试航模拟）：
-// - standardEngine / advancedEngine / glassEngine 差异<1% → v_cruise 由
-//   飞船整体性能决定（质量/加速度/G力），引擎类型主要影响燃料流速。
-// - hyperthrustEngine 明显更快（超跑，G力 27）。
-// - fuelSavingEngine（OOG LCB，G力 10）介于两者之间。
-// 因此 v_cruise 用 G力经验公式近似（飞船试航后按 G力/性能校准）：
-//   v_cruise ≈ V_G8 × (G / 8)^k
-// 其中 V_G8 为 G力=8 的参考（BP-OHMI ≈ 61,750 km/s），k 为 G力指数。
-const STL_CRUISE_G8 = 61750; // km/s @ G力=8（BP-OHMI 实测）
-const STL_CRUISE_G_EXP = 0.9; // G力指数（近似，从 3 组数据拟合）
+// STL 引擎参数查表（引擎未命中时用 hyperthrust 校准值）。
+function stlEngineParams(engineOption: string | undefined) {
+  if (engineOption !== undefined) {
+    const p = STL_ENGINE_SPEED[engineOption];
+    if (p !== undefined) {
+      return p;
+    }
+  }
+  return DEFAULT_STL_SPEED;
+}
 
-// v_cruise（km/s @ f=1.0）：优先用实测引擎表（精确），
-// 未知引擎/组合用 G力经验公式近似（BP-OHMI G=8 为基准）。
-function vCruiseFor(engineOption: string | undefined, maxGFactor?: number): number {
-  const table: Record<string, number> = {
-    STL_ENGINE_HYPERTHRUST: 150000, // 超跑（G=27）
-    STL_ENGINE_FUEL_SAVING: 112500, // OOG LCB（G=10）
-    STL_ENGINE_STANDARD: STL_CRUISE_G8,
-    STL_ENGINE_ADVANCED: STL_CRUISE_G8,
-    STL_ENGINE_GLASS: STL_CRUISE_G8,
-  };
-  if (engineOption && table[engineOption] !== undefined) {
-    return table[engineOption];
-  }
-  if (maxGFactor !== undefined && maxGFactor > 0) {
-    return STL_CRUISE_G8 * Math.pow(maxGFactor / 8, STL_CRUISE_G_EXP);
-  }
-  return STL_CRUISE_BASE;
+// STL 巡航速度（km/s @ 燃料滑块 f）：饱和模型 v(f) = min(V_BASE×f^K, V_SAT)。
+// 整条曲线查引擎表（引擎类型决定，非每船校准）；G力/质量不影响。
+// 实测：hyperthrust f≥0.2 饱和 90800；advanced f≈0.45 饱和 74500；glass f≈0.1 饱和 74500。
+function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
+  const p = stlEngineParams(ship.stlEngineOption);
+  const f = Math.max(0.001, fuel);
+  return Math.min(p.vBase * Math.pow(f, p.k), p.vSat);
+}
+
+// STL 燃料系数（每 km·滑块）按引擎取。
+function stlFuelCFor(engineOption: string | undefined, fallback: number): number {
+  const p = stlEngineParams(engineOption);
+  return p.fuelC ?? fallback;
 }
 
 // 船体条件修正系数：<阈值时线性衰减（80%→0 性能衰减 20%，50%→50%）。
@@ -144,40 +195,29 @@ export function computeFuelOption(
   prices: { stlPrice: number; ftlPrice: number; timeValue: number },
   settings: ModelSettings = {},
 ): FuelOption {
-  const cF = settings.stlFuelC ?? STL_FUEL_C;
-  const cFF = settings.ftlFuelC ?? FTL_FUEL_C;
-  const refMass = settings.refMass ?? REF_MASS;
   const cond = conditionFactor(ship.condition);
 
-  // 质量缩放（当前质量 vs 参考），船体修正。
-  const massScale = Math.pow(ship.mass / refMass, 0.8);
-  // STL 时间（小时）：T = d_km / (v_cruise × f^1.4 × 3600) × massScale / cond。
-  // v_cruise 优先按蓝图 G力经验公式，回退引擎查表。
+  // STL 时间（小时）：T = d / (v(f) × 3600) / cond。
+  // v(f) = min(V_BASE×f^K, V_SAT)，整条曲线查引擎表（引擎类型决定，与质量/G力无关）。
   const d = metrics.stlDistanceKm;
-  const vCruise = vCruiseFor(ship.stlEngineOption, ship.maxGFactor);
-  const stlHours =
-    d !== undefined && d > 0
-      ? ((d / (vCruise * Math.pow(fuel, STL_FUEL_EXP) * 3600)) * massScale) / cond
-      : 0;
-  // STL 燃料（∝ f × d；跨飞船按流量相对缩放）。
-  const flowScale =
-    ship.stlFuelFlowRate !== undefined && (settings.refFlowRate ?? 0) > 0
-      ? ship.stlFuelFlowRate / (settings.refFlowRate as number)
-      : 1;
-  const stlFuel = d !== undefined ? cF * fuel * d * flowScale : 0;
+  const v = stlSpeedFor(ship, fuel);
+  const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
+  // STL 燃料（∝ f × d；按引擎燃料系数）。
+  const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
+  const stlFuel = d !== undefined ? cF * fuel * d : 0;
 
   // 自然 FTL：
-  // - JUMP 时间 = pc / (ftlMaxSpeed × r)
-  // - 充能时间 = CHARGE_SECONDS × r 每跳（实测充能时间 ∝ r）
-  // - FTL 燃料 = FTL_FUEL_C × r × pc（实测 ∝ r × 距离）
+  // - JUMP 速度 = ftlMax × r^(a(1+1.5r))，a = 0.40×ln(ftlMax) − 0.10
+  // - 充能时间 = (emitterChargeTime ÷ minReactorUsage) × r 每跳
+  // - FTL 燃料 = 0.00293 × 反应堆功率 × r × pc
   const r = Math.max(0.01, reactor);
-  const natSpeed = Math.max(0.1, ship.ftlMaxSpeed) * r;
+  const natSpeed = ftlSpeedFor(ship, r);
   const natJumpHours = metrics.natPc > 0 && natSpeed > 0 ? metrics.natPc / natSpeed : 0;
+  const chargeSeconds = ftlChargeSecondsFor(ship, r);
   const natChargeHours =
-    (metrics.natJumpCount ?? 0) > 0
-      ? ((metrics.natJumpCount as number) * FTL_CHARGE_SECONDS * r) / 3600
-      : 0;
-  const ftlFuelNat = cFF * r * metrics.natPc;
+    (metrics.natJumpCount ?? 0) > 0 ? ((metrics.natJumpCount as number) * chargeSeconds) / 3600 : 0;
+  const ftlFuelC = settings.ftlFuelC ?? ftlFuelCFor(ship);
+  const ftlFuelNat = ftlFuelC * r * metrics.natPc;
   // 网关 FTL：速度固定 3.0 pc/h，燃料 0，每段 +20min 锁定/衰减。
   const gwHours =
     metrics.gwPc > 0 ? metrics.gwPc / GW_PC_PER_H + metrics.gwCount * GW_LOCK_HOURS : 0;
