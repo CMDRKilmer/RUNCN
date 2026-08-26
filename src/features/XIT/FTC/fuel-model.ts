@@ -179,15 +179,18 @@ function conditionFactor(condition: number): number {
   return Math.max(0.2, condition / CONDITION_THRESHOLD);
 }
 
-// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB 三船实测 + FIO 行星重力）：
-// - 离港 = 0.49 × STL罐 × f（7 次验证，与距离/航线无关）
+// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB 三船实测 + FIO 行星环境）：
+// - 离港 = 0.49 × STL罐 × f（7 次验证，与距离/航线无关；仅自然跃迁航线）
 // - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
-// - 着陆 = 船体系数 × (24.2 + 18.4 × 行星重力)
-//   重力驱动确认（3 船 9/10 数据点）：Boucher(g1.237)≈Eos(g1.232) 着陆完全相同，
-//   气压/温度/日光差 5-15 倍却无影响；WCB(G8,m1271,t3500) 着陆≈新手船(G8,m828,t1500)
-//   → 质量模型(^0.57 预测 +28%)死亡，G 模型确认。WCB 残留 +2(+5%) 疑微弱质量效应。
-//   ⚠️ Euu(P=5.72 超厚大气) 着陆偏低 ~28% 已双船证实（新手船 28/WCB 30 vs 预测 40.5），
-//   只影响着陆段（进近差正常）→ 厚大气制动减燃料，阈值待更多高 P 行星验证。
+// - 着陆 = 船体系数 × (24.2 + 18.4 × 行星重力) × 大气修正(P)
+//   重力驱动确认（3 船 9/10 数据点）：Boucher(g1.237)≈Eos(g1.232) 着陆完全相同；
+//   WCB(G8,m1271,t3500) 着陆≈新手船(G8,m828,t1500) → 质量模型(^0.57)死亡，G 模型确认。
+//   ★大气修正确认（3 高压行星 × 2 船共 6 点）：P≥1.79 着陆 ×0.71（Euu 5.72/Sabaton 43.7/
+//   Mimar 1.79 全部偏低 ~29%，新手船 28、WCB 30-34 vs 预测 40-47）；P≤1.50（Ashland 1.50/
+//   Boucher 0.28/Eos 0.049）正常。阈值在 1.5~1.79 间（低于游戏 HSE 2.0），高温/低重力无影响
+//   （Sabaton -102°C 也偏低）→ 纯气压驱动的大气制动，因子 ≈0.71。
+// ⚠️ 已知局限：罐模型仅对自然跃迁航线成立；网关航线（跃门）的离港/进近显著更低
+//   （WCB Sabaton 进近 117/Mimar 90 vs 模型 171.5），结构不同待研究。
 // 跨星系（有跃迁）航线：stlFuel = 0.98 × 罐 × f + 进近差 + 着陆
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
 const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
@@ -196,6 +199,8 @@ const STL_LANDING_G_BASE = 24.2; // 着陆重力项截距（船体系数=1.0，�
 const STL_LANDING_G_SLOPE = 18.4; // 着陆重力项斜率（u/地球g）
 const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船）
 const STL_LANDING_G_EXP = 0.68; // 船体系数 G 指数：HCB(G15) 1.535≈(15/8)^0.68、WCB(G8) 1.0 双验证
+const STL_ATMO_P_THRESHOLD = 1.6; // 大气制动气压阈值（Ashland 1.50 正常 / Mimar 1.79 偏低，取中）
+const STL_ATMO_FACTOR = 0.71; // 厚大气行星着陆燃料系数（6 点平均，Euu/Sabaton/Mimar）
 const STL_SEGMENTS_EXTRA = 40; // 无重力数据时的回退近似（旧常数）
 
 // 着陆船体系数：新手船/WCB(G=8)为 1.0，HCB(G=15)实测 1.535 ≈ (15/8)^0.68。
@@ -218,9 +223,11 @@ export interface ModelSettings {
   stlSegmentExtra?: number;
   // 目的地行星重力（地球 g，FIO /planet/{id}；undefined 时用 stlSegmentExtra 回退）。
   landingGravity?: number;
+  // 目的地行星气压（大气制动修正；≥1.6 时着陆 ×0.71）。
+  landingPressure?: number;
   // 着陆船体系数覆盖（默认 (G/8)^0.68）。
   stlLandingFactor?: number;
-  // 进近差近似（默认 5）。
+  // 进近差近似（默认 8）。
   stlApproachExtra?: number;
   // 参考 STL 燃料流量（用于跨飞船按 stlFuelFlowRate 缩放）。
   refFlowRate?: number;
@@ -245,7 +252,8 @@ export function computeFuelOption(
   const v = stlSpeedFor(ship, fuel);
   const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
   // STL 燃料：跨星系（有跃迁）用罐模型（离港+进近 = 0.98×罐×f + 进近差 + 着陆）。
-  // 着陆 = 船体系数 × (24.2 + 18.4 × 目的地重力)（FIO 重力查询，失败回退旧常数）。
+  // 着陆 = 船体系数 × (24.2 + 18.4 × 目的地重力) × 大气修正(P≥1.6 时 ×0.71)。
+  // （FIO 重力/气压查询，失败回退旧常数；⚠️罐模型仅对自然跃迁航线成立，网关航线偏低。）
   // 同星系用 C_F×f×d（转移段，已校准）。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -255,10 +263,14 @@ export function computeFuelOption(
     const g = settings.landingGravity;
     if (g !== undefined && g > 0) {
       const lf = settings.stlLandingFactor ?? stlLandingFactor(ship);
+      const atmo =
+        settings.landingPressure !== undefined && settings.landingPressure >= STL_ATMO_P_THRESHOLD
+          ? STL_ATMO_FACTOR
+          : 1;
       stlFuel =
         STL_TANK_FUEL_COEF * tank * fuel +
         (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
-        lf * (STL_LANDING_G_BASE + STL_LANDING_G_SLOPE * g);
+        lf * (STL_LANDING_G_BASE + STL_LANDING_G_SLOPE * g) * atmo;
     } else {
       stlFuel = STL_TANK_FUEL_COEF * tank * fuel + (settings.stlSegmentExtra ?? STL_SEGMENTS_EXTRA);
     }

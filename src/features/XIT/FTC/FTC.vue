@@ -224,11 +224,13 @@ interface PlanResult {
 const result = ref<PlanResult | undefined>(undefined);
 const calcMessage = ref<string | undefined>(undefined);
 
-// FIO 行星重力缓存（目的地行星 naturalId → 地球 g）。FIO 请求不稳定，失败回退常数近似。
-const planetGravityCache = new Map<string, number>();
-async function fetchPlanetGravity(naturalId: string): Promise<number | undefined> {
+// FIO 行星环境缓存（目的地行星 naturalId → 重力/气压）。FIO 请求不稳定，失败回退常数近似。
+const planetEnvCache = new Map<string, { gravity: number; pressure?: number }>();
+async function fetchPlanetEnv(
+  naturalId: string,
+): Promise<{ gravity: number; pressure?: number } | undefined> {
   const key = naturalId.toUpperCase();
-  const cached = planetGravityCache.get(key);
+  const cached = planetEnvCache.get(key);
   if (cached !== undefined) {
     return cached;
   }
@@ -237,10 +239,15 @@ async function fetchPlanetGravity(naturalId: string): Promise<number | undefined
     if (!resp.ok) {
       return undefined;
     }
-    const data = (await resp.json()) as { Gravity?: number };
+    const data = (await resp.json()) as { Gravity?: number; Pressure?: number };
     if (typeof data.Gravity === 'number' && data.Gravity > 0) {
-      planetGravityCache.set(key, data.Gravity);
-      return data.Gravity;
+      const env = {
+        gravity: data.Gravity,
+        pressure:
+          typeof data.Pressure === 'number' && data.Pressure > 0 ? data.Pressure : undefined,
+      };
+      planetEnvCache.set(key, env);
+      return env;
     }
   } catch {
     // FIO 不稳定，回退常数近似。
@@ -269,11 +276,11 @@ async function planAndCompute() {
     return;
   }
   const metrics = routeMetrics(route);
-  // 跨星系航线的目的地行星重力（FIO /planet/{id}），用于精确着陆燃料。
+  // 跨星系航线的目的地行星环境（FIO /planet/{id}），用于精确着陆燃料（重力 + 大气修正）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
-  const landingGravity =
+  const landingEnv =
     isCrossSystem && metrics.toBody !== undefined
-      ? await fetchPlanetGravity(metrics.toBody)
+      ? await fetchPlanetEnv(metrics.toBody)
       : undefined;
   const options = scanFuelOptions(
     perf,
@@ -285,7 +292,10 @@ async function planAndCompute() {
       ftlPrice: ftlFuelPrice.value ?? 0,
       timeValue: timeValue.value ?? 0,
     },
-    { landingGravity },
+    {
+      landingGravity: landingEnv?.gravity,
+      landingPressure: landingEnv?.pressure,
+    },
   );
   if (options.length === 0) {
     calcMessage.value = '请输入有效的滑块组合（0–1 之间）';
@@ -294,7 +304,7 @@ async function planAndCompute() {
   result.value = { label: route.label, route, metrics, options, best: options[0] };
   const b = options[0];
   const gravityText =
-    landingGravity !== undefined ? `，目的地重力 ${fixed2v(landingGravity)}g` : '';
+    landingEnv !== undefined ? `，目的地重力 ${fixed2v(landingEnv.gravity)}g` : '';
   calcMessage.value =
     `最优方案：燃料滑块 ${b.fuel} / 反应堆 ${b.reactor}，预计 ${formatDuration(b.totalHours * 3600000)}，总成本 ${formatCurrency(b.totalCost)}` +
     gravityText +
