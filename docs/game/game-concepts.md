@@ -52,10 +52,12 @@ Each planet has properties affecting base viability. Any extremes require specia
 - **Pressure**: SEA for low, HSE for high.
 - **Type**: Rocky or gas giant. Rocky require MCG, gas giants require AEF.
 
-FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`/`Radius`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星环境还影响**飞船着陆燃料**（FTC 已接入）：
+FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`/`Radius`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星环境还影响**飞船起降燃料**（FTC 已接入）：
+- **起飞 = 船体系数 × 0.455 × √(半径_km × 气压^(+0.2))**（行星出发特有）
 - **着陆 = 船体系数 × 0.47 × √(半径_km × 气压^(-0.2))**——3 船 13 实测点误差 ±2.6u
-- 机制：游戏着陆段燃料 ∝ √(着陆距离)，着陆距离 = 0.66×半径×气压^(-0.2)（厚大气 → 更短最终着陆段，更多下降分给进近段）
+- 机制：起/降段燃料 ∝ √(段距离)；起飞距离 = 0.62×半径×气压^(+0.2)、着陆距离 = 0.66×半径×气压^(-0.2)。厚大气 → 起飞更长（冲出大气）、着陆更短（大气制动），起飞+着陆 ≈ 恒定
 - 船体系数 = (G/8)^0.6（G 为蓝图 G力）；与行星重力无关（早期"重力/大气阈值"模型是距离的巧合相关假象）
+- 注意：BTF 起降段距离有 ~±10% 轨道相位波动 → 燃料模型有 ~±6% 固有噪声
 
 Additionally, planets have properties affecting production:
 - **Fertility**: Affects FRM/ORC efficiency. Range roughly -33% to +33%. Fully infertile planets cannot build farms.
