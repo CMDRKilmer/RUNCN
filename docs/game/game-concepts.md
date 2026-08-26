@@ -52,7 +52,9 @@ Each planet has properties affecting base viability. Any extremes require specia
 - **Pressure**: SEA for low, HSE for high.
 - **Type**: Rocky or gas giant. Rocky require MCG, gas giants require AEF.
 
-FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星重力还影响**飞船着陆燃料**（FTC 已接入）：着陆 ≈ 船体系数 × (24.2 + 18.4×g)（6/7 实测点误差 <0.5u，Boucher/Eos 同重力着陆相同）；气压/温度/日光不影响着陆燃料，但极厚大气（P≫1，如 Euu P=5.72）可能例外（待重测）。
+FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星环境还影响**飞船着陆燃料**（FTC 已接入）：
+- **重力**：着陆 = 船体系数 × (24.2 + 18.4×g)（3 船 11 实测点误差 <0.5u；船体系数 = (G/8)^0.68，G 为蓝图 G力）
+- **气压（大气制动）**：P ≥ ~1.6 时着陆 ×0.71（Euu 5.72 / Mimar 1.79 / Sabaton 43.7 三行星双船验证偏低 ~29%，P ≤ 1.50 正常；阈值低于建造材料 HSE 的 P>2.0）。高温/低重力无此效果，纯气压驱动。
 
 Additionally, planets have properties affecting production:
 - **Fertility**: Affects FRM/ORC efficiency. Range roughly -33% to +33%. Fully infertile planets cannot build farms.
