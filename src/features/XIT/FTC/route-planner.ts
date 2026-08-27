@@ -415,6 +415,22 @@ export function buildEstimatedSegmentRows(
   const isCross = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
   const tank = ship.stlFuelCapacity;
 
+  // 记录的原生秒数合理性校验：stlSegmentsStore 不区分飞船/配置，可能混入其它船
+  // 甚至旧配置的记录（如 OOG LCB 曾出现 71.6M km / 2h58m = 6708 km/s 的异常记录，
+  // 而本船巡航 ~21760 km/s）。记录速度若偏离本船模型巡航速度过远（<0.35× 或 >3×），
+  // 判为非同船记录，回退模型时长。
+  function recordedSeconds(seconds: number | undefined, distanceKm: number | undefined) {
+    if (seconds === undefined || seconds <= 0 || distanceKm === undefined || distanceKm <= 0) {
+      return undefined;
+    }
+    const speed = distanceKm / seconds;
+    const ratio = speed / Math.max(1, vStl);
+    if (ratio < 0.35 || ratio > 3) {
+      return undefined;
+    }
+    return seconds;
+  }
+
   // 跨星系 STL 罐模型细分（与 computeFuelOption 同源）：
   // 离港 ≈ 0.49×罐×min(f, f_cap)（省油引擎离港饱和）、进近 ≈ 0.49×罐×f + 进近差、
   // 着陆/起飞按行星半径气压。
@@ -446,9 +462,8 @@ export function buildEstimatedSegmentRows(
       typeKey: 'DEPARTURE',
       destination: `${route.fromBody ?? ''}（环绕轨道）`,
       durationMs:
-        metrics.departSeconds !== undefined && metrics.departSeconds > 0
-          ? metrics.departSeconds * 1000
-          : (departKm / (vStl * 3600) / cond) * 3600000,
+        (recordedSeconds(metrics.departSeconds, departKm) ??
+          (departKm / (vStl * 3600) / cond) * 3600) * 1000,
       distanceKm: departKm,
       damage: 0,
       stlFuel: stlDepartFuel,
@@ -493,9 +508,8 @@ export function buildEstimatedSegmentRows(
       typeKey: 'APPROACH',
       destination: `${route.toBody ?? ''}（环绕轨道）`,
       durationMs:
-        metrics.approachSeconds !== undefined && metrics.approachSeconds > 0
-          ? metrics.approachSeconds * 1000
-          : (approachKm / (vStl * 3600) / cond) * 3600000,
+        (recordedSeconds(metrics.approachSeconds, approachKm) ??
+          (approachKm / (vStl * 3600) / cond) * 3600) * 1000,
       distanceKm: approachKm,
       damage: 0,
       stlFuel: stlApproachFuel,
