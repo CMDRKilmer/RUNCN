@@ -1,6 +1,7 @@
 import { ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 import { hasSystemData, exportStationOrbits } from '@src/infrastructure/fio/orbit';
@@ -84,6 +85,8 @@ export function shipPerformanceFor(s: PrunApi.Ship): ShipPerformance {
   // FTL 最大航速优先从蓝图读取（pc/s → pc/h），无蓝图时回退到 2.26 pc/h。
   const info = blueprintInfoFor(s);
   const ftlMaxSpeed = info?.ftlMaxSpeed ?? 2.26;
+  // 当前 STL 罐余量（油罐 store 实测）：段燃料/段速度基准用余量而非罐容量。
+  const remaining = shipFuelRemainingFor(s);
   return {
     mass: s.mass,
     operatingEmptyMass: s.operatingEmptyMass,
@@ -98,6 +101,38 @@ export function shipPerformanceFor(s: PrunApi.Ship): ShipPerformance {
     minReactorUsage: info?.minReactorUsage,
     emitterChargeTime: info?.emitterChargeTime,
     stlFuelCapacity: info?.stlFuelCapacity,
+    stlRemaining: remaining.stlRemaining > 0 ? remaining.stlRemaining : undefined,
+  };
+}
+
+// 飞船当前剩余 STL / FTL 燃料（从飞船油罐 store 实测）。
+// 油罐 store 含 INVENTORY 项，quantity.amount 即剩余单位数（与 BTF 滑块同单位）。
+// 飞船未停靠或油罐 store 暂不可用时返回 0（避免误报）。
+export interface ShipFuelRemaining {
+  stlRemaining: number;
+  ftlRemaining: number;
+  stlCap: number;
+  ftlCap: number;
+}
+
+export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
+  const stlStores = s.idStlFuelStore
+    ? storagesStore.getByAddressableId(s.idStlFuelStore)
+    : undefined;
+  const ftlStores = s.idFtlFuelStore
+    ? storagesStore.getByAddressableId(s.idFtlFuelStore)
+    : undefined;
+  const stlStore = stlStores?.[0];
+  const ftlStore = ftlStores?.[0];
+  const sumQty = (store?: PrunApi.Store) =>
+    store?.items
+      .filter(i => i.type === 'INVENTORY')
+      .reduce((sum, i) => sum + (i.quantity?.amount ?? 0), 0) ?? 0;
+  return {
+    stlRemaining: sumQty(stlStore),
+    ftlRemaining: sumQty(ftlStore),
+    stlCap: stlStore?.weightCapacity ?? 0,
+    ftlCap: ftlStore?.weightCapacity ?? 0,
   };
 }
 
@@ -265,6 +300,8 @@ export interface FtcComputeOutput {
   landingPressure?: number;
   departureRadius?: number;
   departurePressure?: number;
+  // 飞船当前剩余 STL/FTL 燃料（油罐 store 实测），供面板显示当前油量与缺口。
+  remaining?: { stlRemaining: number; ftlRemaining: number; stlCap: number; ftlCap: number };
 }
 
 // 计算最优燃料方案并写入共享参数（ftc-fuel-settings），无需 FTC 面板打开。
@@ -311,6 +348,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 无需玩家设置档位：自动扫描全范围燃料滑块 f；反应堆 r 仅在存在自然跃迁时扫描
   // （全程系内/纯网关飞行没有自然跃迁，反应堆不影响时长与燃料，无需计算）。
   const reactorRelevant = (metrics.natPc ?? 0) > 0 || (metrics.natJumpCount ?? 0) > 0;
+  // 读飞船当前剩余 STL/FTL 燃料（油罐 store 实测）。后续给每条方案算缺口，
+  // FTC 面板显示「当前油够不够这趟飞」。
+  const remaining = shipFuelRemainingFor(s);
   const options = scanFuelOptions(
     perf,
     metrics,
@@ -327,6 +367,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       departureRadius: departEnv?.radiusKm,
       departurePressure: departEnv?.pressure,
     },
+    remaining,
   );
   if (options.length === 0) {
     return { ok: false, message: '计算失败：未能生成有效的滑块组合' };
@@ -349,5 +390,6 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     landingPressure: landingEnv?.pressure,
     departureRadius: departEnv?.radiusKm,
     departurePressure: departEnv?.pressure,
+    remaining,
   };
 }

@@ -2,6 +2,12 @@
   padding: 4px 8px;
 }
 
+.warning {
+  color: #e88a3a;
+  font-weight: bold;
+  margin-left: 4px;
+}
+
 .form {
   display: flex;
   flex-direction: column;

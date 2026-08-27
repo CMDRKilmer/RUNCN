@@ -240,6 +240,8 @@ interface PlanResult {
   // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
   segments: RouteSegmentRow[];
   segmentsNative: boolean;
+  // 飞船当前剩余 STL/FTL 燃料（油罐 store 实测），用于面板显示当前油量与缺口警告。
+  remaining?: NonNullable<FtcComputeOutput['remaining']>;
 }
 
 const result = ref<PlanResult | undefined>(undefined);
@@ -309,6 +311,7 @@ async function planAndCompute() {
     reactorRelevant,
     segments,
     segmentsNative,
+    remaining: out.remaining,
   };
   const radiusText =
     out.landingRadius !== undefined ? `，目的地半径 ${fixed2v(out.landingRadius)}km` : '';
@@ -553,6 +556,20 @@ const balanceNote = computed(() => {
         <template v-if="!result.reactorRelevant"
           >：全程系内飞行没有自然跃迁，反应堆不适用（--）。</template
         >
+      </div>
+      <div v-if="result.remaining" :class="$style.hint">
+        当前油量：STL
+        {{ Math.round(result.remaining.stlRemaining) }}/{{ result.remaining.stlCap }}
+        ｜ FTL
+        {{ Math.round(result.remaining.ftlRemaining) }}/{{ result.remaining.ftlCap }}
+        <template v-if="result.best.stlShortage > 0 || result.best.ftlShortage > 0">
+          ｜ ⚠ 缺口 STL {{ Math.round(result.best.stlShortage) }} + FTL
+          {{ Math.round(result.best.ftlShortage) }}
+          <span :class="$style.warning">需先加注</span>
+        </template>
+        <template v-else-if="result.best.stlFuel > 0 || result.best.ftlFuel > 0">
+          ｜ ✓ 当前油量足够
+        </template>
       </div>
       <table :class="$style.table">
         <thead>

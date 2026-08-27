@@ -33,8 +33,12 @@ export interface ShipPerformance {
   condition: number;
   // 蓝图 STL 引擎选项（如 STL_ENGINE_HYPERTHRUST），用于查引擎特性表。
   stlEngineOption?: string;
-  // 蓝图 STL 燃料罐容量（跨星系离港/进近燃料按罐比例算）。
+  // 蓝图 STL 燃料罐容量（段燃料基准回退值）。
   stlFuelCapacity?: number;
+  // 飞船当前 STL 罐余量（u，油罐 store 实测）。★2026-08-27 实测：服务器段燃料
+  // Q = 0.49×当前STL余量×f（不是 0.49×罐容量×f）——罐不满时用余量，MTRA 转移油后
+  // 段速度/时间/距离随之变化。缺省回退罐容量（罐满时两者一致，历史标定仍成立）。
+  stlRemaining?: number;
   // 蓝图最小反应堆使用量（= 发射器功率需求/反应堆功率，HYR 超跑 0.076、STD 新手船 0.302）。
   minReactorUsage?: number;
   // 蓝图发射器充能时间（秒，基础充能；充能时间 = eT/m × r）。
@@ -76,6 +80,10 @@ export interface FuelOption {
   totalCost: number;
   // 燃料绝对量为标定估算（true）；false 表示缺关键数据仅能报时间。
   fuelEstimated: boolean;
+  // 该方案相对飞船当前剩余 STL/FTL 燃料的缺口（u；≤0 表示足够）。
+  // 由 scanFuelOptions 在扫描时附加（不参与成本排序）。
+  stlShortage: number;
+  ftlShortage: number;
 }
 
 // ---- STL 引擎特性表（v(f) = min(V_BASE×f^K, V_SAT)，km/s）----
@@ -266,7 +274,10 @@ function stlSegmentSpeedFor(
   curve: StlSegmentCurve,
   approach: boolean,
 ): number {
-  const tank = ship.stlFuelCapacity;
+  // 段燃料基准：★2026-08-27 实测用「当前 STL 罐余量」而非罐容量
+  // （MTRA 把 STL 从 3500 降到 100，段速度/时间随余量显著变化，Q=0.49×余量×f）。
+  // 缺余量数据时回退罐容量（罐满时两者一致）。
+  const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
   if (tank === undefined || tank <= 0) {
     return curve.vSat;
   }
@@ -290,12 +301,13 @@ function stlSegmentCurveFor(ship: ShipPerformance): {
   return p ?? DEFAULT_STL_SEGMENT_CURVE;
 }
 
-// 离港段速度（km/s @ f）：由段燃料 Q=0.49×罐×f 驱动。
+// 离港段速度（km/s @ f）：由段燃料 Q=0.49×STL余量×f 驱动
+// （余量 = 当前 STL 罐余量，缺省回退罐容量）。
 export function stlDepartSpeedFor(ship: ShipPerformance, fuel: number): number {
   return stlSegmentSpeedFor(ship, fuel, stlSegmentCurveFor(ship).depart, false);
 }
 
-// 进近段速度（km/s @ f）：由段燃料 Q=0.49×罐×f+8 驱动。
+// 进近段速度（km/s @ f）：由段燃料 Q=0.49×STL余量×f+8 驱动。
 export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number {
   return stlSegmentSpeedFor(ship, fuel, stlSegmentCurveFor(ship).approach, true);
 }
@@ -443,9 +455,11 @@ export function computeFuelOption(
   // 起飞 = 船体系数 × 0.455 × √(半径_km × P^+0.2)（仅行星出发地，有大气冲出）
   // 空间站无大气：到站无着陆、出发无起飞；两段相互独立（R 缺失只影响自身段）。
   // 同星系用 C_F×f×d（转移段，已校准）。
+  // ★2026-08-27 实测：段燃料基准用「当前 STL 罐余量」而非罐容量
+  // （Q = 0.49×余量×f；余量少 → Q 小 → 段燃料少且段速度慢）。缺余量回退罐容量。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
-  const tank = ship.stlFuelCapacity;
+  const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
   let stlFuel: number;
   if (isCrossSystem && tank !== undefined && tank > 0) {
     const R = settings.landingRadius;
@@ -514,6 +528,8 @@ export function computeFuelOption(
     gatewayCost,
     totalCost: fuelCost + timeCost + gatewayCost,
     fuelEstimated: d !== undefined && d > 0,
+    stlShortage: 0,
+    ftlShortage: 0,
   };
 }
 
@@ -606,6 +622,9 @@ export function findBalanceOption(options: FuelOption[]): FuelOption | undefined
 }
 
 // 扫描滑块组合，按综合成本（燃料费+时间价值）升序返回。
+// 飞船当前剩余 STL/FTL 燃料（remaining）若传入，会给每条方案附加
+// stlShortage/ftlShortage 缺口字段（max(0, 需油 - 剩余)）。
+// 缺省 remaining 不传 → 缺口字段为 0，FTC 面板不再展示缺口警告。
 export function scanFuelOptions(
   ship: ShipPerformance,
   metrics: RouteMetrics,
@@ -613,11 +632,17 @@ export function scanFuelOptions(
   reactors: number[],
   prices: { stlPrice: number; ftlPrice: number; timeValue: number },
   settings: ModelSettings = {},
+  remaining?: { stlRemaining: number; ftlRemaining: number },
 ): FuelOption[] {
   const plans: FuelOption[] = [];
   for (const fuel of fuels) {
     for (const reactor of reactors) {
-      plans.push(computeFuelOption(ship, metrics, fuel, reactor, prices, settings));
+      const opt = computeFuelOption(ship, metrics, fuel, reactor, prices, settings);
+      if (remaining) {
+        opt.stlShortage = Math.max(0, opt.stlFuel - remaining.stlRemaining);
+        opt.ftlShortage = Math.max(0, opt.ftlFuel - remaining.ftlRemaining);
+      }
+      plans.push(opt);
     }
   }
   return plans.sort((a, b) => a.totalCost - b.totalCost);
