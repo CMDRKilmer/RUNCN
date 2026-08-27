@@ -10,5 +10,6 @@ interface RefinedPrunConfig {
     starConnections: string;
     planetEnv: string;
     stationData: string;
+    stlSegments: string;
   };
 }

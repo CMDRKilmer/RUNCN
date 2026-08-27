@@ -6,13 +6,43 @@ export type Middleware<T> = {
   onOpen: () => void;
   onMessage: (payload: T) => Promise<boolean>;
   dispatchClientMessage: Ref<((payload: T) => void) | undefined>;
+  websocket?: WebSocket;
 };
+
+// 当前活跃的游戏 socket（每次新连接时更新）。
+let activeSocket: WebSocket | undefined;
+
+// 向游戏服务器发送一条 socket.io "message" 事件（真实发送，用于主动请求，
+// 如 SHIP_FLIGHT_CALCULATE_TEST_FLIGHT / NOMENCLATURE_QUERY_ADDRESSES）。
+// 注意：actionId 必须是 UUID，否则服务器会静默丢弃请求。
+export function sendServerMessage(message: unknown): boolean {
+  if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+    return false;
+  }
+  activeSocket.send(encodeRequestMessage(message));
+  return true;
+}
+
+// 客户端→服务器的请求事件名是 "message"（服务器→客户端是 "event"）。
+// encodeMessage 生成的是响应格式（"event"），不能用于发送请求。
+function encodeRequestMessage<T>(message: T) {
+  return encodeEIOPacket({
+    type: 'message',
+    data: encodeSIOPacket({
+      type: PacketType.EVENT,
+      nsp: '/',
+      data: ['message', message],
+    }),
+  });
+}
 
 export default function socketIOMiddleware<T>(middleware: Middleware<T>) {
   const addEventListener = WebSocket.prototype.addEventListener;
   window.WebSocket = new Proxy(WebSocket, {
     construct(target: typeof WebSocket, args: [string, (string | string[])?]) {
       const ws = new target(...args);
+      activeSocket = ws;
+      middleware.websocket = ws;
 
       return new Proxy(ws, {
         set(target, prop, value) {
@@ -43,6 +73,15 @@ export default function socketIOMiddleware<T>(middleware: Middleware<T>) {
             return addEventListener.bind(target);
           }
           const value = Reflect.get(target, prop);
+          if (prop === 'send' && typeof value === 'function') {
+            // 每次游戏真实发送时刷新活跃连接：扩展热重载（不刷新页面）时
+            // 游戏 socket 已存在、construct 不会再次触发，activeSocket 会丢失；
+            // 游戏持续发包，借此总能拿到当前活跃连接。
+            return function (this: WebSocket, ...args: Parameters<WebSocket['send']>) {
+              activeSocket = target;
+              return value.apply(target, args);
+            };
+          }
           if (typeof value === 'function') {
             return value.bind(target);
           }

@@ -11,6 +11,12 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
+import { exportStlSegments } from '@src/infrastructure/prun-api/data/system-bodies';
+import {
+  collectAllPlanetStl,
+  clearCollectProgress,
+  collectProgressCount,
+} from '@src/infrastructure/prun-api/data/flight-test-collector';
 import {
   orbitStore,
   prefetchAllOrbits,
@@ -106,6 +112,71 @@ function exportStations() {
   }
   downloadFile(data, 'prun-stations.json', true);
   gatewayMessage.value = `已导出 ${data.length} 个空间站（轨道+归属星系）；运行 build-station-data.mjs 精简后内置`;
+}
+// 导出已积累的 STL 段数据（原生离港/进近段距离，SFC/BTF 计划时自动记录），
+// 供 build-stl-data.mjs 精简内置到 public/json/stl-segments.json。内置后 FTC
+// 对所有已采集航线精确复现原生 STL 路程，运行中记录继续校准。
+function exportStlSegmentsData() {
+  const data = exportStlSegments();
+  if (data.depart.length === 0 && data.approach.length === 0) {
+    gatewayMessage.value =
+      '暂无 STL 段数据：请先在 SFC/BTF 计划过相关航线（离港/进近段会自动记录），再导出';
+    return;
+  }
+  downloadFile(data, 'prun-stl-segments.json', true);
+  gatewayMessage.value =
+    `已导出 ${data.depart.length} 条离港 + ${data.approach.length} 条进近；` +
+    '运行 node scripts/build-stl-data.mjs <文件> 精简后内置';
+}
+// ---- 全部星球 STL 自动采集 ----
+// 通过游戏 socket 主动请求 SHIP_FLIGHT_CALCULATE_TEST_FLIGHT（无需打开 BTF），
+// 为内置 4155 行星逐个计算离港（行星→探针）与进近（探针→行星）原生 STL 距离，
+// 响应自动进入 stlSegmentsStore；支持并发/停止/断点续采，完成后导出内置。
+const collecting = ref(false);
+const collectCancelled = ref(false);
+const collectDone = ref(0);
+const collectTotal = ref(0);
+const collectCurrent = ref('');
+const collectMessage = ref('');
+const collectProbe = ref('VH-192c');
+
+async function startCollect() {
+  collecting.value = true;
+  collectCancelled.value = false;
+  collectMessage.value = '';
+  try {
+    const result = await collectAllPlanetStl({
+      probe: collectProbe.value.trim() || 'VH-192c',
+      concurrency: 4,
+      onProgress: info => {
+        collectDone.value = info.done;
+        collectTotal.value = info.total;
+        collectCurrent.value = info.current;
+        collectMessage.value = info.message;
+      },
+      shouldCancel: () => collectCancelled.value,
+    });
+    collectMessage.value = result.cancelled
+      ? `已停止：完成 ${result.ok} 个（失败 ${result.failed.length}）。再次采集会从断点继续。`
+      : `采集完成：成功 ${result.ok} 个，失败 ${result.failed.length} 个` +
+        (result.failed.length > 0 ? `（${result.failed.slice(0, 6).join('、')}…）` : '') +
+        '。请点「导出 STL 段数据」后把文件发给我内置';
+  } catch (e) {
+    collectMessage.value = '采集失败：' + String(e);
+  } finally {
+    collecting.value = false;
+  }
+}
+
+function stopCollect() {
+  collectCancelled.value = true;
+}
+
+function resetCollectProgress() {
+  clearCollectProgress();
+  collectDone.value = 0;
+  collectTotal.value = 0;
+  collectMessage.value = '已清空采集断点，下次从头开始';
 }
 // 自动浏览星系（不止空间站）：逐个打开目标星系的星系详情（游戏命令
 // `MS <systemId>`，Map: Star System），客户端自动请求 DATA_DATA["systems", id]，
@@ -554,7 +625,43 @@ function fixed2v(value: number) {
           @click="exportStations">
           导出空间站
         </PrunButton>
+        <PrunButton
+          neutral
+          data-tooltip="导出已记录的原生 STL 离港/进近段距离（SFC/BTF 计划时自动记录）。运行 build-stl-data.mjs 精简后内置，FTC 即对所有已采集航线精确复现原生路程。"
+          @click="exportStlSegmentsData">
+          导出 STL 段数据
+        </PrunButton>
       </div>
+      <div :class="$style.fieldRow">
+        <label :class="$style.field">
+          <span>采集探针（全部行星的离港/进近都以它为目标/来源，建议用你自己的行星或站点）</span>
+          <TextInput v-model="collectProbe" placeholder="如：VH-192c" />
+        </label>
+        <div :class="$style.actions">
+          <PrunButton
+            primary
+            :disabled="collecting"
+            data-tooltip="自动为内置全部行星（4155 个）逐个请求原生 STL 离港/进近距离（游戏服务器计算，无需打开 BTF）。并发 4、支持停止与断点续采；响应自动入库，完成后点「导出 STL 段数据」发给我内置。"
+            @click="startCollect">
+            {{
+              collecting
+                ? '采集中…'
+                : `采集全部星球 STL${collectProgressCount() > 0 ? `（已完成 ${collectProgressCount()}）` : ''}`
+            }}
+          </PrunButton>
+          <PrunButton v-if="collecting" neutral @click="stopCollect">停止</PrunButton>
+          <PrunButton :disabled="collecting" neutral @click="resetCollectProgress"
+            >清空断点</PrunButton
+          >
+        </div>
+      </div>
+      <div v-if="collecting || collectDone > 0" :class="$style.exportBar">
+        <ProgressBar :value="collectDone" :max="collectTotal || 1" />
+        <span :class="$style.progress">
+          {{ collectDone }}/{{ collectTotal }}（{{ collectCurrent }}）
+        </span>
+      </div>
+      <div v-if="collectMessage" :class="$style.hint">{{ collectMessage }}</div>
       <div v-if="exporting" :class="$style.exportBar">
         <ProgressBar :value="exportDone" :max="exportTotal || 1" />
         <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
@@ -608,6 +715,8 @@ function fixed2v(value: number) {
           {{ fixed2v(result.metrics.gwPc) }}， 网关 {{ result.metrics.gwCount }} 段）
           <template v-if="result.metrics.stlDistanceKm !== undefined">
             ｜ STL 起降 ≈ {{ formatFuel(result.metrics.stlDistanceKm / 1e6) }}M km
+            <template v-if="result.metrics.stlRecorded">（飞行计划原生记录）</template>
+            <template v-else>（轨道模型估算）</template>
           </template>
         </div>
       </details>

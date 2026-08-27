@@ -1,0 +1,16 @@
+{
+  "depart": [
+    ["HRT|VH-192", { "distanceKm": 21175977, "seconds": 3720 }],
+    ["HRT|VH-874", { "distanceKm": 22092812, "seconds": 3840 }],
+    ["HRT|VH-778", { "distanceKm": 21617511, "seconds": 3880 }],
+    ["VH-331G|VH-192", { "distanceKm": 73901924, "seconds": 13140 }],
+    ["VH-331A|VH-192", { "distanceKm": 63659956, "seconds": 11280 }],
+    ["VH-192C|VH-874", { "distanceKm": 74410426, "seconds": 13200 }]
+  ],
+  "approach": [
+    ["VH-331|VH-192C", { "distanceKm": 72737809, "seconds": 2959 }],
+    ["VH-331|VH-874A", { "distanceKm": 72692158, "seconds": 2959 }],
+    ["VH-192|VH-874A", { "distanceKm": 72781976, "seconds": 2959 }],
+    ["VH-192|VH-192C", { "distanceKm": 69529048, "seconds": 2959 }]
+  ]
+}

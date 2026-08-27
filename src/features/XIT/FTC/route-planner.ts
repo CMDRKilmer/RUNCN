@@ -1,6 +1,9 @@
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { predictPosition, gameNow } from '@src/infrastructure/fio/orbit';
-import { systemBodiesStore } from '@src/infrastructure/prun-api/data/system-bodies';
+import {
+  systemBodiesStore,
+  stlSegmentsStore,
+} from '@src/infrastructure/prun-api/data/system-bodies';
 import { getStarPosition, distance3d, resolveSystemId } from './route-model';
 
 // 航线规划与航线指标（XIT FTC 燃料计算器使用）。
@@ -177,9 +180,15 @@ export function liftOffKm(bodyNatural: string | undefined): number | undefined {
   return undefined;
 }
 
-// 提取飞船性能模型所需的航线指标：STL 起降距离（观测或估算）、自然/网关 pc、自然跳数/网关段数。
+// 提取飞船性能模型所需的航线指标：STL 起降距离（原生记录优先，估算回退）、
+// 自然/网关 pc、自然跳数/网关段数。
+// 原生 STL 路程 = 离港段 + 进近段（跃迁点在起终点恒星连线上，段距离由服务器
+// 计算，离线无法精确复现）——优先用飞行计划记录的原生值（与飞船无关），
+// 无记录时回退到轨道模型预测的起降距离估算。
 export function routeMetrics(route: PlannedRoute): {
   stlDistanceKm: number | undefined;
+  // 是否使用了飞行计划记录的原生 STL 路程（否则为轨道模型估算）。
+  stlRecorded: boolean;
   natPc: number;
   gwPc: number;
   gwCount: number;
@@ -204,10 +213,29 @@ export function routeMetrics(route: PlannedRoute): {
       natJumpCount++;
     }
   }
-  const stlDistanceKm =
-    depart !== undefined && approach !== undefined ? depart + approach : undefined;
+  // 飞行计划记录的原生离港/进近距离：出发按 (出发天体, 首跳目标星系)、
+  // 进近按 (末跳来源星系, 目标天体)。网关航线（legs 全 viaGateway）无记录。
+  const firstLeg = route.legs[0];
+  const lastLeg = route.legs[route.legs.length - 1];
+  const departRec =
+    route.fromBody !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
+      ? stlSegmentsStore.getDeparture(route.fromBody, firstLeg.to)
+      : undefined;
+  const approachRec =
+    route.toBody !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
+      ? stlSegmentsStore.getApproach(lastLeg.from, route.toBody)
+      : undefined;
+  let stlDistanceKm: number | undefined;
+  let stlRecorded = false;
+  if (departRec !== undefined && approachRec !== undefined) {
+    stlDistanceKm = departRec.distanceKm + approachRec.distanceKm;
+    stlRecorded = true;
+  } else {
+    stlDistanceKm = depart !== undefined && approach !== undefined ? depart + approach : undefined;
+  }
   return {
     stlDistanceKm,
+    stlRecorded,
     natPc,
     gwPc,
     gwCount,

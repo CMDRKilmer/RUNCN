@@ -139,9 +139,199 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
   persist();
 }
 
+// ---- 原生 STL 段数据（跨星系自然航线的离港/进近距离与时长）----
+// 游戏服务器计算跃迁点（在起终点恒星连线上），STL 离港/进近段距离由服务器
+// 决定，离线无法精确复现（已探明：跃迁点确定性、随出发天体变化，与目标
+// 恒星连线方向相关；同一出发天体的离港距离基本恒定，行星≈63-74M km、
+// 空间站≈21M km，目标依赖 <5%）。
+// 这里从 SFC/BTF 飞行计划记录原生值，FTC 优先复用，即可精确复现原生 STL 路程：
+// - 离港 = DEPARTURE 段 stlDistance/时长，按 (出发天体, 首跳目标星系) 记录
+// - 进近 = APPROACH 段 stlDistance/时长，按 (末跳来源星系, 目标天体) 记录
+// 网关航线（TRANSIT 结构，无 DEPARTURE/APPROACH/JUMP 段）不记录，FTC 回退模型。
+export interface StlSegmentRecord {
+  distanceKm: number;
+  seconds: number;
+}
+const departRecords = new Map<string, StlSegmentRecord>();
+const approachRecords = new Map<string, StlSegmentRecord>();
+const STL_CACHE_KEY = 'rprun.ftc.stl-segments.v1';
+
+function systemNaturalId(address?: PrunApi.Address): string | undefined {
+  for (const line of address?.lines ?? []) {
+    if (line.type === 'SYSTEM') {
+      return line.entity?.naturalId;
+    }
+  }
+  return undefined;
+}
+
+function recordStlSegments(segments: PrunApi.FlightSegment[]) {
+  const depart = segments.find(s => s.type === 'DEPARTURE');
+  const approach = segments.find(s => s.type === 'APPROACH');
+  const firstJump = segments.find(s => s.type === 'JUMP');
+  const lastJump = [...segments].reverse().find(s => s.type === 'JUMP');
+  let changed = false;
+  if (
+    depart?.stlDistance != null &&
+    depart.stlDistance > 0 &&
+    depart.departure?.timestamp != null &&
+    depart.arrival?.timestamp != null
+  ) {
+    const fromBody = locationEntityId(depart.origin);
+    const toStar = firstJump ? systemNaturalId(firstJump.destination) : undefined;
+    if (fromBody && toStar) {
+      departRecords.set(`${fromBody.toUpperCase()}|${toStar.toUpperCase()}`, {
+        distanceKm: depart.stlDistance,
+        seconds: (depart.arrival.timestamp - depart.departure.timestamp) / 1000,
+      });
+      changed = true;
+    }
+  }
+  if (
+    approach?.stlDistance != null &&
+    approach.stlDistance > 0 &&
+    approach.departure?.timestamp != null &&
+    approach.arrival?.timestamp != null
+  ) {
+    const toBody = locationEntityId(approach.destination);
+    const fromStar = lastJump ? systemNaturalId(lastJump.origin) : undefined;
+    if (toBody && fromStar) {
+      approachRecords.set(`${fromStar.toUpperCase()}|${toBody.toUpperCase()}`, {
+        distanceKm: approach.stlDistance,
+        seconds: (approach.arrival.timestamp - approach.departure.timestamp) / 1000,
+      });
+      changed = true;
+    }
+  }
+  if (changed) {
+    bodiesVersion.value++;
+    persistSegments();
+  }
+}
+
+export const stlSegmentsStore = {
+  // 离港距离/时长（出发天体 → 首跳目标星系）。
+  // 精确键优先；无记录时回退到按出发天体的通配键（"BODY|*"，内置批量采集数据），
+  // 让同一出发天体到任意自然目标星系都能复用近似值。
+  getDeparture(fromBody: string, toStar: string): StlSegmentRecord | undefined {
+    void bodiesVersion.value;
+    const starKey = toStar.toUpperCase();
+    return (
+      departRecords.get(`${fromBody.toUpperCase()}|${starKey}`) ??
+      departRecords.get(`${fromBody.toUpperCase()}|*`)
+    );
+  },
+  // 进近距离/时长（末跳来源星系 → 目标天体）。
+  // 精确键优先；无记录时回退到按目标天体的通配键（"*|BODY"）。
+  getApproach(fromStar: string, toBody: string): StlSegmentRecord | undefined {
+    void bodiesVersion.value;
+    const bodyKey = toBody.toUpperCase();
+    return (
+      approachRecords.get(`${fromStar.toUpperCase()}|${bodyKey}`) ??
+      approachRecords.get(`*|${bodyKey}`)
+    );
+  },
+  get departureCount(): number {
+    return departRecords.size;
+  },
+  get approachCount(): number {
+    return approachRecords.size;
+  },
+};
+
+// 导出已积累的 STL 段数据（供 build-stl-data.mjs 精简内置）。
+// 键：离港 = "出发天体|首跳目标星系"，进近 = "末跳来源星系|目标天体"（全大写）。
+export interface StlSegmentsExport {
+  depart: [string, StlSegmentRecord][];
+  approach: [string, StlSegmentRecord][];
+}
+
+export function exportStlSegments(): StlSegmentsExport {
+  return {
+    depart: [...departRecords],
+    approach: [...approachRecords],
+  };
+}
+
+// 内置数据（public/json/stl-segments.json，由 build-stl-data.mjs 生成）：
+// 从用户批量采集（SFC/BTF 计划各相关天体）导出后精简，只保留与飞船无关的
+// 段距离（时长随飞船变，不内置）。启动时作种子，运行时记录（校准）优先填
+// 缺失项并持续覆盖。
+async function loadBundledStlSegments() {
+  try {
+    const resp = await fetch(config.url.stlSegments);
+    const data = (await resp.json()) as {
+      depart?: [string, number][];
+      approach?: [string, number][];
+    };
+    for (const [k, d] of data.depart ?? []) {
+      if (typeof k === 'string' && typeof d === 'number' && d > 0 && !departRecords.has(k)) {
+        departRecords.set(k, { distanceKm: d, seconds: 0 });
+      }
+    }
+    for (const [k, d] of data.approach ?? []) {
+      if (typeof k === 'string' && typeof d === 'number' && d > 0 && !approachRecords.has(k)) {
+        approachRecords.set(k, { distanceKm: d, seconds: 0 });
+      }
+    }
+    bodiesVersion.value++;
+  } catch {
+    // 内置数据加载失败/无文件：忽略，靠运行记录。
+  }
+}
+void loadBundledStlSegments();
+
+function persistSegments() {
+  try {
+    localStorage.setItem(
+      STL_CACHE_KEY,
+      JSON.stringify({ depart: [...departRecords], approach: [...approachRecords] }),
+    );
+  } catch {
+    // localStorage 不可用：仅内存缓存。
+  }
+}
+
+function restoreSegments() {
+  try {
+    const raw = localStorage.getItem(STL_CACHE_KEY);
+    if (!raw) {
+      return;
+    }
+    const data = JSON.parse(raw) as {
+      depart?: [string, StlSegmentRecord][];
+      approach?: [string, StlSegmentRecord][];
+    };
+    for (const [k, v] of data.depart ?? []) {
+      if (
+        typeof k === 'string' &&
+        v !== undefined &&
+        Number.isFinite(v.distanceKm) &&
+        v.distanceKm > 0
+      ) {
+        departRecords.set(k, v);
+      }
+    }
+    for (const [k, v] of data.approach ?? []) {
+      if (
+        typeof k === 'string' &&
+        v !== undefined &&
+        Number.isFinite(v.distanceKm) &&
+        v.distanceKm > 0
+      ) {
+        approachRecords.set(k, v);
+      }
+    }
+  } catch {
+    // 缓存损坏：忽略，重新积累。
+  }
+}
+restoreSegments();
+
 onApiMessage({
   SHIP_FLIGHT_MISSION(data: PrunApi.FlightPlan) {
     recordFromFlightPlan(data.segments);
+    recordStlSegments(data.segments);
     // SFC 计划按立即出发计算：首段出发时刻 ≈ 服务器当前游戏时间。
     const first = data.segments[0];
     if (first !== undefined) {

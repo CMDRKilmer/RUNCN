@@ -72,6 +72,7 @@ async function startup() {
       starConnections: chrome.runtime.getURL('json/star-connections.json'),
       planetEnv: chrome.runtime.getURL('json/planet-env.json'),
       stationData: chrome.runtime.getURL('json/stations.json'),
+      stlSegments: chrome.runtime.getURL('json/stl-segments.json'),
     },
   };
   // Keep the module script and the config payload in separate <script>
