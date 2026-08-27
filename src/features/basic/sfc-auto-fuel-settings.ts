@@ -1,5 +1,5 @@
 import { watch } from 'vue';
-import { refTextContent } from '@src/utils/reactive-dom';
+import { refTextContent, refValue } from '@src/utils/reactive-dom';
 import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
@@ -93,6 +93,7 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   const current = getSliderValue(slider);
   if (current !== undefined && Math.abs(current - value) < 0.01) {
     labelMap.set(label, 'done');
+    console.log(`[sfc-auto-fuel-settings] ${label} 已是目标值 ${value}`);
     return;
   }
 
@@ -200,13 +201,22 @@ async function maybeClickStart(tile: PrunTile) {
 // FTC 参数变化时，对已打开的 SFC 磁贴重新写入（先清除已配置标记，允许新值覆盖）。
 // 防抖合并：一次计算连续写入燃料/反应堆两个参数（或并发计算先后完成）时只执行一次，
 // 避免重复写滑块导致游戏多次重算/弹确认。
+// FTC 参数变化时，对已打开的 SFC 磁贴重新写入（先清除已配置标记，允许新值覆盖）。
+// 防抖合并：一次计算连续写入燃料/反应堆两个参数（或并发计算先后完成）时只执行一次，
+// 避免重复写滑块导致游戏多次重算/弹确认。
+// onlyTile 不传时遍历所有 SFC 磁贴（FTC 面板手动计算场景）；传入时仅刷那一个磁贴，
+// 绕开 watch 的同值短路——用户切目的地后 pushRouteToFtc 末尾主动调一次，保证新航线
+// 参数一定被检查/写入。
 let applyFtcTimer: number | undefined;
 function applyFtcSettingsDebounced() {
   window.clearTimeout(applyFtcTimer);
-  applyFtcTimer = window.setTimeout(applyFtcSettings, 60);
+  applyFtcTimer = window.setTimeout(() => applyFtcSettings(), 60);
 }
-function applyFtcSettings() {
+function applyFtcSettings(onlyTile?: PrunTile) {
   for (const [tile, sliders] of tileSliders) {
+    if (onlyTile !== undefined && tile !== onlyTile) {
+      continue;
+    }
     if (isTileReserved(tile.anchor)) {
       continue;
     }
@@ -237,6 +247,22 @@ function readGatewayState(tile: PrunTile): boolean {
     return indicator?.classList.contains(C.RadioItem.active) ?? false;
   }
   return false;
+}
+
+// 每个磁贴的 pushRouteToFtc 防抖定时器：stats 文本短时间内多次变化（用户输入中触发
+// 多次服务器重算）合并为一次推送，避免中间状态（input.value 仍为旧目的地）误读后
+// key 不变提前 return、最终漏推。
+const pushTimers = new WeakMap<Element, number>();
+function schedulePushRoute(tile: PrunTile) {
+  const prev = pushTimers.get(tile.anchor);
+  if (prev !== undefined) {
+    window.clearTimeout(prev);
+  }
+  const timer = window.setTimeout(() => {
+    pushTimers.delete(tile.anchor);
+    void pushRouteToFtc(tile);
+  }, 300);
+  pushTimers.set(tile.anchor, timer);
 }
 
 // SFC 重算完成后，把当前飞船 + 起终点自动推送给 FTC 计算最优燃料参数
@@ -278,21 +304,39 @@ async function pushRouteToFtc(tile: PrunTile) {
   }
   if (!result.ok) {
     console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
+    return;
   }
+  // 算完后立刻清掉自己的已配置标记，并主动遍历当前磁贴的滑块重新检查写入。
+  // 绕开 watch 的同值短路：ftcFuelSlider/Reactor 同值赋值时 watch 不触发，
+  // applyFtcSettings 不跑，fuel/reactor slider 不会被"确认"过一次，用户的
+  // console 看不到 set 日志。主动调 applyFtcSettings(tile) 保证新航线参数
+  // 一定被 configureSlider 走过一次（current === value 时打 already 日志）。
+  configuredLabels.delete(tile.anchor);
+  applyFtcSettings(tile);
 }
 
-// 等目的地行程统计(MissionPlan)加载出来后再开始配置,
-// 此时滑块已基于真实数据渲染,避免在未就绪的骨架节点上写入。
+// 等 MissionPlan 表格加载出来后再开始配置：滑块基于真实数据渲染，
+// 避免在未就绪的骨架节点上写入。
 async function onTileReady(tile: PrunTile) {
-  const stats = await $(tile.anchor, C.MissionPlan.stats);
+  const table = await $(tile.anchor, C.MissionPlan.table);
   // 磁贴关闭时清理追踪，避免对已卸载元素重复写入。
   onNodeDisconnected(tile.anchor, () => tileSliders.delete(tile));
-  // 以 MissionPlan.stats 文本内容变化作为「重算完成」信号：改目的地/滑块/跃迁点都会触发
-  // 服务器重算，完成后 stats 必更新。此时从 SFC 表单读取当前飞船+目的地推送给 FTC。
-  // （实测：改目的地后表格 data-prun-id 不变，不能用它作信号或读计划。）
-  watch(refTextContent(stats), () => {
-    void pushRouteToFtc(tile);
+  // 以 MissionPlan 表格文本变化作为「重算完成」信号：服务器完成 SHIP_FLIGHT_MISSION 重算后
+  // 才会刷新整个表格内容（含目的地/时长/燃料等列），地址输入中间状态不会触发推送。
+  // （之前用 stats 文本，但 AddressSelector 输入过程中 stats 会被搜索响应间接带动，过敏。）
+  watch(refTextContent(table), () => {
+    schedulePushRoute(tile);
   });
+  // 补充信号：监听目的地输入框 value 变化。用户在 listbox 选中项目后 input.value
+  // 立刻同步（无须等服务器重算），触发推送保证 FTC 不会漏掉新目的地。
+  // 表单表格尚未刷新时 FTC 会先按新目的地计算（FTC 不依赖服务器计划），服务器后续
+  // 重算到位后 table 信号再次触发推送——key 未变则 lastPushedRoute 提前 return。
+  const input = _$(tile.anchor, C.AddressSelector.input) as HTMLInputElement | undefined;
+  if (input) {
+    watch(refValue(input), () => {
+      schedulePushRoute(tile);
+    });
+  }
   // 首次行程计划就绪：立即推送一次。
   void pushRouteToFtc(tile);
   subscribe($$(tile.anchor, 'rc-slider'), slider => {
