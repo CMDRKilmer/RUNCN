@@ -12,7 +12,6 @@ import {
 import { starsStore, getStarName } from '@src/infrastructure/prun-api/data/stars';
 import {
   conditionFactor,
-  stlSpeedFor,
   stlDepartSpeedFor,
   stlApproachSpeedFor,
   ftlSpeedFor,
@@ -410,10 +409,9 @@ export function buildEstimatedSegmentRows(
 ): RouteSegmentRow[] {
   const rows: RouteSegmentRow[] = [];
   const cond = conditionFactor(ship.condition);
-  const vStl = stlSpeedFor(ship, fuel);
-  // 离港/进近段速度（游戏实际远低于巡航，按引擎查表；无数据回退巡航）。
-  const vDepart = stlDepartSpeedFor(ship, fuel) ?? vStl;
-  const vApproach = stlApproachSpeedFor(ship, fuel) ?? vStl;
+  // 离港/进近段速度（统一段模型，见 fuel-model.ts）。
+  const vDepart = stlDepartSpeedFor(ship, fuel);
+  const vApproach = stlApproachSpeedFor(ship, fuel);
   const vFtl = ftlSpeedFor(ship, reactor);
   const chargeSec = ftlChargeSecondsFor(ship, reactor);
   const ftlC = ftlFuelCFor(ship);
@@ -422,15 +420,19 @@ export function buildEstimatedSegmentRows(
 
   // 记录的原生秒数合理性校验：stlSegmentsStore 不区分飞船/配置，可能混入其它船
   // 甚至旧配置的记录（如 OOG LCB 曾出现 71.6M km / 2h58m = 6708 km/s 的异常记录，
-  // 而本船巡航 ~21760 km/s）。记录速度若偏离本船模型巡航速度过远（<0.35× 或 >3×），
-  // 判为非同船记录，回退模型时长。
-  function recordedSeconds(seconds: number | undefined, distanceKm: number | undefined) {
+  // 而本船段模型速度 ~19.8k/33.9k km/s）。记录速度若偏离本船段模型速度过远
+  // （<0.5× 或 >2×），判为非同船记录，回退模型时长。
+  function recordedSeconds(
+    seconds: number | undefined,
+    distanceKm: number | undefined,
+    segSpeed: number,
+  ) {
     if (seconds === undefined || seconds <= 0 || distanceKm === undefined || distanceKm <= 0) {
       return undefined;
     }
     const speed = distanceKm / seconds;
-    const ratio = speed / Math.max(1, vStl);
-    if (ratio < 0.35 || ratio > 3) {
+    const ratio = speed / Math.max(1, segSpeed);
+    if (ratio < 0.5 || ratio > 2) {
       return undefined;
     }
     return seconds;
@@ -467,7 +469,7 @@ export function buildEstimatedSegmentRows(
       typeKey: 'DEPARTURE',
       destination: `${route.fromBody ?? ''}（环绕轨道）`,
       durationMs:
-        (recordedSeconds(metrics.departSeconds, departKm) ??
+        (recordedSeconds(metrics.departSeconds, departKm, vDepart) ??
           (departKm / (vDepart * 3600) / cond) * 3600) * 1000,
       distanceKm: departKm,
       damage: 0,
@@ -513,7 +515,7 @@ export function buildEstimatedSegmentRows(
       typeKey: 'APPROACH',
       destination: `${route.toBody ?? ''}（环绕轨道）`,
       durationMs:
-        (recordedSeconds(metrics.approachSeconds, approachKm) ??
+        (recordedSeconds(metrics.approachSeconds, approachKm, vApproach) ??
           (approachKm / (vApproach * 3600) / cond) * 3600) * 1000,
       distanceKm: approachKm,
       damage: 0,
