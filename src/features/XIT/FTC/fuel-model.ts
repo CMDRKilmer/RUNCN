@@ -83,14 +83,18 @@ export interface FuelOption {
 //   advanced/standard(BP-OHMI AEN): f=0.05→53611、f=0.1→74011、f≥0.2 饱和 75200（同参数）。
 //   glass(BP-OHMI 玻璃): f=0.03→35401、f=0.05→53176、f≈0.1 饱和 74500。
 //   fuelSaving: f=0.05→11540、f=0.1→22517、f≈0.45 饱和 74500，省油 C_F=5.2e-6。
-const STL_ENGINE_SPEED: Record<string, { vBase: number; k: number; vSat: number; fuelC: number }> =
-  {
-    STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5 }, // HCB 实测
-    STL_ENGINE_FUEL_SAVING: { vBase: 167000, k: 0.885, vSat: 74500, fuelC: 5.2e-6 }, // 实测（省油）
-    STL_ENGINE_STANDARD: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5 }, // BP-OHMI 实测（≈advanced）
-    STL_ENGINE_ADVANCED: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5 }, // BP-OHMI(AEN) 实测
-    STL_ENGINE_GLASS: { vBase: 357000, k: 0.648, vSat: 74500, fuelC: 2.84e-5 }, // BP-OHMI(玻璃) 实测
-  };
+// flow = STL 燃料流量（u/s，用于着陆/离港燃料的流量缩放；飞船数据缺流量时回退）：
+//   fuelSaving 0.0075（OOG LCB 蓝图实测）、标准 0.015、glass 0.015、advanced/hyperthrust 0.02。
+const STL_ENGINE_SPEED: Record<
+  string,
+  { vBase: number; k: number; vSat: number; fuelC: number; flow: number }
+> = {
+  STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5, flow: 0.02 }, // HCB 实测
+  STL_ENGINE_FUEL_SAVING: { vBase: 167000, k: 0.885, vSat: 74500, fuelC: 5.2e-6, flow: 0.0075 }, // 实测（省油）
+  STL_ENGINE_STANDARD: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5, flow: 0.015 }, // BP-OHMI 实测（≈advanced）
+  STL_ENGINE_ADVANCED: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5, flow: 0.02 }, // BP-OHMI(AEN) 实测
+  STL_ENGINE_GLASS: { vBase: 357000, k: 0.648, vSat: 74500, fuelC: 2.84e-5, flow: 0.015 }, // BP-OHMI(玻璃) 实测
+};
 const DEFAULT_STL_SPEED = STL_ENGINE_SPEED.STL_ENGINE_HYPERTHRUST;
 // 自然 FTL 模型（2026-08-26 多船/多配置实测校准，蓝图性能驱动）：
 // - JUMP 速度：v = ftlMaxSpeed × r^(a(1+1.6r))，a = 0.40×ln(ftlMaxSpeed) − 0.10
@@ -213,10 +217,11 @@ const STL_LANDING_FLOW_REF = 0.015; // 着陆燃料流量基准（WCB 标准引�
 //   纯 G 模型对省油船失效（G=10 预测 35 实测 16，方向反了：G 更高燃料反而更少）。
 // - 辅因子 = (G/8)^(1/6)（弱 G 修正）：把纯流量模型对 HCB(G15) 的 8% 低估补回
 //   （HCB 1.333→1.481 ≈ 旧 G 标定 1.456；WCB/新手船 G=8 无影响）。
-// - 无流量数据回退旧 G 模型；流量用飞船数据（Ship.stlFuelFlowRate），无需蓝图。
+// - 无流量数据回退旧 G 模型；流量优先用飞船数据（Ship.stlFuelFlowRate），
+//   缺失时回退引擎表流量（stlFlowRateFor）。
 export function stlLandingFactor(ship: ShipPerformance): number {
   const g = ship.maxGFactor;
-  const flow = ship.stlFuelFlowRate;
+  const flow = stlFlowRateFor(ship);
   if (flow !== undefined && flow > 0) {
     const gSoft =
       g !== undefined && g > 0 ? Math.pow(g / STL_LANDING_G_REF, STL_LANDING_G_EXP_SOFT) : 1;
@@ -232,11 +237,20 @@ export function stlLandingFactor(ship: ShipPerformance): number {
 // f_cap = 0.49×罐 到 141 的拐点 ≈ 10.96×流量）。标准/超推力引擎 f_cap≈0.16-0.22，
 // 常规滑块（≤0.1）不触发；无流量数据不饱和。
 export function stlDepartureFSat(ship: ShipPerformance): number {
-  const flow = ship.stlFuelFlowRate;
+  const flow = stlFlowRateFor(ship);
   if (flow !== undefined && flow > 0) {
     return Math.max(0.05, STL_DEPARTURE_F_SAT_COEF * flow);
   }
   return 1;
+}
+
+// STL 燃料流量（u/s）：飞船数据优先（Ship.stlFuelFlowRate），缺失时按 STL 引擎类型
+// 回退引擎表流量（省油 0.0075 / 标准 0.015 / glass 0.015 / advanced·超推力 0.02）。
+function stlFlowRateFor(ship: ShipPerformance): number | undefined {
+  if (ship.stlFuelFlowRate !== undefined && ship.stlFuelFlowRate > 0) {
+    return ship.stlFuelFlowRate;
+  }
+  return stlEngineParams(ship.stlEngineOption).flow;
 }
 
 export interface ModelSettings {
