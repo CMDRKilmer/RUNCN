@@ -359,9 +359,12 @@ async function fetchMotionFactor() {
   }
 }
 
-// 解析天体的中心天体：行星（naturalId 为 XX-XXX + 单个小写字母，如 VH-331g）
+// 解析天体的中心天体：行星（naturalId 为 XX-XXX + 单个字母，如 VH-331g）
 // → 所属星系恒星；空间站（naturalId 全大写，如 HRT）→ 所属星系恒星。
-// PrUn 无卫星：所有行星都直接绕恒星公转，剥一个结尾小写字母即得恒星。
+// PrUn 无卫星：所有行星都直接绕恒星公转，剥一个结尾字母即得恒星。
+// ⚠️ 调用方（predictPosition/ensureOrbitData）传入的可能是已 toUpperCase 的键
+// （如 VH-192C），因此剥尾字母必须大小写不敏感（/^[a-zA-Z]$/），否则行星
+// 无法解析中心恒星 → 离线位置预测失败 → FTC 显示「需位置观测」。
 function resolveParent(naturalId: string): { id: string; isStar: boolean } | undefined {
   const key = naturalId.toUpperCase();
   // 空间站：绕所属星系恒星公转（星系详情 celestialBodies 提供其轨道根数）。
@@ -375,7 +378,7 @@ function resolveParent(naturalId: string): { id: string; isStar: boolean } | und
     const systemLine = getSystemLineFromAddress(station.address);
     return systemLine ? { id: systemLine.entity.naturalId, isStar: true } : undefined;
   }
-  const stripped = naturalId.replace(/[a-z]$/, '').toUpperCase();
+  const stripped = naturalId.replace(/[a-zA-Z]$/, '').toUpperCase();
   if (stripped === key) {
     return undefined;
   }
@@ -440,9 +443,13 @@ function trueAnomalyFromEccentric(E: number, e: number) {
   return Math.atan2(Math.sqrt(1 - e * e) * Math.sin(E), Math.cos(E) - e);
 }
 
-// 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(-inc)·R3(-ra)。
+// 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(+inc)·R3(-ra)。
 // 注意：历史 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，
-// 是旧相位标定不准的根源。此实现与游戏 bundle 的 _le 完全一致。
+// 是旧相位标定不准的根源。
+// 2026-08-27 用服务器 transferEllipse 绝对坐标实测（CH-131 系 3 行星 + 各自
+// 出发时刻戳）验证：inclination 需**正向**旋转（R1(+i)），否则 z 分量符号相反
+// （反推恒星位置误差 5~10M km，翻转后 <1.7M）。FIO 与 DATA_DATA 的 inclination
+// 约定一致（可为负），配合 R1(+i) 后与服务器坐标完全对齐。
 function gameOrbitalToWorld(
   p: { x: number; y: number; z: number },
   orbit: PlanetOrbit,
@@ -459,7 +466,7 @@ function gameOrbitalToWorld(
     return { x: v.x, y: c * v.y - s * v.z, z: s * v.y + c * v.z };
   };
   let v = rotZ(p, -w);
-  v = rotX(v, -i);
+  v = rotX(v, i);
   return rotZ(v, -o);
 }
 
@@ -654,8 +661,11 @@ export function exportStationOrbits(): StationOrbitExport[] {
   const out: StationOrbitExport[] = [];
   const seen = new Set<string>();
   for (const [key, orbit] of planets) {
-    // 行星 naturalId 均带小写字母后缀（如 VH-331g）；空间站全大写（HRT）。
-    if (/[a-z]/.test(key)) {
+    // ⚠️ planets 键已全部 toUpperCase 归一化（loadBundledData/setPlanetOrbit 均
+    // toUpperCase），不能再用「含小写字母 = 行星」判断——那样所有行星（如
+    // VH-192C）都会漏过并当作空间站导出。行星 naturalId 恒为 XX-XXX+单字母
+    // （VH-192c → VH-192C）格式，按格式排除；其余（HRT/MOR 等）即空间站。
+    if (/^[A-Z]{2}-\d{3}[A-Z]$/.test(key)) {
       continue;
     }
     const systemId = stationSystem.get(key) ?? bodySystem.get(key);
