@@ -38,7 +38,15 @@ import {
   buildEstimatedSegmentRows,
 } from './route-planner';
 import { resolveSystemId } from './route-model';
-import { scanFuelOptions, FuelOption, ShipPerformance } from './fuel-model';
+import {
+  scanFuelOptions,
+  autoFuelGrid,
+  autoReactorGrid,
+  paretoFrontier,
+  findBalanceOption,
+  FuelOption,
+  ShipPerformance,
+} from './fuel-model';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞船性能驱动的飞行燃料性价比计算器。
@@ -280,8 +288,6 @@ const routeFrom = ref('');
 const routeTo = ref('');
 // 网关开关：玩家自选是否走网关跃迁（网关不耗 FTL 燃料，但可能收现金）。
 const useGateway = ref(false);
-const fuelText = ref('0.05,0.1,0.3,0.5,0.8,1');
-const reactorText = ref('0.25,0.5,0.75,1');
 const stlFuelPrice = ref<number | undefined>(undefined);
 const ftlFuelPrice = ref<number | undefined>(undefined);
 const timeValue = ref<number | undefined>(0);
@@ -368,15 +374,6 @@ watchEffect(() => {
   }
 });
 
-function parseNumbers(text: string) {
-  return text
-    .split(/[,，\s]+/)
-    .map(x => parseFloat(x))
-    .filter(x => Number.isFinite(x) && x > 0 && x <= 1);
-}
-const fuels = computed(() => parseNumbers(fuelText.value));
-const reactors = computed(() => parseNumbers(reactorText.value));
-
 // 飞船实时性能 → 模型输入。
 function shipPerformance(): ShipPerformance | undefined {
   const s = ship.value;
@@ -408,6 +405,8 @@ interface PlanResult {
   metrics: ReturnType<typeof routeMetrics>;
   options: FuelOption[];
   best: FuelOption;
+  // 时间↔燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）。
+  frontier: FuelOption[];
   // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
   segments: RouteSegmentRow[];
   segmentsNative: boolean;
@@ -516,11 +515,12 @@ async function planAndCompute() {
     isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
     isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,
   ]);
+  // 无需玩家设置档位：自动扫描全范围燃料滑块 f 与反应堆 r（含滑块下限）。
   const options = scanFuelOptions(
     perf,
     metrics,
-    fuels.value,
-    reactors.value,
+    autoFuelGrid(),
+    autoReactorGrid(perf),
     {
       stlPrice: stlFuelPrice.value ?? 0,
       ftlPrice: ftlFuelPrice.value ?? 0,
@@ -534,10 +534,14 @@ async function planAndCompute() {
     },
   );
   if (options.length === 0) {
-    calcMessage.value = '请输入有效的滑块组合（0–1 之间）';
+    calcMessage.value = '计算失败：未能生成有效的滑块组合';
     return;
   }
-  const b = options[0];
+  // 平衡点：设了时间价值（₳/小时）时按总成本（燃料费 + 时间价值）最优，
+  // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
+  const tv = timeValue.value ?? 0;
+  const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
+  const frontier = paretoFrontier(options);
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
@@ -550,7 +554,7 @@ async function planAndCompute() {
     segments = buildNativeSegmentRows(nativePlan);
     segmentsNative = true;
   } else {
-    segments = buildEstimatedSegmentRows(route, metrics, perf, b.fuel, b.reactor, {
+    segments = buildEstimatedSegmentRows(route, metrics, perf, best.fuel, best.reactor, {
       landingRadius: landingEnv?.radiusKm,
       landingPressure: landingEnv?.pressure,
       departureRadius: departEnv?.radiusKm,
@@ -558,11 +562,26 @@ async function planAndCompute() {
     });
     segmentsNative = false;
   }
-  result.value = { label: route.label, route, metrics, options, best: b, segments, segmentsNative };
+  result.value = {
+    label: route.label,
+    route,
+    metrics,
+    options,
+    best,
+    frontier,
+    segments,
+    segmentsNative,
+  };
   const radiusText =
     landingEnv !== undefined ? `，目的地半径 ${fixed2v(landingEnv.radiusKm)}km` : '';
+  const fuelText =
+    best.fuelEstimated && (best.stlFuel > 0 || best.ftlFuel > 0)
+      ? `，STL ${Math.round(best.stlFuel)} + FTL ${Math.round(best.ftlFuel)} 燃料`
+      : '';
   calcMessage.value =
-    `最优方案：燃料滑块 ${b.fuel} / 反应堆 ${b.reactor}，预计 ${formatDuration(b.totalHours * 3600000)}，总成本 ${formatCurrency(b.totalCost)}` +
+    `最优方案（平衡点）：燃料滑块 ${best.fuel} / 反应堆 ${best.reactor}，预计 ${formatDuration(best.totalHours * 3600000)}` +
+    fuelText +
+    `，总成本 ${formatCurrency(best.totalCost)}` +
     radiusText +
     (useGateway.value && metrics.gwCount > 0
       ? '（网关航线：FTL 燃料为 0）'
@@ -627,6 +646,18 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
   }
   return parts.length > 0 ? parts.join(' + ') : '--';
 }
+
+// 表格中高亮平衡点行（按燃料滑块+反应堆精确匹配）。
+function isBestOption(o: FuelOption) {
+  const b = result.value?.best;
+  return b !== undefined && b.fuel === o.fuel && b.reactor === o.reactor;
+}
+
+// 平衡点说明（结果表提示）：设了时间价值按总成本，否则按 Pareto 拐点折衷。
+const balanceNote = computed(() => {
+  const tv = timeValue.value ?? 0;
+  return tv > 0 ? '按总成本（燃料费 + 时间价值）最优' : '快与省油的折衷（Pareto 拐点）';
+});
 </script>
 
 <template>
@@ -656,6 +687,11 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
         </label>
       </div>
 
+      <div :class="$style.hint">
+        无需设置滑块档位：自动扫描全范围燃料滑块（0.05–1）与反应堆使用量（滑块下限–1），
+        计算每种组合的时间与燃料消耗，找出「尽量快同时耗油少」的平衡点。
+      </div>
+
       <label :class="$style.field">
         <span>
           使用网关跃迁（玩家自选；网关不消耗 FTL 燃料、速度 3.0 pc/h，但可能收现金过路费）
@@ -665,17 +701,6 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
           启用网关（{{ routesStore.gatewayConnectionCount }} 条已记录连接）
         </span>
       </label>
-
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>燃料消耗滑块组合（0–1）</span>
-          <TextInput v-model="fuelText" />
-        </label>
-        <label :class="$style.field">
-          <span>反应堆使用量组合（0–1，仅自然跃迁相关）</span>
-          <TextInput v-model="reactorText" />
-        </label>
-      </div>
 
       <details :class="$style.costDetails">
         <summary>成本参数（性价比评分 = 燃料费 + 时间价值）</summary>
@@ -781,6 +806,10 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
 
     <template v-if="result">
       <SectionHeader>最优燃料方案（{{ result.label }}航线）</SectionHeader>
+      <div :class="$style.hint">
+        下表为时间 ↔ 燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）；
+        绿色高亮行为平衡点（{{ balanceNote }}）。
+      </div>
       <table :class="$style.table">
         <thead>
           <tr>
@@ -796,9 +825,9 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
         </thead>
         <tbody>
           <tr
-            v-for="(o, i) in result.options"
+            v-for="o in result.frontier"
             :key="`${o.fuel}-${o.reactor}`"
-            :class="[$style.row, { [$style.best]: i === 0 }]">
+            :class="[$style.row, { [$style.best]: isBestOption(o) }]">
             <td>{{ o.fuel }}</td>
             <td>{{ o.reactor }}</td>
             <td>{{ formatDuration(o.totalHours * 3600000) }}</td>

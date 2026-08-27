@@ -482,8 +482,93 @@ export function computeFuelOption(
   };
 }
 
-export const DEFAULT_FUELS = [0.05, 0.1, 0.3, 0.5, 0.8, 1];
-export const DEFAULT_REACTORS = [0.25, 0.5, 0.75, 1];
+// ---- 自动档位网格（无需玩家设置）----
+// 燃料滑块 f：0.05 → 1，步长 0.05。STL 速度/燃料对 f 平滑单调（速度 f^K 饱和），
+// 0.05 分辨率足以刻画快↔省油权衡曲线，无需手动输入档位组合。
+export function autoFuelGrid(): number[] {
+  const out: number[] = [];
+  for (let f = 0.05; f <= 1.00001; f += 0.05) {
+    out.push(Math.round(f * 100) / 100);
+  }
+  return out;
+}
+
+// 反应堆使用量 r：从 minReactorUsage（游戏滑块下限，蓝图性能）→ 1，步长 0.05。
+// 缺蓝图数据时从 0.05 起。
+export function autoReactorGrid(ship: ShipPerformance): number[] {
+  const min =
+    ship.minReactorUsage !== undefined && ship.minReactorUsage > 0 ? ship.minReactorUsage : 0.05;
+  const out: number[] = [min];
+  const start = Math.max(min + 0.05, Math.floor(min * 20 + 1) / 20);
+  for (let r = start; r <= 1.00001; r += 0.05) {
+    out.push(Math.min(1, Math.round(r * 100) / 100));
+  }
+  const uniq: number[] = [];
+  for (const v of out) {
+    if (uniq.length === 0 || v > uniq[uniq.length - 1] + 1e-9) {
+      uniq.push(v);
+    }
+  }
+  if (uniq[uniq.length - 1] !== 1) {
+    uniq.push(1);
+  }
+  return uniq;
+}
+
+// 方案燃料总量（STL + FTL）。
+function totalFuelOf(o: FuelOption): number {
+  return o.stlFuel + o.ftlFuel;
+}
+
+// Pareto 前沿（时间 ↦ 燃料双目标）：返回不被其它方案在时间与燃料上都严格支配的方案，
+// 按时间升序（首项最快/最费油，末项最慢/最省油）。
+export function paretoFrontier(options: FuelOption[]): FuelOption[] {
+  return options
+    .filter(
+      o =>
+        !options.some(
+          p =>
+            p !== o &&
+            p.totalHours <= o.totalHours &&
+            totalFuelOf(p) <= totalFuelOf(o) &&
+            (p.totalHours < o.totalHours || totalFuelOf(p) < totalFuelOf(o)),
+        ),
+    )
+    .sort((a, b) => a.totalHours - b.totalHours);
+}
+
+// 平衡点：Pareto 前沿的拐点（knee）。
+// 把「最快方案」（时间最短、燃料最多）与「最省油方案」（燃料最少、时间最长）连成一条线，
+// 前沿上离这条线最远的点就是折衷平衡点——用尽量少的额外燃料换取尽量多的时间节省，
+// 两端都不极端。未设置时间价值时的默认最优。
+export function findBalanceOption(options: FuelOption[]): FuelOption | undefined {
+  const pareto = paretoFrontier(options);
+  if (pareto.length === 0) {
+    return undefined;
+  }
+  if (pareto.length === 1) {
+    return pareto[0];
+  }
+  const fastest = pareto[0];
+  const cheapest = pareto[pareto.length - 1];
+  const tSpan = Math.max(1e-9, cheapest.totalHours - fastest.totalHours);
+  const fuels = pareto.map(totalFuelOf);
+  const fMin = Math.min(...fuels);
+  const fSpan = Math.max(1e-9, Math.max(...fuels) - fMin);
+  // 归一化后：最快点 (0,1)、最省油点 (1,0)，连线 x+y=1；拐点 = 距连线最远的点。
+  let best = fastest;
+  let bestDist = -1;
+  for (const o of pareto) {
+    const x = (o.totalHours - fastest.totalHours) / tSpan;
+    const y = (totalFuelOf(o) - fMin) / fSpan;
+    const dist = Math.abs(x + y - 1);
+    if (dist > bestDist) {
+      bestDist = dist;
+      best = o;
+    }
+  }
+  return best;
+}
 
 // 扫描滑块组合，按综合成本（燃料费+时间价值）升序返回。
 export function scanFuelOptions(
