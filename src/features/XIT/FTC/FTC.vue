@@ -42,7 +42,6 @@ import {
   scanFuelOptions,
   autoFuelGrid,
   autoReactorGrid,
-  paretoFrontier,
   findBalanceOption,
   FuelOption,
   ShipPerformance,
@@ -405,8 +404,6 @@ interface PlanResult {
   metrics: ReturnType<typeof routeMetrics>;
   options: FuelOption[];
   best: FuelOption;
-  // 时间↔燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）。
-  frontier: FuelOption[];
   // 是否有自然跃迁（否 = 全程系内/纯网关飞行，反应堆滑块不影响结果，无需计算）。
   reactorRelevant: boolean;
   // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
@@ -545,7 +542,6 @@ async function planAndCompute() {
   // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
   const tv = timeValue.value ?? 0;
   const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
-  const frontier = paretoFrontier(options);
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
@@ -572,7 +568,6 @@ async function planAndCompute() {
     metrics,
     options,
     best,
-    frontier,
     reactorRelevant,
     segments,
     segmentsNative,
@@ -653,12 +648,6 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
     parts.push(`${Math.round(ftlFuel)} 超光速`);
   }
   return parts.length > 0 ? parts.join(' + ') : '--';
-}
-
-// 表格中高亮平衡点行（按燃料滑块+反应堆精确匹配）。
-function isBestOption(o: FuelOption) {
-  const b = result.value?.best;
-  return b !== undefined && b.fuel === o.fuel && b.reactor === o.reactor;
 }
 
 // 平衡点说明（结果表提示）：设了时间价值按总成本，否则按 Pareto 拐点折衷。
@@ -815,10 +804,9 @@ const balanceNote = computed(() => {
     <template v-if="result">
       <SectionHeader>最优燃料方案（{{ result.label }}航线）</SectionHeader>
       <div :class="$style.hint">
-        下表为时间 ↔ 燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）；
-        绿色高亮行为平衡点（{{ balanceNote }}）。
+        平衡点（{{ balanceNote }}）
         <template v-if="!result.reactorRelevant"
-          >全程系内飞行没有自然跃迁，反应堆不适用（--）。</template
+          >：全程系内飞行没有自然跃迁，反应堆不适用（--）。</template
         >
       </div>
       <table :class="$style.table">
@@ -835,18 +823,17 @@ const balanceNote = computed(() => {
           </tr>
         </thead>
         <tbody>
-          <tr
-            v-for="o in result.frontier"
-            :key="`${o.fuel}-${o.reactor}`"
-            :class="[$style.row, { [$style.best]: isBestOption(o) }]">
-            <td>{{ o.fuel }}</td>
-            <td>{{ result.reactorRelevant ? o.reactor : '--' }}</td>
-            <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
-            <td>{{ o.fuelEstimated ? formatFuel(o.stlFuel) : '需位置观测' }}</td>
-            <td>{{ formatFuel(o.ftlFuel) }}</td>
-            <td>{{ formatCurrency(o.fuelCost) }}</td>
-            <td>{{ formatCurrency(o.timeCost) }}</td>
-            <td>{{ formatCurrency(o.totalCost) }}</td>
+          <tr :class="$style.best">
+            <td>{{ result.best.fuel }}</td>
+            <td>{{ result.reactorRelevant ? result.best.reactor : '--' }}</td>
+            <td>{{ formatDuration(result.best.totalHours * 3600000) }}</td>
+            <td>{{
+              result.best.fuelEstimated ? formatFuel(result.best.stlFuel) : '需位置观测'
+            }}</td>
+            <td>{{ formatFuel(result.best.ftlFuel) }}</td>
+            <td>{{ formatCurrency(result.best.fuelCost) }}</td>
+            <td>{{ formatCurrency(result.best.timeCost) }}</td>
+            <td>{{ formatCurrency(result.best.totalCost) }}</td>
           </tr>
         </tbody>
       </table>
