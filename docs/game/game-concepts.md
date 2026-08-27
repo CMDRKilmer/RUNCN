@@ -60,6 +60,19 @@ FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`
 - **空间站无大气**：到空间站无着陆段、从空间站出发无起飞段（起/降段相互独立，FTC `fuel-model.ts` 用 R 缺失独立判定）。空间站↔空间站航线 = 离港+进近（0.49×罐×min(f, f_cap) + 0.49×罐×f）+ 进近差（f_cap ≈ 10.96×流量，省油引擎离港燃料随 f 饱和），不回退旧常数
 - 注意：BTF 起降段距离有 ~±10% 轨道相位波动 → 燃料模型有 ~±6% 固有噪声
 
+## STL 离港/进近段速度（2026-08-27 重大发现：油箱决定！）
+
+**离港/进近段速度不由巡航速度决定，而由"段中可用 STL 燃料量"决定**（BP-OHMI 多引擎×多油箱实测）：
+
+$$v_{seg} = V_{SAT}^{G8} \times \left(\frac{G}{8}\right)^{0.3} \times \left(1 - e^{-(Q/Q_0)^k}\right)$$
+
+- **段燃料量**：$Q_{离港} = 0.49 \times 罐 \times f$；$Q_{进近} = 0.49 \times 罐 \times f + 8$（进近差）
+- **油箱大小是关键**：标准引擎 f=0.05 离港——小型 1500 罐 → 5.7k、中型 3500 → 12.3k、大型 8000 → 19.3k km/s；饱和段速度与油箱无关（各引擎 V_SAT 见 `fuel-model.ts` STL_SEGMENT_CURVES）
+- **G 力修正** (G/8)^0.3（HCB G15 1.218×、OOG G10 1.089× vs G8 实测）
+- ⚠️ 旧"段 = 巡航比例"模型只在大型油箱下偶然成立（罐大 Q 充足接近饱和）；小型油箱（新手船 STS 1500 罐段速度仅 5.7k）彻底推翻
+- ⚠️ **BTF 窗口缓存旧蓝图配置**：改油箱后必须关闭 BTF 重新打开才生效（否则离港燃料仍按旧罐计算），数据采集易踩坑
+- 5 引擎实测验证平均误差 1.1%（standard 3 油箱全档 + 大型油箱 5 引擎全档）
+
 Additionally, planets have properties affecting production:
 - **Fertility**: Affects FRM/ORC efficiency. Range roughly -33% to +33%. Fully infertile planets cannot build farms.
 - **Resources**: Extractable minerals, ores, liquids, gases. Different planetary conditions determine extraction building type (RIG for liquids, EXT for solids, COL for gases).
