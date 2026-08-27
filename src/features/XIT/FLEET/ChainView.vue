@@ -17,6 +17,11 @@ import {
   type ChainStopPlan,
   type ShipChainPlan,
 } from '@src/features/XIT/FLEET/chain-planner';
+import {
+  estimateChainFlightTimes,
+  type ChainFlightEstimate,
+  type ChainFlightLeg,
+} from '@src/features/XIT/FLEET/chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { getBaseGroups } from '@src/core/base-groups';
 import { useTileState } from '@src/store/user-data-tiles';
@@ -209,6 +214,44 @@ const unusedShipCount = computed(() =>
   selectedShips.value.length > 0 ? selectedShips.value.length - shipPlans.value.length : 0,
 );
 
+// ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
+// 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
+// 显示在「飞行」列与汇总「飞行时长」行；下游基地用未来预计位置计算。
+const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
+const flightTimesLoading = ref(false);
+
+// 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
+// 计划为空（未规划/执行中船已离港）时保留已有预估——进度表快照仍引用同船同站。
+let flightTimeToken = 0;
+watch(
+  shipPlans,
+  async plans => {
+    const token = ++flightTimeToken;
+    if (plans.length === 0) {
+      return;
+    }
+    flightTimesLoading.value = true;
+    const estimates = new Map<string, ChainFlightEstimate>();
+    for (const sp of plans) {
+      const est = await estimateChainFlightTimes({
+        ship: sp.ship.ship,
+        origin: sp.plan.originNaturalId,
+        stops: sp.plan.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName })),
+      });
+      if (token !== flightTimeToken) {
+        return; // 计划已变化，丢弃过期结果。
+      }
+      estimates.set(sp.ship.ship.id, est);
+    }
+    if (token !== flightTimeToken) {
+      return;
+    }
+    flightEstimates.value = estimates;
+    flightTimesLoading.value = false;
+  },
+  { immediate: true },
+);
+
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
   if (chainGroup.value === undefined) {
@@ -301,6 +344,8 @@ function clearPlan() {
   chainShipIds.value = undefined;
   planSnapshot.value = [];
   executeNotice.value = undefined;
+  flightEstimates.value = new Map();
+  flightTimesLoading.value = false;
   for (const shipId of Object.keys(userData.chainRuns)) {
     clearFinishedCleanup(shipId);
     delete userData.chainRuns[shipId];
@@ -1222,6 +1267,57 @@ function formatFinalUnloadNotes(plan: {
     .map(([ticker, note]) => `${ticker}：${note}`)
     .join('；');
 }
+
+// ── 飞行时间显示 ─────────────────────────────────────────────
+function flightLegFor(shipId: string, legIndex: number): ChainFlightLeg | undefined {
+  return flightEstimates.value.get(shipId)?.legs[legIndex];
+}
+
+// 中文精确时长（≥1 天 天/时/分；<1 天 时/分/秒），与 FTC 面板口径一致。
+function formatFlightDuration(ms: number): string {
+  if (ms <= 0) {
+    return '--';
+  }
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (days > 0) {
+    return `${days}天 ${hours}小时 ${minutes}分钟`;
+  }
+  if (hours > 0) {
+    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+  }
+  if (minutes > 0) {
+    return `${minutes}分钟 ${seconds}秒`;
+  }
+  return `${seconds}秒`;
+}
+
+// 某段飞行时间文本（空 = 尚无预估）。
+function flightTimeText(shipId: string, legIndex: number): string {
+  const leg = flightLegFor(shipId, legIndex);
+  if (!leg) {
+    return '';
+  }
+  if (!leg.ok) {
+    return leg.error ? `（${leg.error}）` : '';
+  }
+  return ` · ${formatFlightDuration(leg.hours * 3600000)}`;
+}
+
+// 环线总飞行时长文本。
+function flightTotalText(shipId: string): string {
+  const est = flightEstimates.value.get(shipId);
+  if (!est) {
+    return '';
+  }
+  if (!est.ok) {
+    return '（部分航段无法计算）';
+  }
+  return `约 ${formatFlightDuration(est.totalHours * 3600000)}`;
+}
 </script>
 
 <template>
@@ -1359,7 +1455,8 @@ function formatFinalUnloadNotes(plan: {
               </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
-                  → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId }}
+                  → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId
+                  }}{{ flightTimeText(sp.shipId, 0) }}
                 </template>
                 <template v-else-if="sp.progress">
                   → {{ sp.progress.stops[0]?.planetName ?? sp.progress.originNaturalId }}
@@ -1413,7 +1510,9 @@ function formatFinalUnloadNotes(plan: {
                 <span v-else>—</span>
               </td>
               <td :class="$style.matCell">
-                <template v-if="sp.plan"> → {{ nextStopName(sp.plan.stops, i) }} </template>
+                <template v-if="sp.plan">
+                  → {{ nextStopName(sp.plan.stops, i) }}{{ flightTimeText(sp.shipId, i + 1) }}
+                </template>
                 <template v-else-if="sp.progress">
                   → {{ sp.progress.stops[i + 1]?.planetName ?? sp.progress.originNaturalId }}
                 </template>
@@ -1461,7 +1560,9 @@ function formatFinalUnloadNotes(plan: {
                 </template>
                 <span v-else>—</span>
               </td>
-              <td :class="$style.matCell">归航</td>
+              <td :class="$style.matCell">
+                归航{{ sp.plan ? flightTimeText(sp.shipId, sp.plan.stops.length) : '' }}
+              </td>
               <td :class="$style.narrowCol">
                 <template v-if="sp.plan">
                   {{ formatLoadCell({ weight: 0, volume: 0 }, sp.plan.capacity) }}
@@ -1476,6 +1577,13 @@ function formatFinalUnloadNotes(plan: {
         </table>
 
         <div v-if="sp.plan" :class="$style.summary">
+          <div :class="$style.summaryRow">
+            <span :class="$style.summaryLabel">飞行时长：</span>
+            <span>
+              <template v-if="flightTimesLoading">计算中…</template>
+              <template v-else>{{ flightTotalText(sp.shipId) || '--' }}</template>
+            </span>
+          </div>
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">装船：</span>
             <span>

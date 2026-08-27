@@ -105,7 +105,7 @@ export function shipPerformanceFor(s: PrunApi.Ship): ShipPerformance {
 // （blueprintsStore 只含公司蓝图列表，首次访问 getByNaturalId 会触发 BLU 窗口请求，
 // 响应异步到达——不等待则本次计算全部落到默认值，误差巨大，如把省油引擎当超推力）。
 // 返回是否成功取得蓝图；失败（非公司蓝图/响应超时）时继续用默认值计算。
-async function ensureShipBlueprint(s: PrunApi.Ship): Promise<boolean> {
+export async function ensureShipBlueprint(s: PrunApi.Ship): Promise<boolean> {
   if (blueprintsStore.getByNaturalId(s.blueprintNaturalId)) {
     return true;
   }
@@ -228,7 +228,7 @@ async function loadPlanetEnv(): Promise<void> {
 }
 
 // 从内置数据查行星环境（半径 km + 气压）。找不到（空间站/星系/无数据）返回 undefined。
-async function fetchPlanetEnv(
+export async function fetchPlanetEnv(
   naturalId: string,
 ): Promise<{ radiusKm: number; pressure?: number } | undefined> {
   await loadPlanetEnv();

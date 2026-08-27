@@ -181,7 +181,12 @@ export function planRoutes(
 // 行星/空间站到本星恒星的近似距离（游戏坐标单位，与恒星坐标同源）。
 // 优先实时观测（SFC 飞行计划标定，最准）；无观测时用轨道离线预测
 // （行星轨道全量内置；空间站轨道内置后亦可离线预测，无需游戏内观测）。
-export function liftOffKm(bodyNatural: string | undefined): number | undefined {
+// 指定时刻版本：用轨道模型预测天体在 timestampMs 时刻的位置（下游基地
+// 要用"未来预计位置"计算航程——飞船到达前，天体已沿轨道移动）。
+export function liftOffKmAt(
+  bodyNatural: string | undefined,
+  timestampMs: number,
+): number | undefined {
   if (bodyNatural === undefined) {
     return undefined;
   }
@@ -190,11 +195,16 @@ export function liftOffKm(bodyNatural: string | undefined): number | undefined {
   if (star === undefined) {
     return undefined;
   }
-  const pos = systemBodiesStore.getPosition(bodyNatural) ?? predictPosition(bodyNatural, gameNow());
+  const pos =
+    systemBodiesStore.getPosition(bodyNatural) ?? predictPosition(bodyNatural, timestampMs);
   if (pos !== undefined) {
     return distance3d(pos, star);
   }
   return undefined;
+}
+
+export function liftOffKm(bodyNatural: string | undefined): number | undefined {
+  return liftOffKmAt(bodyNatural, gameNow());
 }
 
 // 跨星系 STL 起降统计估算（无飞行计划记录时回退）：
@@ -210,7 +220,12 @@ const STL_EST_APPROACH_KM = 68e6;
 // 原生 STL 路程 = 离港段 + 进近段（跃迁点在起终点恒星连线上，段距离由服务器
 // 计算，离线无法精确复现）——优先用飞行计划记录的原生值（与飞船无关），
 // 无记录时回退：跨星系航段用内置数据统计估算，同星系/网关段用本地轨道距离。
-export function routeMetrics(route: PlannedRoute): {
+// times（可选）：起/终点天体位置预测时刻（毫秒，游戏世界时间）。链式多段
+// 规划时传未来时刻，使同星系/网关段的起降距离按"飞船到达时天体所在位置"计算。
+export function routeMetrics(
+  route: PlannedRoute,
+  times?: { departMs?: number; arriveMs?: number },
+): {
   stlDistanceKm: number | undefined;
   // 是否使用了飞行计划记录的原生 STL 路程（否则为统计/轨道估算）。
   stlRecorded: boolean;
@@ -230,8 +245,8 @@ export function routeMetrics(route: PlannedRoute): {
   // 出发地实体 naturalId（跨星系时用于 FIO 行星环境查询，判断起飞段）。
   fromBody?: string;
 } {
-  const departLift = liftOffKm(route.fromBody);
-  const approachLift = liftOffKm(route.toBody);
+  const departLift = liftOffKmAt(route.fromBody, times?.departMs ?? gameNow());
+  const approachLift = liftOffKmAt(route.toBody, times?.arriveMs ?? gameNow());
   let natPc = 0;
   let gwPc = 0;
   let gwCount = 0;
