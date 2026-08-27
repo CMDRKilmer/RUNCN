@@ -541,7 +541,9 @@ async function planAndCompute() {
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
-  const nativePlan = findNativeFlightPlan(from, to);
+  // 用解析后的起/终点实体（非原始输入别名）匹配，输入 'Euu'/'Liuli Central Sector - Euu'
+  // 等别名也能命中原生计划。
+  const nativePlan = findNativeFlightPlan(route.fromBody ?? from, route.toBody ?? to);
   let segments: RouteSegmentRow[];
   let segmentsNative: boolean;
   if (nativePlan) {
