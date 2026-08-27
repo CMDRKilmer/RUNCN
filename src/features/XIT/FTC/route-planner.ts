@@ -4,6 +4,21 @@ import {
   systemBodiesStore,
   stlSegmentsStore,
 } from '@src/infrastructure/prun-api/data/system-bodies';
+import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
+import {
+  getEntityNaturalIdFromAddress,
+  getDestinationFullName,
+} from '@src/infrastructure/prun-api/data/addresses';
+import { starsStore, getStarName } from '@src/infrastructure/prun-api/data/stars';
+import {
+  conditionFactor,
+  stlSpeedFor,
+  ftlSpeedFor,
+  ftlChargeSecondsFor,
+  ftlFuelCFor,
+  stlLandingFactor,
+} from './fuel-model';
+import type { ShipPerformance } from './fuel-model';
 import { getStarPosition, distance3d, resolveSystemId } from './route-model';
 
 // 航线规划与航线指标（XIT FTC 燃料计算器使用）。
@@ -262,4 +277,216 @@ export function routeMetrics(route: PlannedRoute): {
     toBody: route.toBody,
     fromBody: route.fromBody,
   };
+}
+
+// ---- 完整航线段展示（严格按游戏 SFC 飞行计划表格）----
+// 优先复用服务器下发的原生 FlightPlan（SHIP_FLIGHT_MISSION，flightPlansStore
+// 已捕获），逐段列出 离港/跃迁/充能/进近/着陆 及目的地、耗时、距离、损伤、
+// 燃料消耗——与 SFC 窗口表格完全一致。无原生计划时回退模型估算分段。
+
+export interface RouteSegmentRow {
+  type: string;
+  typeKey: PrunApi.SegmentType;
+  destination: string;
+  durationMs: number;
+  distanceKm?: number;
+  distancePc?: number;
+  damage: number;
+  stlFuel?: number;
+  ftlFuel?: number;
+  // 是否来自服务器原生飞行计划（否则为模型估算）。
+  native: boolean;
+}
+
+const SEGMENT_TYPE_LABEL: Record<string, string> = {
+  TAKE_OFF: '起飞',
+  DEPARTURE: '离港',
+  TRANSIT: '转移',
+  CHARGE: '充能',
+  JUMP: '跃迁',
+  FLOAT: '漂浮',
+  APPROACH: '进近',
+  LANDING: '着陆',
+  LOCK: '锁定',
+  DECAY: '衰减',
+  JUMP_GATEWAY: '网关跃迁',
+};
+
+function segmentTypeLabel(type: string): string {
+  return SEGMENT_TYPE_LABEL[type] ?? type;
+}
+
+// 目的地址文本：与游戏 SFC 表格一致（含 ORBIT 时加「（环绕轨道）」后缀）。
+function segmentDestinationText(dest?: PrunApi.Address): string {
+  if (!dest) {
+    return '--';
+  }
+  const full = getDestinationFullName(dest);
+  const hasOrbit = dest.lines?.some(l => l.type === 'ORBIT');
+  return hasOrbit ? `${full}（环绕轨道）` : (full ?? '--');
+}
+
+// 从 flightPlansStore 查找匹配当前航线（起终点实体 naturalId）的原生计划，
+// 多条时取出发时刻最新的一条。
+export function findNativeFlightPlan(
+  fromBody: string,
+  toBody: string,
+): PrunApi.FlightPlan | undefined {
+  const plans = flightPlansStore.all.value;
+  if (!plans || plans.length === 0) {
+    return undefined;
+  }
+  const from = fromBody.toUpperCase();
+  const to = toBody.toUpperCase();
+  let best: PrunApi.FlightPlan | undefined;
+  let bestDepart = -Infinity;
+  for (const plan of plans) {
+    const segs = plan.segments;
+    if (segs.length === 0) {
+      continue;
+    }
+    const origin = getEntityNaturalIdFromAddress(segs[0].origin)?.toUpperCase();
+    const dest = getEntityNaturalIdFromAddress(segs[segs.length - 1].destination)?.toUpperCase();
+    if (origin !== from || dest !== to) {
+      continue;
+    }
+    const depart = segs[0].departure?.timestamp ?? 0;
+    if (depart > bestDepart) {
+      bestDepart = depart;
+      best = plan;
+    }
+  }
+  return best;
+}
+
+// 将原生 FlightPlan 的 segments 转为展示行（严格按 SFC 表格）。
+export function buildNativeSegmentRows(plan: PrunApi.FlightPlan): RouteSegmentRow[] {
+  return plan.segments.map(seg => ({
+    type: segmentTypeLabel(seg.type),
+    typeKey: seg.type,
+    destination: segmentDestinationText(seg.destination),
+    durationMs: (seg.arrival?.timestamp ?? 0) - (seg.departure?.timestamp ?? 0),
+    distanceKm: seg.stlDistance ?? undefined,
+    distancePc: seg.ftlDistance ?? undefined,
+    damage: seg.damage,
+    stlFuel: seg.stlFuelConsumption ?? undefined,
+    ftlFuel: seg.ftlFuelConsumption ?? undefined,
+    native: true,
+  }));
+}
+
+// ---- 模型估算分段（无原生飞行计划时回退，格式与 SFC 表格一致）----
+function starName(systemId: string): string {
+  const star = starsStore.getByNaturalId(systemId);
+  return star ? (getStarName(star) ?? systemId) : systemId;
+}
+
+// 按航线/指标/飞船性能估算完整分段。跨星系 STL 段用罐模型（与 fuel-model
+// computeFuelOption 同源）；FTL 段按每跳 pc 分摊燃料与时间。
+export function buildEstimatedSegmentRows(
+  route: PlannedRoute,
+  metrics: ReturnType<typeof routeMetrics>,
+  ship: ShipPerformance,
+  fuel: number,
+  reactor: number,
+  settings: {
+    landingRadius?: number;
+    landingPressure?: number;
+    departureRadius?: number;
+    departurePressure?: number;
+    stlLandingFactor?: number;
+    stlApproachExtra?: number;
+  } = {},
+): RouteSegmentRow[] {
+  const rows: RouteSegmentRow[] = [];
+  const cond = conditionFactor(ship.condition);
+  const vStl = stlSpeedFor(ship, fuel);
+  const vFtl = ftlSpeedFor(ship, reactor);
+  const chargeSec = ftlChargeSecondsFor(ship, reactor);
+  const ftlC = ftlFuelCFor(ship);
+  const isCross = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
+  const tank = ship.stlFuelCapacity;
+
+  // 跨星系 STL 罐模型细分（与 computeFuelOption 同源）：
+  // 离港 ≈ 0.49×罐×f、进近 ≈ 0.49×罐×f + 进近差、着陆/起飞按行星半径气压。
+  const stlDepartFuel = isCross && tank !== undefined && tank > 0 ? 0.49 * tank * fuel : undefined;
+  const lf = settings.stlLandingFactor ?? stlLandingFactor(ship);
+  const P =
+    settings.landingPressure !== undefined && settings.landingPressure > 0
+      ? settings.landingPressure
+      : 1;
+  const R = settings.landingRadius;
+  const landingFuel =
+    isCross && R !== undefined && R > 0 ? 0.47 * Math.sqrt(R * Math.pow(P, -0.2)) * lf : undefined;
+  const approachExtra = settings.stlApproachExtra ?? 8;
+  const stlApproachFuel =
+    isCross && tank !== undefined && tank > 0 ? 0.49 * tank * fuel + approachExtra : undefined;
+
+  // 离港段（起点 → 首跳恒星）。
+  const departKm = metrics.departKm;
+  if (departKm !== undefined && departKm > 0) {
+    rows.push({
+      type: '离港',
+      typeKey: 'DEPARTURE',
+      destination: `${route.fromBody ?? ''}（环绕轨道）`,
+      durationMs: (departKm / (vStl * 3600) / cond) * 3600000,
+      distanceKm: departKm,
+      damage: 0,
+      stlFuel: stlDepartFuel,
+      native: false,
+    });
+  }
+
+  // 每条跃迁 + 充能。
+  for (const leg of route.legs) {
+    const jumpFuel = leg.viaGateway ? 0 : ftlC * reactor * leg.pc;
+    rows.push({
+      type: leg.viaGateway ? '网关跃迁' : '跃迁',
+      typeKey: leg.viaGateway ? 'JUMP_GATEWAY' : 'JUMP',
+      destination: `${starName(leg.to)}（环绕轨道）`,
+      durationMs: (leg.pc / vFtl) * 3600000,
+      distancePc: leg.pc,
+      damage: 0,
+      native: false,
+    });
+    rows.push({
+      type: '充能',
+      typeKey: 'CHARGE',
+      destination: `${starName(leg.to)}（环绕轨道）`,
+      durationMs: chargeSec * 1000,
+      damage: 0,
+      ftlFuel: jumpFuel,
+      native: false,
+    });
+  }
+
+  // 进近段（末跳恒星 → 终点）。
+  const approachKm = metrics.approachKm;
+  if (approachKm !== undefined && approachKm > 0) {
+    rows.push({
+      type: '进近',
+      typeKey: 'APPROACH',
+      destination: `${route.toBody ?? ''}（环绕轨道）`,
+      durationMs: (approachKm / (vStl * 3600) / cond) * 3600000,
+      distanceKm: approachKm,
+      damage: 0,
+      stlFuel: stlApproachFuel,
+      native: false,
+    });
+  }
+
+  // 着陆段（终点行星表面）。
+  if (landingFuel !== undefined && R !== undefined) {
+    rows.push({
+      type: '着陆',
+      typeKey: 'LANDING',
+      destination: route.toBody ?? '',
+      durationMs: 0,
+      damage: 0,
+      stlFuel: landingFuel,
+      native: false,
+    });
+  }
+
+  return rows;
 }

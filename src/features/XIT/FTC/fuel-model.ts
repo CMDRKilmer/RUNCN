@@ -112,7 +112,7 @@ function ftlSpeedExponentA(ftlMaxSpeed: number): number {
 }
 
 // FTL 跃迁速度（pc/h）：v = ftlMax × r^(a(1+1.5r))。
-function ftlSpeedFor(ship: ShipPerformance, reactor: number): number {
+export function ftlSpeedFor(ship: ShipPerformance, reactor: number): number {
   const ftlMax = Math.max(0.1, ship.ftlMaxSpeed);
   const r = Math.max(0.001, reactor);
   const a = ftlSpeedExponentA(ftlMax);
@@ -122,7 +122,7 @@ function ftlSpeedFor(ship: ShipPerformance, reactor: number): number {
 
 // FTL 充能时间（秒/跳）：charge = (emitterChargeTime ÷ minReactorUsage) × r。
 // 缺蓝图参数时回退到 90×r（HYR 校准值）。
-function ftlChargeSecondsFor(ship: ShipPerformance, reactor: number): number {
+export function ftlChargeSecondsFor(ship: ShipPerformance, reactor: number): number {
   const m = ship.minReactorUsage;
   const eT = ship.emitterChargeTime;
   if (m !== undefined && eT !== undefined && m > 0) {
@@ -132,7 +132,7 @@ function ftlChargeSecondsFor(ship: ShipPerformance, reactor: number): number {
 }
 
 // FTL 燃料系数（每 pc·r）：C_F = 0.00293 × 反应堆功率(GW)。缺功率时回退 HYR 21.4。
-function ftlFuelCFor(ship: ShipPerformance): number {
+export function ftlFuelCFor(ship: ShipPerformance): number {
   const power = ship.reactorPower;
   if (power !== undefined && power > 0) {
     return FTL_FUEL_C_PER_GW * power;
@@ -159,20 +159,20 @@ function stlEngineParams(engineOption: string | undefined) {
 // STL 巡航速度（km/s @ 燃料滑块 f）：饱和模型 v(f) = min(V_BASE×f^K, V_SAT)。
 // 整条曲线查引擎表（引擎类型决定，非每船校准）；G力/质量不影响。
 // 实测：hyperthrust f≥0.2 饱和 90800；advanced f≈0.45 饱和 74500；glass f≈0.1 饱和 74500。
-function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
+export function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = stlEngineParams(ship.stlEngineOption);
   const f = Math.max(0.001, fuel);
   return Math.min(p.vBase * Math.pow(f, p.k), p.vSat);
 }
 
 // STL 燃料系数（每 km·滑块）按引擎取。
-function stlFuelCFor(engineOption: string | undefined, fallback: number): number {
+export function stlFuelCFor(engineOption: string | undefined, fallback: number): number {
   const p = stlEngineParams(engineOption);
   return p.fuelC ?? fallback;
 }
 
 // 船体条件修正系数：<阈值时线性衰减（80%→0 性能衰减 20%，50%→50%）。
-function conditionFactor(condition: number): number {
+export function conditionFactor(condition: number): number {
   if (condition >= CONDITION_THRESHOLD) {
     return 1;
   }

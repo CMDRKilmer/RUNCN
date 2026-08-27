@@ -28,7 +28,15 @@ import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
 import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
-import { planRoutes, routeMetrics, PlannedRoute } from './route-planner';
+import {
+  planRoutes,
+  routeMetrics,
+  PlannedRoute,
+  RouteSegmentRow,
+  findNativeFlightPlan,
+  buildNativeSegmentRows,
+  buildEstimatedSegmentRows,
+} from './route-planner';
 import { resolveSystemId } from './route-model';
 import { scanFuelOptions, FuelOption, ShipPerformance } from './fuel-model';
 import $style from './FTC.module.css';
@@ -400,6 +408,9 @@ interface PlanResult {
   metrics: ReturnType<typeof routeMetrics>;
   options: FuelOption[];
   best: FuelOption;
+  // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
+  segments: RouteSegmentRow[];
+  segmentsNative: boolean;
 }
 
 const result = ref<PlanResult | undefined>(undefined);
@@ -498,8 +509,26 @@ async function planAndCompute() {
     calcMessage.value = '请输入有效的滑块组合（0–1 之间）';
     return;
   }
-  result.value = { label: route.label, route, metrics, options, best: options[0] };
   const b = options[0];
+  // 完整航线段（严格按游戏 SFC 表格）：
+  // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
+  // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
+  const nativePlan = findNativeFlightPlan(from, to);
+  let segments: RouteSegmentRow[];
+  let segmentsNative: boolean;
+  if (nativePlan) {
+    segments = buildNativeSegmentRows(nativePlan);
+    segmentsNative = true;
+  } else {
+    segments = buildEstimatedSegmentRows(route, metrics, perf, b.fuel, b.reactor, {
+      landingRadius: landingEnv?.radiusKm,
+      landingPressure: landingEnv?.pressure,
+      departureRadius: departEnv?.radiusKm,
+      departurePressure: departEnv?.pressure,
+    });
+    segmentsNative = false;
+  }
+  result.value = { label: route.label, route, metrics, options, best: b, segments, segmentsNative };
   const radiusText =
     landingEnv !== undefined ? `，目的地半径 ${fixed2v(landingEnv.radiusKm)}km` : '';
   calcMessage.value =
@@ -520,6 +549,32 @@ function formatFuel(value: number) {
 }
 function fixed2v(value: number) {
   return fixed2(value);
+}
+
+// 分段耗时：与 SFC 表格一致（如 "21分钟 1秒"、"2小时 14分钟"、"57秒"）。
+function formatSegmentDuration(ms: number) {
+  if (ms <= 0) {
+    return '--';
+  }
+  return formatCountdown(ms);
+}
+// 分段损伤：SFC 表格显示百分比（如 "0.018%"）。
+function formatDamage(damage: number) {
+  if (damage <= 0) {
+    return '--';
+  }
+  return `${(damage * 100).toFixed(3)}%`;
+}
+// 分段燃料消耗：与 SFC 表格一致（如 "87 低光速 + 20 超光速"）。
+function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
+  const parts: string[] = [];
+  if (stlFuel !== undefined && stlFuel > 0) {
+    parts.push(`${Math.round(stlFuel)} 低光速`);
+  }
+  if (ftlFuel !== undefined && ftlFuel > 0) {
+    parts.push(`${Math.round(ftlFuel)} 超光速`);
+  }
+  return parts.length > 0 ? parts.join(' + ') : '--';
 }
 </script>
 
@@ -727,6 +782,41 @@ function fixed2v(value: number) {
           </template>
         </div>
       </details>
+      <SectionHeader>
+        航线分段（{{ result.segmentsNative ? '服务器原生飞行计划' : '模型估算' }}）
+      </SectionHeader>
+      <table :class="$style.planTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>类型</th>
+            <th>目的地</th>
+            <th>耗时</th>
+            <th>距离</th>
+            <th>损伤</th>
+            <th>消耗</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(s, i) in result.segments" :key="i">
+            <td>{{ i }}</td>
+            <td>{{ s.type }}</td>
+            <td>{{ s.destination }}</td>
+            <td>{{ formatSegmentDuration(s.durationMs) }}</td>
+            <td>
+              <template v-if="s.distanceKm !== undefined">
+                {{ formatFuel(s.distanceKm / 1e6) }}M km
+              </template>
+              <template v-else-if="s.distancePc !== undefined">
+                {{ fixed2v(s.distancePc) }} pc
+              </template>
+              <template v-else>--</template>
+            </td>
+            <td>{{ formatDamage(s.damage) }}</td>
+            <td>{{ formatSegmentFuel(s.stlFuel, s.ftlFuel) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </template>
   </div>
 </template>
