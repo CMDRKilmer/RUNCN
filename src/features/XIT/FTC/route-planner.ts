@@ -180,15 +180,26 @@ export function liftOffKm(bodyNatural: string | undefined): number | undefined {
   return undefined;
 }
 
+// 跨星系 STL 起降统计估算（无飞行计划记录时回退）：
+// 实测内置数据（2018 离港 + 1082 进近）中位数：离港≈70M、进近≈68M km。
+// 远优于"行星到本星系恒星"距离（liftOffKm）——那是本地轨道距离，不是到
+// 跃迁点的航程（跳点在恒星连线方向 ~75M 处），低估数倍。
+// 空间站/常飞天体通常已有通配记录（BODY|* / *|BODY），不落到此兜底。
+const STL_EST_DEPARTURE_KM = 70e6;
+const STL_EST_APPROACH_KM = 68e6;
+
 // 提取飞船性能模型所需的航线指标：STL 起降距离（原生记录优先，估算回退）、
 // 自然/网关 pc、自然跳数/网关段数。
 // 原生 STL 路程 = 离港段 + 进近段（跃迁点在起终点恒星连线上，段距离由服务器
 // 计算，离线无法精确复现）——优先用飞行计划记录的原生值（与飞船无关），
-// 无记录时回退到轨道模型预测的起降距离估算。
+// 无记录时回退：跨星系航段用内置数据统计估算，同星系/网关段用本地轨道距离。
 export function routeMetrics(route: PlannedRoute): {
   stlDistanceKm: number | undefined;
-  // 是否使用了飞行计划记录的原生 STL 路程（否则为轨道模型估算）。
+  // 是否使用了飞行计划记录的原生 STL 路程（否则为统计/轨道估算）。
   stlRecorded: boolean;
+  // 离港/进近各自的值（用于展示）。
+  departKm: number | undefined;
+  approachKm: number | undefined;
   natPc: number;
   gwPc: number;
   gwCount: number;
@@ -198,8 +209,8 @@ export function routeMetrics(route: PlannedRoute): {
   // 出发地实体 naturalId（跨星系时用于 FIO 行星环境查询，判断起飞段）。
   fromBody?: string;
 } {
-  const depart = liftOffKm(route.fromBody);
-  const approach = liftOffKm(route.toBody);
+  const departLift = liftOffKm(route.fromBody);
+  const approachLift = liftOffKm(route.toBody);
   let natPc = 0;
   let gwPc = 0;
   let gwCount = 0;
@@ -225,17 +236,25 @@ export function routeMetrics(route: PlannedRoute): {
     route.toBody !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
       ? stlSegmentsStore.getApproach(lastLeg.from, route.toBody)
       : undefined;
-  let stlDistanceKm: number | undefined;
-  let stlRecorded = false;
-  if (departRec !== undefined && approachRec !== undefined) {
-    stlDistanceKm = departRec.distanceKm + approachRec.distanceKm;
-    stlRecorded = true;
-  } else {
-    stlDistanceKm = depart !== undefined && approach !== undefined ? depart + approach : undefined;
-  }
+  // 离港/进近估算：记录（精确）优先；跨星系航段回退统计中位数；其余用本地轨道距离。
+  const departKm =
+    departRec?.distanceKm ??
+    (route.fromBody !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
+      ? STL_EST_DEPARTURE_KM
+      : departLift);
+  const approachKm =
+    approachRec?.distanceKm ??
+    (route.toBody !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
+      ? STL_EST_APPROACH_KM
+      : approachLift);
+  const stlRecorded = departRec !== undefined && approachRec !== undefined;
+  const stlDistanceKm =
+    departKm !== undefined && approachKm !== undefined ? departKm + approachKm : undefined;
   return {
     stlDistanceKm,
     stlRecorded,
+    departKm,
+    approachKm,
     natPc,
     gwPc,
     gwCount,

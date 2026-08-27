@@ -715,8 +715,15 @@ function fixed2v(value: number) {
           {{ fixed2v(result.metrics.gwPc) }}， 网关 {{ result.metrics.gwCount }} 段）
           <template v-if="result.metrics.stlDistanceKm !== undefined">
             ｜ STL 起降 ≈ {{ formatFuel(result.metrics.stlDistanceKm / 1e6) }}M km
+            <template
+              v-if="
+                result.metrics.departKm !== undefined && result.metrics.approachKm !== undefined
+              ">
+              （离港 {{ formatFuel(result.metrics.departKm / 1e6) }}M + 进近
+              {{ formatFuel(result.metrics.approachKm / 1e6) }}M）
+            </template>
             <template v-if="result.metrics.stlRecorded">（飞行计划原生记录）</template>
-            <template v-else>（轨道模型估算）</template>
+            <template v-else>（统计/轨道估算，采集中会逐步精确）</template>
           </template>
         </div>
       </details>
