@@ -131,7 +131,11 @@ function onFuel(registration: string) {
       <div v-for="x in rows" :key="x.ship.id" :class="$style.row">
         <div :class="[$style.bodyCell]">
           <span
-            :class="[C.Link.link, { [$style.lowCondition]: x.ship.condition <= 0.83 }]"
+            :class="[
+              C.Link.link,
+              { [$style.warnCondition]: x.ship.condition >= 0.8 && x.ship.condition <= 0.83 },
+              { [$style.lowCondition]: x.ship.condition < 0.8 },
+            ]"
             @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}
           </span>
@@ -274,6 +278,12 @@ function onFuel(registration: string) {
   color: #3fa2de;
 }
 
+/* 耐久 80%~83% 时舰名变黄警示。 */
+.warnCondition {
+  color: #f0ad4e;
+}
+
+/* 耐久低于 80% 时舰名变红告警。 */
 .lowCondition {
   color: #d9534f;
 }
