@@ -87,12 +87,13 @@ export interface FuelOption {
 //   glass(BP-OHMI 玻璃): f=0.03→35401、f=0.05→53176、f≈0.1 饱和 74500。
 //   fuelSaving: f=0.05→11540、f=0.1→22517、f≈0.45 饱和 74500，省油 C_F=5.2e-6。
 // flow = STL 燃料流量（u/s，用于着陆/离港燃料的流量缩放；飞船数据缺流量时回退）：
-//   fuelSaving 0.0075（OOG LCB 蓝图实测）、标准 0.015、glass 0.015、advanced/hyperthrust 0.02。
+//   fuelSaving 0.0075、标准 0.015、glass 0.015、advanced 0.02、hyperthrust 0.03（均 BLU 蓝图实测；
+//   旧值 hyperthrust 0.02 错误——BP-OHMI 超推力显示"每秒0.03单位燃料"）。
 const STL_ENGINE_SPEED: Record<
   string,
   { vBase: number; k: number; vSat: number; fuelC: number; flow: number }
 > = {
-  STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5, flow: 0.02 }, // HCB 实测
+  STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5, flow: 0.03 }, // HCB 实测
   // fuelSaving（2026-08-27 OOG LCB 实测修正）：旧借值 167000/0.885/74500（v0.1≈21.8k）
   // 严重低估——OOG 实测离港/进近按统一段模型反推巡航 v0.1≈65k、饱和 ~69.8k。
   STL_ENGINE_FUEL_SAVING: { vBase: 246530, k: 0.578, vSat: 69754, fuelC: 5.2e-6, flow: 0.0075 }, // OOG LCB 实测
@@ -174,32 +175,94 @@ export function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
   return Math.min(p.vBase * Math.pow(f, p.k), p.vSat);
 }
 
-// ---- 离港/进近段速度（2026-08-27 统一模型，OOG LCB + HCB 实测校准）----
-// 游戏离港/进近段（起终点 ↔ 跃迁点）的实际速度远低于巡航，且与引擎无关地服从
-// 统一的巡航比例（不同引擎/配置通用）：
-//   ★ 进近 = 0.52 × 巡航速度（HCB 三档 0.52/0.51/0.52 一致、OOG 吻合）
-//   ★ 离港 = 巡航 × [0.28 + 0.30×(1 − 巡航/巡航V_SAT)]（HCB+OOG 六点误差 <3%；
-//     低 f 时离港比例高 ~0.42，随 f 接近饱和降到 0.28）
-// 即段速度只由引擎巡航曲线（STL_ENGINE_SPEED，已全校准）+ 两个通用常数决定，
-// 任意引擎/飞船配置通用，无需逐引擎标定。实测点（HRT→Euu）：
-//   fuelSaving(OOG)：离港 17.7k@0.05/19.8k@0.1+ 饱和；进近 22.7k@0.05/33.9k@0.1/36.3k@0.3+
-//   hyperthrust(HCB)：离港 19.3k@0.05/25.4k@0.1/25.5k@0.3+ 饱和；进近 22.8k@0.05/37.8k@0.1/46.9k@0.3+
-const SEGMENT_APPROACH_RATIO = 0.52; // 进近/巡航比（通用）
-const SEGMENT_DEPART_RATIO_SAT = 0.28; // 离港/巡航比（巡航饱和时）
-const SEGMENT_DEPART_RATIO_SPAN = 0.3; // 离港比例随巡航未饱和程度的抬升幅度
+// ---- 离港/进近段速度（2026-08-27 重构：段燃料 Q 驱动 + 逐引擎 Weibull 标定）----
+// 💥 重大发现：离港/进近段速度不由巡航速度决定，而由"段中可用的 STL 燃料量"决定！
+//   实测（BP-OHMI 多引擎×多油箱，HRT→Euu，同引擎同航线）：
+//     油箱越小 → 段速度越慢（standard f=0.05 离港：小型1500→5.7k、中型3500→12.3k、
+//     大型8000→19.3k km/s），饱和段速度与油箱无关 → 段速度是"段燃料"的函数。
+//   段燃料：Q_离港 = 0.49×罐×f；Q_进近 = 0.49×罐×f + 进近差(8)。
+//   模型：v_seg = V_SAT_seg × (1 − exp(−(Q/Q0)^k))（Weibull 饱和曲线，2-5% 误差）。
+//   各引擎 V_SAT（离/进近饱和，油箱无关）与 Weibull 参数（Q0/k）2026-08-27 实测标定：
+//     standard:      离 20938/94.6/1.216；进 38607/181/1.17   （3 油箱全档最全）
+//     fuelSaving:    离 18130/31.5/1.3；  进 33298/95/1.45    （OOG 中型+大型）
+//     advanced:      离 20937/105.9/1.2；进 38534/221.2/1.436 （大型油箱）
+//     hyperthrust:   离 20937/193.6/1.636；进 38534/328.2/1.217（大型油箱）
+//     glass:         离 12820/174.2/2.059；进 23447/256.5/1.303（大型油箱）
+//   ★ G 力修正：段速度饱和值 ∝ (G/8)^0.3（HCB G15 1.218×、OOG G10 1.089× vs G8 实测），
+//   即 v = V_SAT_G8 × (G/8)^0.3 × (1−exp(−(Q/Q0)^k))。
+//   ⚠️ 旧"统一段模型（段=巡航比例）"只在大型油箱+特定引擎下偶然成立（HCB/OOG 罐大、
+//   Q 充足段速度接近饱和），小型油箱（新手船 STS 1500 罐）彻底推翻 → 需按此重构。
+interface StlSegmentCurve {
+  vSat: number;
+  q0: number;
+  k: number;
+}
+const STL_SEGMENT_CURVES: Record<string, { depart: StlSegmentCurve; approach: StlSegmentCurve }> = {
+  STL_ENGINE_FUEL_SAVING: {
+    depart: { vSat: 18130, q0: 31.5, k: 1.3 },
+    approach: { vSat: 33298, q0: 95, k: 1.45 },
+  },
+  STL_ENGINE_STANDARD: {
+    depart: { vSat: 20938, q0: 94.6, k: 1.216 },
+    approach: { vSat: 38607, q0: 181, k: 1.17 },
+  },
+  STL_ENGINE_ADVANCED: {
+    depart: { vSat: 20937, q0: 105.9, k: 1.2 },
+    approach: { vSat: 38534, q0: 221.2, k: 1.436 },
+  },
+  STL_ENGINE_HYPERTHRUST: {
+    depart: { vSat: 20937, q0: 193.6, k: 1.636 },
+    approach: { vSat: 38534, q0: 328.2, k: 1.217 },
+  },
+  STL_ENGINE_GLASS: {
+    depart: { vSat: 12820, q0: 174.2, k: 2.059 },
+    approach: { vSat: 23447, q0: 256.5, k: 1.303 },
+  },
+};
+const DEFAULT_STL_SEGMENT_CURVE = STL_SEGMENT_CURVES.STL_ENGINE_STANDARD;
 
-// 离港段速度（km/s @ f）：v_depart = cruise × [0.28 + 0.30×(1 − cruise/V_SAT)]。
-export function stlDepartSpeedFor(ship: ShipPerformance, fuel: number): number {
-  const cruise = stlSpeedFor(ship, fuel);
-  const vSat = stlEngineParams(ship.stlEngineOption).vSat;
-  const ratio =
-    SEGMENT_DEPART_RATIO_SAT + SEGMENT_DEPART_RATIO_SPAN * (1 - cruise / Math.max(1, vSat));
-  return cruise * ratio;
+// 段速度（km/s）：v = V_SAT_G8 × (G/8)^0.3 × (1 − exp(−(Q/Q0)^k))，Q 由 STL 罐容量×f 决定。
+// G 修正：段速度饱和值 ∝ (G/8)^0.3（HCB G15 1.218×、OOG G10 1.089× vs G8 实测）。
+// 缺罐数据时回退饱和段速度（V_SAT，保守取上限——大多数跨星系船都有蓝图罐数据）。
+const STL_SEGMENT_G_REF = 8;
+const STL_SEGMENT_G_EXP = 0.3;
+function stlSegmentSpeedFor(
+  ship: ShipPerformance,
+  fuel: number,
+  curve: StlSegmentCurve,
+  approach: boolean,
+): number {
+  const tank = ship.stlFuelCapacity;
+  if (tank === undefined || tank <= 0) {
+    return curve.vSat;
+  }
+  const q = approach
+    ? STL_TANK_FUEL_COEF * tank * fuel + STL_APPROACH_EXTRA
+    : STL_TANK_FUEL_COEF * tank * fuel;
+  let vSat = curve.vSat;
+  const g = ship.maxGFactor;
+  if (g !== undefined && g > 0) {
+    vSat *= Math.pow(g / STL_SEGMENT_G_REF, STL_SEGMENT_G_EXP);
+  }
+  return vSat * (1 - Math.exp(-Math.pow(q / curve.q0, curve.k)));
 }
 
-// 进近段速度（km/s @ f）：v_approach = 0.52 × cruise。
+function stlSegmentCurveFor(ship: ShipPerformance): {
+  depart: StlSegmentCurve;
+  approach: StlSegmentCurve;
+} {
+  const p = STL_SEGMENT_CURVES[ship.stlEngineOption ?? ''];
+  return p ?? DEFAULT_STL_SEGMENT_CURVE;
+}
+
+// 离港段速度（km/s @ f）：由段燃料 Q=0.49×罐×f 驱动。
+export function stlDepartSpeedFor(ship: ShipPerformance, fuel: number): number {
+  return stlSegmentSpeedFor(ship, fuel, stlSegmentCurveFor(ship).depart, false);
+}
+
+// 进近段速度（km/s @ f）：由段燃料 Q=0.49×罐×f+8 驱动。
 export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number {
-  return SEGMENT_APPROACH_RATIO * stlSpeedFor(ship, fuel);
+  return stlSegmentSpeedFor(ship, fuel, stlSegmentCurveFor(ship).approach, true);
 }
 
 // STL 燃料系数（每 km·滑块）按引擎取。
