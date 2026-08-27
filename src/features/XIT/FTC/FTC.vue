@@ -6,11 +6,8 @@ import TextInput from '@src/components/forms/TextInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
-import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getPrice } from '@src/infrastructure/fio/cx';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { sleep } from '@src/utils/sleep';
 import { exportStlSegments } from '@src/infrastructure/prun-api/data/system-bodies';
 import {
   collectAllPlanetStl,
@@ -22,30 +19,25 @@ import {
   prefetchAllOrbits,
   exportAllPlanetData,
   exportStationOrbits,
-  hasSystemData,
 } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
 import { formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import {
-  planRoutes,
-  routeMetrics,
   PlannedRoute,
   RouteSegmentRow,
   findNativeFlightPlan,
   buildNativeSegmentRows,
   buildEstimatedSegmentRows,
 } from './route-planner';
-import { resolveSystemId } from './route-model';
 import {
-  scanFuelOptions,
-  autoFuelGrid,
-  autoReactorGrid,
-  findBalanceOption,
-  FuelOption,
-  ShipPerformance,
-} from './fuel-model';
+  computeFtcPlan,
+  shipPerformanceFor,
+  blueprintInfoFor,
+  FtcComputeOutput,
+} from './ftc-compute';
+import { FuelOption } from './fuel-model';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞船性能驱动的飞行燃料性价比计算器。
@@ -193,94 +185,6 @@ function resetCollectProgress() {
   collectTotal.value = 0;
   collectMessage.value = '已清空采集断点，下次从头开始';
 }
-// 自动浏览星系（不止空间站）：逐个打开目标星系的星系详情（游戏命令
-// `MS <systemId>`，Map: Star System），客户端自动请求 DATA_DATA["systems", id]，
-// orbit.ts 监听积累该星系全部数据——恒星质量 + 行星/空间站轨道（celestialBodies），
-// 不只空间站。DATA_DATA 到达后自动关闭窗口。FIO 无空间站数据，这是唯一能离线
-// 补全空间站轨道的方式（模拟用户浏览星系，符合"插件不主动请求数据"约束）。
-// 在计算时调用：起终点星系阻塞等待（保证本次计算 STL 起降距离可用），
-// 其余无轨道空间站的归属星系后台渐进（不阻塞，为后续计算积累）。
-async function browseSystems(systemIds: string[]): Promise<string[]> {
-  const seen = new Set<string>();
-  const list: string[] = [];
-  for (const id of systemIds) {
-    const key = id.trim().toUpperCase();
-    if (key !== '' && !seen.has(key)) {
-      seen.add(key);
-      list.push(key);
-    }
-  }
-  const browsed: string[] = [];
-  for (const systemId of list) {
-    // 本会话已浏览过（DATA_DATA 已积累）：跳过，避免重复打开窗口。
-    if (hasSystemData(systemId)) {
-      browsed.push(systemId);
-      continue;
-    }
-    const done = ref(false);
-    const timeout = window.setTimeout(() => {
-      done.value = true;
-    }, 25000);
-    let ok = false;
-    try {
-      // 打开星系详情并提交命令（竞速保护：地图渲染慢时不等窗口，DATA_DATA 已触发）。
-      await Promise.race([
-        showBuffer(`MS ${systemId}`, {
-          autoClose: true,
-          closeWhen: done,
-        }).catch(() => {
-          done.value = true;
-        }),
-        sleep(10000),
-      ]);
-      // 轮询数据积累（DATA_DATA 到达即完成；done=true 让 closeWhenDone 关闭窗口）。
-      while (!done.value && !hasSystemData(systemId)) {
-        await sleep(400);
-      }
-      ok = hasSystemData(systemId);
-    } catch {
-      // 单星系失败不中断：标记完成，继续下一个。
-    } finally {
-      done.value = true;
-      window.clearTimeout(timeout);
-    }
-    if (ok) {
-      browsed.push(systemId);
-    }
-  }
-  return browsed;
-}
-
-// 收集计算需要浏览的星系：起终点所在星系（关键，阻塞）+ 无轨道空间站的归属星系（后台）。
-// 不止空间站：起终点为行星/星系时同样浏览其星系，积累恒星质量与行星轨道。
-function collectBrowseTargets(
-  from: string,
-  to: string,
-): {
-  critical: string[];
-  background: string[];
-} {
-  const critical = new Set<string>();
-  const fromSys = resolveSystemId(from);
-  const toSys = resolveSystemId(to);
-  if (fromSys !== undefined) {
-    critical.add(fromSys);
-  }
-  if (toSys !== undefined) {
-    critical.add(toSys);
-  }
-  const background = new Set<string>();
-  for (const st of exportStationOrbits()) {
-    if (!st.orbit) {
-      background.add(st.systemId);
-    }
-  }
-  return {
-    critical: [...critical],
-    background: [...background].filter(s => !critical.has(s)),
-  };
-}
-
 // ---- 燃料性价比计算器 ----
 const registration = ref('');
 const routeFrom = ref('');
@@ -295,55 +199,8 @@ const dockedShips = computed(() =>
   (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
 );
 const ship = computed(() => shipsStore.getByRegistration(registration.value));
-// 蓝图性能（FTL 最大航速、STL 引擎、FTL 充能/燃料参数）。
-const blueprintInfo = computed(() => {
-  const s = ship.value;
-  if (!s) {
-    return undefined;
-  }
-  const bp = blueprintsStore.getByNaturalId(s.blueprintNaturalId);
-  if (!bp) {
-    return undefined;
-  }
-  const ftlMaxSpeed =
-    bp.performance.ftlMaxSpeed > 0 ? bp.performance.ftlMaxSpeed * 3600 : undefined;
-  // 蓝图 STL 燃料罐容量（跨星系离港/进近燃料按罐比例算）。
-  const stlFuelCapacity =
-    bp.performance.stlFuelCapacity > 0 ? bp.performance.stlFuelCapacity : undefined;
-  // 蓝图最小反应堆使用量 / 发射器充能时间（充能时间 = eT/m × r）。
-  const minReactorUsage =
-    bp.performance.minReactorUsage > 0 ? bp.performance.minReactorUsage : undefined;
-  const emitterChargeTime =
-    bp.performance.emitterChargeTime > 0 ? bp.performance.emitterChargeTime : undefined;
-  // 蓝图最大 G力过载因子（用于 STL v_cruise 经验公式）。
-  const maxGFactor = bp.performance.maxGFactor;
-  // 从 selections 中查 STL_ENGINE 选项与反应堆功率（FTL_POWER，燃料系数用）。
-  let stlEngine: string | undefined;
-  let reactorPower: number | undefined;
-  for (const sel of bp.selections) {
-    if (sel.amount <= 0) {
-      continue;
-    }
-    if (sel.type === 'STL_ENGINE') {
-      stlEngine = sel.option;
-    } else if (sel.type === 'FTL_REACTOR') {
-      for (const mod of sel.modifiers) {
-        if (mod.type === 'FTL_POWER') {
-          reactorPower = mod.value;
-        }
-      }
-    }
-  }
-  return {
-    ftlMaxSpeed,
-    stlEngine,
-    reactorPower,
-    stlFuelCapacity,
-    minReactorUsage,
-    emitterChargeTime,
-    maxGFactor,
-  };
-});
+// 蓝图性能（FTL 最大航速、STL 引擎、FTL 充能/燃料参数）——提取逻辑在 ftc-compute 共享模块。
+const blueprintInfo = computed(() => (ship.value ? blueprintInfoFor(ship.value) : undefined));
 
 // 从飞船燃料仓自动识别燃料材料 ticker，用于自动填价。
 function storageTicker(storeId?: string | null) {
@@ -373,36 +230,10 @@ watchEffect(() => {
   }
 });
 
-// 飞船实时性能 → 模型输入。
-function shipPerformance(): ShipPerformance | undefined {
-  const s = ship.value;
-  if (!s) {
-    return undefined;
-  }
-  // FTL 最大航速优先从蓝图读取（pc/s → pc/h），无蓝图时回退到 2.26 pc/h。
-  const ftlMaxSpeed = blueprintInfo.value?.ftlMaxSpeed ?? 2.26;
-  return {
-    mass: s.mass,
-    operatingEmptyMass: s.operatingEmptyMass,
-    acceleration: s.acceleration,
-    thrust: s.thrust,
-    ftlMaxSpeed,
-    stlFuelFlowRate: s.stlFuelFlowRate,
-    reactorPower: blueprintInfo.value?.reactorPower ?? s.reactorPower,
-    condition: s.condition,
-    stlEngineOption: blueprintInfo.value?.stlEngine,
-    maxGFactor: blueprintInfo.value?.maxGFactor,
-    minReactorUsage: blueprintInfo.value?.minReactorUsage,
-    emitterChargeTime: blueprintInfo.value?.emitterChargeTime,
-    stlFuelCapacity: blueprintInfo.value?.stlFuelCapacity,
-  };
-}
-
 interface PlanResult {
   label: string;
   route: PlannedRoute;
-  metrics: ReturnType<typeof routeMetrics>;
-  options: FuelOption[];
+  metrics: NonNullable<FtcComputeOutput['metrics']>;
   best: FuelOption;
   // 是否有自然跃迁（否 = 全程系内/纯网关飞行，反应堆滑块不影响结果，无需计算）。
   reactorRelevant: boolean;
@@ -413,58 +244,6 @@ interface PlanResult {
 
 const result = ref<PlanResult | undefined>(undefined);
 const calcMessage = ref<string | undefined>(undefined);
-
-// 行星环境数据（半径 km / 气压）内置静态 JSON（FIO 全量导出，避免运行时查询）。
-// 格式：{ "PG-241H": { r: 8000, p: 1.2 }, ... }。
-type PlanetEnvEntry = { r: number; p?: number };
-let planetEnvData: Record<string, PlanetEnvEntry> | undefined;
-let planetEnvLoading: Promise<void> | undefined;
-
-async function loadPlanetEnv(): Promise<void> {
-  if (planetEnvData !== undefined || planetEnvLoading !== undefined) {
-    return planetEnvLoading;
-  }
-  planetEnvLoading = (async () => {
-    try {
-      const resp = await fetch(config.url.planetEnv);
-      planetEnvData = (await resp.json()) as Record<string, PlanetEnvEntry>;
-    } catch {
-      // 内置文件加载失败：回退常数近似（无起降精确项）。
-      planetEnvData = {};
-    }
-  })();
-  return planetEnvLoading;
-}
-
-// 从内置数据查行星环境（半径 km + 气压）。找不到（空间站/星系/无数据）返回 undefined。
-async function fetchPlanetEnv(
-  naturalId: string,
-): Promise<{ radiusKm: number; pressure?: number } | undefined> {
-  await loadPlanetEnv();
-  const env = planetEnvData?.[naturalId.toUpperCase()];
-  if (env === undefined) {
-    return undefined;
-  }
-  return { radiusKm: env.r, pressure: env.p };
-}
-
-// 等待飞船蓝图加载：FTL 航速/充能时间/燃料罐容量/STL 引擎/最大 G 等性能全部来自蓝图
-// （blueprintsStore 只含公司蓝图列表，首次访问 getByNaturalId 会触发 BLU 窗口请求，
-// 响应异步到达——不等待则本次计算全部落到默认值，误差巨大，如把省油引擎当超推力）。
-// 返回是否成功取得蓝图；失败（非公司蓝图/响应超时）时继续用默认值计算并提示。
-async function ensureShipBlueprint(s: PrunApi.Ship): Promise<boolean> {
-  if (blueprintsStore.getByNaturalId(s.blueprintNaturalId)) {
-    return true;
-  }
-  const deadline = Date.now() + 6000;
-  while (Date.now() < deadline) {
-    await sleep(100);
-    if (blueprintsStore.getByNaturalId(s.blueprintNaturalId)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 async function planAndCompute() {
   calcMessage.value = undefined;
@@ -480,68 +259,28 @@ async function planAndCompute() {
     calcMessage.value = '请选择停靠中的飞船';
     return;
   }
-  // 关键：计算前等待飞船蓝图加载（决定 FTL 航速/充能/燃料罐/引擎等性能）。
-  const bpOk = await ensureShipBlueprint(s);
-  const perf = shipPerformance();
-  if (!perf) {
-    calcMessage.value = '请选择停靠中的飞船';
-    return;
-  }
-  if (!bpOk) {
-    calcMessage.value = '未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准';
-  }
-  // 计算时自动浏览星系（无需手动按钮）：起终点星系阻塞获取轨道/恒星质量数据，
-  // 其余无轨道空间站星系后台渐进。浏览后可离线预测起降位置，STL 距离更准。
-  const targets = collectBrowseTargets(from, to);
-  if (targets.critical.length > 0) {
-    calcMessage.value = `正在获取起终点星系轨道数据（${targets.critical.join('、')}）…`;
-    await browseSystems(targets.critical);
-  }
-  if (targets.background.length > 0) {
-    void browseSystems(targets.background);
-  }
-  const planned = planRoutes(from, to);
-  const route = useGateway.value ? (planned.gateway ?? planned.natural) : planned.natural;
-  if (!route) {
-    calcMessage.value = '无法解析起终点或航线不可达（需恒星位置数据，请先打开星图）';
-    return;
-  }
-  const metrics = routeMetrics(route);
-  // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
-  // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
-  const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
-  const [landingEnv, departEnv] = await Promise.all([
-    isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
-    isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,
-  ]);
-  // 无需玩家设置档位：自动扫描全范围燃料滑块 f；反应堆 r 仅在存在自然跃迁时扫描
-  // （全程系内/纯网关飞行没有自然跃迁，反应堆不影响时长与燃料，无需计算）。
-  const reactorRelevant = (metrics.natPc ?? 0) > 0 || (metrics.natJumpCount ?? 0) > 0;
-  const options = scanFuelOptions(
-    perf,
-    metrics,
-    autoFuelGrid(),
-    reactorRelevant ? autoReactorGrid(perf) : [1],
-    {
-      stlPrice: stlFuelPrice.value ?? 0,
-      ftlPrice: ftlFuelPrice.value ?? 0,
-      timeValue: timeValue.value ?? 0,
+  // 计算编排（蓝图等待/星系浏览/滑块扫描）在 ftc-compute 共享模块，FTC 面板与 SFC 自动计算共用。
+  const out = await computeFtcPlan({
+    shipRegistration: registration.value,
+    from,
+    to,
+    useGateway: useGateway.value,
+    stlPrice: stlFuelPrice.value,
+    ftlPrice: ftlFuelPrice.value,
+    timeValue: timeValue.value,
+    onProgress: msg => {
+      calcMessage.value = msg;
     },
-    {
-      landingRadius: landingEnv?.radiusKm,
-      landingPressure: landingEnv?.pressure,
-      departureRadius: departEnv?.radiusKm,
-      departurePressure: departEnv?.pressure,
-    },
-  );
-  if (options.length === 0) {
-    calcMessage.value = '计算失败：未能生成有效的滑块组合';
+  });
+  if (!out.ok) {
+    calcMessage.value = out.message;
     return;
   }
-  // 平衡点：设了时间价值（₳/小时）时按总成本（燃料费 + 时间价值）最优，
-  // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
-  const tv = timeValue.value ?? 0;
-  const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
+  const route = out.route!;
+  const metrics = out.metrics!;
+  const best = out.best!;
+  const reactorRelevant = out.reactorRelevant ?? false;
+  const perf = shipPerformanceFor(s);
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
@@ -555,10 +294,10 @@ async function planAndCompute() {
     segmentsNative = true;
   } else {
     segments = buildEstimatedSegmentRows(route, metrics, perf, best.fuel, best.reactor, {
-      landingRadius: landingEnv?.radiusKm,
-      landingPressure: landingEnv?.pressure,
-      departureRadius: departEnv?.radiusKm,
-      departurePressure: departEnv?.pressure,
+      landingRadius: out.landingRadius,
+      landingPressure: out.landingPressure,
+      departureRadius: out.departureRadius,
+      departurePressure: out.departurePressure,
     });
     segmentsNative = false;
   }
@@ -566,14 +305,13 @@ async function planAndCompute() {
     label: route.label,
     route,
     metrics,
-    options,
     best,
     reactorRelevant,
     segments,
     segmentsNative,
   };
   const radiusText =
-    landingEnv !== undefined ? `，目的地半径 ${fixed2v(landingEnv.radiusKm)}km` : '';
+    out.landingRadius !== undefined ? `，目的地半径 ${fixed2v(out.landingRadius)}km` : '';
   const fuelText =
     best.fuelEstimated && (best.stlFuel > 0 || best.ftlFuel > 0)
       ? `，STL ${Math.round(best.stlFuel)} + FTL ${Math.round(best.ftlFuel)} 燃料`

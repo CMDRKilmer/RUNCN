@@ -1,10 +1,16 @@
+import { watch } from 'vue';
 import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
+import onNodeDisconnected from '@src/utils/on-node-disconnected';
 import { isTileReserved, setSliderValue } from '@src/infrastructure/prun-ui/utils/set-slider-value';
+import { refPrunId } from '@src/infrastructure/prun-ui/attributes';
+import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
+import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import { ftcFuelSlider, ftcReactorUsage } from '@src/features/XIT/FTC/ftc-fuel-settings';
+import { computeFtcPlan } from '@src/features/XIT/FTC/ftc-compute';
 
-// 打开 SFC 时自动写入的燃料参数。
-const FUEL_CONSUMPTION = 0.1;
-const REACTOR_USAGE = 1;
+// 打开 SFC 时自动写入的燃料参数 = FTC 计算出的最优方案（燃料消耗 / 反应堆使用量）。
+// 未在 FTC 计算过（undefined）时不改动滑块，由玩家自行决定。
 
 // 预留接口：是否自动勾选“使用跃迁点”。默认不勾选。
 const USE_JUMP_POINT = false;
@@ -39,6 +45,20 @@ const configuredLabels = new WeakMap<Element, Map<string, number | 'done'>>();
 // 用该集合同步拦截并发重复写入；写入失败则移除，允许后续重建时重试。
 const pendingLabels = new WeakMap<Element, Set<string>>();
 
+// 已打开的 SFC 磁贴当前滑块（按标签），FTC 参数变化时自动重新写入。
+const tileSliders = new Map<PrunTile, Map<string, Element>>();
+
+// 读取 FTC 计算出的最优燃料参数；无结果（undefined）返回 undefined（不改滑块）。
+function ftcValueFor(label: string | undefined): number | undefined {
+  if (label === '燃料消耗') {
+    return ftcFuelSlider.value;
+  }
+  if (label === '反应堆使用量') {
+    return ftcReactorUsage.value;
+  }
+  return undefined;
+}
+
 async function configureSlider(tile: PrunTile, slider: Element) {
   // FTC 查询引擎独占的窗口由引擎自己写滑块，这里跳过避免互相覆盖。
   if (isTileReserved(tile.anchor)) {
@@ -46,12 +66,12 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   }
   // 星系内飞行时“反应堆使用量”不是轨道条（显示为 --），不会触发写入；燃料消耗仍会调整。
   const label = getSliderLabel(slider);
-  let value: number;
-  if (label === '燃料消耗') {
-    value = FUEL_CONSUMPTION;
-  } else if (label === '反应堆使用量') {
-    value = REACTOR_USAGE;
-  } else {
+  if (!label) {
+    return;
+  }
+  const value = ftcValueFor(label);
+  // 无 FTC 计算结果：不改滑块，由玩家自行决定。
+  if (value === undefined) {
     return;
   }
 
@@ -160,11 +180,90 @@ async function maybeClickStart(tile: PrunTile) {
   await clickElement(button as HTMLElement);
 }
 
+// FTC 参数变化时，对已打开的 SFC 磁贴重新写入（先清除已配置标记，允许新值覆盖）。
+function applyFtcSettings() {
+  for (const [tile, sliders] of tileSliders) {
+    if (isTileReserved(tile.anchor)) {
+      continue;
+    }
+    configuredLabels.delete(tile.anchor);
+    for (const slider of sliders.values()) {
+      void configureSlider(tile, slider);
+    }
+  }
+}
+watch([ftcFuelSlider, ftcReactorUsage], applyFtcSettings);
+
+// 已推送给 FTC 的航线（飞船|起|终|网关），防反馈循环：
+// FTC 写滑块 → SFC 重算（起终点不变）→ 不再重复推送；仅用户改起终点时才重新推送。
+const lastPushedRoute = new WeakMap<Element, string>();
+
+// SFC 行程计划就绪后，把当前飞船 + 起终点自动推送给 FTC 计算最优燃料参数
+// （计算不依赖 FTC 面板打开，成功后在 ftc-compute 内写入共享参数，滑块自动跟随）。
+async function pushRouteToFtc(tile: PrunTile, table: Element) {
+  const ship = tile.parameter;
+  if (!ship) {
+    return;
+  }
+  const planId = refPrunId(table as HTMLElement).value;
+  if (!planId) {
+    return;
+  }
+  // SHIP_FLIGHT_MISSION 与表格渲染可能有极短竞态，短暂等待计划进入 store。
+  let plan = flightPlansStore.getById(planId);
+  if (!plan) {
+    const deadline = Date.now() + 2000;
+    while (Date.now() < deadline && !plan) {
+      await sleep(100);
+      plan = flightPlansStore.getById(planId);
+    }
+  }
+  if (!plan || plan.segments.length === 0) {
+    return;
+  }
+  const from = getEntityNaturalIdFromAddress(plan.segments[0].origin);
+  const to = getEntityNaturalIdFromAddress(plan.segments[plan.segments.length - 1].destination);
+  if (!from || !to) {
+    return;
+  }
+  const viaGateway = plan.segments.some(seg => seg.type === 'JUMP_GATEWAY');
+  const key = `${ship}|${from}|${to}|${viaGateway ? 'gw' : 'nat'}`;
+  if (lastPushedRoute.get(tile.anchor) === key) {
+    return;
+  }
+  lastPushedRoute.set(tile.anchor, key);
+  console.log(`[sfc-auto-fuel-settings] 推送航线给 FTC：${ship} ${from} → ${to}`);
+  const result = await computeFtcPlan({
+    shipRegistration: ship,
+    from,
+    to,
+    useGateway: viaGateway,
+  });
+  if (!result.ok) {
+    console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
+  }
+}
+
 // 等目的地行程统计(MissionPlan)加载出来后再开始配置,
 // 此时滑块已基于真实数据渲染,避免在未就绪的骨架节点上写入。
 async function onTileReady(tile: PrunTile) {
   await $(tile.anchor, C.MissionPlan.stats);
+  // 磁贴关闭时清理追踪，避免对已卸载元素重复写入。
+  onNodeDisconnected(tile.anchor, () => tileSliders.delete(tile));
+  // 行程计划表出现/更新时，把飞船与起终点推送给 FTC 自动计算。
+  subscribe($$(tile.anchor, C.MissionPlan.table), table => {
+    void pushRouteToFtc(tile, table);
+  });
   subscribe($$(tile.anchor, 'rc-slider'), slider => {
+    const label = getSliderLabel(slider);
+    if (label) {
+      let sliders = tileSliders.get(tile);
+      if (!sliders) {
+        sliders = new Map();
+        tileSliders.set(tile, sliders);
+      }
+      sliders.set(label, slider);
+    }
     void configureSlider(tile, slider);
   });
   subscribe($$(tile.anchor, C.RadioItem.container), radio => {
@@ -177,4 +276,8 @@ function init() {
   tiles.observe('SFC', onTileReady);
 }
 
-features.add(import.meta.url, init, 'SFC：目的地加载后将燃料消耗设为 0.1、反应堆使用量设为 100%。');
+features.add(
+  import.meta.url,
+  init,
+  'SFC：自动把飞船/起终点推送给 FTC 计算最优燃料参数，并把燃料消耗/反应堆使用量设为该参数（未计算过时不改动）。',
+);
