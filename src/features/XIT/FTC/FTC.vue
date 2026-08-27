@@ -27,7 +27,7 @@ import {
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
 import ProgressBar from '@src/components/ProgressBar.vue';
-import { formatCountdown, formatCurrency, fixed2, fixed4 } from '@src/utils/format';
+import { formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import {
   planRoutes,
   routeMetrics,
@@ -571,8 +571,32 @@ async function planAndCompute() {
         : '');
 }
 
+// 精确时长（中文单位，完整精度）：≥1 天显示 天/小时/分钟，<1 天显示 小时/分钟/秒。
+// 例：1天 7小时 26分钟、7小时 26分钟 35秒、26分钟 35秒、35秒。
+function formatPreciseDuration(ms: number) {
+  if (ms <= 0) {
+    return '--';
+  }
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (days > 0) {
+    return `${days}天 ${hours}小时 ${minutes}分钟`;
+  }
+  if (hours > 0) {
+    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+  }
+  if (minutes > 0) {
+    return `${minutes}分钟 ${seconds}秒`;
+  }
+  return `${seconds}秒`;
+}
+
+// 总时长（最优方案表 / 计算提示）：精确到 天/时/分（≥1 天）或 时/分/秒（<1 天）。
 function formatDuration(ms: number) {
-  return formatCountdown(ms);
+  return formatPreciseDuration(ms);
 }
 function formatFuel(value: number) {
   return fixed4(value);
@@ -581,12 +605,9 @@ function fixed2v(value: number) {
   return fixed2(value);
 }
 
-// 分段耗时：与 SFC 表格一致（如 "21分钟 1秒"、"2小时 14分钟"、"57秒"）。
+// 分段耗时：与 SFC 表格一致，中文单位完整精度（如 "21分钟 1秒"、"2小时 14分钟 58秒"）。
 function formatSegmentDuration(ms: number) {
-  if (ms <= 0) {
-    return '--';
-  }
-  return formatCountdown(ms);
+  return formatPreciseDuration(ms);
 }
 // 分段损伤：SFC 表格显示百分比（如 "0.018%"）。
 function formatDamage(damage: number) {
