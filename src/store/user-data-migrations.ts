@@ -44,6 +44,18 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '28.08.2026 Triggers mode to AUTO',
+    userData => {
+      // 触发器模式统一改为 AUTO：手动执行通过列表「执行」按钮进行。
+      const triggers: any[] = userData.triggers ?? [];
+      for (const trigger of triggers) {
+        if (trigger && typeof trigger === 'object') {
+          trigger.mode = 'AUTO';
+        }
+      }
+    },
+  ],
+  [
     '24.08.2026 Add base groups',
     userData => {
       if (!userData.baseGroups || typeof userData.baseGroups !== 'object') {

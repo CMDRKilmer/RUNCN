@@ -170,12 +170,11 @@ function onSaveClick() {
       </Active>
       <Active
         label="模式"
-        tooltip="AUTO：触发后直接执行（需在面板中全局启用）；CONFIRM：桌面通知确认后执行；手动：不自动触发，仅列表内点执行按钮手动运行。">
+        tooltip="AUTO：触发后直接执行（需在面板全局切换为自动模式）；手动：不自动触发，仅列表内点执行按钮手动运行。">
         <SelectInput
           v-model="mode"
           :options="[
             { label: 'AUTO（直接执行）', value: 'AUTO' },
-            { label: 'CONFIRM（通知确认）', value: 'CONFIRM' },
             { label: '手动（点按钮执行）', value: 'MANUAL' },
           ]" />
       </Active>

@@ -94,7 +94,7 @@ export class HttpError extends Error {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
   body?: unknown;
   // 跳过鉴权（用于 /auth/register /auth/login /auth/refresh）
   skipAuth?: boolean;

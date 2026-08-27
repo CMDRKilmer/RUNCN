@@ -1,3 +1,30 @@
+<script lang="ts">
+import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
+
+// 模块级状态：跨组件实例共享（ChainView 在切换页签时会卸载/重挂载，
+// 组件内 let 每实例一份，无法跨实例共享）。
+// 自动恢复每个「数据就绪周期」至多执行一次；服务器重连时重置以便再次恢复。
+let chainAutoRecovered = false;
+// 区分首次连接与重连：首次连接在扩展加载早期触发，先于本面板挂载。
+let chainFirstConnect = true;
+// 重连提示：由模块级连接监听置位，组件数据就绪时消费并展示。
+let chainReconnectNotice = false;
+
+// 服务器重连检测：断联后游戏通常原地重连而非整页刷新，各数据 store 会重置后
+// 重新推送。重置自动恢复标志，数据重载完成后自动重新检测环线断线阶段
+//（断联期间到港告警可能错过，页面未刷新导致原先的自动恢复不会再次触发）。
+onApiMessage({
+  CLIENT_CONNECTION_OPENED() {
+    if (chainFirstConnect) {
+      chainFirstConnect = false;
+      return;
+    }
+    chainAutoRecovered = false;
+    chainReconnectNotice = true;
+  },
+});
+</script>
+
 <script setup lang="ts">
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
@@ -28,14 +55,22 @@ import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
 import { stagedDispatch, dispatchFinished } from '@src/features/XIT/FLEET/staged';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { queueTriggerRun, getPackageFinished } from '@src/features/XIT/ACT/trigger-queue';
+import {
+  queueTriggerRun,
+  getPackageFinished,
+  hasPendingTriggerRun,
+} from '@src/features/XIT/ACT/trigger-queue';
 import { watchUntil } from '@src/utils/watch';
 import { createId } from '@src/store/create-id';
-import { stripDeletedActions } from '@src/features/XIT/ACT/utils';
-import { downloadJson } from '@src/utils/json-file';
-import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
-import ImportTriggerConfig from '@src/features/XIT/TRIGGER/ImportTriggerConfig.vue';
-import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
+import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
+import {
+  CONFIG_KEY,
+  createChainSyncController,
+  isChainPackageName,
+  isChainTrigger,
+  type ChainSyncState,
+} from '@src/features/XIT/FLEET/chain-sync';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
@@ -66,6 +101,8 @@ const chainBaseIds = useTileState<string[] | undefined>('chainBaseIds', undefine
 const chainAutoLaunch = useTileState<boolean>('chainAutoLaunch', true);
 // 到港触发器模式：开启 → AUTO（到港自动执行），关闭 → CONFIRM（通知确认）。
 const chainAutoTrigger = useTileState<boolean>('chainAutoTrigger', false);
+// 自动恢复：页面加载后自动检测并执行环线断线阶段的下一步（网页关闭期间错过到港触发器）。
+const chainAutoRecover = useTileState<boolean>('chainAutoRecover', true);
 
 // 换分组时重置基地勾选（新分组默认全选）。
 watch(chainGroup, () => {
@@ -286,9 +323,9 @@ function upsertTrigger(trigger: UserData.TriggerData) {
   }
 }
 
-// 清理该船旧版/已完成的环线脚本与一次性触发器：防止改名或取消执行后
-// ACT / TRIGGER 列表残留过期脚本（旧版主包 `Chain 船名` 无 autoDelete 曾会残留）。
-function removeLegacyChainScripts(shipName: string) {
+// 删除指定船的全部环线 ACT 操作包与一次性触发器（含未 autoDelete 的历史残留）。
+// 用于「清理计划」按钮（含已完成）与重执行前清理旧脚本。
+function removeShipChainScripts(shipName: string) {
   for (let i = userData.actionPackages.length - 1; i >= 0; i--) {
     const name = userData.actionPackages[i]!.global.name;
     if (
@@ -302,9 +339,8 @@ function removeLegacyChainScripts(shipName: string) {
     const trigger = userData.triggers[i]!;
     const name = trigger.packageName;
     if (
-      trigger.autoDelete &&
-      ((isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
-        name === `环线派遣 ${shipName}`)
+      (isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
+      name === `环线派遣 ${shipName}`
     ) {
       userData.triggers.splice(i, 1);
     }
@@ -312,13 +348,16 @@ function removeLegacyChainScripts(shipName: string) {
 }
 
 const executeNotice = ref<string | undefined>(undefined);
+// 状态检查结果提示：环线运行中网页关闭导致到港触发器错过时，提示自动恢复情况。
+const statusCheckNotice = ref<string | undefined>(undefined);
 
 // 执行时的计划快照：环线执行中船离港后 shipPlans 为空，
 // 用快照保持「与规划一致」的表格显示，仅在序列叠加进度图标。
 // 快照同时持久化到 chainRuns.plan，页面刷新后仍可显示阶段载重。
 const planSnapshot = ref<ShipChainPlan[]>([]);
 
-// 环线完成（含归航）后短暂保留运行记录，让「✓」标记可见，随后自动清理。
+// 完成清理定时器（历史遗留）：完成态环线保留在状态列表不再自动清理；
+// 仅重执行/清理计划时用于取消旧定时器。
 const finishedCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function clearFinishedCleanup(shipId: string) {
@@ -336,20 +375,25 @@ onBeforeUnmount(() => {
   finishedCleanupTimers.clear();
 });
 
-// 清理计划：清空当前分组/基地/船只选择与计划快照，并移除全部环线运行记录，
-// 用于导入旧 JSON 或删除全部 ACT/触发器后一键清掉残留的预留列表。
-function clearPlan() {
-  chainGroup.value = undefined;
-  chainBaseIds.value = undefined;
-  chainShipIds.value = undefined;
-  planSnapshot.value = [];
-  executeNotice.value = undefined;
-  flightEstimates.value = new Map();
-  flightTimesLoading.value = false;
-  for (const shipId of Object.keys(userData.chainRuns)) {
-    clearFinishedCleanup(shipId);
-    delete userData.chainRuns[shipId];
-  }
+// 按船清理计划（含已完成）：确认后删除该船环线运行记录 + 相关 ACT 操作包与触发器。
+function onClearShipPlanClick(
+  e: Event,
+  sp: { shipId: string; ship?: DispatchShip; shipName?: string },
+) {
+  const rawName = sp.ship ? (sp.ship.ship.name ?? sp.ship.ship.registration) : (sp.shipName ?? '');
+  const shipName = sanitizeActName(rawName) || rawName;
+  const label = sp.ship ? shipLabel(sp.ship) : shipName;
+  showConfirmationOverlay(
+    e,
+    () => {
+      removeShipChainScripts(shipName);
+      clearFinishedCleanup(sp.shipId);
+      delete userData.chainRuns[sp.shipId];
+      planSnapshot.value = planSnapshot.value.filter(p => p.ship.ship.id !== sp.shipId);
+      statusCheckNotice.value = `已清理 ${label} 的环线计划及 ACT 脚本/触发器。`;
+    },
+    { message: `删除 ${label} 的环线计划及其 ACT 脚本/触发器？`, confirmLabel: '删除' },
+  );
 }
 
 function execute() {
@@ -374,7 +418,7 @@ function execute() {
     clearFinishedCleanup(ship.ship.id);
     const shipName =
       sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
-    removeLegacyChainScripts(shipName);
+    removeShipChainScripts(shipName);
 
     // 记录环线运行进度（以船为键），并持久化计划快照：
     // 页面刷新后仍按规划样式显示各阶段操作与「当前阶段载重」。
@@ -502,86 +546,317 @@ function stageMainPackage(pkg: UserData.ActionPackageData) {
   }
 }
 
-// ── 环线触发器配置导入/导出 ─────────────────────────────────
-// 环线相关 = 本面板生成的到港触发器与其操作包（主包/站点包/归航包）。
-// 命名约定与 buildChainActionPackages / sanitizeActName 一致（阶段号与进度表「序」列一致）：
-//   主包       `0 Chain ${船名}`（旧版 `Chain ${船名}`）
-//   站点包     `${序号} ${站点} Loop ${船名}`（旧版 `${站点} Loop/环线 ${船名}`）
-//   归航包     `${序号} Chain Return ${船名}`（旧版 `Chain Return/环线归航 ${船名}`）
-function isChainPackageName(name: string): boolean {
-  return (
-    /(?:^|\s)\d+\s+Chain(?: Return)?\s/.test(name) ||
-    name.startsWith('Chain ') ||
-    name.startsWith('环线归航 ') ||
-    name.includes(' Loop ') ||
-    name.includes(' 环线 ')
-  );
+// ── 状态检查（断线恢复） ─────────────────────────────────────
+// 环线运行中若网页关闭，到港触发器（FLIGHT_ENDED 告警事件）错过触发，
+// 重新打开页面后环线会卡在当前阶段。状态检查依据船当前停靠位置与
+// 持久化阶段状态，判断当前阶段并自动执行下一步操作包。
+interface PendingChainStep {
+  pkgName: string;
+  label: string;
 }
 
-function isChainTrigger(t: UserData.TriggerData): boolean {
-  return t.event.type === 'FLIGHT_ENDED' && isChainPackageName(t.packageName);
-}
-
-// 导出环线配置：所有环线触发器 + 环线相关操作包（自包含，便于分享/备份）。
-function onExportChainConfigClick() {
-  const triggers = userData.triggers.filter(isChainTrigger);
-  const packageNames = new Set(
-    userData.actionPackages.filter(p => isChainPackageName(p.global.name)).map(p => p.global.name),
-  );
-  for (const t of triggers) {
-    packageNames.add(t.packageName);
+// 刷新后脚本一致性校验：chainRuns 中「持久化为未完成」的阶段，其操作包应仍存在。
+// 执行过的阶段包会被 autoDelete 删除（属正常）；旧记录无持久化状态则跳过校验
+// （回退到「包消失 = 完成」的推导）。
+function verifyChainRunScript(run: UserData.ChainRun): { ok: boolean; missing: string[] } {
+  const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
+  const missing: string[] = [];
+  if (
+    run.originState === 'pending' &&
+    run.mainPkgName !== undefined &&
+    !pkgExists(run.mainPkgName)
+  ) {
+    missing.push(run.mainPkgName);
   }
-  const actionPackages = userData.actionPackages.filter(p => packageNames.has(p.global.name));
-  downloadJson(
-    {
-      version: 1,
-      triggers,
-      actionPackages,
-      // 列表全局状态：站点/操作/进度快照，导入后不依赖 ACT 与触发器是否还在。
-      chainRuns: Object.values(userData.chainRuns).map(run => JSON.parse(JSON.stringify(run))),
-    },
-    `chain-config-${Date.now()}.json`,
-    {
-      pretty: true,
-    },
-  );
+  for (const stop of run.stops) {
+    if (stop.state === 'pending' && stop.pkgName && !pkgExists(stop.pkgName)) {
+      missing.push(stop.pkgName);
+    }
+  }
+  if (
+    run.finalState === 'pending' &&
+    run.finalPkgName !== undefined &&
+    !pkgExists(run.finalPkgName)
+  ) {
+    missing.push(run.finalPkgName);
+  }
+  return { ok: missing.length === 0, missing };
 }
 
-// 事件为扁平对象，按键排序归一化后序列化，避免键序差异导致同一触发器签名不同。
-function canonicalEvent(event: UserData.TriggerEventData) {
-  return Object.fromEntries(Object.entries(event).sort(([a], [b]) => a.localeCompare(b)));
+function verifyAllChainRuns(): { ok: boolean; diffs: string[] } {
+  const diffs: string[] = [];
+  for (const run of Object.values(userData.chainRuns)) {
+    const { ok, missing } = verifyChainRunScript(run);
+    if (!ok) {
+      diffs.push(`${run.shipName}：缺失 ${missing.join('、')}`);
+    }
+  }
+  return { ok: diffs.length === 0, diffs };
 }
 
-// 导入环线配置：操作包按名称覆盖或新增；触发器追加（按名称+操作包+事件+模式去重）。
-function onImportChainConfigClick(e: Event) {
-  showTileOverlay(e, ImportTriggerConfig, {
-    onImport: config => {
-      for (const pkg of config.actionPackages) {
-        stripDeletedActions(pkg);
-        const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
-        if (index >= 0) {
-          userData.actionPackages[index] = pkg;
+// 扫描全部运行中的环线，找出「船已就位但操作包未执行」的下一阶段。
+// includeOrigin=false：刷新自动恢复时不自动执行第 0 步（出发），
+// 仅刷新状态显示为「未开始」，出发由用户手动触发。
+function collectPendingChainSteps(includeOrigin = true): PendingChainStep[] {
+  const steps: PendingChainStep[] = [];
+  for (const run of Object.values(userData.chainRuns)) {
+    const ship = shipsStore.getById(run.shipId);
+    if (ship === undefined) {
+      continue;
+    }
+    const dockedAt = ship.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+    const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
+    // 出发阶段：船仍在出发地、主包未执行（包未被 autoDelete 删除）时执行主包。
+    if (
+      includeOrigin &&
+      run.mainPkgName !== undefined &&
+      run.originState !== 'done' &&
+      dockedAt === run.originNaturalId &&
+      pkgExists(run.mainPkgName) &&
+      !hasPendingTriggerRun(run.mainPkgName)
+    ) {
+      steps.push({ pkgName: run.mainPkgName, label: `${run.shipName} 出发` });
+      continue;
+    }
+    // 站点阶段：取第一个未完成站，若船正停靠该站则执行该站包。
+    let allStopsDone = true;
+    for (const stop of run.stops) {
+      if (stop.state === 'done') {
+        continue;
+      }
+      allStopsDone = false;
+      if (
+        dockedAt === stop.naturalId &&
+        pkgExists(stop.pkgName) &&
+        !hasPendingTriggerRun(stop.pkgName)
+      ) {
+        steps.push({ pkgName: stop.pkgName, label: `${run.shipName} ${stop.planetName}` });
+      }
+      break;
+    }
+    // 归航阶段：全部站点完成、船已回出发地且归航包未执行时执行归航包。
+    if (
+      allStopsDone &&
+      run.finalPkgName !== undefined &&
+      run.finalState !== 'done' &&
+      dockedAt === run.originNaturalId &&
+      pkgExists(run.finalPkgName) &&
+      !hasPendingTriggerRun(run.finalPkgName)
+    ) {
+      steps.push({ pkgName: run.finalPkgName, label: `${run.shipName} 归航卸货` });
+    }
+  }
+  return steps;
+}
+
+// 静默执行环线操作包：与触发器引擎同通道（入队 + 隐藏窗口自动执行、结束自动关窗）。
+function runChainStepSilently(pkgName: string) {
+  const finished = getPackageFinished(pkgName);
+  finished.value = false;
+  queueTriggerRun({ triggerId: createId(), packageName: pkgName });
+  showBuffer(`XIT ACT_${pkgName.replace(' ', '_')}`, {
+    force: true,
+    autoClose: true,
+    closeWhen: computed(() => finished.value),
+  });
+}
+
+// 状态检查：自动判断当前阶段并自动处理下一步。
+function onStatusCheckClick() {
+  const steps = collectPendingChainSteps();
+  if (steps.length === 0) {
+    statusCheckNotice.value =
+      '状态检查：未发现需要恢复的环线步骤（无运行中的环线，或船数据未加载完成，可稍后再试）。';
+    return;
+  }
+  for (const step of steps) {
+    runChainStepSilently(step.pkgName);
+  }
+  statusCheckNotice.value = `状态检查：${steps.length} 个阶段待恢复，已自动执行 —— ${steps
+    .map(s => s.label)
+    .join('、')}。`;
+}
+
+// ── 自动恢复（断线自动续跑） ────────────────────────────────
+// 船数据就绪且「自动恢复」开启后运行：扫描运行中的环线，自动执行断线阶段。
+// 服务器重连（页面未自动刷新）时 store 会重置后重新推送；数据就绪时若本次
+// 来自重连（模块级监听置位）则提示用户，并自动再次检测断线阶段。
+watch(
+  () => shipsStore.fetched.value,
+  fetched => {
+    if (!fetched) {
+      return;
+    }
+    // 刷新后脚本一致性校验：未完成阶段的脚本应仍存在；缺失则提示差异，
+    // 且不自动恢复（避免执行到错误/被另一端改动的脚本）。
+    const { ok, diffs } = verifyAllChainRuns();
+    if (!ok) {
+      statusCheckNotice.value = `环线脚本差异：${diffs.join('；')}。请检查 ACT/TRIGGER 列表或执行云端同步。`;
+      return;
+    }
+    // 消费重连提示（模块级标志跨实例共享，避免首次连接误报）。
+    if (chainReconnectNotice) {
+      chainReconnectNotice = false;
+      if (chainAutoRecover.value && Object.keys(userData.chainRuns).length > 0) {
+        statusCheckNotice.value = '检测到服务器重连（页面未自动刷新），自动恢复已重新启用。';
+      }
+    }
+    if (!chainAutoRecover.value || chainAutoRecovered) {
+      return;
+    }
+    chainAutoRecovered = true;
+    // 刷新后不自动执行第 0 步（出发）：状态显示「未开始」，出发由用户手动触发。
+    const steps = collectPendingChainSteps(false);
+    if (steps.length === 0) {
+      return;
+    }
+    for (const step of steps) {
+      runChainStepSilently(step.pkgName);
+    }
+    statusCheckNotice.value = `自动恢复：检测到 ${steps.length} 个环线阶段断线，已自动执行 —— ${steps
+      .map(s => s.label)
+      .join('、')}。`;
+  },
+  { immediate: true },
+);
+
+// ── 环线多端同步（org-api 服务器，跨浏览器/设备） ─────────────
+// 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，
+// 互不覆盖；'__config__' 存全局配置。无自动轮询——仅在本地环线状态改变时
+// 防抖推送；覆盖仅由「云端同步」对话框手动选择。
+const chainSyncState = ref<ChainSyncState>({
+  syncing: false,
+  lastSyncAt: null,
+  dirty: false,
+  conflict: false,
+  error: null,
+});
+const syncNotice = ref<string | undefined>(undefined);
+
+const chainSync = createChainSyncController({
+  getConfig: () => ({
+    chainGroup: chainGroup.value,
+    chainShipIds: chainShipIds.value,
+    chainBaseIds: chainBaseIds.value,
+    chainAutoLaunch: chainAutoLaunch.value,
+    chainAutoTrigger: chainAutoTrigger.value,
+    chainAutoRecover: chainAutoRecover.value,
+  }),
+  // chainGroup 的 watch 会清空 chainBaseIds（用户切换分组的语义）：
+  // 先设 group 并等其 watch flush，再设其余字段，避免远端 chainBaseIds 被误清。
+  applyConfig: async config => {
+    if (config.chainGroup !== undefined && config.chainGroup !== chainGroup.value) {
+      chainGroup.value = config.chainGroup;
+    }
+    await nextTick();
+    if (config.chainBaseIds !== undefined) {
+      chainBaseIds.value = config.chainBaseIds;
+    }
+    if (config.chainShipIds !== undefined) {
+      chainShipIds.value = config.chainShipIds;
+    }
+    if (config.chainAutoLaunch !== undefined) {
+      chainAutoLaunch.value = config.chainAutoLaunch;
+    }
+    if (config.chainAutoTrigger !== undefined) {
+      chainAutoTrigger.value = config.chainAutoTrigger;
+    }
+    if (config.chainAutoRecover !== undefined) {
+      chainAutoRecover.value = config.chainAutoRecover;
+    }
+  },
+  // shipId → 该船净化后的名字（环线包名后缀），用于按船收集/匹配脚本。
+  resolveShipName: shipId => {
+    const ship = shipsStore.getById(shipId);
+    if (!ship) {
+      return undefined;
+    }
+    return sanitizeActName(ship.name ?? ship.registration) || ship.registration;
+  },
+  onState: s => {
+    chainSyncState.value = s;
+  },
+  onNotice: msg => {
+    syncNotice.value = msg;
+  },
+});
+
+// 环线数据变化 → 按船标记脏 → 防抖推送（每船只推自己的数据）。
+// 远端应用引发的变化由 controller 抑制，避免「应用远端 → 重推 → 远端更新」循环。
+watch(
+  () => [
+    chainGroup.value,
+    chainShipIds.value,
+    chainBaseIds.value,
+    chainAutoLaunch.value,
+    chainAutoTrigger.value,
+    chainAutoRecover.value,
+    userData.chainRuns,
+    userData.actionPackages.filter(p => isChainPackageName(p.global.name)),
+    userData.triggers.filter(isChainTrigger),
+  ],
+  () => {
+    for (const shipId of Object.keys(userData.chainRuns)) {
+      chainSync.markDirtyShip(shipId);
+    }
+    chainSync.markDirtyConfig();
+  },
+  { deep: true },
+);
+
+onMounted(() => {
+  chainSync.start();
+});
+onUnmounted(() => {
+  chainSync.stop();
+});
+
+const syncStateText = computed(() => {
+  const s = chainSyncState.value;
+  if (s.syncing) {
+    return '同步中…';
+  }
+  if (s.error) {
+    return '同步失败';
+  }
+  if (s.conflict) {
+    return '有冲突';
+  }
+  if (s.dirty) {
+    return '待同步';
+  }
+  if (s.lastSyncAt !== null) {
+    return `已同步 ${new Date(s.lastSyncAt).toLocaleTimeString()}`;
+  }
+  return '未同步';
+});
+
+// 打开云端同步对比对话框：拉取云端 + 收集本地（配置 + 各活跃船），
+// 由用户逐项选择覆盖方向（按船/配置）。
+async function onChainSyncClick(e: Event) {
+  const cmp = await chainSync.prepareComparison();
+  if (!cmp) {
+    return; // 拉取失败/进行中：错误已写入 chainSyncState。
+  }
+  showTileOverlay(e, ChainSyncDialog, {
+    comparison: cmp,
+    onApply: (target, direction) => {
+      if (direction === 'pull') {
+        // 用云端覆盖本地（指定船或配置）。
+        if (target === CONFIG_KEY) {
+          if (cmp.remoteConfig) {
+            chainSync.confirmPull(CONFIG_KEY, cmp.remoteConfig);
+          }
         } else {
-          userData.actionPackages.push(pkg);
+          const doc = cmp.remoteShips.get(target);
+          if (doc) {
+            chainSync.confirmPull(target, doc);
+          }
         }
+      } else {
+        // 用本地覆盖云端（强制推送该目标）。
+        void chainSync.pushNow(true, target);
       }
-      const signature = (t: UserData.TriggerData) =>
-        JSON.stringify([t.name, t.packageName, canonicalEvent(t.event), t.mode]);
-      const existing = new Set(userData.triggers.map(signature));
-      for (const trigger of config.triggers) {
-        if (existing.has(signature(trigger))) {
-          continue;
-        }
-        userData.triggers.push({ ...trigger, id: createId() });
-        existing.add(signature(trigger));
-      }
-      // 恢复列表全局状态（按 shipId 覆盖）：站点/操作/进度不再受 ACT/触发器删除影响。
-      for (const run of config.chainRuns ?? []) {
-        if (run && run.shipId) {
-          userData.chainRuns[run.shipId] = run;
-        }
-      }
-      triggerEngine.start();
     },
   });
 }
@@ -875,6 +1150,15 @@ interface RunProgress {
 // 单船各站状态：与执行前一致，沿「origin → 各站 → origin」给出每站进度。
 // 新版本将状态持久化到 chainRuns：删除 ACT/触发器后列表仍能展示站点与操作；
 // 旧记录（无持久化状态）回退到「包消失 = 完成」的推导。
+// 是否已完成（全部站点 + 归航完成）：状态列表据此显示「已完成」标记。
+function isRunFinished(sp: { progress?: RunProgress }): boolean {
+  return (
+    sp.progress !== undefined &&
+    sp.progress.finalState === 'done' &&
+    sp.progress.done >= sp.progress.total
+  );
+}
+
 function runProgress(run: UserData.ChainRun): RunProgress {
   const ship = shipsStore.getById(run.shipId);
   const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
@@ -1101,10 +1385,9 @@ const tables = computed<
   });
 });
 
-// 环线完成后清理运行记录：遍历全部 chainRuns（不限于当前选中的船）。
-// 完成（含归航卸载）后短暂保留记录展示 ✓ 标记，随后自动移除；
-// 若重新开始同一艘船的新环线，execute() 会先清掉对应定时器。
-// 另外：若某条记录的 ACT 脚本与触发器已全部删除（孤立预留列表），直接移除，
+// 环线运行记录保留策略：遍历全部 chainRuns（不限于当前选中的船）。
+// 完成的环线（含归航卸载）不再自动清理，保留在状态列表显示「完成」；
+// 孤立的预留列表（ACT 脚本与触发器已全部删除且非完成态）直接移除，
 // 避免导入旧 JSON 后删除全部脚本/触发器时残留空列表。
 watchEffect(() => {
   for (const [shipId, run] of Object.entries(userData.chainRuns)) {
@@ -1123,23 +1406,13 @@ watchEffect(() => {
           userData.triggers.some(t => t.packageName === run.finalPkgName)));
     const finished = progress.finalState === 'done' && progress.done >= progress.total;
     if (!hasAnyScript) {
-      // 新格式正常完成的运行保留 10 秒展示 ✓；其余孤立预留列表立即移除。
+      // 正常完成的运行保留展示（状态列表显示「完成」）；孤立的预留列表立即移除。
       const completedNewRun =
         run.mainPkgName !== undefined &&
         run.originState === 'done' &&
         run.finalState === 'done' &&
         progress.done >= progress.total;
       if (completedNewRun) {
-        if (!finishedCleanupTimers.has(shipId)) {
-          const timer = setTimeout(() => {
-            delete userData.chainRuns[shipId];
-            finishedCleanupTimers.delete(shipId);
-            if (Object.keys(userData.chainRuns).length === 0) {
-              planSnapshot.value = [];
-            }
-          }, 10_000);
-          finishedCleanupTimers.set(shipId, timer);
-        }
         continue;
       }
       delete userData.chainRuns[shipId];
@@ -1147,21 +1420,12 @@ watchEffect(() => {
       continue;
     }
     if (finished) {
-      if (!finishedCleanupTimers.has(shipId)) {
-        const timer = setTimeout(() => {
-          delete userData.chainRuns[shipId];
-          finishedCleanupTimers.delete(shipId);
-          if (Object.keys(userData.chainRuns).length === 0) {
-            planSnapshot.value = [];
-          }
-        }, 10_000);
-        finishedCleanupTimers.set(shipId, timer);
-      }
+      // 完成：保留在状态列表，显示「完成」。
       continue;
     }
     clearFinishedCleanup(shipId);
   }
-  // 所有环线执行完成后清空计划快照，避免残留旧数据影响下次规划。
+  // 没有运行记录时清空计划快照，避免残留旧数据影响下次规划。
   if (Object.keys(userData.chainRuns).length === 0) {
     planSnapshot.value = [];
   }
@@ -1327,10 +1591,14 @@ function flightTotalText(shipId: string): string {
       <div :class="$style.separator" />
       <RadioItem v-model="chainAutoLaunch" horizontal>自动发船</RadioItem>
       <RadioItem v-model="chainAutoTrigger" horizontal>自动执行</RadioItem>
+      <RadioItem v-model="chainAutoRecover" horizontal>自动恢复</RadioItem>
       <div :class="$style.separator" />
-      <PrunButton dark @click="onExportChainConfigClick">导出配置</PrunButton>
-      <PrunButton dark @click="onImportChainConfigClick">导入配置</PrunButton>
-      <PrunButton dark @click="clearPlan">清理计划</PrunButton>
+      <PrunButton dark @click="onStatusCheckClick">状态检查</PrunButton>
+      <div :class="$style.separator" />
+      <PrunButton dark :disabled="chainSyncState.syncing" @click="onChainSyncClick($event)"
+        >云端同步</PrunButton
+      >
+      <span :class="$style.syncState" :title="chainSyncState.error ?? ''">{{ syncStateText }}</span>
       <div :class="$style.spacer" />
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
@@ -1375,16 +1643,22 @@ function flightTotalText(shipId: string): string {
     </div>
 
     <div v-if="executeNotice" :class="$style.notice">{{ executeNotice }}</div>
+    <div v-if="statusCheckNotice" :class="$style.notice">{{ statusCheckNotice }}</div>
+    <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
     <!-- 规划 / 进度统一表格：环线执行中显示执行前的计划快照（格式与规划一致），
          仅在「序」列叠加进度图标；等所有船归航后自动恢复实时规划。 -->
     <div v-if="activeRuns.length > 0 || shipPlans.length > 0" :class="$style.content">
       <div v-for="sp in tables" :key="sp.shipId" :class="$style.shipPlan">
-        <div :class="$style.shipHeader"
-          >{{ sp.ship ? shipLabel(sp.ship) : (sp.shipName ?? '') }}（{{
-            sp.ship?.exchangeCode ?? ''
-          }}）</div
-        >
+        <div :class="$style.shipHeader">
+          <span
+            >{{ sp.ship ? shipLabel(sp.ship) : (sp.shipName ?? '') }}（{{
+              sp.ship?.exchangeCode ?? ''
+            }}）</span
+          >
+          <span v-if="isRunFinished(sp)" :class="$style.finished">已完成</span>
+          <PrunButton dark @click="onClearShipPlanClick($event, sp)">清理计划</PrunButton>
+        </div>
         <div :class="$style.route">
           <span :class="$style.routeLabel">航线：</span>
           <span :class="$style.routeOrigin">{{
@@ -1673,6 +1947,14 @@ function flightTotalText(shipId: string): string {
   margin: 0 0.25rem;
 }
 
+.syncState {
+  color: #8a9aa8;
+  font-size: 11px;
+  white-space: nowrap;
+  align-self: center;
+  margin-left: 0.25rem;
+}
+
 .spacer {
   flex: 1;
 }
@@ -1818,8 +2100,17 @@ function flightTotalText(shipId: string): string {
 }
 
 .shipHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-weight: 600;
   color: rgb(63, 162, 222);
+}
+
+.finished {
+  color: #5cb85c;
+  font-size: 11px;
+  margin-left: 0.5rem;
 }
 
 .marker {

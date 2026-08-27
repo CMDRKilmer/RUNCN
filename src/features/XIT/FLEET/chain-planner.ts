@@ -1237,8 +1237,7 @@ export function buildChainActionPackages(
 
   const mainPkg: UserData.ActionPackageData = {
     global: { name: `0 Chain ${shipName}` },
-    // 阶段 0（空间站出发）完成即删除，避免 ACT 列表残留过期脚本。
-    autoDelete: true,
+    // 环线脚本不随执行自动删除：保留完整脚本供状态列表/云端同步/手动清理。
     groups,
     actions,
   };
@@ -1283,7 +1282,6 @@ export function buildChainActionPackages(
       : undefined;
     const pkg: UserData.ActionPackageData = {
       global: { name: pkgName },
-      autoDelete: true,
       groups: [
         { type: 'Manual', name: '卸货', materials: unload },
         { type: 'Manual', name: '提取', materials: load },
@@ -1324,7 +1322,6 @@ export function buildChainActionPackages(
     finalPkg = {
       pkg: {
         global: { name: pkgName },
-        autoDelete: true,
         groups: [{ type: 'Manual', name: '卸货', materials: plan.finalUnload }],
         actions: [
           {
