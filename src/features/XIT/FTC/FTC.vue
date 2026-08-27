@@ -672,6 +672,13 @@ const balanceNote = computed(() => {
           </option>
         </select>
       </label>
+      <div v-if="blueprintInfo" :class="$style.hint">
+        蓝图 {{ ship?.blueprintNaturalId }} ｜ STL 引擎 {{ blueprintInfo.stlEngine ?? '未知' }} ｜
+        罐 {{ blueprintInfo.stlFuelCapacity ?? '--' }} ｜ G
+        {{ blueprintInfo.maxGFactor ?? '--' }} ｜ 加速 {{ ship?.acceleration ?? '--' }} m/s² ｜ 空重
+        {{ ship?.operatingEmptyMass ?? '--' }}t ｜ 流量 {{ ship?.stlFuelFlowRate ?? '--' }} u/s ｜
+        FTL {{ fixed2v(blueprintInfo.ftlMaxSpeed ?? 0) }} pc/h
+      </div>
 
       <div :class="$style.fieldRow">
         <label :class="$style.field">

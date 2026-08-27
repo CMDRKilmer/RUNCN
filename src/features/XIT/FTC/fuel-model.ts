@@ -226,6 +226,40 @@ const DEFAULT_STL_SEGMENT_CURVE = STL_SEGMENT_CURVES.STL_ENGINE_STANDARD;
 // 缺罐数据时回退饱和段速度（V_SAT，保守取上限——大多数跨星系船都有蓝图罐数据）。
 const STL_SEGMENT_G_REF = 8;
 const STL_SEGMENT_G_EXP = 0.3;
+// ---- 推力受限修正（2026-08-27 HCB 载重实测三档验证）----
+// 段速度 = V_SAT_G8 × (G/8)^0.3 × Weibull(Q)，前提是飞船处于 G 受限
+// （加速度 = G×9.81）。载重使飞船进入推力受限（a = min(推力/质量, G×9.81) < G×9.81）
+// 时，段速度整体按 (a/(G×9.81))^0.55 下降：
+//   HCB(hyperthrust, G15, 推力260000, 空1765t) 三档载重实测（HRT→VH-192c）：
+//     0t(a=147.2)→2526t(a=60.6)→4974t(a=38.6)，离港 19,266→12,480→9,307、
+//     进近 22,333→14,106→10,486；反推指数 0.49~0.565（平均 0.53，0.55 在噪声内）。
+//   BP-OHMI(standard, G8, 880t)：载重 0→500t，a 恒 78.5（G 受限，196659/1380=142>78.5）
+//     → 无影响（BTF 实测确认）。
+// 用实时加速度（ship.acceleration，已含载荷）对比 G 上限；无加速度数据时用
+// 推力/质量回退。G 受限船 factor=1（不影响既有标定）。
+// ⚠️ 注意：HCB 空载本身就比超推力曲线快 12-19%（基曲线非普适，另一独立问题）；
+//    HCB 着陆燃料随载重增加（43→58u）疑似含质量项，待研究。
+const STL_THRUST_LIMIT_EXP = 0.55;
+function stlThrustLimitFactor(ship: ShipPerformance): number {
+  const g = ship.maxGFactor;
+  if (g === undefined || g <= 0) {
+    return 1;
+  }
+  const gLimit = g * 9.81;
+  let a = ship.acceleration;
+  if (
+    (a === undefined || a <= 0) &&
+    ship.thrust !== undefined &&
+    ship.mass !== undefined &&
+    ship.mass > 0
+  ) {
+    a = ship.thrust / ship.mass;
+  }
+  if (a === undefined || a <= 0 || a >= gLimit) {
+    return 1;
+  }
+  return Math.pow(a / gLimit, STL_THRUST_LIMIT_EXP);
+}
 function stlSegmentSpeedFor(
   ship: ShipPerformance,
   fuel: number,
@@ -244,7 +278,8 @@ function stlSegmentSpeedFor(
   if (g !== undefined && g > 0) {
     vSat *= Math.pow(g / STL_SEGMENT_G_REF, STL_SEGMENT_G_EXP);
   }
-  return vSat * (1 - Math.exp(-Math.pow(q / curve.q0, curve.k)));
+  const v = vSat * (1 - Math.exp(-Math.pow(q / curve.q0, curve.k)));
+  return v * stlThrustLimitFactor(ship);
 }
 
 function stlSegmentCurveFor(ship: ShipPerformance): {
