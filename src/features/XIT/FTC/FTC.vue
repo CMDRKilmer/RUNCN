@@ -450,6 +450,24 @@ async function fetchPlanetEnv(
   return { radiusKm: env.r, pressure: env.p };
 }
 
+// 等待飞船蓝图加载：FTL 航速/充能时间/燃料罐容量/STL 引擎/最大 G 等性能全部来自蓝图
+// （blueprintsStore 只含公司蓝图列表，首次访问 getByNaturalId 会触发 BLU 窗口请求，
+// 响应异步到达——不等待则本次计算全部落到默认值，误差巨大，如把省油引擎当超推力）。
+// 返回是否成功取得蓝图；失败（非公司蓝图/响应超时）时继续用默认值计算并提示。
+async function ensureShipBlueprint(s: PrunApi.Ship): Promise<boolean> {
+  if (blueprintsStore.getByNaturalId(s.blueprintNaturalId)) {
+    return true;
+  }
+  const deadline = Date.now() + 6000;
+  while (Date.now() < deadline) {
+    await sleep(100);
+    if (blueprintsStore.getByNaturalId(s.blueprintNaturalId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function planAndCompute() {
   calcMessage.value = undefined;
   result.value = undefined;
@@ -459,10 +477,20 @@ async function planAndCompute() {
     calcMessage.value = '请输入起点和终点';
     return;
   }
+  const s = ship.value;
+  if (!s) {
+    calcMessage.value = '请选择停靠中的飞船';
+    return;
+  }
+  // 关键：计算前等待飞船蓝图加载（决定 FTL 航速/充能/燃料罐/引擎等性能）。
+  const bpOk = await ensureShipBlueprint(s);
   const perf = shipPerformance();
   if (!perf) {
     calcMessage.value = '请选择停靠中的飞船';
     return;
+  }
+  if (!bpOk) {
+    calcMessage.value = '未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准';
   }
   // 计算时自动浏览星系（无需手动按钮）：起终点星系阻塞获取轨道/恒星质量数据，
   // 其余无轨道空间站星系后台渐进。浏览后可离线预测起降位置，STL 距离更准。

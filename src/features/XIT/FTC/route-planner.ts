@@ -17,6 +17,7 @@ import {
   ftlChargeSecondsFor,
   ftlFuelCFor,
   stlLandingFactor,
+  stlDepartureFSat,
 } from './fuel-model';
 import type { ShipPerformance } from './fuel-model';
 import { getStarPosition, distance3d, resolveSystemId } from './route-model';
@@ -215,6 +216,10 @@ export function routeMetrics(route: PlannedRoute): {
   // 离港/进近各自的值（用于展示）。
   departKm: number | undefined;
   approachKm: number | undefined;
+  // 飞行计划记录的原生离港/进近段耗时（秒，随飞船变，仅运行时记录有值；
+  // 内置数据不含时长）。有值时航线段展示直接用（精确复现服务器时长）。
+  departSeconds: number | undefined;
+  approachSeconds: number | undefined;
   natPc: number;
   gwPc: number;
   gwCount: number;
@@ -270,6 +275,9 @@ export function routeMetrics(route: PlannedRoute): {
     stlRecorded,
     departKm,
     approachKm,
+    departSeconds: departRec !== undefined && departRec.seconds > 0 ? departRec.seconds : undefined,
+    approachSeconds:
+      approachRec !== undefined && approachRec.seconds > 0 ? approachRec.seconds : undefined,
     natPc,
     gwPc,
     gwCount,
@@ -408,8 +416,11 @@ export function buildEstimatedSegmentRows(
   const tank = ship.stlFuelCapacity;
 
   // 跨星系 STL 罐模型细分（与 computeFuelOption 同源）：
-  // 离港 ≈ 0.49×罐×f、进近 ≈ 0.49×罐×f + 进近差、着陆/起飞按行星半径气压。
-  const stlDepartFuel = isCross && tank !== undefined && tank > 0 ? 0.49 * tank * fuel : undefined;
+  // 离港 ≈ 0.49×罐×min(f, f_cap)（省油引擎离港饱和）、进近 ≈ 0.49×罐×f + 进近差、
+  // 着陆/起飞按行星半径气压。
+  const fDep = stlDepartureFSat(ship);
+  const stlDepartFuel =
+    isCross && tank !== undefined && tank > 0 ? 0.49 * tank * Math.min(fuel, fDep) : undefined;
   const lf = settings.stlLandingFactor ?? stlLandingFactor(ship);
   const P =
     settings.landingPressure !== undefined && settings.landingPressure > 0
@@ -422,24 +433,34 @@ export function buildEstimatedSegmentRows(
   const stlApproachFuel =
     isCross && tank !== undefined && tank > 0 ? 0.49 * tank * fuel + approachExtra : undefined;
 
-  // 离港段（起点 → 首跳恒星）。
+  // 离港段（起点 → 首跳恒星）。与游戏 SFC 表格一致：离港段 FTL 燃料 = 首跳充能
+  // （自然航线离港时即为第一跳充电；网关无 FTL 燃料）。时长优先用飞行计划记录的
+  // 原生秒数（服务器计算，含加速/转移动力学，比 d/v_cruise 精确）；无记录回退模型。
   const departKm = metrics.departKm;
   if (departKm !== undefined && departKm > 0) {
+    const firstLeg = route.legs[0];
+    const departFtl =
+      firstLeg !== undefined && !firstLeg.viaGateway ? ftlC * reactor * firstLeg.pc : undefined;
     rows.push({
       type: '离港',
       typeKey: 'DEPARTURE',
       destination: `${route.fromBody ?? ''}（环绕轨道）`,
-      durationMs: (departKm / (vStl * 3600) / cond) * 3600000,
+      durationMs:
+        metrics.departSeconds !== undefined && metrics.departSeconds > 0
+          ? metrics.departSeconds * 1000
+          : (departKm / (vStl * 3600) / cond) * 3600000,
       distanceKm: departKm,
       damage: 0,
       stlFuel: stlDepartFuel,
+      ftlFuel: departFtl,
       native: false,
     });
   }
 
-  // 每条跃迁 + 充能。
-  for (const leg of route.legs) {
-    const jumpFuel = leg.viaGateway ? 0 : ftlC * reactor * leg.pc;
+  // 每条跃迁 + 充能。与游戏 SFC 表格一致：充能只存在于两跳之间（为下一跳充电），
+  // 最后一跳后直接进近、无充能段；充能 FTL 燃料按下一跳距离分摊。
+  for (let i = 0; i < route.legs.length; i++) {
+    const leg = route.legs[i];
     rows.push({
       type: leg.viaGateway ? '网关跃迁' : '跃迁',
       typeKey: leg.viaGateway ? 'JUMP_GATEWAY' : 'JUMP',
@@ -449,25 +470,32 @@ export function buildEstimatedSegmentRows(
       damage: 0,
       native: false,
     });
-    rows.push({
-      type: '充能',
-      typeKey: 'CHARGE',
-      destination: `${starName(leg.to)}（环绕轨道）`,
-      durationMs: chargeSec * 1000,
-      damage: 0,
-      ftlFuel: jumpFuel,
-      native: false,
-    });
+    if (i < route.legs.length - 1) {
+      const nextLeg = route.legs[i + 1];
+      const chargeFuel = nextLeg.viaGateway ? 0 : ftlC * reactor * nextLeg.pc;
+      rows.push({
+        type: '充能',
+        typeKey: 'CHARGE',
+        destination: `${starName(leg.to)}（环绕轨道）`,
+        durationMs: chargeSec * 1000,
+        damage: 0,
+        ftlFuel: chargeFuel,
+        native: false,
+      });
+    }
   }
 
-  // 进近段（末跳恒星 → 终点）。
+  // 进近段（末跳恒星 → 终点）。时长优先用飞行计划记录的原生秒数。
   const approachKm = metrics.approachKm;
   if (approachKm !== undefined && approachKm > 0) {
     rows.push({
       type: '进近',
       typeKey: 'APPROACH',
       destination: `${route.toBody ?? ''}（环绕轨道）`,
-      durationMs: (approachKm / (vStl * 3600) / cond) * 3600000,
+      durationMs:
+        metrics.approachSeconds !== undefined && metrics.approachSeconds > 0
+          ? metrics.approachSeconds * 1000
+          : (approachKm / (vStl * 3600) / cond) * 3600000,
       distanceKm: approachKm,
       damage: 0,
       stlFuel: stlApproachFuel,

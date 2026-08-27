@@ -179,13 +179,12 @@ export function conditionFactor(condition: number): number {
   return Math.max(0.2, condition / CONDITION_THRESHOLD);
 }
 
-// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB 四船 14 航线实测 + FIO 行星环境）：
-// - 离港 = 0.49 × STL罐 × f（7 次验证，与距离/航线无关；仅自然跃迁航线）
-// - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
+// 跨星系 STL 分段燃料（2026-08-26 新手船/HCB + 2026-08-27 WCB/OOG LCB 实测 + FIO 行星环境）：
+// - 离港 = 0.49 × STL罐 × min(f, f_cap)（7 次验证；省油引擎离港燃料随 f 饱和，
+//   OOG LCB 四档实测 87@0.05 / 141@0.1+，f_cap ≈ 10.96×流量：标准 0.015→0.164 无实际影响）
+// - 进近 ≈ 0.49 × STL罐 × f + 进近差（不饱和；OOG LCB 178@f0.1 精确吻合，与引擎无关）
 // - 起飞（行星出发特有）= 船体系数 × 0.455 × √(半径_km × P^(+0.2))   ★3 点 ±3%
-// - 离港 = 0.49 × STL罐 × f（8 次验证，与距离/航线/出发地无关；仅自然跃迁航线）
-// - 进近 ≈ 0.49 × STL罐 × f + 进近差（小量：新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14，默认 8）
-// - 着陆 = 船体系数 × 0.47 × √(半径_km × P^(-0.2))    ★终极模型（7/7 点 ±0.7u）
+// - 着陆 = 船体系数 × 0.47 × √(半径_km × P^(-0.2))    ★终极模型（WCB 7 行星 ±0.7u）
 //   实测 WCB 7 行星（Boucher/Ashland/LS-231a/UQ-328b/Mimar/Euu/Sabaton）着陆燃料 =
 //   0.578×√(着陆距离km)，着陆距离 = 0.66×R×P^(-0.2)（厚大气→短着陆段，进近段更长）。
 //   起飞与着陆 P 指数符号相反（厚大气→起飞长/着陆短），起飞+着陆 ≈ 84 恒定（WCB f=0.1）。
@@ -193,26 +192,51 @@ export function conditionFactor(condition: number): number {
 //   更高直接证伪阈值）；"G 重力模型"是距离与 g/P 巧合相关的假象。
 // ⚠️ 已知局限：罐模型仅对自然跃迁航线成立；网关航线（跃门）的离港/进近显著更低
 //   （WCB Sabaton 进近 117/Mimar 90 vs 模型 171.5），结构不同待研究。
-// 跨星系（有跃迁）航线：stlFuel = 0.98×罐×f + 进近差 + 着陆 + 起飞。
+// 跨星系（有跃迁）航线：stlFuel = 0.49×罐×min(f, f_cap) + 0.49×罐×f + 进近差 + 着陆 + 起飞。
 // 空间站无大气：到站无着陆、出发无起飞（起降段相互独立，R 缺失只影响自身段）。
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
-const STL_TANK_FUEL_COEF = 0.98; // 离港+进近 = 0.98×罐×f
+const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近）= 0.49×罐×f
+const STL_DEPARTURE_F_SAT_COEF = 10.96; // 离港 f 饱和系数：f_cap = 系数×流量（OOG LCB 0.0075→0.0822 实测）
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_DIST_C = 0.47; // 着陆燃料系数：fuel = C×√(R_km × P^-0.2)（WCB 实测 7 点 ±0.7u）
 const STL_LANDING_P_EXP = 0.2; // 气压缩短着陆段指数（着陆距离 = 0.66×R×P^-0.2）
 const STL_TAKEOFF_FUEL_C = 0.455; // 起飞燃料系数：fuel = C×√(R_km × P^+0.2)（3 点 ±3%）
 const STL_TAKEOFF_P_EXP = 0.2; // 大气延长起飞段指数（起飞距离 = 0.62×R×P^0.2，厚大气冲出更长）
-const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船）
-const STL_LANDING_G_EXP = 0.6; // 船体系数 G 指数：HCB(G15) 1.456≈(15/8)^0.6、WCB(G8) 1.0
+const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船/WCB）
+const STL_LANDING_G_EXP = 0.6; // 回退 G 指数（无流量数据时：HCB 1.456≈(15/8)^0.6）
+const STL_LANDING_G_EXP_SOFT = 1 / 6; // 弱 G 修正指数（有流量时，配合流量主导）
+const STL_LANDING_FLOW_REF = 0.015; // 着陆燃料流量基准（WCB 标准引擎 u/s）
 
-// 着陆船体系数：新手船/WCB(G=8)为 1.0，HCB(G=15)实测 1.456 ≈ (15/8)^0.6。
-// 新手船实测 0.94 偏低 6%（特例，疑轻船效应），G 力从蓝图读取（maxGFactor），无需每船校准。
+// 着陆船体系数（2026-08-27 OOG LCB 实测修正）：
+// - 主因子 = stlFuelFlowRate / 0.015（流量主导）：OOG LCB 省油引擎 0.0075 → 0.5，
+//   Euu 着陆实测 16 vs WCB(G8/标准引擎) 30 —— 同行星同 f=0.1 同距离，仅流量差 2 倍。
+//   纯 G 模型对省油船失效（G=10 预测 35 实测 16，方向反了：G 更高燃料反而更少）。
+// - 辅因子 = (G/8)^(1/6)（弱 G 修正）：把纯流量模型对 HCB(G15) 的 8% 低估补回
+//   （HCB 1.333→1.481 ≈ 旧 G 标定 1.456；WCB/新手船 G=8 无影响）。
+// - 无流量数据回退旧 G 模型；流量用飞船数据（Ship.stlFuelFlowRate），无需蓝图。
 export function stlLandingFactor(ship: ShipPerformance): number {
   const g = ship.maxGFactor;
-  if (g === undefined || g <= 0) {
-    return 1;
+  const flow = ship.stlFuelFlowRate;
+  if (flow !== undefined && flow > 0) {
+    const gSoft =
+      g !== undefined && g > 0 ? Math.pow(g / STL_LANDING_G_REF, STL_LANDING_G_EXP_SOFT) : 1;
+    return (flow / STL_LANDING_FLOW_REF) * gSoft;
   }
-  return Math.pow(g / STL_LANDING_G_REF, STL_LANDING_G_EXP);
+  if (g !== undefined && g > 0) {
+    return Math.pow(g / STL_LANDING_G_REF, STL_LANDING_G_EXP);
+  }
+  return 1;
+}
+
+// 离港燃料的 f 饱和上限（省油引擎实测：OOG LCB 离港 87@0.05 / 141@f≥0.1 饱和，
+// f_cap = 0.49×罐 到 141 的拐点 ≈ 10.96×流量）。标准/超推力引擎 f_cap≈0.16-0.22，
+// 常规滑块（≤0.1）不触发；无流量数据不饱和。
+export function stlDepartureFSat(ship: ShipPerformance): number {
+  const flow = ship.stlFuelFlowRate;
+  if (flow !== undefined && flow > 0) {
+    return Math.max(0.05, STL_DEPARTURE_F_SAT_COEF * flow);
+  }
+  return 1;
 }
 
 export interface ModelSettings {
@@ -283,7 +307,10 @@ export function computeFuelOption(
     const takeoff = hasTakeoff
       ? STL_TAKEOFF_FUEL_C * Math.sqrt(R0 * Math.pow(P0, STL_TAKEOFF_P_EXP))
       : 0;
+    // 离港（f 饱和）+ 进近（不饱和）+ 进近差 + 着陆 + 起飞。
+    const fDep = Math.min(fuel, stlDepartureFSat(ship));
     stlFuel =
+      STL_TANK_FUEL_COEF * tank * fDep +
       STL_TANK_FUEL_COEF * tank * fuel +
       (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
       lf * (landing + takeoff);
