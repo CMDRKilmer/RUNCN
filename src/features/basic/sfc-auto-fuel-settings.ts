@@ -1,10 +1,10 @@
 import { watch } from 'vue';
+import { refTextContent } from '@src/utils/reactive-dom';
 import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
 import { isTileReserved, setSliderValue } from '@src/infrastructure/prun-ui/utils/set-slider-value';
-import { refPrunId } from '@src/infrastructure/prun-ui/attributes';
-import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { ftcFuelSlider, ftcReactorUsage } from '@src/features/XIT/FTC/ftc-fuel-settings';
 import { computeFtcPlan } from '@src/features/XIT/FTC/ftc-compute';
@@ -198,41 +198,45 @@ watch([ftcFuelSlider, ftcReactorUsage], applyFtcSettings);
 // FTC 写滑块 → SFC 重算（起终点不变）→ 不再重复推送；仅用户改起终点时才重新推送。
 const lastPushedRoute = new WeakMap<Element, string>();
 
-// SFC 行程计划就绪后，把当前飞船 + 起终点自动推送给 FTC 计算最优燃料参数
+// 读 SFC 表单「使用跃迁点」单选当前状态（激活 → 走网关航线计算）。
+function readGatewayState(tile: PrunTile): boolean {
+  for (const radio of _$$(tile.anchor, C.RadioItem.container)) {
+    const value = _$(radio, C.RadioItem.value);
+    if (value?.textContent?.trim() !== '使用跃迁点') {
+      continue;
+    }
+    const indicator = _$(radio, C.RadioItem.indicator);
+    return indicator?.classList.contains(C.RadioItem.active) ?? false;
+  }
+  return false;
+}
+
+// SFC 重算完成后，把当前飞船 + 起终点自动推送给 FTC 计算最优燃料参数
 // （计算不依赖 FTC 面板打开，成功后在 ftc-compute 内写入共享参数，滑块自动跟随）。
-async function pushRouteToFtc(tile: PrunTile, table: Element) {
+// 起点 = 飞船当前位置（SFC 位置固定为飞船地址）；终点 = 目的地输入框 canonicalized 自然 ID
+// （如 OT-580 / FK-794b）。不依赖飞行计划 store/表格 missionId——实测改目的地后
+// MissionPlan 表格 data-prun-id 不变，无法作为信号或读计划。
+async function pushRouteToFtc(tile: PrunTile) {
   const ship = tile.parameter;
   if (!ship) {
     return;
   }
-  const planId = refPrunId(table as HTMLElement).value;
-  if (!planId) {
-    return;
-  }
-  // SHIP_FLIGHT_MISSION 与表格渲染可能有极短竞态，短暂等待计划进入 store。
-  let plan = flightPlansStore.getById(planId);
-  if (!plan) {
-    const deadline = Date.now() + 2000;
-    while (Date.now() < deadline && !plan) {
-      await sleep(100);
-      plan = flightPlansStore.getById(planId);
-    }
-  }
-  if (!plan || plan.segments.length === 0) {
-    return;
-  }
-  const from = getEntityNaturalIdFromAddress(plan.segments[0].origin);
-  const to = getEntityNaturalIdFromAddress(plan.segments[plan.segments.length - 1].destination);
+  const s = shipsStore.getByRegistration(ship);
+  const from = s?.address ? getEntityNaturalIdFromAddress(s.address) : undefined;
+  const input = _$(tile.anchor, C.AddressSelector.input) as HTMLInputElement | undefined;
+  const to = input?.value?.trim();
   if (!from || !to) {
     return;
   }
-  const viaGateway = plan.segments.some(seg => seg.type === 'JUMP_GATEWAY');
+  const viaGateway = readGatewayState(tile);
   const key = `${ship}|${from}|${to}|${viaGateway ? 'gw' : 'nat'}`;
   if (lastPushedRoute.get(tile.anchor) === key) {
     return;
   }
   lastPushedRoute.set(tile.anchor, key);
-  console.log(`[sfc-auto-fuel-settings] 推送航线给 FTC：${ship} ${from} → ${to}`);
+  console.log(
+    `[sfc-auto-fuel-settings] 推送航线给 FTC：${ship} ${from} → ${to}${viaGateway ? '（网关）' : ''}`,
+  );
   const result = await computeFtcPlan({
     shipRegistration: ship,
     from,
@@ -247,18 +251,17 @@ async function pushRouteToFtc(tile: PrunTile, table: Element) {
 // 等目的地行程统计(MissionPlan)加载出来后再开始配置,
 // 此时滑块已基于真实数据渲染,避免在未就绪的骨架节点上写入。
 async function onTileReady(tile: PrunTile) {
-  await $(tile.anchor, C.MissionPlan.stats);
+  const stats = await $(tile.anchor, C.MissionPlan.stats);
   // 磁贴关闭时清理追踪，避免对已卸载元素重复写入。
   onNodeDisconnected(tile.anchor, () => tileSliders.delete(tile));
-  // 行程计划表出现/更新时，把飞船与起终点推送给 FTC 自动计算。
-  // 改目的地触发重算后 React 常复用同一表格元素（仅更新 data-prun-id/missionId），
-  // subscribe 只在新元素出现时触发——因此除首次外还要监听 missionId 变化，变化即重新推送。
-  subscribe($$(tile.anchor, C.MissionPlan.table), table => {
-    void pushRouteToFtc(tile, table);
-    watch(refPrunId(table as HTMLElement), () => {
-      void pushRouteToFtc(tile, table);
-    });
+  // 以 MissionPlan.stats 文本内容变化作为「重算完成」信号：改目的地/滑块/跃迁点都会触发
+  // 服务器重算，完成后 stats 必更新。此时从 SFC 表单读取当前飞船+目的地推送给 FTC。
+  // （实测：改目的地后表格 data-prun-id 不变，不能用它作信号或读计划。）
+  watch(refTextContent(stats), () => {
+    void pushRouteToFtc(tile);
   });
+  // 首次行程计划就绪：立即推送一次。
+  void pushRouteToFtc(tile);
   subscribe($$(tile.anchor, 'rc-slider'), slider => {
     const label = getSliderLabel(slider);
     if (label) {
