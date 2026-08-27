@@ -3,7 +3,11 @@ import { refTextContent } from '@src/utils/reactive-dom';
 import { clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
-import { isTileReserved, setSliderValue } from '@src/infrastructure/prun-ui/utils/set-slider-value';
+import {
+  isTileReserved,
+  setSliderValue,
+  getSliderValue,
+} from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { ftcFuelSlider, ftcReactorUsage } from '@src/features/XIT/FTC/ftc-fuel-settings';
@@ -64,6 +68,10 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   if (isTileReserved(tile.anchor)) {
     return;
   }
+  // React 已重建/卸载的旧节点：跳过（避免对 detached 元素重复点击）。
+  if (!slider.isConnected) {
+    return;
+  }
   // 星系内飞行时“反应堆使用量”不是轨道条（显示为 --），不会触发写入；燃料消耗仍会调整。
   const label = getSliderLabel(slider);
   if (!label) {
@@ -79,6 +87,13 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   if (!labelMap) {
     labelMap = new Map();
     configuredLabels.set(tile.anchor, labelMap);
+  }
+
+  // 滑块已是目标值：无需点击（避免重复触发游戏重算/确认弹窗），直接标记已配置。
+  const current = getSliderValue(slider);
+  if (current !== undefined && Math.abs(current - value) < 0.01) {
+    labelMap.set(label, 'done');
+    return;
   }
 
   const state = labelMap.get(label);
@@ -121,7 +136,9 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   // 延迟重试：先释放 pending，避免递归重新进入时被并发拦截卡住。
   if (shouldRetry) {
     await sleep(RETRY_DELAY_MS);
-    await configureSlider(tile, slider);
+    // 重试时用当前最新的滑块节点（React 可能已重建旧节点，detached 节点点击无效）。
+    const latest = tileSliders.get(tile)?.get(label);
+    await configureSlider(tile, latest ?? slider);
   }
 }
 
@@ -181,6 +198,13 @@ async function maybeClickStart(tile: PrunTile) {
 }
 
 // FTC 参数变化时，对已打开的 SFC 磁贴重新写入（先清除已配置标记，允许新值覆盖）。
+// 防抖合并：一次计算连续写入燃料/反应堆两个参数（或并发计算先后完成）时只执行一次，
+// 避免重复写滑块导致游戏多次重算/弹确认。
+let applyFtcTimer: number | undefined;
+function applyFtcSettingsDebounced() {
+  window.clearTimeout(applyFtcTimer);
+  applyFtcTimer = window.setTimeout(applyFtcSettings, 60);
+}
 function applyFtcSettings() {
   for (const [tile, sliders] of tileSliders) {
     if (isTileReserved(tile.anchor)) {
@@ -188,11 +212,15 @@ function applyFtcSettings() {
     }
     configuredLabels.delete(tile.anchor);
     for (const slider of sliders.values()) {
+      // 只处理仍在 DOM 的滑块（旧的 detached 节点等下一次订阅覆盖）。
+      if (!slider.isConnected) {
+        continue;
+      }
       void configureSlider(tile, slider);
     }
   }
 }
-watch([ftcFuelSlider, ftcReactorUsage], applyFtcSettings);
+watch([ftcFuelSlider, ftcReactorUsage], applyFtcSettingsDebounced);
 
 // 已推送给 FTC 的航线（飞船|起|终|网关），防反馈循环：
 // FTC 写滑块 → SFC 重算（起终点不变）→ 不再重复推送；仅用户改起终点时才重新推送。
@@ -243,6 +271,11 @@ async function pushRouteToFtc(tile: PrunTile) {
     to,
     useGateway: viaGateway,
   });
+  // 计算期间航线已再次变化：丢弃过期结果，避免旧航线参数覆盖新航线（重复响应）。
+  if (lastPushedRoute.get(tile.anchor) !== key) {
+    console.log('[sfc-auto-fuel-settings] 航线已变化，丢弃过期计算结果');
+    return;
+  }
   if (!result.ok) {
     console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
   }
