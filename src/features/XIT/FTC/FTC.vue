@@ -407,6 +407,8 @@ interface PlanResult {
   best: FuelOption;
   // 时间↔燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）。
   frontier: FuelOption[];
+  // 是否有自然跃迁（否 = 全程系内/纯网关飞行，反应堆滑块不影响结果，无需计算）。
+  reactorRelevant: boolean;
   // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
   segments: RouteSegmentRow[];
   segmentsNative: boolean;
@@ -515,12 +517,14 @@ async function planAndCompute() {
     isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
     isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,
   ]);
-  // 无需玩家设置档位：自动扫描全范围燃料滑块 f 与反应堆 r（含滑块下限）。
+  // 无需玩家设置档位：自动扫描全范围燃料滑块 f；反应堆 r 仅在存在自然跃迁时扫描
+  // （全程系内/纯网关飞行没有自然跃迁，反应堆不影响时长与燃料，无需计算）。
+  const reactorRelevant = (metrics.natPc ?? 0) > 0 || (metrics.natJumpCount ?? 0) > 0;
   const options = scanFuelOptions(
     perf,
     metrics,
     autoFuelGrid(),
-    autoReactorGrid(perf),
+    reactorRelevant ? autoReactorGrid(perf) : [1],
     {
       stlPrice: stlFuelPrice.value ?? 0,
       ftlPrice: ftlFuelPrice.value ?? 0,
@@ -569,6 +573,7 @@ async function planAndCompute() {
     options,
     best,
     frontier,
+    reactorRelevant,
     segments,
     segmentsNative,
   };
@@ -578,8 +583,11 @@ async function planAndCompute() {
     best.fuelEstimated && (best.stlFuel > 0 || best.ftlFuel > 0)
       ? `，STL ${Math.round(best.stlFuel)} + FTL ${Math.round(best.ftlFuel)} 燃料`
       : '';
+  const reactorText = reactorRelevant ? ` / 反应堆 ${best.reactor}` : '';
   calcMessage.value =
-    `最优方案（平衡点）：燃料滑块 ${best.fuel} / 反应堆 ${best.reactor}，预计 ${formatDuration(best.totalHours * 3600000)}` +
+    `最优方案（平衡点）：燃料滑块 ${best.fuel}` +
+    reactorText +
+    `，预计 ${formatDuration(best.totalHours * 3600000)}` +
     fuelText +
     `，总成本 ${formatCurrency(best.totalCost)}` +
     radiusText +
@@ -688,8 +696,8 @@ const balanceNote = computed(() => {
       </div>
 
       <div :class="$style.hint">
-        无需设置滑块档位：自动扫描全范围燃料滑块（0.05–1）与反应堆使用量（滑块下限–1），
-        计算每种组合的时间与燃料消耗，找出「尽量快同时耗油少」的平衡点。
+        无需设置滑块档位：自动扫描全范围燃料滑块（0.05–1），计算每种组合的时间与燃料消耗，
+        找出「尽量快同时耗油少」的平衡点。含自然跃迁时还会扫描反应堆使用量（滑块下限–1）。
       </div>
 
       <label :class="$style.field">
@@ -809,6 +817,9 @@ const balanceNote = computed(() => {
       <div :class="$style.hint">
         下表为时间 ↔ 燃料的 Pareto 权衡前沿（自动扫描全范围滑块后的非支配方案，按时间升序）；
         绿色高亮行为平衡点（{{ balanceNote }}）。
+        <template v-if="!result.reactorRelevant"
+          >全程系内飞行没有自然跃迁，反应堆不适用（--）。</template
+        >
       </div>
       <table :class="$style.table">
         <thead>
@@ -829,7 +840,7 @@ const balanceNote = computed(() => {
             :key="`${o.fuel}-${o.reactor}`"
             :class="[$style.row, { [$style.best]: isBestOption(o) }]">
             <td>{{ o.fuel }}</td>
-            <td>{{ o.reactor }}</td>
+            <td>{{ result.reactorRelevant ? o.reactor : '--' }}</td>
             <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
             <td>{{ o.fuelEstimated ? formatFuel(o.stlFuel) : '需位置观测' }}</td>
             <td>{{ formatFuel(o.ftlFuel) }}</td>
