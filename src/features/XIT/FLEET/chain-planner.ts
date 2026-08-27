@@ -10,6 +10,7 @@ import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { createId } from '@src/store/create-id';
 import {
@@ -109,6 +110,102 @@ function matWeightVolume(ticker: string, amount: number) {
   };
 }
 
+// started 订单日耗/日产补充：burn（calculatePlanetBurn）用 getRecurringOrders
+// 过滤掉 started 订单，正在运行的产线（如 Animus a 的 PCB）input/output 会被遗漏，
+// 导致其上下游在产业链中不被识别（Shardonia c 的 BCO/BGO → Animus a 的 PCB 边缺失）。
+// 此处按与 burn 相同的归一化（每线 started 订单时长求和、×capacity）补充日消耗与日产。
+function startedOrderSupplement(siteId: string): {
+  input: Map<string, number>;
+  output: Map<string, number>;
+} {
+  const input = new Map<string, number>();
+  const output = new Map<string, number>();
+  const lines = productionStore.getBySiteId(siteId);
+  if (!lines) {
+    return { input, output };
+  }
+  for (const line of lines) {
+    const started = line.orders.filter(o => o.started && !o.halted && o.duration?.millis != null);
+    if (started.length === 0) {
+      continue;
+    }
+    const capacity = line.capacity;
+    let totalMillis = 0;
+    for (const order of started) {
+      totalMillis += order.duration!.millis!;
+    }
+    const totalDays = totalMillis / 86400000;
+    if (totalDays <= 0) {
+      continue;
+    }
+    for (const order of started) {
+      for (const mat of order.outputs) {
+        const ticker = mat.material.ticker;
+        output.set(ticker, (output.get(ticker) ?? 0) + (mat.amount * capacity) / totalDays);
+      }
+      for (const mat of order.inputs) {
+        const ticker = mat.material.ticker;
+        input.set(ticker, (input.get(ticker) ?? 0) + (mat.amount * capacity) / totalDays);
+      }
+    }
+  }
+  return { input, output };
+}
+
+// 有效 burn：在 getPlanetBurn 基础上并入 started 订单的日耗/日产。
+// burn 只记录「已出现在生产/劳动力」的 ticker，纯 started 产线的物料
+// （如正在运行的 PCB 线的 BCO/BGO）不在 burn 中，其库存也从存储补读，
+// 否则上游可提取量 / 下游缺口都会按 0 计。
+function effectiveBurn(siteId: string): BurnValues | undefined {
+  const burn = getPlanetBurn(siteId);
+  if (!burn) {
+    return undefined;
+  }
+  const { input, output } = startedOrderSupplement(siteId);
+  if (input.size === 0 && output.size === 0) {
+    return burn.burn;
+  }
+  const stores = storagesStore.getByAddressableId(siteId);
+  const merged: BurnValues = { ...burn.burn };
+  const patch = (ticker: string, extra: number, key: 'input' | 'output') => {
+    const existing = merged[ticker];
+    if (existing !== undefined) {
+      merged[ticker] = { ...existing, [key]: existing[key] + extra };
+      return;
+    }
+    // 新建条目：真实库存从存储读取（burn 未记录该 ticker）。
+    let inventory = 0;
+    if (stores !== undefined) {
+      for (const store of stores) {
+        for (const item of store.items) {
+          const q = item.quantity;
+          if (q && q.material.ticker === ticker) {
+            inventory += q.amount;
+          }
+        }
+      }
+    }
+    merged[ticker] = {
+      input: 0,
+      output: 0,
+      workforce: 0,
+      dailyAmount: 0,
+      remainingAllocation: 0,
+      inventory,
+      daysLeft: 0,
+      type: key === 'output' ? 'output' : 'input',
+    };
+    merged[ticker]![key] = extra;
+  };
+  for (const [ticker, extra] of input) {
+    patch(ticker, extra, 'input');
+  }
+  for (const [ticker, extra] of output) {
+    patch(ticker, extra, 'output');
+  }
+  return merged;
+}
+
 // 目标天数：与 computeResupplyBill 相同的 suppliesCapDays 钳制（见 supplies-cap.ts）。
 function clampTargetDays(base: ChainPlannerBase) {
   return clampTargetDaysUtil(base.config.days, getSuppliesCap(base.site));
@@ -141,13 +238,15 @@ export function planChainRoute(input: {
   const warnings: string[] = [];
 
   // 各基地 burn 数据（任一未加载则整体视为加载中）。
+  // 用有效 burn（合并 started 订单日耗/日产与真实库存），
+  // 使正在运行的产线也参与产业链识别与运量平衡。
   const burns = new Map<string, BurnValues>();
   for (const base of bases) {
-    const burn = getPlanetBurn(base.siteId);
+    const burn = effectiveBurn(base.siteId);
     if (!burn) {
       return undefined;
     }
-    burns.set(base.naturalId, burn.burn);
+    burns.set(base.naturalId, burn);
   }
 
   // 预读白名单：BSN 中配置的 ticker 是「可提取产物白名单」，
@@ -196,7 +295,10 @@ export function planChainRoute(input: {
     }
   }
   for (const site of sitesStore.all.value ?? []) {
-    const burn = getPlanetBurn(site.siteId);
+    // 有效 burn（含 started 订单日耗/日产）：burn 用 getRecurringOrders 过滤掉
+    // started 订单，正在运行的产线（如 Animus a 的 PCB）input 不会出现在 burn.input，
+    // 导致其上游不被识别为产业链节点（如 Shardonia c 的 BCO/BGO → Animus a 的 PCB）。
+    const burn = effectiveBurn(site.siteId);
     if (!burn) {
       continue;
     }
@@ -204,38 +306,13 @@ export function planChainRoute(input: {
     if (!naturalId) {
       continue;
     }
-    for (const [ticker, mat] of Object.entries(burn.burn)) {
+    for (const [ticker, mat] of Object.entries(burn)) {
       if (mat.input > 0 || mat.workforce > 0) {
         const list = consumers.get(ticker) ?? [];
         if (!list.includes(naturalId)) {
           list.push(naturalId);
         }
         consumers.set(ticker, list);
-      }
-    }
-    // 补充：burn 过滤掉 started 订单的 input，导致正在运行的 PCB 生产线
-    // 不会出现在 burn.input 里。直接从 production orders 读所有 input 物料
-    // （不限于未启动订单），合并入 consumer 集合，避免 ticker 被误判为最终产物。
-    const lines = productionStore.getBySiteId(site.siteId);
-    if (lines) {
-      for (const line of lines) {
-        for (const order of line.orders) {
-          for (const mat of order.inputs ?? []) {
-            const ticker = mat.material.ticker;
-            // 仅当 burn 表明该基地确实消耗此 ticker 时才标记为下游（input>0 或
-            // workforce>0）。订单正在跑但 burn 未含时忽略，否则 rawEdges 会把
-            // 这些站点作为下游带入 need/avail，造成 `mat` 为 undefined 而崩溃。
-            const siteBurn = burn.burn[ticker];
-            if (siteBurn === undefined || (siteBurn.input <= 0 && siteBurn.workforce <= 0)) {
-              continue;
-            }
-            const list = consumers.get(ticker) ?? [];
-            if (!list.includes(naturalId)) {
-              list.push(naturalId);
-            }
-            consumers.set(ticker, list);
-          }
-        }
       }
     }
   }
@@ -670,7 +747,9 @@ export function planChainRoute(input: {
       }
     }
     // 有前向下游边的产物：已按需补给下游（flows），剩余 avail 运回空间站。
-    for (const ticker of [...new Set(flows.filter(f => f.from === id).map(f => f.ticker))]) {
+    // 遍历「所有下游边」而非仅正向 flows——下游已充足（need=0）时流量为 0，
+    // 但产物仍有可提取余量，应运回空间站；否则会卡在基地既不送下游也不运回。
+    for (const ticker of [...new Set(edges.filter(f => f.from === id).map(f => f.ticker))]) {
       const sent = delivered.get(id)?.get(ticker) ?? 0;
       const surplus = Math.max(0, avail(id, ticker) - sent);
       if (surplus > 0) {
@@ -983,7 +1062,7 @@ export function splitChainPlanAcrossShips(
     if (configured === undefined) {
       continue;
     }
-    const burn = getPlanetBurn(base.siteId)?.burn;
+    const burn = effectiveBurn(base.siteId);
     if (!burn) {
       continue;
     }
