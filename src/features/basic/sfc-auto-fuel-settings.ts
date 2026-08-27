@@ -251,8 +251,13 @@ async function onTileReady(tile: PrunTile) {
   // 磁贴关闭时清理追踪，避免对已卸载元素重复写入。
   onNodeDisconnected(tile.anchor, () => tileSliders.delete(tile));
   // 行程计划表出现/更新时，把飞船与起终点推送给 FTC 自动计算。
+  // 改目的地触发重算后 React 常复用同一表格元素（仅更新 data-prun-id/missionId），
+  // subscribe 只在新元素出现时触发——因此除首次外还要监听 missionId 变化，变化即重新推送。
   subscribe($$(tile.anchor, C.MissionPlan.table), table => {
     void pushRouteToFtc(tile, table);
+    watch(refPrunId(table as HTMLElement), () => {
+      void pushRouteToFtc(tile, table);
+    });
   });
   subscribe($$(tile.anchor, 'rc-slider'), slider => {
     const label = getSliderLabel(slider);
