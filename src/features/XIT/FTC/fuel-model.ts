@@ -47,6 +47,9 @@ export interface ShipPerformance {
 export interface RouteMetrics {
   // 起降+进近的 STL 距离（km，游戏距离单位）。
   stlDistanceKm?: number;
+  // 离港/进近各自的距离（km，用于按段速度分别计时）。
+  departKm?: number;
+  approachKm?: number;
   // 自然跃迁总距离（pc）。
   natPc: number;
   // 网关跃迁总距离（pc）。
@@ -169,6 +172,48 @@ export function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
   return Math.min(p.vBase * Math.pow(f, p.k), p.vSat);
 }
 
+// ---- 离港/进近段速度（2026-08-27 OOG LCB 四档实测校准）----
+// 游戏离港/进近段（起终点 ↔ 跃迁点）的实际速度远低于巡航，且受起降动力学/转移轨道
+// 影响，离港与进近各自独立饱和：
+//   fuelSaving(OOG LCB, HRT→Euu)：离港 17.7k@0.05/19.8k@f≥0.1 饱和；
+//                                 进近 22.7k@0.05/33.9k@0.1/36.3k@f≥0.3 饱和。
+// 曲线同巡航模型 v(f) = min(V_BASE×f^K, V_SAT)，按引擎分段查表。
+// 目前仅 fuelSaving 校准（单船/单航线：空间站出发→行星进近）；其他引擎无数据回退
+// 巡航速度（d/v_cruise，离港/进近会偏快）。⚠️ 段速度可能还随段距离/天体类型变化
+// （未验证），新数据可补充其他引擎或修正曲线。
+interface StlSegmentSpeed {
+  vBase: number;
+  k: number;
+  vSat: number;
+}
+const STL_SEGMENT_SPEED: Record<string, { depart?: StlSegmentSpeed; approach?: StlSegmentSpeed }> =
+  {
+    STL_ENGINE_FUEL_SAVING: {
+      depart: { vBase: 34862, k: 0.227, vSat: 19787 },
+      approach: { vBase: 127570, k: 0.578, vSat: 36272 },
+    },
+  };
+
+// 离港段速度（km/s @ f）。无该引擎校准数据时返回 undefined（调用方回退巡航）。
+export function stlDepartSpeedFor(ship: ShipPerformance, fuel: number): number | undefined {
+  const curve = STL_SEGMENT_SPEED[ship.stlEngineOption ?? '']?.depart;
+  if (curve === undefined) {
+    return undefined;
+  }
+  const f = Math.max(0.001, fuel);
+  return Math.min(curve.vBase * Math.pow(f, curve.k), curve.vSat);
+}
+
+// 进近段速度（km/s @ f）。无该引擎校准数据时返回 undefined（调用方回退巡航）。
+export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number | undefined {
+  const curve = STL_SEGMENT_SPEED[ship.stlEngineOption ?? '']?.approach;
+  if (curve === undefined) {
+    return undefined;
+  }
+  const f = Math.max(0.001, fuel);
+  return Math.min(curve.vBase * Math.pow(f, curve.k), curve.vSat);
+}
+
 // STL 燃料系数（每 km·滑块）按引擎取。
 export function stlFuelCFor(engineOption: string | undefined, fallback: number): number {
   const p = stlEngineParams(engineOption);
@@ -287,11 +332,27 @@ export function computeFuelOption(
 ): FuelOption {
   const cond = conditionFactor(ship.condition);
 
-  // STL 时间（小时）：T = d / (v(f) × 3600) / cond。
+  // STL 时间（小时）：跨星系离港/进近分别用段速度（离港/进近段实际速度远低于巡航，
+  // 按引擎查表，fuelSaving 已校准）；无段速度数据回退巡航 v(f)。
   // v(f) = min(V_BASE×f^K, V_SAT)，整条曲线查引擎表（引擎类型决定，与质量/G力无关）。
   const d = metrics.stlDistanceKm;
   const v = stlSpeedFor(ship, fuel);
-  const stlHours = d !== undefined && d > 0 ? d / (v * 3600) / cond : 0;
+  const vDepart = stlDepartSpeedFor(ship, fuel) ?? v;
+  const vApproach = stlApproachSpeedFor(ship, fuel) ?? v;
+  const departKm = metrics.departKm;
+  const approachKm = metrics.approachKm;
+  let stlHours = 0;
+  if (departKm !== undefined && departKm > 0) {
+    stlHours += departKm / (vDepart * 3600);
+  }
+  if (approachKm !== undefined && approachKm > 0) {
+    stlHours += approachKm / (vApproach * 3600);
+  }
+  if (stlHours > 0) {
+    stlHours /= cond;
+  } else if (d !== undefined && d > 0) {
+    stlHours = d / (v * 3600) / cond;
+  }
   // STL 燃料：跨星系（有跃迁）用罐模型。
   // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（仅行星目的地，有大气减速）
   // 起飞 = 船体系数 × 0.455 × √(半径_km × P^+0.2)（仅行星出发地，有大气冲出）

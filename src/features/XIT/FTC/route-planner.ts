@@ -13,6 +13,8 @@ import { starsStore, getStarName } from '@src/infrastructure/prun-api/data/stars
 import {
   conditionFactor,
   stlSpeedFor,
+  stlDepartSpeedFor,
+  stlApproachSpeedFor,
   ftlSpeedFor,
   ftlChargeSecondsFor,
   ftlFuelCFor,
@@ -409,6 +411,9 @@ export function buildEstimatedSegmentRows(
   const rows: RouteSegmentRow[] = [];
   const cond = conditionFactor(ship.condition);
   const vStl = stlSpeedFor(ship, fuel);
+  // 离港/进近段速度（游戏实际远低于巡航，按引擎查表；无数据回退巡航）。
+  const vDepart = stlDepartSpeedFor(ship, fuel) ?? vStl;
+  const vApproach = stlApproachSpeedFor(ship, fuel) ?? vStl;
   const vFtl = ftlSpeedFor(ship, reactor);
   const chargeSec = ftlChargeSecondsFor(ship, reactor);
   const ftlC = ftlFuelCFor(ship);
@@ -463,7 +468,7 @@ export function buildEstimatedSegmentRows(
       destination: `${route.fromBody ?? ''}（环绕轨道）`,
       durationMs:
         (recordedSeconds(metrics.departSeconds, departKm) ??
-          (departKm / (vStl * 3600) / cond) * 3600) * 1000,
+          (departKm / (vDepart * 3600) / cond) * 3600) * 1000,
       distanceKm: departKm,
       damage: 0,
       stlFuel: stlDepartFuel,
@@ -509,7 +514,7 @@ export function buildEstimatedSegmentRows(
       destination: `${route.toBody ?? ''}（环绕轨道）`,
       durationMs:
         (recordedSeconds(metrics.approachSeconds, approachKm) ??
-          (approachKm / (vStl * 3600) / cond) * 3600) * 1000,
+          (approachKm / (vApproach * 3600) / cond) * 3600) * 1000,
       distanceKm: approachKm,
       damage: 0,
       stlFuel: stlApproachFuel,
