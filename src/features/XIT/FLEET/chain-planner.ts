@@ -12,8 +12,10 @@ import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import { createId } from '@src/store/create-id';
+import { fixed0 } from '@src/utils/format';
 import {
   combinedBaseBill,
   type DispatchBaseConfig,
@@ -230,6 +232,8 @@ export function planChainRoute(input: {
   originStock?: Record<string, number>;
   // 组内产出 ticker 集合（多船分段时传全局集合，跨段产物在任何段都不纳入采购）。
   groupProducedTickers?: Set<string>;
+  // 出发地交易所代码（CX Buy 下单处），用于购买时检测空间站订单簿库存。
+  exchangeCode?: string;
 }): ChainPlan | undefined {
   const { originNaturalId, capacity, bases } = input;
   if (capacity.weight <= 0 && capacity.volume <= 0) {
@@ -550,7 +554,8 @@ export function planChainRoute(input: {
 
   // 每站 CX 账单：与基地规划派遣一致的完整账单（补给+维修），
   // 减去链上「确定输送」的量；组内产出的 ticker 整体剔除（缺口不回落 CX 采购）。
-  // 若出发地空间站仓库已有组内产物库存（上一轮运回），缺口改由出发地「取货」补足。
+  // 出发地空间站仓库已有库存的物资（含组内产物与普通补给）优先以「取货」装船，
+  // 采购量在 purchaseBill 阶段扣除取货部分，避免仓库已有仍重复购买。
   const incoming = new Map<string, Map<string, number>>(); // naturalId → ticker → 输送量
   for (const flow of flows) {
     const byTicker = incoming.get(flow.to) ?? new Map<string, number>();
@@ -599,6 +604,26 @@ export function planChainRoute(input: {
       if (remaining > 0) {
         producedGap.set(ticker, (producedGap.get(ticker) ?? 0) + remaining);
       }
+    }
+    // 空间站仓库已有库存的普通物资（非组内产出）：优先从仓库「取货」装船，
+    // 不足部分才进入 CX 采购（purchaseBill 阶段按取货量扣除），避免重复购买。
+    for (const ticker of Object.keys(bill)) {
+      if (groupProducedTickers.has(ticker)) {
+        continue;
+      }
+      const stock = remainingOriginStock.get(ticker) ?? 0;
+      if (stock <= 0) {
+        continue;
+      }
+      const need = bill[ticker]!;
+      const pickup = Math.min(need, stock);
+      if (pickup <= 0) {
+        continue;
+      }
+      const byTicker = originPickupByStop.get(id) ?? {};
+      byTicker[ticker] = (byTicker[ticker] ?? 0) + pickup;
+      originPickupByStop.set(id, byTicker);
+      remainingOriginStock.set(ticker, stock - pickup);
     }
     cxResupply.set(id, bill);
   }
@@ -925,6 +950,45 @@ export function planChainRoute(input: {
     }
   }
 
+  // 购买时检测出发地空间站（CX 交易所）订单簿库存：供应不足的物资缩减采购量
+  // （cxBill 装船量同步缩减，避免装船缺货），并警告——防止执行时 CX Buy 因
+  // 库存不足而整体失败。订单簿数据未加载（未打开过 CXOB）时跳过检测，不误报。
+  if (input.exchangeCode !== undefined) {
+    for (const [ticker, amount] of Object.entries(plan.purchaseBill)) {
+      const broker = cxobStore.getByTicker(`${ticker}.${input.exchangeCode}`);
+      if (broker === undefined) {
+        continue;
+      }
+      const supply = broker.supply;
+      if (supply >= amount) {
+        continue;
+      }
+      const available = Math.max(0, Math.floor(supply));
+      const shrink = amount - available;
+      if (available > 0) {
+        plan.purchaseBill[ticker] = available;
+        warnings.push(
+          `「${ticker}」空间站库存不足（供应 ${fixed0(available)} / 需 ${fixed0(
+            amount,
+          )}），采购量已缩减至 ${fixed0(available)}。`,
+        );
+      } else {
+        delete plan.purchaseBill[ticker];
+        warnings.push(`「${ticker}」空间站无库存，已从采购清单移除。`);
+      }
+      // 装船量同步缩减（买不到的装不上船）。
+      const cxAmount = plan.cxBill[ticker] ?? 0;
+      if (cxAmount > 0) {
+        const nextCx = Math.max(0, cxAmount - shrink);
+        if (nextCx > 0) {
+          plan.cxBill[ticker] = nextCx;
+        } else {
+          delete plan.cxBill[ticker];
+        }
+      }
+    }
+  }
+
   // 运回空间站产物标注。
   plan.finalUnloadNotes = {};
   for (const ticker of Object.keys(plan.finalUnload)) {
@@ -1156,6 +1220,7 @@ export function splitChainPlanAcrossShips(
       bases: chunk,
       originStock: shipWarehouseStock(ship),
       groupProducedTickers,
+      exchangeCode: ship.exchangeCode,
     });
     if (sub) {
       result.push({ ship, plan: sub });

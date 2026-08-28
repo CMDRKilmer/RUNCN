@@ -75,9 +75,11 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import {
   getEntityNameFromAddress,
   getEntityNaturalIdFromAddress,
+  getSystemLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
@@ -228,6 +230,8 @@ const plan = computed(() => {
     bases: selectedBases.value,
     // 出发地空间站仓库库存：组内产出的缺口由仓库以「取货」补足。
     originStock: shipWarehouseStock(selectedShips.value[0]!),
+    // 出发地交易所：CX 采购下单处，用于检测空间站订单簿库存。
+    exchangeCode: selectedShips.value[0]!.exchangeCode,
   });
 });
 
@@ -450,8 +454,16 @@ function onClearShipPlanClick(
 }
 
 function execute() {
-  const plans = shipPlans.value;
+  const allPlans = shipPlans.value;
+  if (allPlans.length === 0) {
+    return;
+  }
+  // 多环线并行：正在执行环线的船不能重复生成（会覆盖其脚本与运行状态），
+  // 跳过并提示；其余船照常生成新环线。
+  const runningIds = new Set(activeRuns.value.map(r => r.shipId));
+  const plans = allPlans.filter(p => !runningIds.has(p.ship.ship.id));
   if (plans.length === 0) {
+    executeNotice.value = '所选船只均在执行环线中，无法重复生成。请等待归航或先清理计划。';
     return;
   }
 
@@ -541,7 +553,11 @@ function execute() {
     return;
   }
   // 保存计划快照：环线执行期间显示它（格式与规划一致，序列叠加进度图标）。
-  planSnapshot.value = [...plans];
+  // 多环线并行时按船合并，避免覆盖其他运行中环线的快照。
+  planSnapshot.value = [
+    ...planSnapshot.value.filter(p => !plans.some(np => np.ship.ship.id === p.ship.ship.id)),
+    ...plans,
+  ];
 
   if (mainPkgs.length === 1) {
     stageMainPackage(mainPkgs[0]!);
@@ -1232,20 +1248,40 @@ function isRunFinished(sp: { progress?: RunProgress }): boolean {
   );
 }
 
+// 空间站 naturalId → 所属系统 naturalId（空间站地址被 AddressSelector 规范化为系统，
+// 归航/飞往空间站的航段比较需先解析到系统）。
+function stationSystemOf(naturalId: string): string | undefined {
+  const station = stationsStore.getByNaturalId(naturalId);
+  if (!station) {
+    return undefined;
+  }
+  return getSystemLineFromAddress(station.address)?.entity.naturalId;
+}
+
 function runProgress(run: UserData.ChainRun): RunProgress {
   const ship = shipsStore.getById(run.shipId);
   const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
   const flightDest = flight ? getEntityNaturalIdFromAddress(flight.destination) : undefined;
   const dockedAt = ship?.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
-  // 环线按序执行：船当前停靠站点之前的所有站必然已通过并执行完成。
-  // 环线脚本不再 autoDelete 后 markChainStageDone 不再触发，旧记录的已通过站
-  // 可能仍停留在 arrived/pending——按停靠位置前推为完成，使状态检查能推进。
-  const dockedStopIndex = run.stops.findIndex(s => s.naturalId === dockedAt);
+  // 环线按序执行：船已通过（停靠或飞行途中的目标站）之前的所有站必然已执行完成。
+  // 中断恢复后船可能已在途（正飞往后续站），上一站状态可能未持久化为 done——
+  // 按停靠位置（dockedAt）或飞行目的站（flightDest）前推为完成。
+  const stopIndexAt = (id: string | undefined) =>
+    id === undefined ? -1 : run.stops.findIndex(s => s.naturalId === id);
+  const dockedStopIndex = stopIndexAt(dockedAt);
+  // 归航在途：飞行目的地是出发地（空间站地址可能被规范化为系统，按归属系统比较）。
+  const homeward =
+    flightDest !== undefined &&
+    (flightDest.toUpperCase() === run.originNaturalId.toUpperCase() ||
+      (stationSystemOf(run.originNaturalId) ?? '').toUpperCase() === flightDest.toUpperCase());
+  // 已通过前缀终点（不含该站本身）：停靠站 > 在途目的站 > 归航（全部站）。
+  const passedUpTo =
+    dockedStopIndex >= 0 ? dockedStopIndex : homeward ? run.stops.length : stopIndexAt(flightDest);
   const stops = run.stops.map((stop, i) => {
     const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
     const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
     let state: StopState;
-    if (stop.state === 'done' || (dockedStopIndex >= 0 && i < dockedStopIndex)) {
+    if (stop.state === 'done' || (passedUpTo >= 0 && i < passedUpTo)) {
       state = 'done';
     } else if (dockedAt === stop.naturalId || (pkgExists && fired)) {
       state = 'arrived';
@@ -1277,7 +1313,8 @@ function runProgress(run: UserData.ChainRun): RunProgress {
     if (dockedAt === run.originNaturalId) {
       // 新记录保留持久化状态（避免删除归航包被误判完成）；旧记录按原逻辑处理。
       finalState = run.finalState === undefined ? (finalPkgExists ? 'arrived' : 'done') : 'arrived';
-    } else if (flightDest === run.originNaturalId) {
+    } else if (homeward) {
+      // 归航在途：目的地为出发地（空间站地址可能被规范化为系统）。
       finalState = 'transit';
     } else {
       finalState = run.finalState ?? 'pending';
@@ -1406,54 +1443,57 @@ watchEffect(() => {
   }
 });
 
-// 规划区 / 进度区统一表格数据：
-// - 规划模式：实时计划（无进度）。
-// - 环线执行中：显示执行前的计划快照，仅在「序」列叠加进度图标；
-//   无快照（页面刷新 / 旧版本环线）时退化为仅显示站点与进度。
-const tables = computed<
-  {
-    shipId: string;
-    ship?: DispatchShip;
-    shipName?: string;
-    plan?: ChainPlan;
-    progress?: RunProgress;
-    // 无快照时的逆推操作（页面刷新 / 旧版本环线）。
-    derivedStops?: { unload: Record<string, number>; load: Record<string, number> }[];
-    derivedPurchase?: Record<string, number>;
-    derivedFinal?: Record<string, number>;
-  }[]
->(() => {
-  if (activeRuns.value.length === 0) {
-    return shipPlans.value.map(sp => ({
-      shipId: sp.ship.ship.id,
-      ship: sp.ship,
-      plan: sp.plan,
-      progress: undefined,
-    }));
+type ChainTableRow = {
+  shipId: string;
+  ship?: DispatchShip;
+  shipName?: string;
+  plan?: ChainPlan;
+  progress?: RunProgress;
+  // 无快照时的逆推操作（页面刷新 / 旧版本环线）。
+  derivedStops?: { unload: Record<string, number>; load: Record<string, number> }[];
+  derivedPurchase?: Record<string, number>;
+  derivedFinal?: Record<string, number>;
+};
+
+// 「规划中」页签：当前选中配置的实时规划（跳过运行中的船，避免同船重复），
+// 有环线运行中仍可规划其他环线。
+const planTables = computed<ChainTableRow[]>(() => {
+  const runningIds = new Set(activeRuns.value.map(e => e.shipId));
+  return shipPlans.value
+    .filter(sp => !runningIds.has(sp.ship.ship.id))
+    .map(sp => ({ shipId: sp.ship.ship.id, ship: sp.ship, plan: sp.plan, progress: undefined }));
+});
+
+// 「运行中」页签：正在执行的环线（进度），优先计划快照，快照未覆盖的
+// （刷新后 / 旧版本）从 chainRuns 还原。
+const runningTables = computed<ChainTableRow[]>(() => {
+  const result: ChainTableRow[] = [];
+  const snapshotIds = new Set<string>();
+  for (const sp of planSnapshot.value) {
+    const progress = progressByShip.value.get(sp.ship.ship.id);
+    if (progress === undefined) {
+      continue;
+    }
+    snapshotIds.add(sp.ship.ship.id);
+    result.push({ shipId: sp.ship.ship.id, ship: sp.ship, plan: sp.plan, progress });
   }
-  if (planSnapshot.value.length > 0) {
-    return planSnapshot.value
-      .filter(sp => progressByShip.value.has(sp.ship.ship.id))
-      .map(sp => ({
-        shipId: sp.ship.ship.id,
-        ship: sp.ship,
-        plan: sp.plan,
-        progress: progressByShip.value.get(sp.ship.ship.id),
-      }));
-  }
-  return activeRuns.value.map(entry => {
+  for (const entry of activeRuns.value) {
+    if (snapshotIds.has(entry.shipId)) {
+      continue;
+    }
     // 新版本环线：持久化计划快照可完整还原阶段载重/操作。
     const plan = chainPlanFromRun(entry.run);
     if (plan) {
-      return {
+      result.push({
         shipId: entry.shipId,
         shipName: entry.run.shipName,
         plan,
         progress: entry.progress,
-      };
+      });
+      continue;
     }
     // 旧版本环线（无快照）：退回逆推模式，载重列显示实时舱载。
-    return {
+    result.push({
       shipId: entry.shipId,
       shipName: entry.run.shipName,
       progress: entry.progress,
@@ -1461,9 +1501,20 @@ const tables = computed<
       derivedPurchase:
         entry.run.stops.length > 0 ? derivePurchaseBill(entry.run.stops[0]!.pkgName) : {},
       derivedFinal: entry.run.finalPkgName ? deriveFinalOps(entry.run.finalPkgName) : {},
-    };
-  });
+    });
+  }
+  return result;
 });
+
+// 规划中 / 运行中 分页：页签状态（跨面板重挂载保持），当前可见表格。
+const chainTab = useTileState<'plan' | 'running'>('chainTab', 'plan');
+const chainTabs = computed(() => [
+  { id: 'plan' as const, label: '规划中', count: planTables.value.length },
+  { id: 'running' as const, label: '运行中', count: runningTables.value.length },
+]);
+const visibleTables = computed<ChainTableRow[]>(() =>
+  chainTab.value === 'plan' ? planTables.value : runningTables.value,
+);
 
 // 环线运行记录保留策略：遍历全部 chainRuns（不限于当前选中的船）。
 // 完成的环线（含归航卸载）不再自动清理，保留在状态列表显示「完成」；
@@ -1532,6 +1583,20 @@ function formatMaterials(record: Record<string, number>) {
     .join('、');
 }
 
+// 空间站行（序 0）「取货」：装船总量（cxBill）中不由 CX 采购的部分，
+// 即从空间站仓库直接装船的物资（含组内产出取货与仓库已有库存），
+// 与「采购」（从 CX 购买）分开展示。
+function spaceStationTake(plan: ChainPlan): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const [ticker, amount] of Object.entries(plan.cxBill)) {
+    const take = amount - (plan.purchaseBill[ticker] ?? 0);
+    if (take > 0) {
+      result[ticker] = take;
+    }
+  }
+  return result;
+}
+
 function formatUnloadChain(stop: ChainStopPlan) {
   return [...stop.unloadChain.entries()]
     .map(([ticker, x]) => `${ticker}×${x.amount}(${x.from})`)
@@ -1545,10 +1610,6 @@ function formatUnloadAt(stop: ChainStopPlan) {
     return `${cx}、${chain}`;
   }
   return cx || chain;
-}
-
-function nextStopName(stops: ChainStopPlan[], i: number): string {
-  return stops[i + 1]?.planetName ?? '出发地';
 }
 
 function formatLoad(stop: ChainStopPlan) {
@@ -1634,7 +1695,20 @@ function legInTransit(shipId: string, legIndex: number): boolean {
   if (!leg) {
     return false;
   }
-  return leg.to.toUpperCase() === destNaturalId.toUpperCase();
+  if (leg.to.toUpperCase() === destNaturalId.toUpperCase()) {
+    return true;
+  }
+  // 空间站地址被 AddressSelector 规范化为系统地址：飞往空间站（如归航回 HRT）
+  // 的航段 leg.to（空间站 naturalId）无法与目的地系统 naturalId 直接匹配，
+  // 用空间站所属系统判断。
+  const station = stationsStore.getByNaturalId(leg.to);
+  if (station) {
+    const stationSystem = getSystemLineFromAddress(station.address)?.entity.naturalId;
+    return (
+      stationSystem !== undefined && stationSystem.toUpperCase() === destNaturalId.toUpperCase()
+    );
+  }
+  return false;
 }
 
 // 中文精确时长（≥1 天 天/时/分；<1 天 时/分/秒），与 FTC 面板口径一致。
@@ -1659,17 +1733,17 @@ function formatFlightDuration(ms: number): string {
   return `${seconds}秒`;
 }
 
-// 到达时刻文本：HH:MM（游戏世界时）；跨天时带 MM-DD。
+// 到达时刻文本：HH:MM（本地时间，浏览器时区）；跨天时带 MM-DD。
 function arrivalClockText(ms: number): string {
   const t = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, '0');
-  const clock = `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
+  const clock = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
   const now = new Date(gameNow());
   const sameDay =
-    now.getUTCFullYear() === t.getUTCFullYear() &&
-    now.getUTCMonth() === t.getUTCMonth() &&
-    now.getUTCDate() === t.getUTCDate();
-  return sameDay ? clock : `${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())} ${clock}`;
+    now.getFullYear() === t.getFullYear() &&
+    now.getMonth() === t.getMonth() &&
+    now.getDate() === t.getDate();
+  return sameDay ? clock : `${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${clock}`;
 }
 
 // 各段飞行列文本（模板「飞行」列）：
@@ -1690,7 +1764,9 @@ function flightCellText(
     }
   }
   // 在途：真实剩余时间与真实到达时间。
-  if (legInTransit(sp.shipId, legIndex)) {
+  // 仅执行中的环线（有 progress）显示在途——规划中的环线即使船当前恰好在飞，
+  // 那是另一个环线的真实飞行，混入会把预估时间覆盖成错误的时间。
+  if (sp.progress !== undefined && legInTransit(sp.shipId, legIndex)) {
     const ship = shipsStore.getById(sp.shipId);
     const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
     if (flight) {
@@ -1784,18 +1860,43 @@ function flightTotalText(shipId: string): string {
     <div v-if="statusCheckNotice" :class="$style.notice">{{ statusCheckNotice }}</div>
     <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
-    <!-- 规划 / 进度统一表格：环线执行中显示执行前的计划快照（格式与规划一致），
-         仅在「序」列叠加进度图标；等所有船归航后自动恢复实时规划。 -->
+    <!-- 规划中 / 运行中 分页：有运行中环线时仍可规划其他环线，两页独立查看。 -->
     <div v-if="activeRuns.length > 0 || shipPlans.length > 0" :class="$style.content">
-      <div v-for="sp in tables" :key="sp.shipId" :class="$style.shipPlan">
+      <div :class="C.Tabs.component">
+        <div :class="C.Tabs.tabs">
+          <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
+            <a
+              :class="[
+                chainTab === t.id ? C.Tabs.tabActive : '',
+                C.Tabs.tab,
+                C.fonts.fontRegular,
+                C.type.typeRegular,
+              ]"
+              >{{ t.label }}（{{ t.count }}）</a
+            >
+            <div
+              :class="[
+                C.Tabs.toggleIndicator,
+                chainTab === t.id ? C.Tabs.toggleIndicatorActive : '',
+                chainTab === t.id ? C.effects.shadowPrimary : '',
+              ]" />
+          </div>
+        </div>
+      </div>
+
+      <div v-for="sp in visibleTables" :key="sp.shipId" :class="$style.shipPlan">
         <div :class="$style.shipHeader">
-          <span
-            >{{ sp.ship ? shipLabel(sp.ship) : (sp.shipName ?? '') }}（{{
-              sp.ship?.exchangeCode ?? ''
-            }}）</span
+          <span>
+            {{ sp.ship ? shipLabel(sp.ship) : (sp.shipName ?? '') }}
+            <template v-if="sp.progress">
+              <span v-if="isRunFinished(sp)" :class="$style.finished">（已完成）</span>
+              <span v-else :class="$style.running">（运行中）</span>
+            </template>
+            <template v-else>（{{ sp.ship?.exchangeCode ?? '' }}）</template>
+          </span>
+          <PrunButton v-if="sp.progress" dark @click="onClearShipPlanClick($event, sp)"
+            >清理计划</PrunButton
           >
-          <span v-if="isRunFinished(sp)" :class="$style.finished">已完成</span>
-          <PrunButton dark @click="onClearShipPlanClick($event, sp)">清理计划</PrunButton>
         </div>
         <div :class="$style.route">
           <span :class="$style.routeLabel">航线：</span>
@@ -1852,9 +1953,9 @@ function flightTotalText(shipId: string): string {
                     <span :class="$style.opsLabel">采购</span>
                     [{{ formatMaterials(sp.plan.purchaseBill) || '无' }}]
                   </div>
-                  <div v-if="Object.keys(sp.plan.originPickup).length > 0">
+                  <div>
                     <span :class="$style.opsLabel">取货</span>
-                    [{{ formatMaterials(sp.plan.originPickup) }}]
+                    [{{ formatMaterials(spaceStationTake(sp.plan)) || '无' }}]
                   </div>
                 </template>
                 <template v-else-if="sp.derivedPurchase">
@@ -1865,17 +1966,7 @@ function flightTotalText(shipId: string): string {
                 </template>
                 <span v-else>—</span>
               </td>
-              <td :class="$style.matCell">
-                <template v-if="sp.plan">
-                  → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId
-                  }}{{ flightCellText(sp, 0) }}
-                </template>
-                <template v-else-if="sp.progress">
-                  → {{ sp.progress.stops[0]?.planetName ?? sp.progress.originNaturalId
-                  }}{{ flightCellText(sp, 0) }}
-                </template>
-                <span v-else>—</span>
-              </td>
+              <td :class="$style.matCell">出发</td>
               <td :class="$style.narrowCol">
                 <template v-if="sp.plan">
                   {{ formatLoadCell(sp.plan.loadOnDeparture, sp.plan.capacity) }}
@@ -1924,11 +2015,12 @@ function flightTotalText(shipId: string): string {
               </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
-                  → {{ nextStopName(sp.plan.stops, i) }}{{ flightCellText(sp, i + 1) }}
+                  → {{ sp.plan.stops[i]?.planetName ?? sp.plan.originNaturalId
+                  }}{{ flightCellText(sp, i) }}
                 </template>
                 <template v-else-if="sp.progress">
-                  → {{ sp.progress.stops[i + 1]?.planetName ?? sp.progress.originNaturalId
-                  }}{{ flightCellText(sp, i + 1) }}
+                  → {{ sp.progress.stops[i]?.planetName ?? sp.progress.originNaturalId
+                  }}{{ flightCellText(sp, i) }}
                 </template>
                 <span v-else>—</span>
               </td>
@@ -1975,9 +2067,14 @@ function flightTotalText(shipId: string): string {
                 <span v-else>—</span>
               </td>
               <td :class="$style.matCell">
-                归航<template v-if="sp.plan">{{
-                  flightCellText(sp, sp.plan.stops.length)
-                }}</template>
+                <template v-if="sp.plan">
+                  → {{ sp.plan.originNaturalId }}{{ flightCellText(sp, sp.plan.stops.length) }}
+                </template>
+                <template v-else-if="sp.progress">
+                  → {{ sp.progress.originNaturalId
+                  }}{{ flightCellText(sp, sp.progress.stops.length) }}
+                </template>
+                <span v-else>归航</span>
               </td>
               <td :class="$style.narrowCol">
                 <template v-if="sp.plan">
@@ -2046,8 +2143,15 @@ function flightTotalText(shipId: string): string {
         </div>
       </div>
 
-      <div v-if="unusedShipCount > 0" :class="$style.notice">
+      <div v-if="chainTab === 'plan' && unusedShipCount > 0" :class="$style.notice">
         已忽略 {{ unusedShipCount }} 艘未参与分配的船。
+      </div>
+      <div v-if="visibleTables.length === 0" :class="$style.hint">
+        {{
+          chainTab === 'plan'
+            ? '当前没有可执行的规划。请在上方选择分组、基地与船只后点击「执行环线」。'
+            : '当前没有运行中的环线。'
+        }}
       </div>
     </div>
 
@@ -2262,6 +2366,12 @@ function flightTotalText(shipId: string): string {
 
 .finished {
   color: #5cb85c;
+  font-size: 11px;
+  margin-left: 0.5rem;
+}
+
+.running {
+  color: #f0ad4e;
   font-size: 11px;
   margin-left: 0.5rem;
 }
