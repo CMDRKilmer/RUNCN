@@ -6,6 +6,7 @@ import {
   getSuppliesCap,
 } from '@src/features/XIT/FLEET/supplies-cap';
 import { comparePlanets } from '@src/core/game-lookups';
+import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
@@ -441,8 +442,13 @@ export function planChainRoute(input: {
     );
   };
 
-  // 按 ticker 平衡：多下游共享多上游时，按需求比例分配总可提取量，
-  // 再按上游库存比例分摊到各条边。
+  // 按 ticker 平衡：多下游共享多上游时，供给不足优先补最紧缺的下游，
+  // 提取优先从仓储将满的上游取货（缓解其满仓压力）。
+  // 1) 供给优先：总可提取量不足以满足全部需求时，按下游该 ticker 在 BURN
+  //    中的剩余天数（快耗尽者优先）依次补满，而非按需求比例均摊；供给充足时
+  //    各下游仍按需补满，与旧行为一致。
+  // 2) 运走优先：下游需求从各上游提取时，仓储填满天数（daysUntilFull）越小的
+  //    上游越先被提取（其产物优先运走），避免库存满仓。
   // 只按下游实际需求（need>0）补给；下游已充足时不再投放储备，剩余运回空间站。
   // 上游不足的部分不在此处理：组内产出不再回落 CX 采购，由下方账单剔除后按实际可得补给。
   const flows: ChainFlow[] = [];
@@ -457,14 +463,73 @@ export function planChainRoute(input: {
     }
     const needs = new Map(downstreams.map(x => [x, need(x, ticker)] as const));
     const totalNeed = [...needs.values()].reduce((a, b) => a + b, 0);
-    for (const to of downstreams) {
+    if (totalNeed <= 0) {
+      continue;
+    }
+    // 下游紧迫度：该 ticker 在该基地 BURN 中的剩余天数（越小越急；净产出/无消耗为 ∞）。
+    const tickerDaysLeft = (id: string) => {
+      const mat = burns.get(id)![ticker];
+      return mat === undefined ? Infinity : mat.daysLeft;
+    };
+    const orderedDownstreams = [...downstreams].sort((a, b) => {
+      const da = tickerDaysLeft(a);
+      const db = tickerDaysLeft(b);
+      if (da === db) {
+        return 0;
+      }
+      if (da === Infinity) {
+        return 1;
+      }
+      if (db === Infinity) {
+        return -1;
+      }
+      return da - db;
+    });
+    // 上游仓储紧迫度：仓储填满天数（daysUntilFull）越小越满，越优先被提取运走。
+    const daysUntilFullOf = (id: string) => {
+      const base = byNaturalId.get(id);
+      const analysis = base ? getBaseStorageAnalysis(base.site) : undefined;
+      return analysis ? analysis.daysUntilFull : Infinity;
+    };
+    const orderedUpstreams = [...upstreams].sort((a, b) => {
+      const da = daysUntilFullOf(a);
+      const db = daysUntilFullOf(b);
+      if (da === db) {
+        return 0;
+      }
+      if (da === Infinity) {
+        return 1;
+      }
+      if (db === Infinity) {
+        return -1;
+      }
+      return da - db;
+    });
+    // 上游剩余可提取量：逐下游扣减，避免同一上游被重复提取超出其 avail。
+    const remainingAvail = new Map(avails);
+    let remainingAvailTotal = totalAvail;
+    for (const to of orderedDownstreams) {
       const needTo = needs.get(to)!;
-      // 只按实际需求补给；下游已充足时不再投储备，剩余运回空间站。
-      const share = totalNeed > 0 ? Math.min(needTo, (totalAvail * needTo) / totalNeed) : 0;
-      for (const from of upstreams) {
-        const amount = Math.floor((avails.get(from)! * share) / totalAvail);
-        if (amount > 0) {
-          flows.push({ ticker, from, to, amount });
+      if (needTo <= 0) {
+        continue;
+      }
+      const give = Math.min(needTo, remainingAvailTotal);
+      if (give <= 0) {
+        break;
+      }
+      let remainingGive = give;
+      for (const from of orderedUpstreams) {
+        const available = remainingAvail.get(from)!;
+        if (available <= 0) {
+          continue;
+        }
+        const amount = Math.min(available, remainingGive);
+        remainingAvail.set(from, available - amount);
+        remainingAvailTotal -= amount;
+        remainingGive -= amount;
+        flows.push({ ticker, from, to, amount });
+        if (remainingGive <= 0) {
+          break;
         }
       }
     }
