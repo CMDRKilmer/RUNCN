@@ -258,36 +258,77 @@ const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
 const flightTimesLoading = ref(false);
 
 // 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
-// 计划为空（未规划/执行中船已离港）时保留已有预估——进度表快照仍引用同船同站。
+// 同时响应规划（shipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
+// eligibleShips / shipPlans 中，但 flightTimeText 仍需读取预估——按 shipId 收集
+// 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
+// 注：watch 内部会引用 activeRuns，必须在 activeRuns 定义之后再注册；放在下方
+// 「环线执行进度」computed 之后调用 registerFlightTimeWatch()。
 let flightTimeToken = 0;
-watch(
-  shipPlans,
-  async plans => {
-    const token = ++flightTimeToken;
-    if (plans.length === 0) {
-      return;
-    }
-    flightTimesLoading.value = true;
-    const estimates = new Map<string, ChainFlightEstimate>();
-    for (const sp of plans) {
-      const est = await estimateChainFlightTimes({
-        ship: sp.ship.ship,
-        origin: sp.plan.originNaturalId,
-        stops: sp.plan.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName })),
-      });
-      if (token !== flightTimeToken) {
-        return; // 计划已变化，丢弃过期结果。
+function registerFlightTimeWatch() {
+  watch(
+    [shipPlans, activeRuns],
+    async ([plans, runs]) => {
+      const token = ++flightTimeToken;
+      // 统一为 shipId → {ship, origin, stops}：规划取实时计划，执行中取链快照/持久化链记录。
+      const entries = new Map<
+        string,
+        {
+          ship: PrunApi.Ship;
+          origin: string;
+          stops: { naturalId: string; planetName: string }[];
+        }
+      >();
+      for (const sp of plans) {
+        if (sp.plan.stops === undefined) {
+          continue;
+        }
+        entries.set(sp.ship.ship.id, {
+          ship: sp.ship.ship,
+          origin: sp.plan.originNaturalId,
+          stops: sp.plan.stops.map(s => ({
+            naturalId: s.naturalId,
+            planetName: s.planetName,
+          })),
+        });
       }
-      estimates.set(sp.ship.ship.id, est);
-    }
-    if (token !== flightTimeToken) {
-      return;
-    }
-    flightEstimates.value = estimates;
-    flightTimesLoading.value = false;
-  },
-  { immediate: true },
-);
+      for (const run of runs) {
+        if (entries.has(run.shipId)) {
+          continue;
+        }
+        const ship = shipsStore.getById(run.shipId);
+        if (!ship) {
+          continue;
+        }
+        if (run.stops === undefined) {
+          continue;
+        }
+        entries.set(run.shipId, {
+          ship,
+          origin: run.originNaturalId,
+          stops: run.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName })),
+        });
+      }
+      if (entries.size === 0) {
+        return;
+      }
+      flightTimesLoading.value = true;
+      const estimates = new Map<string, ChainFlightEstimate>(flightEstimates.value);
+      for (const [shipId, info] of entries) {
+        const est = await estimateChainFlightTimes(info);
+        if (token !== flightTimeToken) {
+          return; // 计划已变化，丢弃过期结果。
+        }
+        estimates.set(shipId, est);
+      }
+      if (token !== flightTimeToken) {
+        return;
+      }
+      flightEstimates.value = estimates;
+      flightTimesLoading.value = false;
+    },
+    { immediate: true },
+  );
+}
 
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
@@ -1262,6 +1303,9 @@ const progressByShip = computed(() => {
   return map;
 });
 
+// 飞行时间 watch（依赖 activeRuns，需在 activeRuns 之后注册）。
+registerFlightTimeWatch();
+
 // 把推导出的进度状态持久化到 chainRuns：列表全局状态与 ACT/触发器解耦，
 // 删除 ACT 脚本或触发器后，站点与操作内容仍能完整展示。
 watchEffect(() => {
@@ -1537,6 +1581,41 @@ function flightLegFor(shipId: string, legIndex: number): ChainFlightLeg | undefi
   return flightEstimates.value.get(shipId)?.legs[legIndex];
 }
 
+// 当前船是否正在飞向 legIndex 对应的目的地（transit 状态）。
+// 船当前 Flight 的 destination 与环线该段终点一致时，即为该段在途。
+function legInTransit(shipId: string, legIndex: number): boolean {
+  const ship = shipsStore.getById(shipId);
+  if (!ship?.flightId) {
+    return false;
+  }
+  const flight = flightsStore.getById(ship.flightId);
+  if (!flight) {
+    return false;
+  }
+  const destNaturalId = getEntityNaturalIdFromAddress(flight.destination) ?? '';
+  const est = flightEstimates.value.get(shipId);
+  const leg = est?.legs[legIndex];
+  if (!leg) {
+    return false;
+  }
+  return leg.to.toUpperCase() === destNaturalId.toUpperCase();
+}
+
+// 在途阶段：返回到达时间 HH:MM（游戏世界时）；否则 undefined。
+function liveArrivalText(shipId: string, legIndex: number): string | undefined {
+  if (!legInTransit(shipId, legIndex)) {
+    return undefined;
+  }
+  const ship = shipsStore.getById(shipId);
+  const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
+  if (!flight) {
+    return undefined;
+  }
+  const t = new Date(flight.arrival.timestamp);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(t.getUTCHours())}:${pad(t.getUTCMinutes())}`;
+}
+
 // 中文精确时长（≥1 天 天/时/分；<1 天 时/分/秒），与 FTC 面板口径一致。
 function formatFlightDuration(ms: number): string {
   if (ms <= 0) {
@@ -1730,10 +1809,15 @@ function flightTotalText(shipId: string): string {
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
                   → {{ sp.plan.stops[0]?.planetName ?? sp.plan.originNaturalId
-                  }}{{ flightTimeText(sp.shipId, 0) }}
+                  }}<template v-if="liveArrivalText(sp.shipId, 0)"
+                    >{{ liveArrivalText(sp.shipId, 0) }}到达</template
+                  ><template v-else>{{ flightTimeText(sp.shipId, 0) }}</template>
                 </template>
                 <template v-else-if="sp.progress">
-                  → {{ sp.progress.stops[0]?.planetName ?? sp.progress.originNaturalId }}
+                  → {{ sp.progress.stops[0]?.planetName ?? sp.progress.originNaturalId
+                  }}<template v-if="liveArrivalText(sp.shipId, 0)"
+                    >{{ liveArrivalText(sp.shipId, 0) }}到达</template
+                  ><template v-else>{{ flightTimeText(sp.shipId, 0) }}</template>
                 </template>
                 <span v-else>—</span>
               </td>
@@ -1785,10 +1869,16 @@ function flightTotalText(shipId: string): string {
               </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
-                  → {{ nextStopName(sp.plan.stops, i) }}{{ flightTimeText(sp.shipId, i + 1) }}
+                  → {{ nextStopName(sp.plan.stops, i)
+                  }}<template v-if="liveArrivalText(sp.shipId, i + 1)"
+                    >{{ liveArrivalText(sp.shipId, i + 1) }}到达</template
+                  ><template v-else>{{ flightTimeText(sp.shipId, i + 1) }}</template>
                 </template>
                 <template v-else-if="sp.progress">
-                  → {{ sp.progress.stops[i + 1]?.planetName ?? sp.progress.originNaturalId }}
+                  → {{ sp.progress.stops[i + 1]?.planetName ?? sp.progress.originNaturalId
+                  }}<template v-if="liveArrivalText(sp.shipId, i + 1)"
+                    >{{ liveArrivalText(sp.shipId, i + 1) }}到达</template
+                  ><template v-else>{{ flightTimeText(sp.shipId, i + 1) }}</template>
                 </template>
                 <span v-else>—</span>
               </td>
@@ -1835,7 +1925,11 @@ function flightTotalText(shipId: string): string {
                 <span v-else>—</span>
               </td>
               <td :class="$style.matCell">
-                归航{{ sp.plan ? flightTimeText(sp.shipId, sp.plan.stops.length) : '' }}
+                归航<template v-if="sp.plan && liveArrivalText(sp.shipId, sp.plan.stops.length)"
+                  >{{ liveArrivalText(sp.shipId, sp.plan.stops.length) }}到达</template
+                ><template v-else-if="sp.plan">{{
+                  flightTimeText(sp.shipId, sp.plan.stops.length)
+                }}</template>
               </td>
               <td :class="$style.narrowCol">
                 <template v-if="sp.plan">
@@ -1850,6 +1944,17 @@ function flightTotalText(shipId: string): string {
           </tbody>
         </table>
 
+        <!-- 执行中且无计划快照（旧版本环线 / 逆推模式）时仅显示飞行时长汇总。
+             完整装船/采购/舱容等汇总依赖 sp.plan，留给有快照的表格行展示。 -->
+        <div v-if="!sp.plan && sp.progress" :class="$style.summary">
+          <div :class="$style.summaryRow">
+            <span :class="$style.summaryLabel">飞行时长：</span>
+            <span>
+              <template v-if="flightTimesLoading">计算中…</template>
+              <template v-else>{{ flightTotalText(sp.shipId) || '--' }}</template>
+            </span>
+          </div>
+        </div>
         <div v-if="sp.plan" :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
