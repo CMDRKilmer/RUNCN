@@ -110,6 +110,12 @@ const runner = new ActionRunner({
     dispatchFinished.value = true;
     // 触发器引擎静默打开的 ACT 窗口据此自动关窗（成功/失败/取消均关闭）。
     getPackageFinished(pkg.global.name).value = true;
+    // 环线阶段完成：执行成功即写回持久化 chainRuns（不依赖 autoDelete）。
+    // 环线脚本自 2026-08-27 起不再 autoDelete，原先仅在 autoDelete 分支调用
+    // 导致站点/归航状态永远停在 arrived，状态检查与自动恢复无法推进下一阶段。
+    if (success) {
+      markChainStageDone(pkg.global.name);
+    }
     // 一次性操作包（BURNGEN 生成）执行成功后自动删除。
     if (success && pkg.autoDelete) {
       const idx = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
@@ -123,8 +129,6 @@ const runner = new ActionRunner({
           userData.triggers.splice(i, 1);
         }
       }
-      // 环线阶段完成：写入持久化 chainRuns，删除 ACT/触发器后列表仍保持完整。
-      markChainStageDone(pkg.global.name);
     }
   },
   onStatusChanged: (title, keepReady) => {

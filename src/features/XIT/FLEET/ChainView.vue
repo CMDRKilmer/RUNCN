@@ -718,8 +718,28 @@ function runChainStepSilently(pkgName: string) {
 function onStatusCheckClick() {
   const steps = collectPendingChainSteps();
   if (steps.length === 0) {
-    statusCheckNotice.value =
-      '状态检查：未发现需要恢复的环线步骤（无运行中的环线，或船数据未加载完成，可稍后再试）。';
+    // 诊断：无运行中环线 vs 船已就位但未匹配到可执行阶段。
+    // 后一种情况给出每艘船的实际停靠位置与预期阶段，便于核对位置/脚本差异。
+    const runs = Object.values(userData.chainRuns).filter(
+      r => shipsStore.getById(r.shipId) !== undefined,
+    );
+    if (runs.length === 0) {
+      statusCheckNotice.value =
+        '状态检查：未发现需要恢复的环线步骤（无运行中的环线，或船数据未加载完成，可稍后再试）。';
+    } else {
+      const details = runs.map(run => {
+        const ship = shipsStore.getById(run.shipId)!;
+        const dockedAt = ship.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+        const progress = runProgress(run);
+        const next = progress.stops.find(s => s.state !== 'done');
+        const expected = next ? `${next.planetName}（${next.naturalId}）` : '归航';
+        return `${run.shipName}：停靠 ${dockedAt ?? '未知'}，预期 ${expected}`;
+      });
+      statusCheckNotice.value =
+        `状态检查：${runs.length} 艘运行中但无待恢复步骤 —— ` +
+        details.join('；') +
+        '。请核对停靠位置、货舱与操作包是否一致。';
+    }
     return;
   }
   for (const step of steps) {
@@ -1217,11 +1237,15 @@ function runProgress(run: UserData.ChainRun): RunProgress {
   const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
   const flightDest = flight ? getEntityNaturalIdFromAddress(flight.destination) : undefined;
   const dockedAt = ship?.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
-  const stops = run.stops.map(stop => {
+  // 环线按序执行：船当前停靠站点之前的所有站必然已通过并执行完成。
+  // 环线脚本不再 autoDelete 后 markChainStageDone 不再触发，旧记录的已通过站
+  // 可能仍停留在 arrived/pending——按停靠位置前推为完成，使状态检查能推进。
+  const dockedStopIndex = run.stops.findIndex(s => s.naturalId === dockedAt);
+  const stops = run.stops.map((stop, i) => {
     const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
     const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
     let state: StopState;
-    if (stop.state === 'done') {
+    if (stop.state === 'done' || (dockedStopIndex >= 0 && i < dockedStopIndex)) {
       state = 'done';
     } else if (dockedAt === stop.naturalId || (pkgExists && fired)) {
       state = 'arrived';
