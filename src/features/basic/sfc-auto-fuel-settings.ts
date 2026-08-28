@@ -293,6 +293,8 @@ async function pushRouteToFtc(tile: PrunTile) {
     from,
     to,
     useGateway: viaGateway,
+    // SFC 自动联动不开星系窗口：环线自动执行时开窗会抢占缓冲槽位干扰 SFC 面板。
+    browse: false,
   });
   // 计算期间航线已再次变化：丢弃过期结果，避免旧航线参数覆盖新航线（重复响应）。
   if (lastPushedRoute.get(tile.anchor) !== key) {

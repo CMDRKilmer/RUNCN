@@ -18,6 +18,37 @@ import {
 } from './fuel-model';
 import { ftcFuelSlider, ftcReactorUsage } from './ftc-fuel-settings';
 
+// 最近一次成功计算的航线 key（供等待方轮询：每段飞行前先确保 FTC 最优方案算完）。
+export const lastFtcCompute = ref<{ key: string; at: number } | undefined>(undefined);
+
+// 等待某船某航线最近的 FTC 计算完成（OPEN_SFC 设目的地后调用，确保最优燃料
+// 滑块应用后再提交飞行；自然/网关任一航线完成即视为就绪）。
+export async function waitForFtcCompute(
+  shipRegistration: string,
+  from: string,
+  to: string,
+  useGateway: boolean,
+  timeoutMs = 8000,
+): Promise<boolean> {
+  const base = `${shipRegistration}|${from}|${to}|`;
+  const gateway = useGateway ? 'gw' : 'nat';
+  const alternate = useGateway ? 'nat' : 'gw';
+  const start = Date.now();
+  const deadline = start + timeoutMs;
+  while (Date.now() < deadline) {
+    const last = lastFtcCompute.value;
+    if (
+      last !== undefined &&
+      last.at >= start &&
+      (last.key === `${base}${gateway}` || last.key === `${base}${alternate}`)
+    ) {
+      return true;
+    }
+    await sleep(100);
+  }
+  return false;
+}
+
 // FTC 最优燃料计算的共享编排层：不依赖 FTC 面板（Vue 组件），
 // SFC 自动设置（features/basic/sfc-auto-fuel-settings）与 FTC 面板共用。
 // 计算成功后把最优参数写入 ftc-fuel-settings 的共享 ref，SFC 滑块自动跟随。
@@ -284,6 +315,10 @@ export interface FtcComputeInput {
   stlPrice?: number;
   ftlPrice?: number;
   timeValue?: number;
+  // 是否自动浏览星系轨道数据（默认 true）。SFC 自动联动（环线/飞行前）传 false：
+  // 计算时不开星系窗口——环线自动执行时开窗会抢占缓冲槽位、干扰 SFC 面板导致
+  // 无法自动出发；星系数据未积累时用已有数据/回退估算。
+  browse?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
@@ -322,15 +357,17 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
-  // 计算时自动浏览星系（无需手动按钮）：起终点星系阻塞获取轨道/恒星质量数据，
-  // 其余无轨道空间站星系后台渐进。浏览后可离线预测起降位置，STL 距离更准。
-  const targets = collectBrowseTargets(from, to);
-  if (targets.critical.length > 0) {
-    progress(`正在获取起终点星系轨道数据（${targets.critical.join('、')}）…`);
-    await browseSystems(targets.critical);
-  }
-  if (targets.background.length > 0) {
-    void browseSystems(targets.background);
+  // 计算时自动浏览星系（可选）：起终点星系阻塞获取轨道/恒星质量数据，
+  // 其余无轨道空间站星系后台渐进。SFC 联动（browse=false）跳过开窗，避免干扰。
+  if (input.browse !== false) {
+    const targets = collectBrowseTargets(from, to);
+    if (targets.critical.length > 0) {
+      progress(`正在获取起终点星系轨道数据（${targets.critical.join('、')}）…`);
+      await browseSystems(targets.critical);
+    }
+    if (targets.background.length > 0) {
+      void browseSystems(targets.background);
+    }
   }
   const planned = planRoutes(from, to);
   const route = input.useGateway ? (planned.gateway ?? planned.natural) : planned.natural;
@@ -379,6 +416,11 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 共享给 SFC 自动设置：写入本次计算的最优燃料滑块 / 反应堆使用量。
   ftcFuelSlider.value = best.fuel;
   ftcReactorUsage.value = best.reactor;
+  // 记录本次成功计算的航线，供 OPEN_SFC 等动作等待（每段飞行前先算好最优燃油）。
+  lastFtcCompute.value = {
+    key: `${input.shipRegistration}|${from}|${to}|${input.useGateway ? 'gw' : 'nat'}`,
+    at: Date.now(),
+  };
   return {
     ok: true,
     message: '',
