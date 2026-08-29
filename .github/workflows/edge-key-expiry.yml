@@ -1,0 +1,69 @@
+name: Edge API Key Expiry Reminder
+
+on:
+  schedule:
+    # 每周一 00:00 UTC（北京时间 08:00）检查一次
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+env:
+  # Partner Center「发布 API」页 Key_1 的到期日期（UTC）。续期后更新此值，
+  # 并同步更新 release.yml 顶部的 EDGE_API_KEY_EXPIRY。
+  EDGE_API_KEY_EXPIRY: '2026-11-09'
+  # 距到期不足该天数（天）时开提醒 issue
+  REMIND_DAYS: '30'
+
+jobs:
+  check:
+    name: Check expiry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open or update reminder issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          EXPIRY="$EDGE_API_KEY_EXPIRY"
+          REMIND="${REMIND_DAYS:-30}"
+          NOW=$(date +%s)
+          EXP=$(date -u -d "$EXPIRY" +%s)
+          DAYS_LEFT=$(( (EXP - NOW) / 86400 ))
+          echo "Edge API key expires on $EXPIRY, days left: $DAYS_LEFT"
+          TITLE="Edge API 密钥即将到期（$EXPIRY）"
+          EXISTING=$(gh issue list --state open --limit 1 \
+            --search "in:title \"$TITLE\"" \
+            --json number --jq '.[0].number' || true)
+          if [ "$DAYS_LEFT" -le "$REMIND" ]; then
+            if [ "$DAYS_LEFT" -le 0 ]; then
+              BODY="⚠️ **Edge Add-ons API 密钥已到期（$EXPIRY，$(( -DAYS_LEFT )) 天前）**，Edge 商店自动发布已失效。
+
+          请立即：
+          1. 到 [Partner Center 发布 API](https://partner.microsoft.com/dashboard/microsoftedge/public/login?ref=dd) 创建新的 API 凭据；
+          2. 更新仓库 secret \`EDGE_API_KEY\`；
+          3. 更新 \`.github/workflows/edge-key-expiry.yml\` 与 \`.github/workflows/release.yml\` 中的 \`EDGE_API_KEY_EXPIRY\`。"
+            else
+              BODY="⚠️ **Edge Add-ons API 密钥将于 $EXPIRY 到期（还剩 $DAYS_LEFT 天）**。
+
+          到期后 Edge 商店自动发布会失败。请：
+          1. 到 [Partner Center 发布 API](https://partner.microsoft.com/dashboard/microsoftedge/public/login?ref=dd) 创建新的 API 凭据；
+          2. 更新仓库 secret \`EDGE_API_KEY\`；
+          3. 更新 \`.github/workflows/edge-key-expiry.yml\` 与 \`.github/workflows/release.yml\` 中的 \`EDGE_API_KEY_EXPIRY\`。"
+            fi
+            if [ -n "$EXISTING" ]; then
+              gh issue edit "$EXISTING" --body "$BODY"
+              echo "Updated reminder issue #$EXISTING"
+            else
+              gh issue create --title "$TITLE" --body "$BODY"
+              echo "Created reminder issue"
+            fi
+          else
+            if [ -n "$EXISTING" ]; then
+              gh issue close "$EXISTING" --comment "Edge API 密钥已续期，提醒关闭。"
+              echo "Closed reminder issue #$EXISTING"
+            else
+              echo "Key is valid (more than $REMIND days left). No reminder needed."
+            fi
+          fi

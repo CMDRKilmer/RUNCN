@@ -3,6 +3,8 @@ env:
   PROJECT_NAME: 琉璃小工具
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   KEEP_RELEASES: '10'
+  # Edge Add-ons API 密钥到期日（UTC），续期后同步更新 edge-key-expiry.yml
+  EDGE_API_KEY_EXPIRY: '2026-11-09'
 
 name: Release
 on:
@@ -221,6 +223,21 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Check Edge API key expiry
+        run: |
+          set -e
+          EXPIRY="$EDGE_API_KEY_EXPIRY"
+          NOW=$(date +%s)
+          EXP=$(date -u -d "$EXPIRY" +%s)
+          DAYS_LEFT=$(( (EXP - NOW) / 86400 ))
+          echo "Edge API key expires on $EXPIRY, days left: $DAYS_LEFT"
+          if [ "$DAYS_LEFT" -le 0 ]; then
+            echo "::error::Edge Add-ons API 密钥已到期（$EXPIRY）。请到 Partner Center 重新生成，更新 EDGE_API_KEY secret 与 EDGE_API_KEY_EXPIRY 后重试。"
+            exit 1
+          fi
+          if [ "$DAYS_LEFT" -le 14 ]; then
+            echo "::warning::Edge Add-ons API 密钥将于 $DAYS_LEFT 天后到期（$EXPIRY），请尽快续期。"
+          fi
       - name: Create zip for Edge submission
         run: |
           cd dist
