@@ -1578,6 +1578,20 @@ const visibleTables = computed<ChainTableRow[]>(() =>
   chainTab.value === 'plan' ? planTables.value : runningTables.value,
 );
 
+// 运行中环线折叠状态：按 shipId 持久化（跨面板重挂载保持），折叠后仅显示船名行。
+const collapsedRuns = useTileState<string[] | undefined>('chainCollapsed', undefined);
+
+function isRunCollapsed(shipId: string) {
+  return collapsedRuns.value?.includes(shipId) ?? false;
+}
+
+function toggleRunCollapsed(shipId: string) {
+  const current = collapsedRuns.value ?? [];
+  collapsedRuns.value = current.includes(shipId)
+    ? current.filter(x => x !== shipId)
+    : [...current, shipId];
+}
+
 // 环线运行记录保留策略：遍历全部 chainRuns（不限于当前选中的船）。
 // 完成的环线（含归航卸载）不再自动清理，保留在状态列表显示「完成」；
 // 孤立的预留列表（ACT 脚本与触发器已全部删除且非完成态）直接移除，
@@ -1948,6 +1962,13 @@ function flightTotalText(shipId: string): string {
 
       <div v-for="sp in visibleTables" :key="sp.shipId" :class="$style.shipPlan">
         <div :class="$style.shipHeader">
+          <span
+            v-if="sp.progress"
+            :class="[$style.caret, isRunCollapsed(sp.shipId) ? '' : $style.caretOpen]"
+            :title="isRunCollapsed(sp.shipId) ? '展开环线进度' : '折叠环线进度'"
+            @click="toggleRunCollapsed(sp.shipId)"
+            >▶</span
+          >
           <span>
             {{ sp.ship ? shipLabel(sp.ship) : (sp.shipName ?? '') }}
             <template v-if="sp.progress">
@@ -1960,7 +1981,7 @@ function flightTotalText(shipId: string): string {
             >清理计划</PrunButton
           >
         </div>
-        <div :class="$style.route">
+        <div v-if="!isRunCollapsed(sp.shipId)" :class="$style.route">
           <span :class="$style.routeLabel">航线：</span>
           <span :class="$style.routeOrigin">{{
             sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
@@ -1977,7 +1998,7 @@ function flightTotalText(shipId: string): string {
           }}</span>
         </div>
 
-        <table :class="$style.table">
+        <table v-if="!isRunCollapsed(sp.shipId)" :class="$style.table">
           <colgroup>
             <col :class="$style.colSeq" />
             <col :class="$style.colStation" />
@@ -2153,7 +2174,7 @@ function flightTotalText(shipId: string): string {
 
         <!-- 执行中且无计划快照（旧版本环线 / 逆推模式）时仅显示飞行时长汇总。
              完整装船/采购/舱容等汇总依赖 sp.plan，留给有快照的表格行展示。 -->
-        <div v-if="!sp.plan && sp.progress" :class="$style.summary">
+        <div v-if="!isRunCollapsed(sp.shipId) && !sp.plan && sp.progress" :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
@@ -2162,7 +2183,7 @@ function flightTotalText(shipId: string): string {
             </span>
           </div>
         </div>
-        <div v-if="sp.plan" :class="$style.summary">
+        <div v-if="!isRunCollapsed(sp.shipId) && sp.plan" :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
@@ -2424,6 +2445,20 @@ function flightTotalText(shipId: string): string {
   gap: 0.5rem;
   font-weight: 600;
   color: rgb(63, 162, 222);
+}
+
+.caret {
+  display: inline-block;
+  cursor: pointer;
+  user-select: none;
+  color: #8a9aa8;
+  font-size: 12px;
+  transform: scale(0.8);
+  transition: transform 0.1s ease-out;
+}
+
+.caretOpen {
+  transform: scale(0.8) rotate(90deg);
 }
 
 .finished {
