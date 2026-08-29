@@ -210,3 +210,25 @@ jobs:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+
+  edge:
+    needs: build
+    name: Submit (Edge)
+    environment: Edge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Create zip for Edge submission
+        run: |
+          cd dist
+          zip -r ../edge.zip ./*
+      - uses: web-scrobbler/edge-addon@v2.0.4
+        with:
+          product_id: ${{ secrets.EDGE_PRODUCT_ID }}
+          client_id: ${{ secrets.EDGE_CLIENT_ID }}
+          api_key: ${{ secrets.EDGE_API_KEY }}
+          zip: edge.zip
+          notes: Release ${{ needs.build.outputs.VERSION }}
