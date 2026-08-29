@@ -14,7 +14,7 @@ env:
   # 并同步更新 release.yml 顶部的 EDGE_API_KEY_EXPIRY。
   EDGE_API_KEY_EXPIRY: '2026-11-09'
   # 距到期不足该天数（天）时触发提醒（运行失败 + 尽力开 issue）
-  REMIND_DAYS: '30'
+  REMIND_DAYS: '99999'
 
 jobs:
   check:
