@@ -16,7 +16,7 @@ import {
   FuelOption,
   ShipPerformance,
 } from './fuel-model';
-import { ftcFuelSlider, ftcReactorUsage } from './ftc-fuel-settings';
+import { setFtcFuelSlider, setFtcReactorUsage } from './ftc-fuel-settings';
 
 // 最近一次成功计算的航线 key（供等待方轮询：每段飞行前先确保 FTC 最优方案算完）。
 export const lastFtcCompute = ref<{ key: string; at: number } | undefined>(undefined);
@@ -413,9 +413,10 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
   const tv = input.timeValue ?? 0;
   const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
-  // 共享给 SFC 自动设置：写入本次计算的最优燃料滑块 / 反应堆使用量。
-  ftcFuelSlider.value = best.fuel;
-  ftcReactorUsage.value = best.reactor;
+  // 共享给 SFC 自动设置：按船写入本次计算的最优燃料滑块 / 反应堆使用量。
+  // （多船 SFC 面板同时打开时各船写各自的参数，互不覆盖。）
+  setFtcFuelSlider(input.shipRegistration, best.fuel);
+  setFtcReactorUsage(input.shipRegistration, best.reactor);
   // 记录本次成功计算的航线，供 OPEN_SFC 等动作等待（每段飞行前先算好最优燃油）。
   lastFtcCompute.value = {
     key: `${input.shipRegistration}|${from}|${to}|${input.useGateway ? 'gw' : 'nat'}`,

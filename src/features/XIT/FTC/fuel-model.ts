@@ -99,15 +99,63 @@ export interface FuelOption {
 //   旧值 hyperthrust 0.02 错误——BP-OHMI 超推力显示"每秒0.03单位燃料"）。
 const STL_ENGINE_SPEED: Record<
   string,
-  { vBase: number; k: number; vSat: number; fuelC: number; flow: number }
+  {
+    vBase: number;
+    k: number;
+    vSat: number;
+    fuelC: number;
+    flow: number;
+    loadExp: number;
+    landingLoadCoef: number;
+  }
 > = {
-  STL_ENGINE_HYPERTHRUST: { vBase: 418187, k: 0.756, vSat: 90800, fuelC: 2.81e-5, flow: 0.03 }, // HCB 实测
+  STL_ENGINE_HYPERTHRUST: {
+    vBase: 418187,
+    k: 0.756,
+    vSat: 90800,
+    fuelC: 2.81e-5,
+    flow: 0.03,
+    loadExp: 0.5,
+    landingLoadCoef: 2.2e-4,
+  }, // HCB 实测
   // fuelSaving（2026-08-27 OOG LCB 实测修正）：旧借值 167000/0.885/74500（v0.1≈21.8k）
   // 严重低估——OOG 实测离港/进近按统一段模型反推巡航 v0.1≈65k、饱和 ~69.8k。
-  STL_ENGINE_FUEL_SAVING: { vBase: 246530, k: 0.578, vSat: 69754, fuelC: 5.2e-6, flow: 0.0075 }, // OOG LCB 实测
-  STL_ENGINE_STANDARD: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5, flow: 0.015 }, // BP-OHMI 实测（≈advanced）
-  STL_ENGINE_ADVANCED: { vBase: 216000, k: 0.465, vSat: 75200, fuelC: 2.85e-5, flow: 0.02 }, // BP-OHMI(AEN) 实测
-  STL_ENGINE_GLASS: { vBase: 357000, k: 0.648, vSat: 74500, fuelC: 2.84e-5, flow: 0.015 }, // BP-OHMI(玻璃) 实测
+  STL_ENGINE_FUEL_SAVING: {
+    vBase: 246530,
+    k: 0.578,
+    vSat: 69754,
+    fuelC: 5.2e-6,
+    flow: 0.0075,
+    loadExp: 0.87,
+    landingLoadCoef: 2.7e-4,
+  }, // OOG LCB 实测
+  STL_ENGINE_STANDARD: {
+    vBase: 216000,
+    k: 0.465,
+    vSat: 75200,
+    fuelC: 2.85e-5,
+    flow: 0.015,
+    loadExp: 0.6,
+    landingLoadCoef: 2.2e-4,
+  }, // BP-OHMI 实测（≈advanced）
+  STL_ENGINE_ADVANCED: {
+    vBase: 216000,
+    k: 0.465,
+    vSat: 75200,
+    fuelC: 2.85e-5,
+    flow: 0.02,
+    loadExp: 0.6,
+    landingLoadCoef: 2.2e-4,
+  }, // BP-OHMI(AEN) 实测
+  STL_ENGINE_GLASS: {
+    vBase: 357000,
+    k: 0.648,
+    vSat: 74500,
+    fuelC: 2.84e-5,
+    flow: 0.015,
+    loadExp: 0.6,
+    landingLoadCoef: 2.2e-4,
+  }, // BP-OHMI(玻璃) 实测
 };
 const DEFAULT_STL_SPEED = STL_ENGINE_SPEED.STL_ENGINE_HYPERTHRUST;
 // 自然 FTL 模型（2026-08-26 多船/多配置实测校准，蓝图性能驱动）：
@@ -175,12 +223,12 @@ function stlEngineParams(engineOption: string | undefined) {
 }
 
 // STL 巡航速度（km/s @ 燃料滑块 f）：饱和模型 v(f) = min(V_BASE×f^K, V_SAT)。
-// 整条曲线查引擎表（引擎类型决定，非每船校准）；G力/质量不影响。
+// 整条曲线查引擎表（引擎类型决定，非每船校准）；G力/质量不影响（见 loadExp 载重修正）。
 // 实测：hyperthrust f≥0.2 饱和 90800；advanced f≈0.45 饱和 74500；glass f≈0.1 饱和 74500。
 export function stlSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = stlEngineParams(ship.stlEngineOption);
   const f = Math.max(0.001, fuel);
-  return Math.min(p.vBase * Math.pow(f, p.k), p.vSat);
+  return Math.min(p.vBase * Math.pow(f, p.k), p.vSat) * stlLoadFactor(ship);
 }
 
 // ---- 离港/进近段速度（2026-08-27 重构：段燃料 Q 驱动 + 逐引擎 Weibull 标定）----
@@ -234,39 +282,23 @@ const DEFAULT_STL_SEGMENT_CURVE = STL_SEGMENT_CURVES.STL_ENGINE_STANDARD;
 // 缺罐数据时回退饱和段速度（V_SAT，保守取上限——大多数跨星系船都有蓝图罐数据）。
 const STL_SEGMENT_G_REF = 8;
 const STL_SEGMENT_G_EXP = 0.3;
-// ---- 推力受限修正（2026-08-27 HCB 载重实测三档验证）----
-// 段速度 = V_SAT_G8 × (G/8)^0.3 × Weibull(Q)，前提是飞船处于 G 受限
-// （加速度 = G×9.81）。载重使飞船进入推力受限（a = min(推力/质量, G×9.81) < G×9.81）
-// 时，段速度整体按 (a/(G×9.81))^0.55 下降：
-//   HCB(hyperthrust, G15, 推力260000, 空1765t) 三档载重实测（HRT→VH-192c）：
-//     0t(a=147.2)→2526t(a=60.6)→4974t(a=38.6)，离港 19,266→12,480→9,307、
-//     进近 22,333→14,106→10,486；反推指数 0.49~0.565（平均 0.53，0.55 在噪声内）。
-//   BP-OHMI(standard, G8, 880t)：载重 0→500t，a 恒 78.5（G 受限，196659/1380=142>78.5）
-//     → 无影响（BTF 实测确认）。
-// 用实时加速度（ship.acceleration，已含载荷）对比 G 上限；无加速度数据时用
-// 推力/质量回退。G 受限船 factor=1（不影响既有标定）。
-// ⚠️ 注意：HCB 空载本身就比超推力曲线快 12-19%（基曲线非普适，另一独立问题）；
-//    HCB 着陆燃料随载重增加（43→58u）疑似含质量项，待研究。
-const STL_THRUST_LIMIT_EXP = 0.55;
-function stlThrustLimitFactor(ship: ShipPerformance): number {
-  const g = ship.maxGFactor;
-  if (g === undefined || g <= 0) {
+// ---- 载重修正（2026-08-29 BTF 载重扫描重构，替代旧推力受限模型）----
+// 旧「推力受限」模型只在加速度 < G×9.81 时减速，且 G 受限船完全不减速。
+// 但 BTF 载重扫描（BP-OHMI standard G8，HRT→VH-331g / VH-192c）显示：
+//   - G 受限区（600/1200t，a 恒 78.5）转移速度已降 19%/38% → 载重直接影响段速度，不只是推力受限；
+//   - 节油引擎（OOG LCB 同款）载重指数 ≈0.87（四档几乎恒定），标准引擎 ≈0.6、超推力(HCB) ≈0.5。
+// 统一改为按质量比的平滑模型（引擎表 loadExp 标定）：
+//   v_load = v0 × (m0/m)^loadExp，m0=整备质量、m=当前质量（含载重+燃料）。
+//   空载（m=m0）因子=1，不影响既有空载标定；载重使转移/离港/进近段速度整体下降。
+//   实测对照（f=0.05）：fuelSaving 600/1200/1800/2400t 误差 ≤5%；标准引擎 1200t +5%、2400t +17%。
+function stlLoadFactor(ship: ShipPerformance): number {
+  const m = ship.mass;
+  const m0 = ship.operatingEmptyMass;
+  if (m === undefined || m0 === undefined || m0 <= 0 || m <= m0) {
     return 1;
   }
-  const gLimit = g * 9.81;
-  let a = ship.acceleration;
-  if (
-    (a === undefined || a <= 0) &&
-    ship.thrust !== undefined &&
-    ship.mass !== undefined &&
-    ship.mass > 0
-  ) {
-    a = ship.thrust / ship.mass;
-  }
-  if (a === undefined || a <= 0 || a >= gLimit) {
-    return 1;
-  }
-  return Math.pow(a / gLimit, STL_THRUST_LIMIT_EXP);
+  const loadExp = stlEngineParams(ship.stlEngineOption).loadExp;
+  return Math.pow(m0 / m, loadExp);
 }
 function stlSegmentSpeedFor(
   ship: ShipPerformance,
@@ -279,7 +311,7 @@ function stlSegmentSpeedFor(
   // 缺余量数据时回退罐容量（罐满时两者一致）。
   const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
   if (tank === undefined || tank <= 0) {
-    return curve.vSat;
+    return curve.vSat * stlLoadFactor(ship);
   }
   const q = approach
     ? STL_TANK_FUEL_COEF * tank * fuel + STL_APPROACH_EXTRA
@@ -290,7 +322,7 @@ function stlSegmentSpeedFor(
     vSat *= Math.pow(g / STL_SEGMENT_G_REF, STL_SEGMENT_G_EXP);
   }
   const v = vSat * (1 - Math.exp(-Math.pow(q / curve.q0, curve.k)));
-  return v * stlThrustLimitFactor(ship);
+  return v * stlLoadFactor(ship);
 }
 
 function stlSegmentCurveFor(ship: ShipPerformance): {
@@ -342,6 +374,9 @@ export function conditionFactor(condition: number): number {
 // 跨星系（有跃迁）航线：stlFuel = 0.49×罐×min(f, f_cap) + 0.49×罐×f + 进近差 + 着陆 + 起飞。
 // 空间站无大气：到站无着陆、出发无起飞（起降段相互独立，R 缺失只影响自身段）。
 // 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
+// ⚠️ 已知差异（2026-08-29 BTF 实测）：同星系走「跃迁点」的转移段燃料 = 2×0.49×罐×min(f,0.5)，
+//   且 f 饱和点 = 0.5 与引擎无关（标准/节油均 740u 级）。与跨星系离港段的 f_cap=10.96×流量 不同，
+//   也非 C_F×f×d。未改代码（需区分直飞/跃迁点路线后再建模）。
 const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近）= 0.49×罐×f
 const STL_DEPARTURE_F_SAT_COEF = 10.96; // 离港 f 饱和系数：f_cap = 系数×流量（OOG LCB 0.0075→0.0822 实测）
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
@@ -353,6 +388,13 @@ const STL_LANDING_G_REF = 8; // 船体系数基准 G（新手船/WCB）
 const STL_LANDING_G_EXP = 0.6; // 回退 G 指数（无流量数据时：HCB 1.456≈(15/8)^0.6）
 const STL_LANDING_G_EXP_SOFT = 1 / 6; // 弱 G 修正指数（有流量时，配合流量主导）
 const STL_LANDING_FLOW_REF = 0.015; // 着陆燃料流量基准（WCB 标准引擎 u/s）
+// 着陆/起飞燃料载重系数（2026-08-29 BTF 载重扫描，按引擎在 STL_ENGINE_SPEED.landingLoadCoef 标定）：
+//   landing_fuel = base × (1 + landingLoadCoef × 载重吨)
+//   标准引擎 2.2e-4 两行星（VH-331g 40→66u / VH-192c 27→41u）均吻合（误差<1u）；
+//   节油引擎 2.7e-4（VH-192c 14→23u 10 点、VH-331g 21→35u 收敛值；低载重略高）。
+//   着陆/起飞段燃料均随载重增加、与 f 无关。
+// ⚠️ 载重 = mass − operatingEmptyMass 含燃料重量（BTF 无燃料故等于纯载重；实船略高估，可接受）。
+const STL_LANDING_LOAD_COEF = 2.2e-4; // 默认值（超推力/未识别引擎回退）
 
 // 着陆船体系数（2026-08-27 OOG LCB 实测修正）：
 // - 主因子 = stlFuelFlowRate / 0.015（流量主导）：OOG LCB 省油引擎 0.0075 → 0.5，
@@ -483,11 +525,16 @@ export function computeFuelOption(
       : 0;
     // 离港（f 饱和）+ 进近（不饱和）+ 进近差 + 着陆 + 起飞。
     const fDep = Math.min(fuel, stlDepartureFSat(ship));
+    // 着陆/起飞载重项：base × (1 + 系数×载重)。系数按引擎（节油引擎载重敏感性更高）。
+    // 载重 = 当前质量 − 整备质量。
+    const load = Math.max(0, ship.mass - (ship.operatingEmptyMass ?? ship.mass));
+    const landingLoadCoef =
+      stlEngineParams(ship.stlEngineOption).landingLoadCoef ?? STL_LANDING_LOAD_COEF;
     stlFuel =
       STL_TANK_FUEL_COEF * tank * fDep +
       STL_TANK_FUEL_COEF * tank * fuel +
       (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
-      lf * (landing + takeoff);
+      lf * (landing + takeoff) * (1 + landingLoadCoef * load);
   } else {
     stlFuel = d !== undefined ? cF * fuel * d : 0;
   }

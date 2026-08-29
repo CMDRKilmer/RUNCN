@@ -5,7 +5,7 @@ import { sleep } from '@src/utils/sleep';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { getSliderValue } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
-import { ftcFuelSlider } from '@src/features/XIT/FTC/ftc-fuel-settings';
+import { getFtcFuelSlider } from '@src/features/XIT/FTC/ftc-fuel-settings';
 import { waitForFtcCompute } from '@src/features/XIT/FTC/ftc-compute';
 
 interface Data {
@@ -64,8 +64,10 @@ function findSliderByLabel(tile: PrunTile, label: string): Element | undefined {
 }
 
 // 等 FTC 最优燃料滑块应用到 SFC 面板（SFC 自动联动计算后写入滑块值）。
-function waitForFtcFuelSlider(tile: PrunTile): Promise<boolean> {
-  const target = ftcFuelSlider.value;
+// 按飞船读各自的最优参数：多船环线同时出发时，各自面板等自己的值，避免被
+// 其他船的参数（全局值）误导而带错燃料起飞。
+function waitForFtcFuelSlider(tile: PrunTile, registration: string): Promise<boolean> {
+  const target = getFtcFuelSlider(registration);
   if (target === undefined) {
     return Promise.resolve(false);
   }
@@ -102,7 +104,7 @@ export const DEPART = act.addActionStep<Data>({
     if (from !== undefined && to) {
       const computed = await waitForFtcCompute(registration, from, to, false, 8000);
       if (computed) {
-        const applied = await waitForFtcFuelSlider(tile);
+        const applied = await waitForFtcFuelSlider(tile, registration);
         if (applied) {
           log.info('已应用 FTC 最优燃料方案');
         } else {

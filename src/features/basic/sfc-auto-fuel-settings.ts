@@ -10,7 +10,12 @@ import {
 } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
-import { ftcFuelSlider, ftcReactorUsage } from '@src/features/XIT/FTC/ftc-fuel-settings';
+import {
+  getFtcFuelSlider,
+  getFtcReactorUsage,
+  ftcFuelSliders,
+  ftcReactorUsages,
+} from '@src/features/XIT/FTC/ftc-fuel-settings';
 import { computeFtcPlan } from '@src/features/XIT/FTC/ftc-compute';
 
 // 打开 SFC 时自动写入的燃料参数 = FTC 计算出的最优方案（燃料消耗 / 反应堆使用量）。
@@ -52,13 +57,15 @@ const pendingLabels = new WeakMap<Element, Set<string>>();
 // 已打开的 SFC 磁贴当前滑块（按标签），FTC 参数变化时自动重新写入。
 const tileSliders = new Map<PrunTile, Map<string, Element>>();
 
-// 读取 FTC 计算出的最优燃料参数；无结果（undefined）返回 undefined（不改滑块）。
-function ftcValueFor(label: string | undefined): number | undefined {
+// 读取该飞船 FTC 计算出的最优燃料参数；无结果（undefined）返回 undefined（不改滑块）。
+// 按飞船取各自的值：环线多船 SFC 面板同时打开时，每艘船用自己算出的最优燃料，
+// 避免后算完的船把全局值覆盖到其他船的面板（互相覆盖 + 反馈抖动）。
+function ftcValueFor(ship: string | undefined, label: string | undefined): number | undefined {
   if (label === '燃料消耗') {
-    return ftcFuelSlider.value;
+    return getFtcFuelSlider(ship);
   }
   if (label === '反应堆使用量') {
-    return ftcReactorUsage.value;
+    return getFtcReactorUsage(ship);
   }
   return undefined;
 }
@@ -77,7 +84,7 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   if (!label) {
     return;
   }
-  const value = ftcValueFor(label);
+  const value = ftcValueFor(tile.parameter, label);
   // 无 FTC 计算结果：不改滑块，由玩家自行决定。
   if (value === undefined) {
     return;
@@ -227,7 +234,7 @@ function applyFtcSettings(onlyTile?: PrunTile) {
     }
   }
 }
-watch([ftcFuelSlider, ftcReactorUsage], applyFtcSettingsDebounced);
+watch([ftcFuelSliders, ftcReactorUsages], applyFtcSettingsDebounced);
 
 // 已推送给 FTC 的航线（飞船|起|终|网关），防反馈循环：
 // FTC 写滑块 → SFC 重算（起终点不变）→ 不再重复推送；仅用户改起终点时才重新推送。
@@ -306,7 +313,7 @@ async function pushRouteToFtc(tile: PrunTile) {
     return;
   }
   // 算完后立刻清掉自己的已配置标记，并主动遍历当前磁贴的滑块重新检查写入。
-  // 绕开 watch 的同值短路：ftcFuelSlider/Reactor 同值赋值时 watch 不触发，
+  // 绕开 watch 的同值短路：本船 ftcFuelSlider/Reactor 同值赋值时 watch 不触发，
   // applyFtcSettings 不跑，fuel/reactor slider 不会被"确认"过一次，用户的
   // console 看不到 set 日志。主动调 applyFtcSettings(tile) 保证新航线参数
   // 一定被 configureSlider 走过一次（current === value 时打 already 日志）。
