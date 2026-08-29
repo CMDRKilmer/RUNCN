@@ -211,12 +211,21 @@ function clearAllShips() {
   chainShipIds.value = [];
 }
 
+// ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
+// 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
+// 显示在「飞行」列与汇总「飞行时长」行；下游基地用未来预计位置计算。
+// 声明在本节顶部：环线规划（plan）读取预估推导各站到达时刻产出。
+const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
+const flightTimesLoading = ref(false);
+
 // ── 环线计划（合并容量，单一路线） ───────────────────────────
 const planOrigin = computed(() =>
   selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
 );
 
-const plan = computed(() => {
+// 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
+// 飞行期间基地继续生产，到港时实际可提取量 = 当前库存 + 日均净变化 × 到达前小时数。
+function runPlanChainRoute(arrivalHours?: Map<string, number>) {
   if (selectedBases.value.length === 0 || selectedShips.value.length === 0) {
     return undefined;
   }
@@ -232,7 +241,59 @@ const plan = computed(() => {
     originStock: shipWarehouseStock(selectedShips.value[0]!),
     // 出发地交易所：CX 采购下单处，用于检测空间站订单簿库存。
     exchangeCode: selectedShips.value[0]!.exchangeCode,
+    ...(arrivalHours !== undefined ? { arrivalHoursByNaturalId: arrivalHours } : {}),
   });
+}
+
+// 基础规划（未含到达时刻产出）：决定站点顺序，供飞行预估与「站→船」映射。
+const basePlan = computed(() => runPlanChainRoute());
+
+// ── 多船分配结果 ─────────────────────────────────────────────
+// 并行分段：每艘船跑航线的连续一段，同时出动，总耗时 ≈ 单环线 / 船数。
+// baseShipPlans 不含到达时刻产出（飞行预估依赖它，避免循环依赖）。
+const baseShipPlans = computed(() => {
+  const p = basePlan.value;
+  if (!p || selectedShips.value.length === 0) {
+    return [];
+  }
+  return splitChainPlanAcrossShips(p, selectedShips.value, selectedBases.value);
+});
+
+// 各站预计到达时刻（相对规划时刻的小时数）：由飞行预估（异步）推导。
+// 预估就绪前为空 Map（取货按当前库存规划）；每站取服务该船的环线预估
+// 到达时刻（多船分段时各船并行出动、分别到站）。
+const arrivalHoursByNaturalId = computed(() => {
+  const map = new Map<string, number>();
+  for (const sp of baseShipPlans.value) {
+    const est = flightEstimates.value.get(sp.ship.ship.id);
+    if (!est) {
+      continue;
+    }
+    const startAtMs = est.legs[0]?.departAtMs ?? gameNow();
+    for (let i = 0; i < sp.plan.stops.length; i++) {
+      const stop = sp.plan.stops[i]!;
+      const leg = est.legs.at(i);
+      if (leg === undefined || !leg.ok) {
+        continue;
+      }
+      const hours = (leg.arriveAtMs - startAtMs) / 3600000;
+      if (hours <= 0) {
+        continue;
+      }
+      const existing = map.get(stop.naturalId);
+      if (existing === undefined || hours < existing) {
+        map.set(stop.naturalId, hours);
+      }
+    }
+  }
+  return map;
+});
+
+// 主规划：含到达时刻预计产出（取货量更贴近到港时实际可提取量）。
+// 飞行预估就绪后自动重算；未就绪时复用基础规划结果（避免重复计算）。
+const plan = computed(() => {
+  const hours = arrivalHoursByNaturalId.value;
+  return hours.size === 0 ? basePlan.value : runPlanChainRoute(hours);
 });
 
 const loading = computed(
@@ -241,14 +302,19 @@ const loading = computed(
 );
 const hasStops = computed(() => (plan.value?.stops.length ?? 0) > 0);
 
-// ── 多船分配结果 ─────────────────────────────────────────────
-// 并行分段：每艘船跑航线的连续一段，同时出动，总耗时 ≈ 单环线 / 船数。
+// 主多船分配结果（用于展示与执行）。
+// 传到达时刻产出映射，使分段子计划的取货量也按到港时预计库存计算。
 const shipPlans = computed(() => {
   const p = plan.value;
   if (!p || selectedShips.value.length === 0) {
     return [];
   }
-  return splitChainPlanAcrossShips(p, selectedShips.value, selectedBases.value);
+  return splitChainPlanAcrossShips(
+    p,
+    selectedShips.value,
+    selectedBases.value,
+    arrivalHoursByNaturalId.value,
+  );
 });
 
 // 未参与分配的船（无货舱，或船多于站点数）。
@@ -256,22 +322,18 @@ const unusedShipCount = computed(() =>
   selectedShips.value.length > 0 ? selectedShips.value.length - shipPlans.value.length : 0,
 );
 
-// ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
-// 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
-// 显示在「飞行」列与汇总「飞行时长」行；下游基地用未来预计位置计算。
-const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
-const flightTimesLoading = ref(false);
-
 // 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
-// 同时响应规划（shipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
-// eligibleShips / shipPlans 中，但飞行列仍需读取预估——按 shipId 收集
+// 同时响应规划（baseShipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
+// eligibleShips / baseShipPlans 中，但飞行列仍需读取预估——按 shipId 收集
 // 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
+// 预估基于 baseShipPlans（不含到达时刻产出）：到达时刻产出只影响取货量、
+// 不影响站点顺序，避免「预估 → 规划 → 预估」循环。
 // 注：watch 内部会引用 activeRuns，必须在 activeRuns 定义之后再注册；放在下方
 // 「环线执行进度」computed 之后调用 registerFlightTimeWatch()。
 let flightTimeToken = 0;
 function registerFlightTimeWatch() {
   watch(
-    [shipPlans, activeRuns, () => shipsStore.fetched.value],
+    [baseShipPlans, activeRuns, () => shipsStore.fetched.value],
     async ([plans, runs, shipsFetched]) => {
       // 船数据未就绪时跳过（估算需读取飞船实时质量/加速度与蓝图）。
       if (!shipsFetched) {

@@ -1,5 +1,5 @@
 import { getPlanetBurn } from '@src/core/burn';
-import type { BurnValues } from '@src/core/burn';
+import type { BurnValues, MaterialBurn } from '@src/core/burn';
 import { getBaseProducts } from '@src/core/base-products';
 import {
   clampTargetDays as clampTargetDaysUtil,
@@ -9,6 +9,7 @@ import { comparePlanets } from '@src/core/game-lookups';
 import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
+import { gameNow } from '@src/infrastructure/fio/orbit';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -155,6 +156,132 @@ function startedOrderSupplement(siteId: string): {
   return { input, output };
 }
 
+// 预计到港时新增产出：按生产线订单起止时间精确推算（生产随时间线性累积）。
+// 生产线模型：capacity = 并行槽位数，每订单占一个槽位、产出 outputs[].amount；
+// 排队订单按序填满空闲槽位；循环（recurring）订单完成后副本在队尾重新入队
+// （循环添加）——生产线到港前持续排产，连续多批（含未开始与循环批次）都能计入。
+// 区间内完成比例 = (到港进度 − 当前进度)，进度 = (t − start) / (end − start) 钳制到 [0,1]；
+// 已完成订单（end ≤ now）的产出已计入当前库存，不重复计算。
+function projectedProductionByArrival(
+  siteId: string,
+  ticker: string,
+  now: number,
+  arrivalMs: number,
+): number {
+  const lines = productionStore.getBySiteId(siteId);
+  if (!lines || arrivalMs <= now) {
+    return 0;
+  }
+  let produced = 0;
+
+  const countOrder = (outputs: PrunApi.MaterialAmountValue[], start: number, end: number) => {
+    if (end <= now || start >= arrivalMs) {
+      return;
+    }
+    const span = end - start;
+    if (span <= 0) {
+      return;
+    }
+    const progress = (t: number) => Math.min(Math.max((t - start) / span, 0), 1);
+    const fraction = progress(arrivalMs) - progress(now);
+    if (fraction <= 0) {
+      return;
+    }
+    for (const out of outputs) {
+      if (out.material.ticker === ticker) {
+        produced += out.amount * fraction;
+      }
+    }
+  };
+
+  interface PendingOrder {
+    duration: number;
+    recurring: boolean;
+    outputs: PrunApi.MaterialAmountValue[];
+  }
+
+  for (const line of lines) {
+    const capacity = line.capacity;
+    if (capacity <= 0) {
+      continue;
+    }
+    // 槽位释放时刻（升序；空闲槽位数 = capacity − 长度）。
+    const slotFree: number[] = [];
+    // 等待队列（FIFO）：排队订单与循环订单完成后的副本。
+    const queue: PendingOrder[] = [];
+    // 未来时刻加入队列的循环副本：{ at, order }，按 at 升序。
+    const joinAt: { at: number; order: PendingOrder }[] = [];
+    const requeue = (order: PendingOrder, at: number) => {
+      joinAt.push({ at, order });
+      joinAt.sort((a, b) => a.at - b.at);
+    };
+
+    for (const order of line.orders) {
+      if (order.duration?.millis == null || order.halted) {
+        continue;
+      }
+      const pending: PendingOrder = {
+        duration: order.duration.millis,
+        recurring: order.recurring,
+        outputs: order.outputs,
+      };
+      if (order.started) {
+        // 已开始订单：占用槽位直到 completion（已完成的不占位）。
+        const start = order.started.timestamp;
+        const end = order.completion?.timestamp ?? start + order.duration.millis;
+        if (end > now) {
+          slotFree.push(end);
+        }
+        countOrder(order.outputs, start, end);
+        if (order.recurring) {
+          requeue(pending, end);
+        }
+      } else {
+        queue.push(pending);
+      }
+    }
+
+    // 事件模拟：按时间推进。有空槽则在当前时刻启动队首订单；
+    // 无空槽则推进到最早槽位释放时刻；循环订单完成后副本在队尾重新排队。
+    let t = now;
+    while ((queue.length > 0 || joinAt.length > 0) && t < arrivalMs) {
+      // 已到时刻的循环副本并入队尾。
+      while (joinAt.length > 0 && joinAt[0].at <= t) {
+        queue.push(joinAt.shift()!.order);
+      }
+      if (queue.length === 0) {
+        // 队列空：跳到最早副本加入时刻（已由 while 条件保证 joinAt 非空）。
+        const next = joinAt[0].at;
+        if (next >= arrivalMs) {
+          break;
+        }
+        t = next;
+        continue;
+      }
+      if (slotFree.length < capacity) {
+        // 有空槽：当前时刻启动队首订单。
+        const pending = queue.shift()!;
+        const start = t;
+        const end = start + pending.duration;
+        countOrder(pending.outputs, start, end);
+        if (pending.recurring) {
+          requeue(pending, end);
+        }
+        slotFree.push(end);
+      } else {
+        // 无空槽：推进到最早槽位释放时刻。
+        const nextFree = Math.min(...slotFree);
+        if (nextFree >= arrivalMs) {
+          break;
+        }
+        slotFree.splice(slotFree.indexOf(nextFree), 1);
+        t = nextFree;
+      }
+    }
+  }
+  return produced;
+}
+
 // 有效 burn：在 getPlanetBurn 基础上并入 started 订单的日耗/日产。
 // burn 只记录「已出现在生产/劳动力」的 ticker，纯 started 产线的物料
 // （如正在运行的 PCB 线的 BCO/BGO）不在 burn 中，其库存也从存储补读，
@@ -234,6 +361,9 @@ export function planChainRoute(input: {
   groupProducedTickers?: Set<string>;
   // 出发地交易所代码（CX Buy 下单处），用于购买时检测空间站订单簿库存。
   exchangeCode?: string;
+  // 各站预计到达时刻（相对规划时刻的小时数）：飞行期间基地继续生产/消耗，
+  // 取货量按到达时预计库存计算，否则到港时取货包装不完飞行期间的新增产出。
+  arrivalHoursByNaturalId?: Map<string, number>;
 }): ChainPlan | undefined {
   const { originNaturalId, capacity, bases } = input;
   if (capacity.weight <= 0 && capacity.volume <= 0) {
@@ -417,6 +547,29 @@ export function planChainRoute(input: {
 
   const byNaturalId = new Map(bases.map(x => [x.naturalId, x] as const));
 
+  // 到达时刻预计库存：飞行期间基地继续生产，到港时可提取量高于当前库存。
+  // 产出部分按生产线订单起止时间精确推算（projectedProductionByArrival），
+  // 消耗部分（劳动力+原料）按 burn 日均速率 × 飞行小时估算。
+  // 未提供到达时刻（无飞行预估）时退化为当前库存，保持旧行为。
+  const arrivalHoursOf = (id: string) => input.arrivalHoursByNaturalId?.get(id) ?? 0;
+  const projectedInventory = (mat: MaterialBurn | undefined, ticker: string, id: string) => {
+    if (mat === undefined) {
+      return 0;
+    }
+    const hours = arrivalHoursOf(id);
+    if (hours <= 0) {
+      return mat.inventory;
+    }
+    const base = byNaturalId.get(id);
+    if (!base) {
+      return mat.inventory;
+    }
+    const now = gameNow();
+    const arrivalMs = now + hours * 3600000;
+    const produced = projectedProductionByArrival(base.siteId, ticker, now, arrivalMs);
+    return mat.inventory + produced - (mat.input + mat.workforce) * (hours / 24);
+  };
+
   // 目标天数（所有选中基地，含无链关系基地的采购补给）。
   const targetDays = new Map<string, number>();
   for (const base of bases) {
@@ -434,7 +587,7 @@ export function planChainRoute(input: {
       Math.ceil(targetDays.get(id)! * (mat.input + mat.workforce) - mat.inventory),
     );
   };
-  // avail: 上游可提取 = 库存 − 自用预留（目标天数 × 自身日耗）。
+  // avail: 上游可提取 = 到达时预计库存 − 自用预留（目标天数 × 自身日耗）。
   const avail = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
     if (mat === undefined) {
@@ -442,7 +595,9 @@ export function planChainRoute(input: {
     }
     return Math.max(
       0,
-      Math.floor(mat.inventory - targetDays.get(id)! * (mat.input + mat.workforce)),
+      Math.floor(
+        projectedInventory(mat, ticker, id) - targetDays.get(id)! * (mat.input + mat.workforce),
+      ),
     );
   };
 
@@ -828,10 +983,10 @@ export function planChainRoute(input: {
     }
     const finalPickup: CargoItem[] = [];
     for (const ticker of finalTickers.get(id) ?? []) {
-      // 最终产物装尽全部库存：不扣自用预留（自用是该基地 burn 的事）。
-      // 链上 flows 仍按 avail（扣自用）避免抽空基地导致断粮。
+      // 最终产物装尽到港时预计库存（含飞行期间新增产出）：不扣自用预留
+      // （自用是该基地 burn 的事）。链上 flows 仍按 avail（扣自用）避免抽空基地断粮。
       const mat = burns.get(id)![ticker];
-      const amount = Math.max(0, Math.floor(mat.inventory));
+      const amount = Math.max(0, Math.floor(projectedInventory(mat, ticker, id)));
       if (amount > 0) {
         finalPickup.push({ ticker, amount, from: id, dest: ORIGIN_DEST });
       }
@@ -1167,6 +1322,9 @@ export function splitChainPlanAcrossShips(
   plan: ChainPlan,
   ships: DispatchShip[],
   bases: ChainPlannerBase[],
+  // 各站预计到达小时数：传给分段子规划，取货量按到港时预计库存计算
+  //（基础规划不传，仅主规划传，避免影响飞行预估用的站点顺序）。
+  arrivalHoursByNaturalId?: Map<string, number>,
 ): ShipChainPlan[] {
   const byId = new Map(bases.map(b => [b.naturalId, b] as const));
   const ordered = plan.stops
@@ -1221,6 +1379,7 @@ export function splitChainPlanAcrossShips(
       originStock: shipWarehouseStock(ship),
       groupProducedTickers,
       exchangeCode: ship.exchangeCode,
+      ...(arrivalHoursByNaturalId !== undefined ? { arrivalHoursByNaturalId } : {}),
     });
     if (sub) {
       result.push({ ship, plan: sub });
