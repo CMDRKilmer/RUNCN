@@ -2312,9 +2312,19 @@ function flightTotalText(shipId: string): string {
 
 .content {
   padding: 8px;
+  /* 与父级 .layout 同为 border-box：width:100% 时 padding 计入宽度，
+     否则内容区会横向溢出（多算 padding 宽度），导致右侧留白。 */
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* 撑满窗口剩余空间，内容超高时在列表区内部滚动（同规划模式 .panes 布局）。
+     width:100% + min-width:0 保证列表横向占满窗口，避免固定列宽的表在右侧留白。 */
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
 }
 
 .route {

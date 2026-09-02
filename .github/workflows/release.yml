@@ -269,4 +269,4 @@ jobs:
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
-        run: npx web-ext@10 sign --channel=listed --source-dir dist-firefox --approval-timeout=0
+        run: npx web-ext@10 sign --channel=listed --source-dir dist-firefox --approval-timeout=0 --amo-metadata scripts/amo-metadata.json
