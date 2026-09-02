@@ -12,6 +12,7 @@ import {
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { useTileState } from '@src/store/user-data-tiles';
 import fa from '@src/utils/font-awesome.module.css';
@@ -118,7 +119,9 @@ const allRows = computed<InvRow[] | undefined>(() => {
     if (typeOrder !== 0) {
       return typeOrder;
     }
-    return a.label.localeCompare(b.label);
+    // 星球行显示代码，按代码排序；其余按名称。
+    const key = (row: InvRow) => (row.type === 'BASE' && row.naturalId ? row.naturalId : row.label);
+    return key(a).localeCompare(key(b));
   });
 
   return rows;
@@ -150,7 +153,11 @@ const filteredRows = computed(() => {
         return false;
       }
     }
-    if (query && !row.label.toUpperCase().includes(query)) {
+    if (
+      query &&
+      !row.label.toUpperCase().includes(query) &&
+      !(row.naturalId ?? '').toUpperCase().includes(query)
+    ) {
       return false;
     }
     return true;
@@ -159,63 +166,110 @@ const filteredRows = computed(() => {
 </script>
 
 <template>
-  <LoadingSpinner v-if="!filteredRows" />
-  <template v-else>
-    <div :class="C.ComExOrdersPanel.filter">
-      <RadioItem v-model="showCx" horizontal>CX</RadioItem>
-      <RadioItem v-model="showBase" horizontal>BS</RadioItem>
-      <RadioItem v-model="showShip" horizontal>SHP</RadioItem>
-      <RadioItem v-model="showWarehouse" horizontal>WAR</RadioItem>
-      <div :class="$style.separator" />
-      <RadioItem v-model="showBaseWar" horizontal>基地仓储</RadioItem>
-      <div :class="$style.spacer" />
-      <div :class="$style.searchContainer">
-        <input
-          v-model="locationFilter"
-          type="text"
-          autocomplete="off"
-          data-1p-ignore="true"
-          data-lpignore="true"
-          placeholder="输入位置"
-          :class="$style.searchInput" />
-        <PrunButton
-          v-if="locationFilter"
-          dark
-          :class="[fa.solid, $style.clearButton]"
-          @click="locationFilter = ''">
-          {{ '' }}
-        </PrunButton>
+  <div :class="$style.layout">
+    <LoadingSpinner v-if="!filteredRows" />
+    <template v-else>
+      <div :class="C.ComExOrdersPanel.filter">
+        <RadioItem v-model="showCx" horizontal>CX</RadioItem>
+        <RadioItem v-model="showBase" horizontal>BS</RadioItem>
+        <RadioItem v-model="showShip" horizontal>SHP</RadioItem>
+        <RadioItem v-model="showWarehouse" horizontal>WAR</RadioItem>
+        <div :class="$style.separator" />
+        <RadioItem v-model="showBaseWar" horizontal>基地仓储</RadioItem>
+        <div :class="$style.spacer" />
+        <div :class="$style.searchContainer">
+          <input
+            v-model="locationFilter"
+            type="text"
+            autocomplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            placeholder="输入位置"
+            :class="$style.searchInput" />
+          <PrunButton
+            v-if="locationFilter"
+            dark
+            :class="[fa.solid, $style.clearButton]"
+            @click="locationFilter = ''">
+            {{ '' }}
+          </PrunButton>
+        </div>
       </div>
-    </div>
-    <table :class="$style.table">
-      <thead>
-        <tr>
-          <th :class="$style.nameCol">名称</th>
-          <th :class="$style.typeCol">类型</th>
-          <th :class="$style.barCol">库存</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="row in filteredRows" :key="row.storeId" :class="$style.row">
-          <td :class="$style.nameCell">
-            <span :class="$style.nameText" @click="showBuffer(row.onClickCmd)">{{
-              row.label
-            }}</span>
-          </td>
-          <td :class="$style.typeCell">{{ TYPE_LABELS[row.type] }}</td>
-          <td :class="$style.barCell">
-            <InvBar
-              :store-id="row.storeId"
-              :natural-id="row.naturalId"
-              :on-click-cmd="row.onClickCmd" />
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </template>
+      <div :class="$style.scroll">
+        <table :class="$style.table">
+          <thead>
+            <tr>
+              <th :class="$style.nameCol">名称</th>
+              <th :class="$style.typeCol">类型</th>
+              <th :class="$style.barCol">库存</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="row in filteredRows" :key="row.storeId" :class="$style.row">
+              <td :class="$style.nameCell">
+                <span :class="$style.nameText" @click="showBuffer(row.onClickCmd)">
+                  <template v-if="row.naturalId">
+                    {{ row.naturalId }}<BaseAlias :natural-id="row.naturalId" />
+                  </template>
+                  <template v-else>{{ row.label }}</template>
+                </span>
+              </td>
+              <td :class="$style.typeCell">{{ TYPE_LABELS[row.type] }}</td>
+              <td :class="$style.barCell">
+                <InvBar
+                  :store-id="row.storeId"
+                  :natural-id="row.naturalId"
+                  :on-click-cmd="row.onClickCmd" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+  </div>
 </template>
 
 <style module>
+.layout {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 细窄深色滚动条（游戏/项目风格） */
+.scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(61, 74, 84) rgb(26, 33, 38);
+}
+
+.scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll::-webkit-scrollbar-track {
+  background: rgb(26, 33, 38);
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: rgb(61, 74, 84);
+  border-radius: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(90, 105, 118);
+}
+
 .separator {
   width: 1px;
   align-self: stretch;

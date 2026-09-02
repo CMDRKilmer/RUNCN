@@ -936,7 +936,9 @@ async function importDispatchConfig() {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  overflow: auto;
+  /* 窗口高度固定：不随内容变高，也不在根上产生内层滚动条；
+     各模式（基地规划/库存/环线）的列表区自行在剩余高度内滚动。 */
+  overflow: hidden;
 }
 
 .spacer {
@@ -995,12 +997,36 @@ async function importDispatchConfig() {
   min-width: 0;
   min-height: 0;
   width: 100%;
+  overflow: auto;
+}
+
+/* 细窄深色滚动条（游戏/项目风格） */
+.panes {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(61, 74, 84) rgb(26, 33, 38);
+}
+
+.panes::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.panes::-webkit-scrollbar-track {
+  background: rgb(26, 33, 38);
+}
+
+.panes::-webkit-scrollbar-thumb {
+  background: rgb(61, 74, 84);
+  border-radius: 4px;
+}
+
+.panes::-webkit-scrollbar-thumb:hover {
+  background: rgb(90, 105, 118);
 }
 
 .left {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: auto;
 }
 
 .table {

@@ -29,6 +29,7 @@ onApiMessage({
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import Tooltip from '@src/components/Tooltip.vue';
+import BaseAlias from '@src/components/BaseAlias.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import {
@@ -1877,7 +1878,11 @@ function flightTotalText(shipId: string): string {
 <template>
   <div :class="$style.layout">
     <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
-      <SelectInput v-model="groupSelect" :options="groupOptions" :width="220" />
+      <SelectInput
+        v-model="groupSelect"
+        :options="groupOptions"
+        :width="220"
+        :class="$style.groupSelect" />
       <div :class="$style.separator" />
       <RadioItem v-model="chainAutoLaunch" horizontal>自动发船</RadioItem>
       <RadioItem v-model="chainAutoTrigger" horizontal>自动执行</RadioItem>
@@ -1907,7 +1912,7 @@ function flightTotalText(shipId: string): string {
         :model-value="selectedBaseIds.includes(base.naturalId)"
         horizontal
         @update:model-value="selected => setBaseSelected(base.naturalId, selected)">
-        {{ base.planetName || base.naturalId }}
+        {{ base.naturalId }}<BaseAlias :site-id="base.siteId" />
       </RadioItem>
       <div :class="$style.separator" />
       <PrunButton dark @click="selectAllBases">全选</PrunButton>
@@ -1990,7 +1995,10 @@ function flightTotalText(shipId: string): string {
             v-for="stop in sp.plan?.stops ?? sp.progress?.stops ?? []"
             :key="stop.naturalId">
             <span :class="$style.routeArrow">→</span>
-            <span :class="$style.routeNode">{{ stop.planetName }}</span>
+            <span :class="$style.routeNode">
+              {{ stop.naturalId || stop.planetName
+              }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
+            </span>
           </template>
           <span :class="$style.routeArrow">→</span>
           <span :class="$style.routeOrigin">{{
@@ -2071,7 +2079,10 @@ function flightTotalText(shipId: string): string {
                 </span>
                 {{ i + 1 }}
               </td>
-              <td :class="$style.narrowCol">{{ stop.planetName }}</td>
+              <td :class="$style.narrowCol">
+                {{ stop.naturalId || stop.planetName
+                }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
+              </td>
               <td :class="$style.matCell">
                 <template v-if="sp.plan">
                   <div>
@@ -2261,9 +2272,8 @@ function flightTotalText(shipId: string): string {
   flex-direction: column;
   box-sizing: border-box;
   width: 100%;
-  min-height: 0;
   flex: 1 1 auto;
-  overflow: auto;
+  min-height: 0;
 }
 
 .filterBar {
@@ -2272,6 +2282,24 @@ function flightTotalText(shipId: string): string {
 
 .filterBar :global(.SelectInput__container) {
   margin: 0;
+}
+
+/* 产业链组下拉：与项目其它下拉框一致的游戏风格外观（同 PlanetRow/ARB 样式），
+   避免 SelectInput 的裸原生 select 外观突兀。 */
+.groupSelect :global(select) {
+  box-sizing: border-box;
+  padding: 2px 6px;
+  border: 1px solid rgb(61, 74, 84);
+  background: rgb(26, 33, 38);
+  color: rgb(226, 230, 233);
+  font: inherit;
+  outline: none;
+}
+
+.groupSelect :global(select:focus) {
+  border-color: rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  background: rgb(30, 38, 44);
 }
 
 .barLabel {
@@ -2318,13 +2346,38 @@ function flightTotalText(shipId: string): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 撑满窗口剩余空间，内容超高时在列表区内部滚动（同规划模式 .panes 布局）。
+  /* 列表区在窗口剩余高度内内部滚动（窗口高度固定，见 FLEET .layout）：
+     顶部过滤/页签保持可见，表格行超高时此处滚动。
      width:100% + min-width:0 保证列表横向占满窗口，避免固定列宽的表在右侧留白。 */
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
+}
+
+/* 细窄深色滚动条（游戏/项目风格） */
+.content {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(61, 74, 84) rgb(26, 33, 38);
+}
+
+.content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: rgb(26, 33, 38);
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: rgb(61, 74, 84);
+  border-radius: 4px;
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: rgb(90, 105, 118);
 }
 
 .tabsHeader {
