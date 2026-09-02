@@ -4,6 +4,9 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+---
+
+## [26.9.2] - 2026-09-02
 ### ✨ Features
 
 - **`release`**：新增 Firefox 浏览器构建与发布支持 —— 新增 `build-firefox.mjs` 从 Chrome 构建产物生成 Firefox 扩展包（删除 `minimum_chrome_version`、`host_permissions` 补 `/*`、加入 gecko `browser_specific_settings`）；发布流程新增 Firefox AMO 自动提交（`web-ext sign`）；扩展更新检查兼容 `moz-extension://`。
@@ -17,6 +20,8 @@
 ### 🐛 Bug Fixes
 
 - **`prun-api`**：修复 createMap/getGroupMap 转换崩溃 —— 选择器返回空/未定义键时跳过该条目，避免 `upperCase(undefined)` 报错。
+
+---
 
 ---
 
