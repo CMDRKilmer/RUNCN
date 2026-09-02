@@ -4,6 +4,12 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### 🐛 Bug Fixes
+
+- **`XIT/FLEET`**：修复环线进度表右侧留白 —— 环线表格改用 `table-layout: auto`（其余列固定 px 宽、多余宽度全部进入 auto 的「操作」列）；Chromium 下 `table-layout: fixed` 不会把剩余宽度分给 auto 列（实测 Chrome 152 中最后一列「载重」右侧留白约 620px，对列显式设 `calc` 宽度也无效），auto 布局能正确铺满且各船表格列宽保持一致。
+- **`XIT/FLEET`**：修复环线「规划中/运行中」页签下方的大片空白 —— 页签容器复用游戏 `.Tabs__component` 样式自带固定高度（实测约 359px，为整套页签面板设计），仅展示页签头时将其收拢为内容高度。
+- **`build`**：修复 Firefox AMO 提交失败 —— `firefox` 发布 job 未 checkout 代码仓库，导致 `web-ext sign --amo-metadata scripts/amo-metadata.json` 找不到元数据文件（AMO 对 listed 版本要求 `version.license`）；补充 `actions/checkout` 使 license 元数据可被读取并随版本提交。
+
 ---
 
 ## [26.9.2.1] - 2026-09-02
