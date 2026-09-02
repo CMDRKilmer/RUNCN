@@ -2,7 +2,9 @@
 
 ## [Unreleased]
 
-> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
+### 🐛 Bug Fixes
+
+- **`build`**：为 Firefox manifest 补充 `license` 字段，满足 AMO 公开渠道（`--channel=listed`）签名校验要求，避免提交返回 Bad Request。
 
 ---
 
