@@ -2329,9 +2329,11 @@ function flightTotalText(shipId: string): string {
 
 .tabsHeader {
   /* 游戏 .Tabs__component 自带固定高度（实测约 359px，为整套页签面板设计），
-     此处仅复用页签头，需收拢为内容高度，否则页签与船卡间留大片空白。 */
-  height: auto !important;
-  min-height: 0 !important;
+     仅复用页签头时必须收拢。注意不能设 height:auto —— 该组件子元素脱离
+     常规流，auto 会塌缩为 0，页签文字溢出并与下方船卡重叠；实测页签行
+     高 29px，故显式给出一行高度。 */
+  height: 29px !important;
+  min-height: 29px !important;
 }
 
 .route {
