@@ -304,3 +304,13 @@ Use Vue slots instead of adding new props to display custom text inside existing
   {material}
 </PrunLink>
 ```
+
+### Local Lint Noise (`dist-firefox`)
+
+`pnpm run lint` fails locally with ~1250 "Parsing error ... TSConfig does not include this file" errors when `dist-firefox/` build output exists in the working tree. The flat config in `eslint.config.mjs` ignores `dist/**/*` but not `dist-firefox/**/*`, and `dist-firefox` is gitignored, so CI lint is clean. Don't try to fix it in config — lint only the files you changed (`pnpm exec eslint <file>`). Note `scripts/*.mjs` are excluded from eslint entirely (they are only type/format checked via prettier).
+
+### Code Scanning
+
+CodeQL runs via GitHub default setup (analysis key `dynamic/github-code-scanning/codeql` — no workflow file in the repo). Every push to `main` triggers a "dynamic Push on main" run containing the Analyze jobs. To resolve an alert: push a fix to `main`; the alert auto-flips to `fixed` after that run — no manual dismissal needed. Watch with `gh run watch <id>` then check states via `gh api repos/CMDRKilmer/RUNCN/code-scanning/alerts`.
+
+`js/bad-tag-filter` ("Bad HTML filtering regexp") fires on **any** regex containing a literal `-->` constant that matches `-->` but not `--`/`--!>` (see CodeQL `BadTagFilterQuery.qll`) — even when the regex is not used for HTML filtering at all. Gateway-name arrow regexes (`(?:->|-->|→)`, used with `.match()` to split display names) are a recurring false positive. Fix without changing semantics: rewrite the alternation as `(?:-{1,2}>|→)` — no literal `-->` token remains, behavior identical.
