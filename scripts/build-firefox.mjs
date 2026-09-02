@@ -55,6 +55,13 @@ manifest.browser_specific_settings = {
   gecko: {
     id: 'liuli-tools@runcn.local',
     strict_min_version: '118.0',
+    // AMO requires this key for new extensions (and eventually for updates).
+    // Declared as "none": the extension collects/transmits no data by itself
+    // (see PRIVACY.md). User-configured opt-in relays/translators connect
+    // directly from the page and are not handled by the extension.
+    data_collection_permissions: {
+      required: ['none'],
+    },
   },
 };
 writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
