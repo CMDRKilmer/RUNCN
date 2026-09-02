@@ -4,9 +4,12 @@ if (import.meta.env.PROD) {
   const container = document.getElementById('container')!;
   const manifestUrl = config.url.manifest;
   // Skip the update poll entirely if the manifest URL is not a real
-  // chrome-extension URL (e.g. chrome.runtime was unavailable when the
-  // config was generated, yielding chrome-extension://invalid/...).
-  if (typeof manifestUrl !== 'string' || !manifestUrl.startsWith('chrome-extension://')) {
+  // extension URL. Chrome yields chrome-extension://..., Firefox and
+  // Gecko-based browsers yield moz-extension://...
+  const isExtensionUrl =
+    typeof manifestUrl === 'string' &&
+    (manifestUrl.startsWith('chrome-extension://') || manifestUrl.startsWith('moz-extension://'));
+  if (!isExtensionUrl) {
     console.warn('refined-prun: skipping extension update check, invalid manifest URL');
   } else {
     let consecutiveFailures = 0;

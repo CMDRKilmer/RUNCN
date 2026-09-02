@@ -86,17 +86,22 @@ jobs:
           node-version-file: ".nvmrc"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Update manifest.json
+        run: npx dot-json@1 public/manifest.json version "${{ steps.parse.outputs.VERSION }}"
       - name: Build
         run: pnpm build
-
-      - name: Update manifest.json
-        run: npx dot-json@1 "$DIRECTORY/manifest.json" version "${{ steps.parse.outputs.VERSION }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
           path: ${{ env.DIRECTORY }}
+
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-firefox
+          path: dist-firefox
 
       - name: Create release
         env:
@@ -105,10 +110,12 @@ jobs:
           VERSION="${{ steps.parse.outputs.VERSION }}"
           FILENAME_ZIP="$PROJECT_NAME-$VERSION.zip"
           FILENAME_CRX="$PROJECT_NAME-$VERSION.crx"
+          FILENAME_FIREFOX="$PROJECT_NAME-$VERSION-firefox.zip"
+          mv dist-firefox.zip "$FILENAME_FIREFOX"
           cd "$DIRECTORY"
           zip -r "$FILENAME_ZIP" ./*
           npx crx pack . -o "$FILENAME_CRX"
-          gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" \
+          gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" "$GITHUB_WORKSPACE/$FILENAME_FIREFOX" \
             --title "琉璃小工具 $VERSION" \
             --notes-file /tmp/release-notes.md
 
@@ -249,3 +256,19 @@ jobs:
           api_key: ${{ secrets.EDGE_API_KEY }}
           zip: edge.zip
           notes: Release ${{ needs.build.outputs.VERSION }}
+
+  firefox:
+    needs: build
+    name: Submit (Firefox AMO)
+    environment: Firefox
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-firefox
+          path: dist-firefox
+      - name: Submit to AMO
+        env:
+          WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
+          WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        run: npx web-ext@10 sign --channel=listed --source-dir dist-firefox --approval-timeout=0

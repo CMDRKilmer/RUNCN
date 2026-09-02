@@ -1,4 +1,4 @@
-import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
+import { changeInputValue } from '@src/utils/dom';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { sleep } from '@src/utils/sleep';
@@ -49,31 +49,55 @@ export async function selectAddress(container: Element, locationName: string): P
     stationsStore.getByNaturalId(locationName)?.name ??
     locationName;
 
-  focusElement(input);
-  changeInputValue(input, query);
+  // Hide the portal for the whole operation so the suggestion list never
+  // flashes on screen during this silent background fill. Clicking the FLEET
+  // row first triggers react-autosuggest's outside-click (closing the list),
+  // then re-focusing the input re-renders it — without hiding, the user would
+  // see the default list + search results pop up and vanish. Hiding via
+  // visibility keeps the items queryable and clickable (React's handlers still
+  // fire); the previous value is restored once we settle.
+  const prevVisibility = portal.style.visibility;
+  portal.style.visibility = 'hidden';
+  try {
+    // Native focus first so react-autosuggest opens the listbox, then let it
+    // settle a frame before writing (empty-focus list renders immediately).
+    input.focus();
+    await sleep(50);
+    changeInputValue(input, query);
 
-  // The portal first renders a default list (own bases, warehouses, CX
-  // stations) for the empty focus query, and the typed query's search results
-  // only arrive after a server round-trip — so wait for an entry that actually
-  // matches the name instead of clicking into the stale default list. Matching
-  // requires a word boundary around the query, because natural ids prefix each
-  // other ("OT-580b" is a prefix of nothing, but "OT-580" prefixes every moon
-  // in the system, and the default list can hold several) — a boundary match
-  // hits "Montem (OT-580b)" but not "OT-580br". Only when no boundary match
-  // arrives within the timeout does a plain substring match get one shot,
-  // keeping tolerance for odd human-entered fragments. No match at all leaves
-  // the field for the user rather than guessing.
-  const boundary = new RegExp(`(^|\\W)${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\W|$)`, 'i');
-  const suggestions = () => _$$(portal, C.AddressSelector.suggestionContent) as HTMLElement[];
-  const findBoundaryMatch = () => suggestions().find(s => boundary.test(s.textContent ?? ''));
-  await waitFor(() => !!findBoundaryMatch(), 5000);
-  const match =
-    findBoundaryMatch() ??
-    suggestions().find(s => s.textContent?.trim().toLowerCase().includes(query.toLowerCase()));
-  if (!match) {
-    return false;
+    // The portal first renders a default list (own bases, warehouses, CX
+    // stations) for the empty focus query, and the typed query's search results
+    // only arrive after a server round-trip — so wait for an entry that actually
+    // matches the name instead of clicking into the stale default list. Matching
+    // requires a word boundary around the query, because natural ids prefix each
+    // other ("OT-580b" is a prefix of nothing, but "OT-580" prefixes every moon
+    // in the system, and the default list can hold several) — a boundary match
+    // hits "Montem (OT-580b)" but not "OT-580br". Only when no boundary match
+    // arrives within the timeout does a plain substring match get one shot,
+    // keeping tolerance for odd human-entered fragments. No match at all leaves
+    // the field for the user rather than guessing.
+    const boundary = new RegExp(
+      `(^|\\W)${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\W|$)`,
+      'i',
+    );
+    const suggestions = () => _$$(portal, C.AddressSelector.suggestionContent) as HTMLElement[];
+    const findBoundaryMatch = () => suggestions().find(s => boundary.test(s.textContent ?? ''));
+    await waitFor(() => !!findBoundaryMatch(), 5000);
+    const match =
+      findBoundaryMatch() ??
+      suggestions().find(s => s.textContent?.trim().toLowerCase().includes(query.toLowerCase()));
+    if (!match) {
+      return false;
+    }
+
+    // Use the NATIVE .click(), not clickElement: react-autosuggest's
+    // onSuggestionSelected listens for the trusted click that HTMLElement.click()
+    // synthesizes. The full pointer/mouse sequence clickElement dispatches is
+    // filtered out and leaves the item highlighted but unselected (see
+    // docs/feature-patterns.md "Click recipe").
+    match.click();
+    return true;
+  } finally {
+    portal.style.visibility = prevVisibility;
   }
-
-  await clickElement(match);
-  return true;
 }

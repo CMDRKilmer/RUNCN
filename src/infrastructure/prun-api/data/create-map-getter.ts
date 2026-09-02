@@ -27,7 +27,7 @@ export function createMapGetter<T>(
 
 export function createGroupMapGetter<T>(
   items: Ref<T[] | undefined>,
-  selector: (item: T) => string,
+  selector: (item: T) => string | undefined | null,
   valueTransformer?: (value: string) => string,
 ) {
   valueTransformer ??= upperCase;

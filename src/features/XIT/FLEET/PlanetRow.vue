@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import PrunLink from '@src/components/PrunLink.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
@@ -19,6 +18,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
 import { getPlanetProduction } from '@src/core/production';
 import { sumBy } from '@src/utils/sum-by';
 import { getStorageAlarmLevel } from '@src/core/storage-analysis';
@@ -244,6 +244,53 @@ function clearShip() {
   config.ship = undefined;
 }
 
+// 点击基地行时：若当前有正在聚焦/打开的游戏原生 AddressSelector（如 SFC 目的地框），
+// 则直接将该基地填入该框；否则维持现状打开 BS 命令。
+// PrUn 不会让地址框 <input> 成为 document.activeElement——焦点停留在 tile 根部的
+// tabindex="-1" 容器上，所以 activeElement 方案永远拿不到地址框。
+// 改用 react-autosuggest 的"打开/聚焦"信号：被聚焦的输入框带 aria-expanded="true"
+// (同一时间只允许一个 listbox 打开)；兜底是容器上的 containerOpen 状态类。
+let focusedAddressSelector: Element | undefined;
+
+function getOpenAddressSelector(): Element | undefined {
+  // react-autosuggest 只有在输入框聚焦时才会把打开的 listbox 渲染进 #autosuggest-portal，
+  // 且同一时间只允许一个 listbox 打开。listbox 一定带 role="listbox"，用其作为稳定判据。
+  const portal = document.getElementById('autosuggest-portal');
+  const listOpen =
+    portal != null &&
+    (portal.querySelector('[role="listbox"]') != null || portal.children.length > 0);
+  if (!listOpen) {
+    return undefined;
+  }
+  const containers = Array.from(document.querySelectorAll(`.${C.AddressSelector.container}`));
+  // 通过 aria-controls / aria-owns 把门户里的 listbox 反查到拥有它的输入框所属容器。
+  const openListIds = new Set(Array.from(portal.querySelectorAll('[id]')).map(el => el.id));
+  return (
+    containers.find(c => c.classList.contains(C.AddressSelector.containerOpen)) ??
+    containers.find(c => {
+      const controlled = c.querySelector('[aria-controls], [aria-owns]');
+      const ref =
+        controlled?.getAttribute('aria-controls') ?? controlled?.getAttribute('aria-owns');
+      return ref != null && openListIds.has(ref);
+    }) ??
+    // 页面上同一时刻往往只有一个地址框容器，直接命中它。
+    (containers.length === 1 ? containers[0] : undefined)
+  );
+}
+
+function captureFocusedAddressSelector() {
+  // 必须在 mousedown 阶段捕获：mousedown 一过，react-autosuggest 的 outside-click
+  // 会把 listbox 关掉、把输入框 blur，到 click 阶段就拿不到"打开"状态了。
+  focusedAddressSelector = getOpenAddressSelector();
+}
+
+async function onPlanetClick() {
+  if (focusedAddressSelector && (await selectAddress(focusedAddressSelector, naturalId))) {
+    return;
+  }
+  showBuffer(`BS ${naturalId}`);
+}
+
 // Production status (from BS)
 const production = computed(() => getPlanetProduction(siteId));
 const prodTotals = computed(() => {
@@ -303,10 +350,13 @@ const barAlarmReason = computed(() =>
     </td>
     <GripCell />
     <td :class="$style.planetCell">
-      <PrunLink inline :command="`BS ${naturalId}`" :class="$style.planetLink">
+      <div
+        :class="[C.Link.link, $style.planetLink]"
+        @mousedown="captureFocusedAddressSelector"
+        @click.stop="onPlanetClick">
         {{ planetName }}
         <BaseAlias :site-id="siteId" />
-      </PrunLink>
+      </div>
     </td>
     <td :class="$style.toggleCell">
       <RadioItem v-model="config.resupply" />
