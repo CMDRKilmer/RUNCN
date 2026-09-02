@@ -54,7 +54,11 @@ manifest.host_permissions = manifest.host_permissions.map((p) =>
 manifest.browser_specific_settings = {
   gecko: {
     id: 'liuli-tools@runcn.local',
-    strict_min_version: '118.0',
+    // 142.0: browser_specific_settings.gecko.data_collection_permissions is
+    // only recognized on Firefox >= 140 (desktop) and >= 142 (Android).
+    // Declaring the key with a lower strict_min_version produces manifest
+    // validation warnings, so keep the floor at the Android-introducing version.
+    strict_min_version: '142.0',
     // AMO requires this key for new extensions (and eventually for updates).
     // Declared as "none": the extension collects/transmits no data by itself
     // (see PRIVACY.md). User-configured opt-in relays/translators connect
