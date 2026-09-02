@@ -9,7 +9,6 @@
 **/dist
 **/build
 dist-firefox/
-dist-firefox.zip
 
 # env
 **/.env.local

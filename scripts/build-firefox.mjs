@@ -2,12 +2,10 @@
  * Build script for Firefox distribution.
  * - Reuses Chrome build output (dist/).
  * - Assembles dist-firefox/ with the Firefox manifest.json and icons.
- * - Packs dist-firefox/ into dist-firefox.zip with manifest.json at the root.
  */
 import { rmSync, mkdirSync, copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { spawnSync } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -70,34 +68,3 @@ for (const f of ['icon16.png', 'icon32.png', 'icon48.png', 'icon128.png']) {
 }
 
 console.log(`Firefox build ready: ${outDir}`);
-
-// Pack into a zip with manifest.json at the archive root.
-const zipPath = join(root, 'dist-firefox.zip');
-if (existsSync(zipPath)) {
-  rmSync(zipPath);
-}
-
-let packer;
-if (process.platform === 'win32') {
-  // PowerShell Compress-Archive: each file is stored at archive root,
-  // preserving the manifest.json path that Firefox expects.
-  packer = spawnSync(
-    'powershell',
-    [
-      '-NoProfile',
-      '-Command',
-      `Compress-Archive -Path '${outDir}\\*' -DestinationPath '${zipPath}' -Force`,
-    ],
-    { stdio: 'inherit' },
-  );
-} else {
-  // Unix: the `zip` CLI stores paths relative to its working directory.
-  packer = spawnSync('zip', ['-r', zipPath, '.'], { cwd: outDir, stdio: 'inherit' });
-}
-
-if (packer.status !== 0) {
-  console.error('Failed to create dist-firefox.zip');
-  process.exit(packer.status ?? 1);
-}
-
-console.log(`Packed: ${zipPath}`);

@@ -110,12 +110,10 @@ jobs:
           VERSION="${{ steps.parse.outputs.VERSION }}"
           FILENAME_ZIP="$PROJECT_NAME-$VERSION.zip"
           FILENAME_CRX="$PROJECT_NAME-$VERSION.crx"
-          FILENAME_FIREFOX="$PROJECT_NAME-$VERSION-firefox.zip"
-          mv dist-firefox.zip "$FILENAME_FIREFOX"
           cd "$DIRECTORY"
           zip -r "$FILENAME_ZIP" ./*
           npx crx pack . -o "$FILENAME_CRX"
-          gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" "$GITHUB_WORKSPACE/$FILENAME_FIREFOX" \
+          gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" \
             --title "琉璃小工具 $VERSION" \
             --notes-file /tmp/release-notes.md
 
