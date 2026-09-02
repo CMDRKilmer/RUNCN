@@ -4,6 +4,20 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### ✨ Features
+
+- **`release`**：新增 Firefox 浏览器构建与发布支持 —— 新增 `build-firefox.mjs` 从 Chrome 构建产物生成 Firefox 扩展包（删除 `minimum_chrome_version`、`host_permissions` 补 `/*`、加入 gecko `browser_specific_settings`）；发布流程新增 Firefox AMO 自动提交（`web-ext sign`）；扩展更新检查兼容 `moz-extension://`。
+- **`XIT/FLEET`**：基地行点击快速填入地址 —— 点击行星行时，若当前有打开/聚焦的游戏原生地址选择器（如 SFC 目的地框），直接把该基地填入该框；否则维持原有打开 BS 命令。
+
+### 🔧 Improvements
+
+- **`XIT/FLEET`**：行星行名称改用基地编号（naturalId）显示，移除 planetName。
+- **`build`**：移除 Firefox 打包产物（dist-firefox.zip）的本地打包与上传步骤 —— Firefox 分发统一由 CI 提交 AMO 处理，简化发布流程。
+
+### 🐛 Bug Fixes
+
+- **`prun-api`**：修复 createMap/getGroupMap 转换崩溃 —— 选择器返回空/未定义键时跳过该条目，避免 `upperCase(undefined)` 报错。
+
 ---
 
 ## [26.8.29.3] - 2026-08-29

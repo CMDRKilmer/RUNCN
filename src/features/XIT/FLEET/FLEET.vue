@@ -906,7 +906,6 @@ async function importDispatchConfig() {
                   v-if="filteredNaturalIds.has(id) && rowById.get(id)"
                   :site-id="rowById.get(id)!.base.siteId"
                   :natural-id="rowById.get(id)!.base.naturalId"
-                  :planet-name="rowById.get(id)!.base.planetName"
                   :config="rowById.get(id)!.config"
                   :bill="billByBase.get(id)"
                   :store-id="rowById.get(id)!.base.storeId"

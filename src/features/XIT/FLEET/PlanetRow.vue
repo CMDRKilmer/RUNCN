@@ -30,7 +30,6 @@ import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLE
 const {
   siteId,
   naturalId,
-  planetName,
   config,
   overloaded,
   bill,
@@ -44,7 +43,6 @@ const {
 } = defineProps<{
   siteId: string;
   naturalId: string;
-  planetName: string;
   config: DispatchBaseConfig;
   overloaded: boolean;
   bill?: Record<string, number>;
@@ -354,7 +352,7 @@ const barAlarmReason = computed(() =>
         :class="[C.Link.link, $style.planetLink]"
         @mousedown="captureFocusedAddressSelector"
         @click.stop="onPlanetClick">
-        {{ planetName }}
+        {{ naturalId }}
         <BaseAlias :site-id="siteId" />
       </div>
     </td>
