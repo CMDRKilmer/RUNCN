@@ -1938,7 +1938,7 @@ function flightTotalText(shipId: string): string {
 
     <!-- 规划中 / 运行中 分页：有运行中环线时仍可规划其他环线，两页独立查看。 -->
     <div v-if="activeRuns.length > 0 || shipPlans.length > 0" :class="$style.content">
-      <div :class="C.Tabs.component">
+      <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
           <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
             <a
@@ -2327,6 +2327,13 @@ function flightTotalText(shipId: string): string {
   overflow: auto;
 }
 
+.tabsHeader {
+  /* 游戏 .Tabs__component 自带固定高度（实测约 359px，为整套页签面板设计），
+     此处仅复用页签头，需收拢为内容高度，否则页签与船卡间留大片空白。 */
+  height: auto !important;
+  min-height: 0 !important;
+}
+
 .route {
   display: flex;
   flex-wrap: wrap;
@@ -2353,8 +2360,12 @@ function flightTotalText(shipId: string): string {
 .table {
   border-collapse: collapse;
   width: 100%;
-  /* 固定列宽：所有船的进度表保持同一列宽，避免按内容自适应导致宽度不一致。 */
-  table-layout: fixed;
+  /* 用 auto 布局：其余列固定 px 宽，多余宽度全部进入 auto 的「操作」列，
+     所有船的表格同宽（同为容器 100%），列宽因此天然一致且能撑满容器。
+     不要用 table-layout: fixed —— 实测 Chromium 下 fixed 布局不会把剩余
+     宽度分给 auto 列（Chrome 152 中最后一列右侧留白约 620px，且对列显式
+     设 calc 宽度也无效），auto 布局则能正确分配并铺满。 */
+  table-layout: auto;
 }
 
 .colSeq {
@@ -2395,7 +2406,7 @@ function flightTotalText(shipId: string): string {
 }
 
 .narrowCol {
-  /* 固定列宽后允许换行，避免超长星球名/载重文本溢出。 */
+  /* 允许换行，避免超长星球名/载重文本把 auto 布局的列撑得过宽。 */
   white-space: normal;
   word-break: break-word;
 }
