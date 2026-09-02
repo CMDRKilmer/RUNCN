@@ -12,7 +12,12 @@ export function createMapGetter<T>(
     }
     const map = new Map<string, T>();
     for (const item of items.value) {
-      map.set(valueTransformer(selector(item)), item);
+      // Skip items with empty/missing keys to avoid upperCase(undefined) crashes.
+      const key = selector(item);
+      if (key === undefined || key === null || key === '') {
+        continue;
+      }
+      map.set(valueTransformer(key), item);
     }
     return map;
   });
@@ -32,7 +37,12 @@ export function createGroupMapGetter<T>(
     }
     const map = new Map<string, T[]>();
     for (const item of items.value) {
-      const key = valueTransformer(selector(item));
+      const raw = selector(item);
+      // Skip items with empty/missing keys to avoid upperCase(undefined) crashes.
+      if (raw === undefined || raw === null || raw === '') {
+        continue;
+      }
+      const key = valueTransformer(raw);
       let group = map.get(key);
       if (!group) {
         group = [];
