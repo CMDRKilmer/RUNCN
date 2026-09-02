@@ -25,7 +25,7 @@ for (const [k, conns] of Object.entries(builtin)) {
 const gws = JSON.parse(readFileSync('C:/Users/kilsa/Downloads/prun-gateways.json', 'utf8'));
 const norm = s => String(s).toLowerCase().replace(/\s+/g, '').replace(/[‐\-–—]/g, '');
 const parseName = name => {
-  const m = name.match(/^(.*?)\s*(?:->|-->|→)\s*(.*?)$/);
+  const m = name.match(/^(.*?)\s*(?:-{1,2}>|→)\s*(.*?)$/);
   return m ? { local: m[1].trim(), remote: m[2].trim() } : null;
 };
 const parsed = gws.map(g => ({ g, ...parseName(g.name) })).filter(p => p.local);

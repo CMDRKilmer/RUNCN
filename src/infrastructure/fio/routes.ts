@@ -134,7 +134,7 @@ function pairGatewayConnections() {
   const all: Parsed[] = [];
   for (const list of gateways.values()) {
     for (const g of list) {
-      const m = g.name.match(/^(.*?)\s*(?:->|-->|→)\s*(.*?)$/);
+      const m = g.name.match(/^(.*?)\s*(?:-{1,2}>|→)\s*(.*?)$/);
       all.push({
         id: g.naturalId,
         sys: g.systemId,
