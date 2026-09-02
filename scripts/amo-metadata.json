@@ -1,4 +1,11 @@
 {
+  "summary": {
+    "en-US": "A toolkit that enhances the Prosperous Universe (PrUn) game interface.",
+    "zh-CN": "增强 Prosperous Universe（PrUn）游戏界面的实用工具集。"
+  },
+  "categories": {
+    "firefox": ["other"]
+  },
   "version": {
     "license": "MIT"
   }

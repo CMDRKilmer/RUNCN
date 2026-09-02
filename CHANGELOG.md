@@ -4,6 +4,10 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### 🐛 Bug Fixes
+
+- **`build`**：修复 Firefox AMO 首次 listed 提交仍被拒 —— AMO 首次创建上架条目除 `version.license` 外还要求 `summary` 与按应用分组的 `categories`；在 `scripts/amo-metadata.json` 补全（`summary` 含 en-US/zh-CN，`categories.firefox` 取 `other`），web-ext `--amo-metadata` 即可一次通过创建校验。
+
 ---
 
 ## [26.9.2.2] - 2026-09-02
