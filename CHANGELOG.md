@@ -4,6 +4,10 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### 🐛 Bug Fixes
+
+- **`build`**：为 Firefox manifest 补充 `data_collection_permissions`（`required: ["none"]`）—— AMO 自 2025-11-03 起要求新扩展在 `browser_specific_settings.gecko` 中声明数据收集/传输类型（旧扩展的新版本后续也将强制）；本扩展自身不收集、不传输任何数据（见 PRIVACY.md），声明 `none` 即可通过校验。
+
 ---
 
 ## [26.9.2.4] - 2026-09-02
