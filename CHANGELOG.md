@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
+
+---
+
+## [26.9.3] - 2026-09-03
 ### ✨ Features
 
 - **`XIT/FLEET`**：环线/库存列表星球显示代码+别名 —— 行星行名称改用 `<代码> <别名>` 格式呈现（基地行本就显示 naturalId）；面板采用固定高度并在列表区内滚动以统一滚动条样式，环线/库存面板切换更顺滑。
@@ -15,6 +20,8 @@
 
 - **`build`**：GitHub Actions 升级至 Node24 运行时 —— `checkout`/`setup-node`/`upload-artifact` 至 v7、`download-artifact` 至 v8、`pnpm-action-setup` 至 v6；移除过渡 workaround `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`。
 - **`docs`**：记录本地 lint 噪音（`dist-firefox/` 解析错误）与 Code Scanning 工作流说明。
+
+---
 
 ---
 
