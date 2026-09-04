@@ -99,6 +99,7 @@ import './prun-bugs';
 import './rprun-version-label';
 import './screen-layout-lock';
 import './screen-tab-bar/screen-tab-bar';
+import './screen-variables';
 import './search-auto-focus';
 import './sfc-auto-fuel-settings';
 import './sfc-exchange-destinations/sfc-exchange-destinations';
