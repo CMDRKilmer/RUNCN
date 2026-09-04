@@ -24,10 +24,20 @@ function loadFromUserData() {
 loadFromUserData();
 
 // 反向持久化:store 变化时写回 userData(自动同步到 chrome.storage.local)。
+// 按 key 写入而非全量 spread,扩展到 NUMBER/TEXT/ENUM 多变量时无需重写。
 watch(
   screenVariables,
-  () => {
-    userData.screenVariables = { ...screenVariables };
+  (next, prev) => {
+    for (const name of Object.keys(next)) {
+      if (next[name] !== prev[name]) {
+        userData.screenVariables[name] = next[name];
+      }
+    }
+    for (const name of Object.keys(prev)) {
+      if (!(name in next)) {
+        delete userData.screenVariables[name];
+      }
+    }
   },
   { deep: true },
 );
