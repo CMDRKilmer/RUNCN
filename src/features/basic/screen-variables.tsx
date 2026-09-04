@@ -10,14 +10,14 @@ import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 //      - 同时 BS tile 自身会打开对应地址的新 tile (INV/PLI 等) —— 这是游戏内置逻辑。
 //   3. 兜底:showBuffer('BS <id>')。
 // 插件自维护 store 同步更新,作为补充/查询入口。
-export async function writeScreenVariable(name: string, naturalId: string): Promise<boolean> {
+export async function writeScreenVariable(name: string, naturalId: string): Promise<void> {
   setScreenVariable(name, naturalId);
 
   // 阶段 4 探查结论: 客户端消息工厂无 UI_SCREENS_* 类,直接发服务器会被丢弃/报错,
   // 因此走"操作原生 BS input"路径 —— 该路径已被实证可触发服务器 UI_SCREENS_VARIABLES 同步。
   // 离屏状态(见 init())下 listbox portal 测不到几何位置,selectAddress 期间
   // 必须临时把 bar 移回屏幕 (withBarVisible),写完再恢复离屏。
-  return withBarVisible(async () => {
+  await withBarVisible(async () => {
     const bar = document.querySelector(
       '[class*="ScreenVariableControls__bar"]',
     ) as HTMLElement | null;
@@ -25,11 +25,10 @@ export async function writeScreenVariable(name: string, naturalId: string): Prom
     if (input !== null) {
       const container = input.closest(`.${C.AddressSelector.container}`) as HTMLElement | null;
       if (container !== null && (await selectAddress(container, naturalId))) {
-        return true;
+        return;
       }
     }
     showBuffer(`BS ${naturalId}`);
-    return true;
   });
 }
 
@@ -46,6 +45,9 @@ function init() {
   // top/left:0 + transform 离屏保证可被 focus / listbox portal 正常测量,react-autosuggest 可拉 server query。
   style.textContent = `[class*="ScreenVariableControls__bar"] { position: absolute !important; top: 0 !important; left: 0 !important; transform: translate(-200vw, -200vh) !important; }`;
   document.head.appendChild(style);
+  // 注意:此 style 元素必须长存 —— withBarVisible 把 bar.style.position/transform
+  // 清空后,靠这条 CSS 规则重新把 bar 拉离屏。删除此 style 会导致 withBarVisible
+  // 还原后 bar 短暂留在屏幕原位。后续若引入 teardown,清理顺序必须最后移除 style。
 }
 
 // 临时把 bar 移回屏幕内 —— writeScreenVariable 写入期间调用,完成/失败后必须恢复离屏。
