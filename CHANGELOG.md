@@ -4,6 +4,9 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+---
+
+## [26.9.4] - 2026-09-04
 ### ✨ Features
 
 - **`basic/screen-variables`**：隐藏原生 SCRN 屏幕变量栏 —— 新增 `core/screen-variables.ts` reactive store 与 `userData` 持久化（`screenVariables` 字段含旧数据迁移）；`basic/screen-variables.tsx` 以 transform 离屏隐藏原生 `ScreenVariableControls__bar`（`display:none` 会让 autosuggest 丢失几何位置），`writeScreenVariable` 操作原生 BS input 驱动服务器 `UI_SCREENS_VARIABLES` 推送，让引用 `$BS` 的原生 tile 重算；FLEET 基地行点击行为由 `showBuffer` 兜底改为写入插件 BS 变量。
@@ -17,6 +20,8 @@
 ### 🔧 Improvements
 
 - **`screen-variables`**：持久化写入改为按 key diff —— 持久化 watcher 由全对象 spread 替换为逐键差异写入，后续新增 `NUMBER`/`TEXT`/`ENUM` 类型时不再每次变更触发整对象重写。
+
+---
 
 ---
 
