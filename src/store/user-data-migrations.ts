@@ -44,6 +44,14 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '04.09.2026 Add screen variables',
+    userData => {
+      if (!userData.screenVariables || typeof userData.screenVariables !== 'object') {
+        userData.screenVariables = {};
+      }
+    },
+  ],
+  [
     '28.08.2026 Triggers mode to AUTO',
     userData => {
       // 触发器模式统一改为 AUTO：手动执行通过列表「执行」按钮进行。

@@ -19,6 +19,7 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
+import { writeScreenVariable } from '@src/features/basic/screen-variables';
 import { getPlanetProduction } from '@src/core/production';
 import { sumBy } from '@src/utils/sum-by';
 import { getStorageAlarmLevel } from '@src/core/storage-analysis';
@@ -286,7 +287,9 @@ async function onPlanetClick() {
   if (focusedAddressSelector && (await selectAddress(focusedAddressSelector, naturalId))) {
     return;
   }
-  showBuffer(`BS ${naturalId}`);
+  // 写入插件自研 BS 变量 + 同步原生 BS input(后者驱动服务器 UI_SCREENS_VARIABLES 推送,
+  // 让所有引用 $BS 的 tile 重新计算 parameter)。
+  await writeScreenVariable('BS', naturalId);
 }
 
 // Production status (from BS)

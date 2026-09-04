@@ -1982,28 +1982,30 @@ function flightTotalText(shipId: string): string {
             </template>
             <template v-else>（{{ sp.ship?.exchangeCode ?? '' }}）</template>
           </span>
+          <div
+            v-if="(sp.plan?.stops?.length ?? 0) > 0 || (sp.progress?.stops?.length ?? 0) > 0"
+            :class="$style.route">
+            <span :class="$style.routeLabel">航线：</span>
+            <span :class="$style.routeOrigin">{{
+              sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
+            }}</span>
+            <template
+              v-for="stop in sp.plan?.stops ?? sp.progress?.stops ?? []"
+              :key="stop.naturalId">
+              <span :class="$style.routeArrow">→</span>
+              <span :class="$style.routeNode">
+                {{ stop.naturalId || stop.planetName
+                }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
+              </span>
+            </template>
+            <span :class="$style.routeArrow">→</span>
+            <span :class="$style.routeOrigin">{{
+              sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
+            }}</span>
+          </div>
           <PrunButton v-if="sp.progress" dark @click="onClearShipPlanClick($event, sp)"
             >清理计划</PrunButton
           >
-        </div>
-        <div v-if="!isRunCollapsed(sp.shipId)" :class="$style.route">
-          <span :class="$style.routeLabel">航线：</span>
-          <span :class="$style.routeOrigin">{{
-            sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
-          }}</span>
-          <template
-            v-for="stop in sp.plan?.stops ?? sp.progress?.stops ?? []"
-            :key="stop.naturalId">
-            <span :class="$style.routeArrow">→</span>
-            <span :class="$style.routeNode">
-              {{ stop.naturalId || stop.planetName
-              }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
-            </span>
-          </template>
-          <span :class="$style.routeArrow">→</span>
-          <span :class="$style.routeOrigin">{{
-            sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
-          }}</span>
         </div>
 
         <table v-if="!isRunCollapsed(sp.shipId)" :class="$style.table">

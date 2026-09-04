@@ -119,6 +119,7 @@ export const initialUserData = deepFreeze({
     locked: [] as string[],
   },
   commandLists: [] as UserData.CommandList[],
+  screenVariables: {} as Record<string, string>,
 
   // 在 user-data-migrations.ts 中使用
   migrations: undefined,
