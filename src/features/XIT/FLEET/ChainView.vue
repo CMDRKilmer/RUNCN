@@ -1982,7 +1982,9 @@ function flightTotalText(shipId: string): string {
             </template>
             <template v-else>（{{ sp.ship?.exchangeCode ?? '' }}）</template>
           </span>
-          <div :class="$style.route">
+          <div
+            v-if="(sp.plan?.stops?.length ?? 0) > 0 || (sp.progress?.stops?.length ?? 0) > 0"
+            :class="$style.route">
             <span :class="$style.routeLabel">航线：</span>
             <span :class="$style.routeOrigin">{{
               sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
