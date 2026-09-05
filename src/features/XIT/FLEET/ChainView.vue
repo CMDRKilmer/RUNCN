@@ -1579,7 +1579,8 @@ const visibleTables = computed<ChainTableRow[]>(() =>
   chainTab.value === 'plan' ? planTables.value : runningTables.value,
 );
 
-// 运行中环线折叠状态：按 shipId 持久化（跨面板重挂载保持），折叠后仅显示船名行。
+// 运行中环线折叠状态：按 shipId 持久化（跨面板重挂载保持），折叠后仅隐藏
+// 明细表格/汇总（船头内的航线概览仍显示）。只对运行行生效——规划中卡片始终展开。
 const collapsedRuns = useTileState<string[] | undefined>('chainCollapsed', undefined);
 
 function isRunCollapsed(shipId: string) {
@@ -1591,6 +1592,14 @@ function toggleRunCollapsed(shipId: string) {
   collapsedRuns.value = current.includes(shipId)
     ? current.filter(x => x !== shipId)
     : [...current, shipId];
+}
+
+// 卡片明细区（表格/汇总）是否可见：折叠只作用于「运行中」的环线行
+// （其船头箭头可展开/折叠）。规划中的行（无 progress）必须始终展开——
+// 否则运行结束残留的折叠标志会让规划卡只剩船名+航线，且规划卡不渲染
+// 箭头（箭头仅在 progress 行出现），用户无法展开查看明细。
+function isRowBodyVisible(sp: { shipId: string; progress?: unknown }) {
+  return !sp.progress || !isRunCollapsed(sp.shipId);
 }
 
 // 环线运行记录保留策略：遍历全部 chainRuns（不限于当前选中的船）。
@@ -1636,6 +1645,18 @@ watchEffect(() => {
   // 没有运行记录时清空计划快照，避免残留旧数据影响下次规划。
   if (Object.keys(userData.chainRuns).length === 0) {
     planSnapshot.value = [];
+  }
+  // 清理已无运行记录的船的折叠标志：运行结束（或手动清理计划）后若标志残留，
+  // 同船再次规划时会把「规划中」卡片折叠且无箭头可展开（箭头仅在运行行渲染）。
+  // 按 activeRuns 保留而非 chainRuns 键——兜底推导的运行行（旧版本/触发器逆推）
+  // 不在 chainRuns 中，但其运行卡片同样可折叠，需保留其标志。
+  const collapsed = collapsedRuns.value;
+  if (collapsed && collapsed.length > 0) {
+    const withRuns = new Set(activeRuns.value.map(e => e.shipId));
+    const pruned = collapsed.filter(id => withRuns.has(id));
+    if (pruned.length !== collapsed.length) {
+      collapsedRuns.value = pruned;
+    }
   }
 });
 
@@ -2008,7 +2029,7 @@ function flightTotalText(shipId: string): string {
           >
         </div>
 
-        <table v-if="!isRunCollapsed(sp.shipId)" :class="$style.table">
+        <table v-if="isRowBodyVisible(sp)" :class="$style.table">
           <colgroup>
             <col :class="$style.colSeq" />
             <col :class="$style.colStation" />
@@ -2187,7 +2208,7 @@ function flightTotalText(shipId: string): string {
 
         <!-- 执行中且无计划快照（旧版本环线 / 逆推模式）时仅显示飞行时长汇总。
              完整装船/采购/舱容等汇总依赖 sp.plan，留给有快照的表格行展示。 -->
-        <div v-if="!isRunCollapsed(sp.shipId) && !sp.plan && sp.progress" :class="$style.summary">
+        <div v-if="isRowBodyVisible(sp) && !sp.plan && sp.progress" :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
@@ -2196,7 +2217,7 @@ function flightTotalText(shipId: string): string {
             </span>
           </div>
         </div>
-        <div v-if="!isRunCollapsed(sp.shipId) && sp.plan" :class="$style.summary">
+        <div v-if="isRowBodyVisible(sp) && sp.plan" :class="$style.summary">
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
