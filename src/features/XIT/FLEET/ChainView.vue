@@ -40,6 +40,9 @@ import {
   shipOriginNaturalId,
   shipWarehouseStock,
   buildCombinedCapacity,
+  shipChainCapacity,
+  chainStopShipmentSizes,
+  planTimeBalancedSegments,
   type ChainPlannerBase,
   type ChainPlan,
   type ChainStopPlan,
@@ -249,15 +252,147 @@ function runPlanChainRoute(arrivalHours?: Map<string, number>) {
 // 基础规划（未含到达时刻产出）：决定站点顺序，供飞行预估与「站→船」映射。
 const basePlan = computed(() => runPlanChainRoute());
 
+// ── 多船时间均衡分段（优先按速度分配） ───────────────────────
+// 并行出动时整条环线完成一轮补给的总耗时 = 最慢那艘船的闭环时长（瓶颈船）。
+// 给每艘可用船沿「整条合并环线」预估一次飞行（异步），用前缀和把任意连续段
+// 代价 O(1) 求出，再经 DP 求 makespan 最小的连续分段——多船真正并行提速、
+// 快船多跑慢船少跑；空段（不参与）由 DP 自动决定，避免切得太碎徒增往返。
+// 预估/求解就绪前退回按舱容贪心（旧行为），就绪后自动切换。
+// 注意：分配只决定「哪艘船跑哪些站」，不改站点顺序——顺序由 basePlan（拓扑序）
+// 决定，分配与飞行预估之间无循环依赖。
+const usableChainShips = computed(() =>
+  selectedShips.value.filter(s => {
+    const c = shipChainCapacity(s);
+    return c !== undefined && (c.freeWeight > 0 || c.freeVolume > 0);
+  }),
+);
+
+interface TimeAlloc {
+  // 与 usableChainShips 对齐：每艘船分配的连续站点 naturalId（空数组 = 不参与）。
+  ranges: string[][];
+  // 与 usableChainShips 对齐：每艘船预计闭环时长（小时，前缀和近似，用于瓶颈展示）。
+  loopHours: number[];
+  // 分配对应的合并环线站点序列（校验当前 plan 是否仍适用）。
+  stopIds: string[];
+}
+const timeAlloc = ref<TimeAlloc | undefined>(undefined);
+const allocStatus = ref<'idle' | 'computing' | 'ready'>('idle');
+
+// 触发键：站点序列 / 参与船集合 / 船数据就绪度变化才重算；量变（仓库、生产
+// 等频繁刷新）不触发，避免反复做异步飞行预估。与 basePlan 对象分离，
+// 也避免 basePlan 因量化变化重算时无谓重跑预估。
+const allocStopKey = computed(() => (basePlan.value?.stops ?? []).map(s => s.naturalId).join('>'));
+const allocShipKey = computed(() => usableChainShips.value.map(s => s.ship.id).join(','));
+
+let allocToken = 0;
+async function computeTimeAlloc() {
+  const p = basePlan.value;
+  const ships = usableChainShips.value;
+  if (!p || p.stops.length < 2 || ships.length < 2 || !shipsStore.fetched.value) {
+    timeAlloc.value = undefined;
+    allocStatus.value = 'idle';
+    return;
+  }
+  const token = ++allocToken;
+  allocStatus.value = 'computing';
+  // 清掉旧分配：配置/船集变化后的重算期间不再套用旧切法（旧 ranges 可能
+  // 与新船集/站点不匹配），退回舱容贪心做中间态，就绪后自动切到时间均衡。
+  timeAlloc.value = undefined;
+  const stopIds = p.stops.map(s => s.naturalId);
+  const stops = p.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName }));
+  try {
+    const capacities = ships.map(s => {
+      const c = shipChainCapacity(s)!;
+      return { freeWeight: c.freeWeight, freeVolume: c.freeVolume };
+    });
+    const loopLegHours: number[][] = [];
+    let complete = true;
+    for (const ship of ships) {
+      const est = await estimateChainFlightTimes({
+        ship: ship.ship,
+        origin: shipOriginNaturalId(ship),
+        stops,
+      });
+      if (token !== allocToken) {
+        return; // 计划/配置已变化，丢弃过期结果。
+      }
+      if (!est.ok || est.legs.length !== stopIds.length + 1) {
+        complete = false;
+        break;
+      }
+      loopLegHours.push(est.legs.map(l => l.hours));
+    }
+    if (token !== allocToken) {
+      return;
+    }
+    const alloc = complete
+      ? planTimeBalancedSegments({
+          loopLegHours,
+          capacities,
+          stopSizes: chainStopShipmentSizes(p),
+        })
+      : undefined;
+    if (token !== allocToken) {
+      return;
+    }
+    if (!alloc) {
+      timeAlloc.value = undefined;
+      allocStatus.value = 'idle';
+      return;
+    }
+    timeAlloc.value = {
+      ranges: alloc.ranges.map(r => stopIds.slice(r.start, r.end)),
+      loopHours: alloc.hours,
+      stopIds,
+    };
+    allocStatus.value = 'ready';
+  } catch (e) {
+    console.warn('[XIT/FLEET] time-balanced alloc failed', e);
+    if (token === allocToken) {
+      timeAlloc.value = undefined;
+      allocStatus.value = 'idle';
+    }
+  }
+}
+
+watch(
+  [allocStopKey, allocShipKey, () => shipsStore.fetched.value],
+  () => {
+    void computeTimeAlloc();
+  },
+  { immediate: true },
+);
+
+// 当前 plan 对应的时间均衡分段（站点序列匹配才有效；否则退回舱容贪心）。
+function allocFor(plan: ChainPlan | undefined): string[][] | undefined {
+  const ta = timeAlloc.value;
+  if (!ta || !plan || plan.stops.length !== ta.stopIds.length) {
+    return undefined;
+  }
+  for (let i = 0; i < plan.stops.length; i++) {
+    if (plan.stops[i]!.naturalId !== ta.stopIds[i]) {
+      return undefined;
+    }
+  }
+  return ta.ranges;
+}
+
 // ── 多船分配结果 ─────────────────────────────────────────────
-// 并行分段：每艘船跑航线的连续一段，同时出动，总耗时 ≈ 单环线 / 船数。
+// 并行分段：每艘船跑航线的连续一段，同时出动。有时间均衡结果时按它切段
+//（总耗时 ≈ 最慢船的闭环时长），否则退回按舱容贪心切段（旧行为）。
 // baseShipPlans 不含到达时刻产出（飞行预估依赖它，避免循环依赖）。
 const baseShipPlans = computed(() => {
   const p = basePlan.value;
   if (!p || selectedShips.value.length === 0) {
     return [];
   }
-  return splitChainPlanAcrossShips(p, selectedShips.value, selectedBases.value);
+  return splitChainPlanAcrossShips(
+    p,
+    selectedShips.value,
+    selectedBases.value,
+    undefined,
+    allocFor(p),
+  );
 });
 
 // 各站预计到达时刻（相对规划时刻的小时数）：由飞行预估（异步）推导。
@@ -315,6 +450,7 @@ const shipPlans = computed(() => {
     selectedShips.value,
     selectedBases.value,
     arrivalHoursByNaturalId.value,
+    allocFor(p),
   );
 });
 
@@ -322,6 +458,41 @@ const shipPlans = computed(() => {
 const unusedShipCount = computed(() =>
   selectedShips.value.length > 0 ? selectedShips.value.length - shipPlans.value.length : 0,
 );
+
+// 时间均衡状态横幅：计算中提示 + 就绪后各船预计闭环时长与瓶颈船。
+const allocBanner = computed<{ kind: 'info' | 'ok'; text: string } | undefined>(() => {
+  if (allocStatus.value === 'computing') {
+    return { kind: 'info', text: '正在按飞行时长均衡分配船只（预估各船环线时长）…' };
+  }
+  const ta = timeAlloc.value;
+  if (!ta || ta.loopHours.length < 2) {
+    return undefined;
+  }
+  const used = usableChainShips.value;
+  // 仅统计实际承担站段的船（空段 = 不参与，不列出）。
+  const parts: string[] = [];
+  let maxIdx = -1;
+  for (let j = 0; j < used.length; j++) {
+    if (ta.ranges[j]!.length === 0) {
+      continue;
+    }
+    const hours = ta.loopHours[j] ?? 0;
+    parts.push(`${shipLabel(used[j]!)}：${formatFlightDuration(hours * 3600000)}`);
+    if (maxIdx < 0 || hours > ta.loopHours[maxIdx]!) {
+      maxIdx = j;
+    }
+  }
+  if (maxIdx < 0) {
+    return undefined;
+  }
+  const makespan = ta.loopHours[maxIdx] ?? 0;
+  return {
+    kind: 'ok',
+    text: `时间均衡分段：${parts.join(' ／ ')}。整条环线首轮约 ${formatFlightDuration(
+      makespan * 3600000,
+    )} 完成（瓶颈：${shipLabel(used[maxIdx]!)}）。`,
+  };
+});
 
 // 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
 // 同时响应规划（baseShipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
@@ -519,6 +690,13 @@ function onClearShipPlanClick(
 function execute() {
   const allPlans = shipPlans.value;
   if (allPlans.length === 0) {
+    return;
+  }
+  // 时间均衡分段计算中：此时 shipPlans 还是舱容贪心（未充分利用多船）。
+  // 等预估完成自动切换到更快的时间均衡分段后再执行，避免按旧切法生成包。
+  if (allocStatus.value === 'computing' && usableChainShips.value.length > 1) {
+    executeNotice.value =
+      '正在按飞行时长均衡分配船只（预估各船环线时长）… 就绪后会自动切换到更快的时间均衡分段，请稍候再执行。';
     return;
   }
   // 多环线并行：正在执行环线的船不能重复生成（会覆盖其脚本与运行状态），
@@ -1986,6 +2164,12 @@ function flightTotalText(shipId: string): string {
         </div>
       </div>
 
+      <div
+        v-if="chainTab === 'plan' && allocBanner"
+        :class="allocBanner.kind === 'ok' ? $style.allocOk : $style.notice">
+        {{ allocBanner.text }}
+      </div>
+
       <div v-for="sp in visibleTables" :key="sp.shipId" :class="$style.shipPlan">
         <div :class="$style.shipHeader">
           <span
@@ -2007,22 +2191,34 @@ function flightTotalText(shipId: string): string {
             v-if="(sp.plan?.stops?.length ?? 0) > 0 || (sp.progress?.stops?.length ?? 0) > 0"
             :class="$style.route">
             <span :class="$style.routeLabel">航线：</span>
-            <span :class="$style.routeOrigin">{{
-              sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
-            }}</span>
+            <span
+              :class="[
+                $style.routeOrigin,
+                sp.progress?.originState === 'done' ? $style.routeDone : '',
+              ]">
+              {{ sp.plan?.originNaturalId ?? sp.progress?.originNaturalId }}
+            </span>
             <template
-              v-for="stop in sp.plan?.stops ?? sp.progress?.stops ?? []"
+              v-for="(stop, i) in sp.plan?.stops ?? sp.progress?.stops ?? []"
               :key="stop.naturalId">
               <span :class="$style.routeArrow">→</span>
-              <span :class="$style.routeNode">
+              <span
+                :class="[
+                  $style.routeNode,
+                  sp.progress?.stops[i]?.state === 'done' ? $style.routeDone : '',
+                ]">
                 {{ stop.naturalId || stop.planetName
                 }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
               </span>
             </template>
             <span :class="$style.routeArrow">→</span>
-            <span :class="$style.routeOrigin">{{
-              sp.plan?.originNaturalId ?? sp.progress?.originNaturalId
-            }}</span>
+            <span
+              :class="[
+                $style.routeOrigin,
+                sp.progress?.finalState === 'done' ? $style.routeDone : '',
+              ]">
+              {{ sp.plan?.originNaturalId ?? sp.progress?.originNaturalId }}
+            </span>
           </div>
           <PrunButton v-if="sp.progress" dark @click="onClearShipPlanClick($event, sp)"
             >清理计划</PrunButton
@@ -2361,6 +2557,12 @@ function flightTotalText(shipId: string): string {
   font-size: 11px;
 }
 
+.allocOk {
+  padding: 4px 8px;
+  color: #7ec8a3;
+  font-size: 11px;
+}
+
 .content {
   padding: 8px;
   /* 与父级 .layout 同为 border-box：width:100% 时 padding 计入宽度，
@@ -2423,8 +2625,9 @@ function flightTotalText(shipId: string): string {
   color: #8a9aa8;
 }
 
+/* 航线节点默认蓝色；完成后由 .routeDone 覆盖为绿色。 */
 .routeNode {
-  color: rgb(171, 198, 128);
+  color: rgb(63, 162, 222);
 }
 
 .routeOrigin {
@@ -2433,6 +2636,11 @@ function flightTotalText(shipId: string): string {
 
 .routeArrow {
   color: #8a9aa8;
+}
+
+/* 完成后（对应站 / 出发 / 归航）标绿；须声明在 .routeNode/.routeOrigin 之后以覆盖默认蓝。 */
+.routeDone {
+  color: rgb(171, 198, 128);
 }
 
 .table {
