@@ -275,6 +275,8 @@ interface TimeAlloc {
   loopHours: number[];
   // 分配对应的合并环线站点序列（校验当前 plan 是否仍适用）。
   stopIds: string[];
+  // 容量诊断：瓶颈站无法转给相邻非空段船的提示（真实吨位/体积）。
+  notes?: string[];
 }
 const timeAlloc = ref<TimeAlloc | undefined>(undefined);
 const allocStatus = ref<'idle' | 'computing' | 'ready'>('idle');
@@ -341,10 +343,72 @@ async function computeTimeAlloc() {
       allocStatus.value = 'idle';
       return;
     }
+    // 容量诊断：瓶颈船（最慢段）相邻的非空段船若因剩余舱容装不下边界站而无法
+    // 接手分担，用真实吨位/体积说明——解释为何瓶颈无法被摊薄（常见是大宗到货
+    // 的单站体积超过小/中船的剩余体积，如整站 > 1000m³）。仅当确实装不下才提示，
+    // 能装下而未转移属时间最优，不误报。
+    const notes: string[] = [];
+    {
+      const sizes = chainStopShipmentSizes(p);
+      const n = stopIds.length;
+      let maxIdx = 0;
+      for (let j = 1; j < alloc.hours.length; j++) {
+        if (alloc.hours[j]! > alloc.hours[maxIdx]!) {
+          maxIdx = j;
+        }
+      }
+      const sumRange = (from: number, to: number) => {
+        let w = 0;
+        let v = 0;
+        for (let k = from; k < to; k++) {
+          w += sizes[k]!.weight;
+          v += sizes[k]!.volume;
+        }
+        return { w, v };
+      };
+      const tryTransfer = (neighborIdx: number, stopIdx: number) => {
+        if (neighborIdx < 0 || neighborIdx >= ships.length || stopIdx < 0 || stopIdx >= n) {
+          return;
+        }
+        if (alloc.ranges[neighborIdx]!.length === 0) {
+          return; // 相邻船本就不参与，无需提示。
+        }
+        const cap = capacities[neighborIdx]!;
+        const own = sumRange(alloc.ranges[neighborIdx]!.start, alloc.ranges[neighborIdx]!.end);
+        const extra = sizes[stopIdx]!;
+        const freeW = cap.freeWeight - own.w;
+        const freeV = cap.freeVolume - own.v;
+        if (extra.weight <= freeW && extra.volume <= freeV) {
+          return; // 能装下：DP 未转移是时间最优，不误报。
+        }
+        notes.push(
+          `${shipLabel(ships[neighborIdx]!)} 接不下 ${p.stops[stopIdx]!.planetName}（该站约 ` +
+            `${fixed0(extra.weight)}t/${fixed0(extra.volume)}m³，其剩余约 ` +
+            `${fixed0(Math.max(0, freeW))}t/${fixed0(Math.max(0, freeV))}m³），` +
+            `该站只能留在瓶颈船 ${shipLabel(ships[maxIdx]!)}（约 ${formatFlightDuration(
+              alloc.hours[maxIdx]! * 3600000,
+            )}）。`,
+        );
+      };
+      // 左侧非空段船接手瓶颈首站（= 左段末站）；右侧非空段船接手瓶颈末站（= 右段首站）。
+      for (let j = maxIdx - 1; j >= 0; j--) {
+        if (alloc.ranges[j]!.length > 0) {
+          tryTransfer(j, alloc.ranges[j]!.end);
+          break;
+        }
+      }
+      for (let j = maxIdx + 1; j < alloc.ranges.length; j++) {
+        if (alloc.ranges[j]!.length > 0) {
+          tryTransfer(j, alloc.ranges[j]!.start - 1);
+          break;
+        }
+      }
+    }
     timeAlloc.value = {
       ranges: alloc.ranges.map(r => stopIds.slice(r.start, r.end)),
       loopHours: alloc.hours,
       stopIds,
+      notes,
     };
     allocStatus.value = 'ready';
   } catch (e) {
@@ -470,27 +534,51 @@ const allocBanner = computed<{ kind: 'info' | 'ok'; text: string } | undefined>(
     return undefined;
   }
   const used = usableChainShips.value;
+  // 该船当前分配段的精确实测（飞行预估 watch 对已定段的闭环实测）：
+  // 与 ta.ranges[j] 匹配（首段目标 = 段首站、段数一致）才采用，保证横幅
+  // 与下方各船卡片的「飞行时长」同口径；分配刚切换、精确实测未就绪时
+  // 回退到 DP 估算（ta.loopHours）。
+  const preciseHoursOf = (j: number): number | undefined => {
+    const stops = ta.ranges[j]!;
+    if (stops.length === 0) {
+      return undefined;
+    }
+    const est = flightEstimates.value.get(used[j]!.ship.id);
+    if (
+      est !== undefined &&
+      est.ok &&
+      est.legs.length === stops.length + 1 &&
+      (est.legs[0]?.to ?? '').toUpperCase() === stops[0]!.toUpperCase()
+    ) {
+      return est.totalHours;
+    }
+    return undefined;
+  };
   // 仅统计实际承担站段的船（空段 = 不参与，不列出）。
   const parts: string[] = [];
   let maxIdx = -1;
+  let maxHours = 0;
   for (let j = 0; j < used.length; j++) {
     if (ta.ranges[j]!.length === 0) {
       continue;
     }
-    const hours = ta.loopHours[j] ?? 0;
+    const hours = preciseHoursOf(j) ?? ta.loopHours[j] ?? 0;
+    if (hours <= 0) {
+      continue;
+    }
     parts.push(`${shipLabel(used[j]!)}：${formatFlightDuration(hours * 3600000)}`);
-    if (maxIdx < 0 || hours > ta.loopHours[maxIdx]!) {
+    if (hours > maxHours) {
+      maxHours = hours;
       maxIdx = j;
     }
   }
   if (maxIdx < 0) {
     return undefined;
   }
-  const makespan = ta.loopHours[maxIdx] ?? 0;
   return {
     kind: 'ok',
     text: `时间均衡分段：${parts.join(' ／ ')}。整条环线首轮约 ${formatFlightDuration(
-      makespan * 3600000,
+      maxHours * 3600000,
     )} 完成（瓶颈：${shipLabel(used[maxIdx]!)}）。`,
   };
 });
@@ -2188,6 +2276,13 @@ function flightTotalText(shipId: string): string {
         :class="allocBanner.kind === 'ok' ? $style.allocOk : $style.notice">
         {{ allocBanner.text }}
       </div>
+      <div
+        v-if="chainTab === 'plan' && timeAlloc?.notes && timeAlloc.notes.length > 0"
+        :class="$style.allocNotes">
+        <div v-for="note in timeAlloc.notes" :key="note" :class="$style.allocNote">
+          {{ note }}
+        </div>
+      </div>
 
       <div v-for="sp in visibleTables" :key="sp.shipId" :class="$style.shipPlan">
         <div :class="$style.shipHeader">
@@ -2579,6 +2674,18 @@ function flightTotalText(shipId: string): string {
 .allocOk {
   padding: 4px 8px;
   color: #7ec8a3;
+  font-size: 11px;
+}
+
+.allocNotes {
+  padding: 0 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.allocNote {
+  color: #8a9aa8;
   font-size: 11px;
 }
 
