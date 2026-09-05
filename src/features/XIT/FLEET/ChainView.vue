@@ -73,6 +73,7 @@ import {
   createChainSyncController,
   isChainPackageName,
   isChainTrigger,
+  shipChainScriptScope,
   type ChainSyncState,
 } from '@src/features/XIT/FLEET/chain-sync';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -616,23 +617,17 @@ function upsertTrigger(trigger: UserData.TriggerData) {
 
 // 删除指定船的全部环线 ACT 操作包与一次性触发器（含未 autoDelete 的历史残留）。
 // 用于「清理计划」按钮（含已完成）与重执行前清理旧脚本。
-function removeShipChainScripts(shipName: string) {
+// shipId 级范围：chainRuns[shipId] 固化包名（改名无关）∪ 未被其它船占用的当前名匹配。
+function removeShipChainScripts(shipId: string, shipName: string) {
+  const scope = shipChainScriptScope(shipId, shipName);
+  const isShipScript = (name: string) => scope.has(name) || name === `环线派遣 ${shipName}`; // 历史格式兼容
   for (let i = userData.actionPackages.length - 1; i >= 0; i--) {
-    const name = userData.actionPackages[i]!.global.name;
-    if (
-      (isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
-      name === `环线派遣 ${shipName}`
-    ) {
+    if (isShipScript(userData.actionPackages[i]!.global.name)) {
       userData.actionPackages.splice(i, 1);
     }
   }
   for (let i = userData.triggers.length - 1; i >= 0; i--) {
-    const trigger = userData.triggers[i]!;
-    const name = trigger.packageName;
-    if (
-      (isChainPackageName(name) && name.endsWith(` ${shipName}`)) ||
-      name === `环线派遣 ${shipName}`
-    ) {
+    if (isShipScript(userData.triggers[i]!.packageName)) {
       userData.triggers.splice(i, 1);
     }
   }
@@ -677,11 +672,14 @@ function onClearShipPlanClick(
   showConfirmationOverlay(
     e,
     () => {
-      removeShipChainScripts(shipName);
+      removeShipChainScripts(sp.shipId, shipName);
       clearFinishedCleanup(sp.shipId);
       delete userData.chainRuns[sp.shipId];
       planSnapshot.value = planSnapshot.value.filter(p => p.ship.ship.id !== sp.shipId);
       statusCheckNotice.value = `已清理 ${label} 的环线计划及 ACT 脚本/触发器。`;
+      // 删除传播：清掉 chainRuns 后粗粒度 watch 不再标脏该船（它已不在
+      // chainRuns 键里），显式标脏以把「空快照」推上云端，清除远端陈旧记录。
+      chainSync.markDirtyShip(sp.shipId);
     },
     { message: `删除 ${label} 的环线计划及其 ACT 脚本/触发器？`, confirmLabel: '删除' },
   );
@@ -724,7 +722,7 @@ function execute() {
     clearFinishedCleanup(ship.ship.id);
     const shipName =
       sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
-    removeShipChainScripts(shipName);
+    removeShipChainScripts(ship.ship.id, shipName);
 
     // 记录环线运行进度（以船为键），并持久化计划快照：
     // 页面刷新后仍按规划样式显示各阶段操作与「当前阶段载重」。
@@ -1062,6 +1060,8 @@ const chainSyncState = ref<ChainSyncState>({
   error: null,
 });
 const syncNotice = ref<string | undefined>(undefined);
+// 同步提示横幅计时器：仅提示当前最新事件，数秒后自动消失，避免常驻遮挡。
+let syncNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const chainSync = createChainSyncController({
   getConfig: () => ({
@@ -1108,6 +1108,13 @@ const chainSync = createChainSyncController({
   },
   onNotice: msg => {
     syncNotice.value = msg;
+    if (syncNoticeTimer) {
+      clearTimeout(syncNoticeTimer);
+    }
+    syncNoticeTimer = setTimeout(() => {
+      syncNotice.value = undefined;
+      syncNoticeTimer = null;
+    }, 8000);
   },
 });
 
@@ -1139,6 +1146,10 @@ onMounted(() => {
 });
 onUnmounted(() => {
   chainSync.stop();
+  if (syncNoticeTimer) {
+    clearTimeout(syncNoticeTimer);
+    syncNoticeTimer = null;
+  }
 });
 
 const syncStateText = computed(() => {
@@ -1172,15 +1183,23 @@ async function onChainSyncClick(e: Event) {
     comparison: cmp,
     onApply: (target, direction) => {
       if (direction === 'pull') {
-        // 用云端覆盖本地（指定船或配置）。
+        // 用云端覆盖本地（指定船或配置）。带上服务端行时间作为乐观锁基准。
         if (target === CONFIG_KEY) {
           if (cmp.remoteConfig) {
-            chainSync.confirmPull(CONFIG_KEY, cmp.remoteConfig);
+            chainSync.confirmPull(
+              CONFIG_KEY,
+              cmp.remoteConfig,
+              cmp.remoteServerUpdatedAt.get(CONFIG_KEY) ?? cmp.remoteConfig.updatedAt,
+            );
           }
         } else {
           const doc = cmp.remoteShips.get(target);
           if (doc) {
-            chainSync.confirmPull(target, doc);
+            chainSync.confirmPull(
+              target,
+              doc,
+              cmp.remoteServerUpdatedAt.get(target) ?? doc.updatedAt,
+            );
           }
         }
       } else {
