@@ -35,6 +35,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import {
   planChainRoute,
   buildChainActionPackages,
+  mintChainFp,
   sanitizeActName,
   splitChainPlanAcrossShips,
   shipOriginNaturalId,
@@ -760,6 +761,12 @@ function onClearShipPlanClick(
   showConfirmationOverlay(
     e,
     () => {
+      // 记录本端清理的代际（run 删除后空快照推送带 clearedFp 传播删除；
+      // clearedFp 由同步控制器持久化，用于推送前拦截同代残留复活）。
+      const clearedFp = userData.chainRuns[sp.shipId]?.fp;
+      if (clearedFp !== undefined) {
+        chainSync.markShipCleared(sp.shipId, clearedFp);
+      }
       removeShipChainScripts(sp.shipId, shipName);
       clearFinishedCleanup(sp.shipId);
       delete userData.chainRuns[sp.shipId];
@@ -798,9 +805,12 @@ function execute() {
   const mainPkgs: UserData.ActionPackageData[] = [];
 
   for (const { ship, plan: shipPlan } of plans) {
+    // 每艘船 mint 一枚代际指纹：铸入 run 与全部 ACT 包/触发器名——改名无关的归属锚点。
+    const fp = mintChainFp();
     const actionPlan = buildChainActionPackages(ship, shipPlan, {
       autoLaunch: chainAutoLaunch.value,
       triggerMode,
+      fp,
     });
     if (!actionPlan) {
       continue;
@@ -817,6 +827,7 @@ function execute() {
     userData.chainRuns[ship.ship.id] = {
       shipId: ship.ship.id,
       shipName: ship.ship.name ?? ship.ship.registration,
+      fp,
       startedAt: Date.now(),
       originNaturalId: shipPlan.originNaturalId,
       stops: shipPlan.stops.map((stop, i) => {
@@ -1440,18 +1451,45 @@ function materialsLoad(record: Record<string, number>) {
   return { weight, volume };
 }
 
-// 旧版/导入的环线记录没有 plan 快照时，从现有 ACT 包（主包/站点包/归航包）
-// 反推一份计划载重快照，让「载重」列显示阶段载重而非实时舱载。
-function buildPlanFromPackages(
-  run: UserData.ChainRun,
-): { plan: UserData.ChainRunPlan; stops: UserData.ChainRunStop[] } | undefined {
+// ── 主包解析（取代按船名切片反推）──────────────────────────
+// 旧版/无 plan 快照的 run 需从 ACT 包反推采购/装载。主包定位优先级：
+// 1) run.mainPkgName 精确匹配（execute 固化、改名无关）；
+// 2) run 带代际指纹时按 `0 Chain … <fp>` 定位（改名后仍准确）；
+// 3) 古早记录（两者皆无）才回退「Loop <船名>」切船名后缀匹配。
+function findRunMainPkg(run: UserData.ChainRun): UserData.ActionPackageData | undefined {
+  if (run.mainPkgName !== undefined) {
+    const pkg = userData.actionPackages.find(p => p.global.name === run.mainPkgName);
+    if (pkg) {
+      return pkg;
+    }
+  }
+  if (run.fp !== undefined) {
+    const suffix = ` ${run.fp}`;
+    const pkg = userData.actionPackages.find(
+      p =>
+        isChainPackageName(p.global.name) &&
+        p.global.name.startsWith('0 Chain') &&
+        p.global.name.endsWith(suffix),
+    );
+    if (pkg) {
+      return pkg;
+    }
+  }
   const firstPkgName = run.stops[0]?.pkgName ?? '';
   const idx = firstPkgName.lastIndexOf(' Loop ');
   if (idx < 0) {
     return undefined;
   }
   const shipName = firstPkgName.slice(idx + ' Loop '.length);
-  const mainPkg = userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+  return userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+}
+
+// 旧版/导入的环线记录没有 plan 快照时，从现有 ACT 包（主包/站点包/归航包）
+// 反推一份计划载重快照，让「载重」列显示阶段载重而非实时舱载。
+function buildPlanFromPackages(
+  run: UserData.ChainRun,
+): { plan: UserData.ChainRunPlan; stops: UserData.ChainRunStop[] } | undefined {
+  const mainPkg = findRunMainPkg(run);
   const buyGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '));
   const loadGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('装载 '));
   const purchaseBill = buyGroup?.materials ?? {};
@@ -1536,14 +1574,9 @@ function buildPlanFromPackages(
 }
 
 // 出发行采购：从主包（Chain 船名）的「购买」组还原。
-// 主包名由站点包名反推（取最后一个「 Loop 」之后的部分作为船名）。
-function derivePurchaseBill(stopPkgName: string): Record<string, number> {
-  const idx = stopPkgName.lastIndexOf(' Loop ');
-  if (idx < 0) {
-    return {};
-  }
-  const shipName = stopPkgName.slice(idx + ' Loop '.length);
-  const mainPkg = userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+// 主包定位走 findRunMainPkg（mainPkgName / 代际指纹优先），不再切船名。
+function derivePurchaseBill(run: UserData.ChainRun): Record<string, number> {
+  const mainPkg = findRunMainPkg(run);
   return mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '))?.materials ?? {};
 }
 
@@ -1846,8 +1879,7 @@ const runningTables = computed<ChainTableRow[]>(() => {
       shipName: entry.run.shipName,
       progress: entry.progress,
       derivedStops: entry.run.stops.map(stop => deriveStopOps(stop.pkgName)),
-      derivedPurchase:
-        entry.run.stops.length > 0 ? derivePurchaseBill(entry.run.stops[0]!.pkgName) : {},
+      derivedPurchase: derivePurchaseBill(entry.run),
       derivedFinal: entry.run.finalPkgName ? deriveFinalOps(entry.run.finalPkgName) : {},
     });
   }

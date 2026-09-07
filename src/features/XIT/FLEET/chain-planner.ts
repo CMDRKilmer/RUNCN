@@ -1607,10 +1607,45 @@ export function sanitizeActName(name: string): string {
     .trim();
 }
 
+// ── 环线代际指纹 ──────────────────────────────────────────────
+// 每次 execute() 生成环线时铸入一枚 10 位 hex 指纹，追加在各 ACT 包/触发器名
+// 末尾（` <fp>`）。它是该环线 run 的「代际身份」：船改名、船名互为后缀都不再
+// 影响归属；云端同步用它判定「同一代已被他端清除」以防止旧数据复活。
+export function mintChainFp(): string {
+  return createId().slice(0, 10);
+}
+// 名称末尾指纹后缀（含前导空格，ASCII 安全、可过 sanitizeActName）。
+export function chainFpSuffix(fp: string): string {
+  return ` ${fp}`;
+}
+// 环线 ACT 包名长度上限（含空格与 fp 后缀）：保守值。XIT/PrUn 侧命令/包名
+// 过长会解析失败，超长船名/星球名 + fp 是最可能的来源；超限时压缩可变段。
+export const MAX_CHAIN_PKG_NAME = 80;
+// 超限时压缩包名：保留数字前缀/类型关键字所在的前段与末尾 fp 后缀（fp 必须
+// 原样保留——它是归属/代际匹配锚点），裁剪中间的可变段。无 fp 后缀时兜底截断。
+export function fitChainPkgName(name: string): string {
+  if (name.length <= MAX_CHAIN_PKG_NAME) {
+    return name;
+  }
+  const fpMatch = /^(.*?)\s+([0-9a-f]{10})$/.exec(name);
+  if (fpMatch === null) {
+    return name.slice(0, MAX_CHAIN_PKG_NAME).trim();
+  }
+  const body = fpMatch[1]!;
+  const fp = fpMatch[2]!;
+  const bodyBudget = MAX_CHAIN_PKG_NAME - 1 - fp.length;
+  return `${body.slice(0, bodyBudget).trimEnd()} ${fp}`;
+}
+
 export function buildChainActionPackages(
   ship: DispatchShip,
   plan: ChainPlan,
-  options: { autoLaunch?: boolean; triggerMode?: UserData.TriggerMode } = {},
+  options: {
+    autoLaunch?: boolean;
+    triggerMode?: UserData.TriggerMode;
+    // 环线代际指纹：非空时追加到所有包名/触发器名末尾（` <fp>`）。
+    fp?: string;
+  } = {},
 ): ChainActionPlan | undefined {
   if (!ship.warehouseStore || !ship.cargoStore) {
     return undefined;
@@ -1618,6 +1653,7 @@ export function buildChainActionPackages(
   // 船名净化后仍为空（如中文船名）时回退到注册号，保证包名非空。
   const shipName =
     sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
+  const fpSuffix = options.fp === undefined ? '' : chainFpSuffix(options.fp);
   const loadGroupName = `装载 ${shipName}`;
   const originWarehouse = serializeStorage(ship.warehouseStore);
   const shipCargo = serializeStorage(ship.cargoStore);
@@ -1680,7 +1716,7 @@ export function buildChainActionPackages(
   }
 
   const mainPkg: UserData.ActionPackageData = {
-    global: { name: `0 Chain ${shipName}` },
+    global: { name: fitChainPkgName(`0 Chain ${shipName}${fpSuffix}`) },
     // 环线脚本不随执行自动删除：保留完整脚本供状态列表/云端同步/手动清理。
     groups,
     actions,
@@ -1704,7 +1740,7 @@ export function buildChainActionPackages(
     // 星球名净化后为空（如中文/含符号名）时回退到 naturalId，保证包名可被 ACT 命令解析。
     const stopLabel = sanitizeActName(stop.planetName || stop.naturalId) || stop.naturalId;
     // 阶段号与进度表「序」列一致：1..N 为各站点。
-    const pkgName = `${i + 1} ${stopLabel} Loop ${shipName}`;
+    const pkgName = fitChainPkgName(`${i + 1} ${stopLabel} Loop ${shipName}${fpSuffix}`);
     const baseStore = `${stop.planetName} Base`;
 
     const unload: Record<string, number> = { ...stop.unloadCx };
@@ -1762,7 +1798,7 @@ export function buildChainActionPackages(
 
   let finalPkg: ChainStopPackage | undefined;
   if (Object.keys(plan.finalUnload).length > 0) {
-    const pkgName = `${plan.stops.length + 1} Chain Return ${shipName}`;
+    const pkgName = fitChainPkgName(`${plan.stops.length + 1} Chain Return ${shipName}${fpSuffix}`);
     finalPkg = {
       pkg: {
         global: { name: pkgName },

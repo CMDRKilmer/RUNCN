@@ -301,6 +301,9 @@ declare namespace UserData {
   interface ChainRun {
     shipId: string;
     shipName: string;
+    // 环线代际指纹（execute() 铸入，10 位 hex，追加在各 ACT 包/触发器名末尾）：
+    // 船改名/名字互为后缀不影响的归属锚点；云端同步据此判定「同一代被清除」。
+    fp?: string;
     startedAt: number;
     originNaturalId: string;
     stops: ChainRunStop[];

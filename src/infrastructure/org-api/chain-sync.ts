@@ -23,6 +23,11 @@ export interface ChainSyncDoc {
   updatedAt: number;
   // 仅 '__config__' 条目携带。
   config?: ChainSyncConfig;
+  // 环线代际指纹（有运行记录时）：该船当前 run 的 fp，见 ChainRun.fp。
+  fp?: string;
+  // 代际清除标记（空快照删除传播时）：被删除 run 的 fp——轻量 tombstone，
+  // 对端据此识别「我持有的同一代已被清除」，防止旧数据复活。
+  clearedFp?: string;
   // 运行状态：按 shipId 的进度快照（船条目只含本船）。
   chainRuns: Record<string, UserData.ChainRun>;
   // 环线相关操作包（船条目只含本船）。
