@@ -1,11 +1,13 @@
 import './ACT/ACT';
 import './ARB/ARB';
+import './BMAT/BMAT';
 import './BPC/BPC';
 import './BSN/BSN';
 import './BURN/BURN';
 import './BURN/BURN_GEN';
 import './CALC';
 import './CART/CART';
+import './CART/BuyTable';
 import './CHAT';
 import './CMDL/CMDL';
 import './CMDS';

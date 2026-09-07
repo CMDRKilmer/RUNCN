@@ -50,6 +50,13 @@ function onGenerateActClick(ev: Event, plan: UserData.BasePlan) {
   showTileOverlay(ev, GenerateConstructionActDialog, { plan });
 }
 
+// 打开 XIT BMAT 建材购买表，并预选该计划。
+function onBuyTableClick(_ev: Event, plan: UserData.BasePlan) {
+  const ws = getTileState<{ planId?: string }>('bmat-plan-id');
+  ws.planId = plan.id;
+  showBuffer('XIT BMAT');
+}
+
 function formatDate(ts: number) {
   return `${ddmmyyyy(ts)} ${hhmm(ts)}`;
 }
@@ -67,12 +74,13 @@ function formatDate(ts: number) {
         <th>保存时间</th>
         <th>打开</th>
         <th>购材</th>
+        <th>购买表</th>
         <th>删除</th>
       </tr>
     </thead>
     <tbody v-if="plans.length === 0">
       <tr>
-        <td colspan="6">暂无计划，点「新建计划」开始规划。</td>
+        <td colspan="7">暂无计划，点「新建计划」开始规划。</td>
       </tr>
     </tbody>
     <tbody v-else>
@@ -85,6 +93,9 @@ function formatDate(ts: number) {
         </td>
         <td>
           <PrunButton dark inline @click="onGenerateActClick($event, plan)">购材 ACT</PrunButton>
+        </td>
+        <td>
+          <PrunButton dark inline @click="onBuyTableClick($event, plan)">购买表</PrunButton>
         </td>
         <td>
           <PrunButton dark inline @click="onDeleteClick($event, plan)">删除</PrunButton>

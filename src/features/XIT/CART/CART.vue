@@ -288,6 +288,11 @@ function generateAct() {
   setStatus(`已生成 ACT 包 ${pkg.global.name}。`);
 }
 
+// 打开 XIT CBUY 购物车购买表：对购物车物品做各交易所比价与最优采购。
+function openBuyTable() {
+  showBuffer('XIT CBUY');
+}
+
 function setStatus(message: string, isError = false) {
   statusMessage.value = message;
   statusError.value = isError;
@@ -298,6 +303,9 @@ function setStatus(message: string, isError = false) {
   <div :class="$style.page">
     <ActionBar>
       <PrunButton primary @click="generateAct">生成 ACT</PrunButton>
+      <PrunButton primary :disabled="cart.items.length === 0" @click="openBuyTable"
+        >购买表</PrunButton
+      >
       <PrunButton primary @click="importFromText">识别 JSON</PrunButton>
       <PrunButton primary @click="uploadImportJson">上传 JSON</PrunButton>
       <PrunButton dark :disabled="!hasSelection" @click="removeSelectedItems">删除选中</PrunButton>
