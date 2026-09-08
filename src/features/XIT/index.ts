@@ -16,6 +16,7 @@ import './CONTS/CONTS';
 import './CONTSS/CONTSS';
 import './CONTFF/CONTFF';
 import './CONTGEN/CONTGEN';
+import './CQ/CQ';
 import './CXOS/CXOS';
 import './CXTS/CXTS';
 import './DEV/DEV';

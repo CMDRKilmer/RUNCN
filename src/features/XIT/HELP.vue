@@ -8,6 +8,7 @@ const categoryMap: Record<string, string> = {
   FINBS: '经济与财务',
   FINCH: '经济与财务',
   ARB: '经济与财务',
+  CQ: '经济与财务',
   CXOS: '经济与财务',
   CXTS: '经济与财务',
   FXTS: '经济与财务',

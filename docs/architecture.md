@@ -111,6 +111,12 @@ External data source at `rest.fnar.net`. Known limitations:
 - Extraction buildings (EXT, RIG, COL) return a single empty placeholder recipe (`=>`). Real extraction recipes are planet-specific; use FIO `/planet/{id}` resources + `materialsStore.getById()` to map `MaterialId` → ticker, or game API `productionTemplates` if the user has a base.
 - Planet resources: `{MaterialId (hash), ResourceType (MINERAL|LIQUID|GASEOUS), Factor (0–1 concentration)}`. ResourceType maps to building: MINERAL→EXT, LIQUID→RIG, GASEOUS→COL.
 
+**Per-company market query endpoints** (all public, no auth, `XIT CQ` panel consumes these):
+- `GET /company/code/{code}` / `GET /company/name/{name}` → resolve a company (returns `CompanyCode`/`CompanyId`/`CompanyName`; 204 when not found). `/company/code` expects uppercase code, try name lookup as fallback. `GET /user/{UserName}` resolves by **username** and returns the same shape (a username may differ from the company name) — resolution chain is code → name → user.
+- `GET /exchange/orders/{CompanyCode}` → that company's open orders **on all CX exchanges**, array of `{ Ticker: "MAT.EX" (material.exchange), Buys: [{Count, Cost}], Sells: [...] }`. `Cost` = per-unit price, `Count` = quantity. Response currency is NOT included — it is fixed per exchange (`AI1`→AIC, `CI1`/`CI2`→CIS, `IC1`→ICA, `NC1`/`NC2`→NCC). Optional `/{ExchangeCode}` narrows to one exchange.
+- `GET /localmarket/company/{Company}` → all of a company's LM ads (`{BuyingAds, SellingAds, ShippingAds}`), `Company` = CompanyId or CompanyName. 204 = none recorded.
+- **Coverage caveat**: FIO data is community-uploaded (whatever panels uploaders had open) and snapshot-like, not game-real-time nor exhaustive. LM coverage in particular is sparse — 204 means "not captured", not "doesn't exist". See the `XIT/CQ` feature for field-semantics calibration.
+
 ### `storage/` — Persistence
 
 User settings live in `userData` (`src/store/user-data.ts`), a reactive object auto-synced to `chrome.storage.local` via a `postMessage` relay between page and content script contexts.
