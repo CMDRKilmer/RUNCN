@@ -204,7 +204,12 @@ export function calculatePlanetBurn(
   for (const ticker of Object.keys(burnValues)) {
     const mat = burnValues[ticker];
     const inv = mat.remainingAllocation + mat.inventory;
-    mat.daysLeft = mat.dailyAmount >= 0 ? Number.POSITIVE_INFINITY : inv / -mat.dailyAmount;
+    // 日均消耗舍入到 0.00（如 -0.001）时视为无消耗，返回 ∞。
+    // 否则库存为 0 时会出现 0 / 0.001 = 0 而非 ∞。
+    mat.daysLeft =
+      mat.dailyAmount >= 0 || Math.abs(mat.dailyAmount) < 0.005
+        ? Number.POSITIVE_INFINITY
+        : inv / -mat.dailyAmount;
   }
 
   return burnValues;
