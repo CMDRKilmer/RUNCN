@@ -70,7 +70,6 @@ import { createId } from '@src/store/create-id';
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
 import {
-  CONFIG_KEY,
   createChainSyncController,
   isChainPackageName,
   isChainTrigger,
@@ -1148,14 +1147,15 @@ watch(
 );
 
 // ── 环线多端同步（org-api 服务器，跨浏览器/设备） ─────────────
-// 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，
-// 互不覆盖；'__config__' 存全局配置。无自动轮询——仅在本地环线状态改变时
-// 防抖推送；覆盖仅由「云端同步」对话框手动选择。
+// 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，互不覆盖。
+// 环线面板的全局配置（分组/基地/船勾选/自动开关）仅本地保存，不参与云同步。
+// 无自动轮询——仅在本地环线状态改变时防抖推送；覆盖仅由「云端同步」对话框手动选择。
 const chainSyncState = ref<ChainSyncState>({
   syncing: false,
   lastSyncAt: null,
   dirty: false,
   conflict: false,
+  mergeKeys: [],
   error: null,
 });
 const syncNotice = ref<string | undefined>(undefined);
@@ -1163,37 +1163,6 @@ const syncNotice = ref<string | undefined>(undefined);
 let syncNoticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 const chainSync = createChainSyncController({
-  getConfig: () => ({
-    chainGroup: chainGroup.value,
-    chainShipIds: chainShipIds.value,
-    chainBaseIds: chainBaseIds.value,
-    chainAutoLaunch: chainAutoLaunch.value,
-    chainAutoTrigger: chainAutoTrigger.value,
-    chainAutoRecover: chainAutoRecover.value,
-  }),
-  // chainGroup 的 watch 会清空 chainBaseIds（用户切换分组的语义）：
-  // 先设 group 并等其 watch flush，再设其余字段，避免远端 chainBaseIds 被误清。
-  applyConfig: async config => {
-    if (config.chainGroup !== undefined && config.chainGroup !== chainGroup.value) {
-      chainGroup.value = config.chainGroup;
-    }
-    await nextTick();
-    if (config.chainBaseIds !== undefined) {
-      chainBaseIds.value = config.chainBaseIds;
-    }
-    if (config.chainShipIds !== undefined) {
-      chainShipIds.value = config.chainShipIds;
-    }
-    if (config.chainAutoLaunch !== undefined) {
-      chainAutoLaunch.value = config.chainAutoLaunch;
-    }
-    if (config.chainAutoTrigger !== undefined) {
-      chainAutoTrigger.value = config.chainAutoTrigger;
-    }
-    if (config.chainAutoRecover !== undefined) {
-      chainAutoRecover.value = config.chainAutoRecover;
-    }
-  },
   // shipId → 该船净化后的名字（环线包名后缀），用于按船收集/匹配脚本。
   resolveShipName: shipId => {
     const ship = shipsStore.getById(shipId);
@@ -1221,12 +1190,6 @@ const chainSync = createChainSyncController({
 // 远端应用引发的变化由 controller 抑制，避免「应用远端 → 重推 → 远端更新」循环。
 watch(
   () => [
-    chainGroup.value,
-    chainShipIds.value,
-    chainBaseIds.value,
-    chainAutoLaunch.value,
-    chainAutoTrigger.value,
-    chainAutoRecover.value,
     userData.chainRuns,
     userData.actionPackages.filter(p => isChainPackageName(p.global.name)),
     userData.triggers.filter(isChainTrigger),
@@ -1235,7 +1198,6 @@ watch(
     for (const shipId of Object.keys(userData.chainRuns)) {
       chainSync.markDirtyShip(shipId);
     }
-    chainSync.markDirtyConfig();
   },
   { deep: true },
 );
@@ -1251,6 +1213,17 @@ onUnmounted(() => {
   }
 });
 
+// 冲突条目的展示名：状态条/悬浮提示指明具体冲突对象（船名）。
+function conflictEntryLabel(key: string): string {
+  const ship = shipsStore.getById(key);
+  if (ship) {
+    return ship.name || ship.registration || key;
+  }
+  return key;
+}
+
+const syncConflictNames = computed(() => chainSyncState.value.mergeKeys.map(conflictEntryLabel));
+
 const syncStateText = computed(() => {
   const s = chainSyncState.value;
   if (s.syncing) {
@@ -1260,7 +1233,8 @@ const syncStateText = computed(() => {
     return '同步失败';
   }
   if (s.conflict) {
-    return '有冲突';
+    const names = syncConflictNames.value.join('、');
+    return names ? `有冲突：${names}` : '有冲突';
   }
   if (s.dirty) {
     return '待同步';
@@ -1271,8 +1245,20 @@ const syncStateText = computed(() => {
   return '未同步';
 });
 
-// 打开云端同步对比对话框：拉取云端 + 收集本地（配置 + 各活跃船），
-// 由用户逐项选择覆盖方向（按船/配置）。
+// 状态条悬浮提示：冲突时列出具体条目与处理指引。
+const syncStateTitle = computed(() => {
+  const s = chainSyncState.value;
+  if (s.conflict) {
+    const names = syncConflictNames.value.join('、');
+    return names
+      ? `冲突条目：${names}。打开「云端同步」，对该条目点「上传」或「下载」解决。`
+      : '存在待处理的同步冲突。打开「云端同步」，对相应条目点「上传」或「下载」解决。';
+  }
+  return s.error ?? '';
+});
+
+// 打开云端同步对比对话框：拉取云端 + 收集本地各活跃船快照，
+// 由用户逐项选择覆盖方向（按船）。
 async function onChainSyncClick(e: Event) {
   const cmp = await chainSync.prepareComparison();
   if (!cmp) {
@@ -1280,26 +1266,18 @@ async function onChainSyncClick(e: Event) {
   }
   showTileOverlay(e, ChainSyncDialog, {
     comparison: cmp,
+    // 冲突待处理条目（awaitingMerge 且 dirty）：对话框据此高亮需要处理的条目。
+    mergeKeys: chainSync.state.mergeKeys,
     onApply: (target, direction) => {
       if (direction === 'pull') {
-        // 用云端覆盖本地（指定船或配置）。带上服务端行时间作为乐观锁基准。
-        if (target === CONFIG_KEY) {
-          if (cmp.remoteConfig) {
-            chainSync.confirmPull(
-              CONFIG_KEY,
-              cmp.remoteConfig,
-              cmp.remoteServerUpdatedAt.get(CONFIG_KEY) ?? cmp.remoteConfig.updatedAt,
-            );
-          }
-        } else {
-          const doc = cmp.remoteShips.get(target);
-          if (doc) {
-            chainSync.confirmPull(
-              target,
-              doc,
-              cmp.remoteServerUpdatedAt.get(target) ?? doc.updatedAt,
-            );
-          }
+        // 用云端覆盖本地（指定船）。带上服务端行时间作为乐观锁基准。
+        const doc = cmp.remoteShips.get(target);
+        if (doc) {
+          chainSync.confirmPull(
+            target,
+            doc,
+            cmp.remoteServerUpdatedAt.get(target) ?? doc.updatedAt,
+          );
         }
       } else {
         // 用本地覆盖云端（强制推送该目标）。
@@ -2231,7 +2209,12 @@ function flightTotalText(shipId: string): string {
       <PrunButton dark :disabled="chainSyncState.syncing" @click="onChainSyncClick($event)"
         >云端同步</PrunButton
       >
-      <span :class="$style.syncState" :title="chainSyncState.error ?? ''">{{ syncStateText }}</span>
+      <span
+        :class="chainSyncState.conflict ? $style.syncStateConflict : $style.syncState"
+        :title="syncStateTitle"
+        @click="chainSyncState.conflict && onChainSyncClick($event)">
+        {{ syncStateText }}
+      </span>
       <div :class="$style.spacer" />
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
@@ -2686,6 +2669,18 @@ function flightTotalText(shipId: string): string {
   white-space: nowrap;
   align-self: center;
   margin-left: 0.25rem;
+}
+
+/* 冲突状态：高亮 + 可点击打开「云端同步」对话框处理。 */
+.syncStateConflict {
+  color: #f0a35e;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
+  margin-left: 0.25rem;
+  cursor: pointer;
+  text-decoration: underline dotted;
 }
 
 .spacer {

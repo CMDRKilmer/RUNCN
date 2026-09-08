@@ -1,9 +1,9 @@
 // src/features/XIT/FLEET/chain-sync.ts
-// 环线多端同步：跨浏览器/设备经 org-api 服务器同步环线快照。
-// - 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，
-//   互不覆盖；'__config__' 存环线面板全局配置。
-// - 无自动轮询：仅在本地环线运行状态改变（ChainView watch 触发 markDirtyShip/
-//   markDirtyConfig）时防抖推送；覆盖仅由「云端同步」对话框手动选择。
+// 环线多端同步：跨浏览器/设备经 org-api 服务器同步「单船飞行配置」快照。
+// - 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，互不覆盖。
+//   环线面板的全局配置（分组/基地/船勾选/自动开关）仅本地保存，不参与云同步。
+// - 无自动轮询：仅在本地环线运行状态改变（ChainView watch 触发 markDirtyShip）
+//   时防抖推送；覆盖仅由「云端同步」对话框手动选择。
 // - 冲突闸：条目一旦发生实质冲突（LWW 拒绝 / 409 且内容不一致）即标记
 //   awaitingMerge，自动推送不再触碰该条目，直到用户在「云端同步」对话框手动
 //   下拉（pull）或强制上传（force）——防止 409 刷新基准后以本地时钟静默覆盖
@@ -27,12 +27,8 @@ import {
   fetchChainSync,
   fetchChainSyncs,
   pushChainSync,
-  type ChainSyncConfig,
   type ChainSyncDoc,
 } from '@src/infrastructure/org-api/chain-sync';
-
-// 特殊条目：环线面板全局配置。
-export const CONFIG_KEY = '__config__';
 
 // ── 同步基准跨会话持久化 ────────────────────────────────────────
 // SyncEntry（CAS base / LWW 时间 / 推送签名）只存在内存：页面重载后归零会让
@@ -65,7 +61,11 @@ function loadBaselines(): BaselineMap {
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        return parsed as BaselineMap;
+        const map = parsed as BaselineMap;
+        // 全局配置不再参与云同步：忽略历史遗留的 '__config__' 基准
+        // （旧版本的配置冲突/合并闸，避免重载后恢复成永久「有冲突」）。
+        delete map['__config__'];
+        return map;
       }
     }
   } catch {
@@ -154,11 +154,9 @@ function normalizeDoc(payload: unknown): ChainSyncDoc | null {
   return p as ChainSyncDoc;
 }
 
-// 对比数据：本地（config + 各活跃船） vs 远端（config + 各船）。
+// 对比数据：本地（各活跃船） vs 远端（各船）。
 export interface SyncComparison {
-  localConfig: ChainSyncDoc;
   localShips: Map<string, ChainSyncDoc>;
-  remoteConfig: ChainSyncDoc | null;
   remoteShips: Map<string, ChainSyncDoc>;
   // 云端各条目服务端行时间（updated_at，CAS 乐观锁基准）；无远端记录时缺省。
   remoteServerUpdatedAt: Map<string, number>;
@@ -271,18 +269,6 @@ function collectShipDoc(
   };
 }
 
-// 全局配置快照（'__config__'）。
-function collectConfigDoc(config: ChainSyncConfig, updatedAt: number): ChainSyncDoc {
-  return {
-    version: 1,
-    updatedAt,
-    config,
-    chainRuns: {},
-    actionPackages: [],
-    triggers: [],
-  };
-}
-
 // ── 应用 ─────────────────────────────────────────────────────────────
 // 应用远端船快照：只动该船数据（chainRuns 该船条目 + 该船环线包/触发器），
 // 不影响其他船。远端无该船条目时删除本地该船记录（删除传播）。
@@ -346,15 +332,13 @@ export interface ChainSyncState {
   lastSyncAt: number | null;
   dirty: boolean;
   conflict: boolean;
+  // 冲突待人工合并的条目 key（awaitingMerge 且 dirty）。UI 据此指明具体是哪个
+  // 船/配置在冲突，避免只显示「有冲突」却无从下手。
+  mergeKeys: string[];
   error: string | null;
 }
 
 export interface ChainSyncControllerOptions {
-  // 读取当前环线配置（tileState 各字段）。
-  getConfig: () => ChainSyncConfig;
-  // 应用远端配置到本地（写 tileState）。ChainGroup 变化会触发其 watch 清空
-  // chainBaseIds，故实现需用 nextTick 保证先设 group、watch flush 后再设其余。
-  applyConfig: (config: ChainSyncConfig) => void;
   // shipId → 该船名（净化后的环线包名后缀）。无法解析时返回 undefined。
   resolveShipName: (shipId: string) => string | undefined;
   // 状态回调（可选）：同步状态变化时通知 UI。
@@ -371,10 +355,11 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     lastSyncAt: null,
     dirty: false,
     conflict: false,
+    mergeKeys: [],
     error: null,
   });
 
-  // 每个同步条目（船 / '__config__'）独立基准。
+  // 每个同步条目（每艘船）独立基准。
   interface SyncEntry {
     remoteUpdatedAt: number; // LWW 比较基准（payload 内时间戳）
     remoteBaseUpdatedAt: number; // 乐观锁基准（服务器 updated_at）
@@ -444,15 +429,26 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     saveBaselines(stored);
   }
 
+  // 待人工合并条目的 key 列表（与 hasPendingMerge 同判据：awaitingMerge 且 dirty）。
+  function pendingMergeKeys(): string[] {
+    const keys: string[] = [];
+    for (const [key, x] of entries) {
+      if (x.awaitingMerge && x.dirty) {
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
   function setState(patch: Partial<ChainSyncState>) {
     Object.assign(state, patch);
+    // 冲突条目标识始终以 entries 实时状态重算：state.conflict 由各路径置位/清除，
+    // 若不同步刷新 mergeKeys，UI 无法知道冲突到底落在哪个船/配置上。
+    state.mergeKeys = pendingMergeKeys();
     opts.onState?.(state);
   }
 
   function entryLabel(key: string): string {
-    if (key === CONFIG_KEY) {
-      return '';
-    }
     const name = opts.resolveShipName(key);
     return name ? `${name} ` : '该船 ';
   }
@@ -475,10 +471,6 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     // 冲突不应被本船的新变化掩盖（保持状态条「有冲突」提示）。
     setState({ dirty: true, conflict: hasPendingMerge(), error: null });
     schedulePush();
-  }
-
-  function markDirtyConfig() {
-    markDirtyShip(CONFIG_KEY);
   }
 
   function schedulePush() {
@@ -541,7 +533,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
 
   // 执行推送批次：推送所有 dirty 条目（每船只推自己的数据）。
   // force=true：跳过 LWW 拒绝与内容签名跳过（用户已在对话框确认「本地覆盖云端」）；
-  // targetKey：只推送指定条目（船 id 或 '__config__'）。
+  // targetKey：只推送指定条目（船 id）。
   async function performPush(force: boolean, targetKey?: string): Promise<void> {
     setState({ syncing: true });
     // 批次中是否刷新过基准（首拉/成功/409 重取）：有才写回 localStorage。
@@ -574,10 +566,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
           }
         }
         const localUpdatedAt = e.lastLocalChangeAt > 0 ? e.lastLocalChangeAt : Date.now();
-        const doc =
-          key === CONFIG_KEY
-            ? collectConfigDoc(opts.getConfig(), localUpdatedAt)
-            : collectShipDoc(key, localUpdatedAt, opts.resolveShipName, e.clearedFp);
+        const doc = collectShipDoc(key, localUpdatedAt, opts.resolveShipName, e.clearedFp);
         // 推送前同代拦截：本地 run 的代际 == 本端已知「云端已清除」的代际
         // （残留脚本被导入/重建）→ 直接移除本地，不推回云端。fp 每次 execute
         // 重新 mint，同代不可能是新的合法 run。此守卫在 base 已刷新（无 409）
@@ -620,7 +609,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
           e.awaitingMerge = false; // force 覆盖成功即视为解决该条目冲突。
           setState({ lastSyncAt: res.updatedAt, error: null });
           if (force) {
-            opts.onNotice?.(`${entryLabel(key) || '配置'}已用本地覆盖云端。`);
+            opts.onNotice?.(`${entryLabel(key)}已用本地覆盖云端。`);
           }
         } else {
           // 409 并发冲突：该船云端已被更新。先取最新快照核对内容是否一致。
@@ -659,7 +648,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
                   e.dirty = false;
                   e.awaitingMerge = false;
                   setState({ lastSyncAt: res.updatedAt, error: null });
-                  opts.onNotice?.(`${entryLabel(key) || '配置'}已用本地覆盖云端。`);
+                  opts.onNotice?.(`${entryLabel(key)}已用本地覆盖云端。`);
                   continue;
                 }
                 // 重推仍失败：落入下方统一 409 处理（内容收敛或冲突闸）。
@@ -770,13 +759,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
   // 未知时退回 payload 时间戳。
   function adoptRemote(shipId: string, doc: ChainSyncDoc, serverUpdatedAt: number): void {
     suppressFor(() => {
-      if (shipId === CONFIG_KEY) {
-        if (doc.config) {
-          opts.applyConfig(doc.config);
-        }
-      } else {
-        applyShipDoc(shipId, doc, opts.resolveShipName);
-      }
+      applyShipDoc(shipId, doc, opts.resolveShipName);
     });
     const e = entry(shipId);
     // 采纳远端清除：记录被清除的代际（空快照删除传播的本地 tombstone）。
@@ -790,12 +773,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     e.remoteUpdatedAt = doc.updatedAt;
     // 签名以「落地后」的本地内容计算：applyShipDoc 会 stripDeletedActions 并
     // 重生成触发器 id，直接取远端 doc 会让下次收集结果与签名不一致而冗余推送。
-    // （配置的 applyConfig 异步落地、无法同步取最终值，故配置直接用远端 doc；
-    //  字段不全时最多冗余一次，随后签名与本地收敛。）
-    const applied =
-      shipId === CONFIG_KEY
-        ? doc
-        : collectShipDoc(shipId, doc.updatedAt, opts.resolveShipName, e.clearedFp);
+    const applied = collectShipDoc(shipId, doc.updatedAt, opts.resolveShipName, e.clearedFp);
     e.pushedSignature = contentSignature(applied);
     e.dirty = false;
     e.awaitingMerge = false; // 已收敛（下拉/云端清除），解除该条目的冲突闸。
@@ -804,13 +782,13 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     persistBaselines();
   }
 
-  // 用户确认「用云端覆盖本地」（指定船或 '__config__'）。
+  // 用户确认「用云端覆盖本地」（指定船）。
   function confirmPull(shipId: string, doc: ChainSyncDoc, serverUpdatedAt: number): void {
     adoptRemote(shipId, doc, serverUpdatedAt);
     opts.onNotice?.(`已用云端覆盖${entryLabel(shipId) || '配置'}。`);
   }
 
-  // 对比数据：本地（config + 各活跃船） vs 远端（config + 各船）。
+  // 对比数据：本地（各活跃船） vs 远端（各船）。
   async function prepareComparison(): Promise<SyncComparison | null> {
     // 等在途推送结束再比较：避免对话框静默不弹或拿到推送中段的状态。
     while (activePush) {
@@ -837,27 +815,65 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
         );
         localShips.set(shipId, doc);
       }
-      const localConfig = collectConfigDoc(
-        opts.getConfig(),
-        entry(CONFIG_KEY).lastLocalChangeAt > 0 ? entry(CONFIG_KEY).lastLocalChangeAt : Date.now(),
-      );
-      let remoteConfig: ChainSyncDoc | null = null;
       const remoteShips = new Map<string, ChainSyncDoc>();
       // 云端各条目服务端行时间（updated_at，CAS 乐观锁基准）。
       const remoteServerUpdatedAt = new Map<string, number>();
       for (const r of remotes) {
+        // 全局配置不再参与云同步：忽略历史遗留的 '__config__' 云端记录。
+        if (r.shipId === '__config__') {
+          continue;
+        }
         const doc = normalizeDoc(r.payload);
         if (!doc) {
           continue;
         }
         remoteServerUpdatedAt.set(r.shipId, r.updatedAt);
-        if (r.shipId === CONFIG_KEY) {
-          remoteConfig = doc;
-        } else {
-          remoteShips.set(r.shipId, doc);
+        remoteShips.set(r.shipId, doc);
+      }
+
+      // 打开对话框时顺带收敛「已无实质分歧」的待处理冲突（否则用户可能在
+      // 对话框里找不到对应条目，冲突标志跨会话永久残留）：
+      // - 云端已无该条目且本地也无数据 → 幽灵冲突：无对象可被覆盖，释放闸并清脏；
+      // - 双方都有且内容签名一致（他端已追平/清除同内容）→ 释放闸并按云端基准收敛；
+      // - 其余（本地有数据云端被清空需回传、或内容确实分歧/本地清空待删云端）→
+      //   保持冲突闸，由用户在对话框对可见条目选方向（保守，不自动覆盖他端意图）。
+      const localByKey = new Map<string, ChainSyncDoc>(localShips);
+      const remoteByKey = new Map<string, ChainSyncDoc>(remoteShips);
+      let reconciled = false;
+      for (const [key, x] of entries) {
+        if (!x.awaitingMerge || !x.dirty) {
+          continue;
+        }
+        const localDoc = localByKey.get(key);
+        const remoteDoc = remoteByKey.get(key);
+        if (remoteDoc === undefined && localDoc === undefined) {
+          // 幽灵：云端与本地都已无该条目，冲突失去保护对象且对话框看不到它，
+          // 无法人工处理——彻底释放闸并清脏（连同跨会话 merge 标志）。
+          x.awaitingMerge = false;
+          x.dirty = false;
+          reconciled = true;
+          continue;
+        }
+        if (remoteDoc !== undefined && localDoc !== undefined) {
+          if (contentSignature(localDoc) === contentSignature(remoteDoc)) {
+            // 双方内容已一致（剔除 updatedAt/触发器 id 后）——按云端基准收敛，无需人工。
+            x.awaitingMerge = false;
+            x.dirty = false;
+            x.remoteBaseUpdatedAt = remoteServerUpdatedAt.get(key) ?? remoteDoc.updatedAt;
+            x.remoteUpdatedAt = remoteDoc.updatedAt;
+            if (remoteDoc.clearedFp !== undefined) {
+              x.clearedFp = remoteDoc.clearedFp;
+            }
+            x.pushedSignature = contentSignature(remoteDoc);
+            reconciled = true;
+          }
         }
       }
-      return { localConfig, localShips, remoteConfig, remoteShips, remoteServerUpdatedAt };
+      if (reconciled) {
+        persistBaselines();
+        setState({ conflict: hasPendingMerge() });
+      }
+      return { localShips, remoteShips, remoteServerUpdatedAt };
     } catch (e) {
       const msg = errorMessage(e);
       if (msg) {
@@ -893,7 +909,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     // 离线、推送前重载等）→ 标脏触发一次空快照推送。已落地的会因内容签名一致
     // 在推送时被跳过（无网络请求）；被更新代际取代的会在 409 时静默收敛。
     for (const [key, saved] of Object.entries(persisted)) {
-      if (key === CONFIG_KEY || saved?.cleared === undefined) {
+      if (saved?.cleared === undefined) {
         continue;
       }
       const e = entry(key);
@@ -921,7 +937,6 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     start,
     stop,
     markDirtyShip,
-    markDirtyConfig,
     markShipCleared,
     pushNow,
     prepareComparison,

@@ -1,14 +1,17 @@
 <script setup lang="ts">
-// 环线云端同步对比对话框（按船/配置）：
-// 展示环线配置与各活跃船在本地/云端的快照概要，由用户逐项选择覆盖方向。
+// 环线云端同步对比对话框（按船）：
+// 展示各活跃船在本地/云端的快照概要，由用户逐船选择覆盖方向。
+// 环线面板全局配置不参与云同步（仅本地保存）。
 import PrunButton from '@src/components/PrunButton.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
-import { CONFIG_KEY, type SyncComparison } from '@src/features/XIT/FLEET/chain-sync';
+import { type SyncComparison } from '@src/features/XIT/FLEET/chain-sync';
 import type { ChainSyncDoc } from '@src/infrastructure/org-api/chain-sync';
 
 const props = defineProps<{
   comparison: SyncComparison;
+  // 冲突待处理条目 key（awaitingMerge 且 dirty）：行内高亮，指明需要处理的条目。
+  mergeKeys: string[];
   onApply: (target: string, direction: 'pull' | 'push') => void;
 }>();
 
@@ -50,6 +53,11 @@ function runCount(doc: ChainSyncDoc | undefined): number {
   return doc === undefined ? 0 : Object.keys(doc.chainRuns).length;
 }
 
+// 该条目是否处于冲突待处理状态（本地/云端时间或内容分歧，自动推送已停）。
+function isConflicted(key: string): boolean {
+  return props.mergeKeys.includes(key);
+}
+
 function stopCount(doc: ChainSyncDoc | undefined): number {
   if (doc === undefined) {
     return 0;
@@ -63,39 +71,18 @@ function stopCount(doc: ChainSyncDoc | undefined): number {
   <div :class="C.DraftConditionEditor.form">
     <SectionHeader>环线云端同步</SectionHeader>
 
-    <div :class="$style.block">
-      <div :class="$style.blockTitle">环线配置</div>
-      <div :class="$style.row">
-        <div :class="$style.side">
-          <div :class="$style.colHead">本地</div>
-          <div>分组：{{ comparison.localConfig.config?.chainGroup || '—' }}</div>
-          <div>时间：{{ formatTime(comparison.localConfig.updatedAt) }}</div>
-          <PrunButton primary :class="$style.sideBtn" @click="apply(CONFIG_KEY, 'push')"
-            >上传</PrunButton
-          >
-        </div>
-        <div :class="$style.side">
-          <div :class="$style.colHead">云端</div>
-          <template v-if="comparison.remoteConfig">
-            <div>分组：{{ comparison.remoteConfig.config?.chainGroup || '—' }}</div>
-            <div>时间：{{ formatTime(comparison.remoteConfig.updatedAt) }}</div>
-          </template>
-          <div v-else :class="$style.empty">无数据</div>
-          <PrunButton
-            v-if="comparison.remoteConfig"
-            dark
-            :class="$style.sideBtn"
-            @click="apply(CONFIG_KEY, 'pull')">
-            下载
-          </PrunButton>
-        </div>
-      </div>
+    <div v-if="props.mergeKeys.length > 0" :class="$style.conflictTip">
+      以下条目存在冲突待处理，自动推送已暂停：请对该条目点「上传」（本地覆盖云端）或
+      「下载」（云端覆盖本地），冲突才会解除。
     </div>
 
     <div v-if="shipIds.length > 0" :class="$style.block">
       <div :class="$style.blockTitle">船只环线</div>
       <div v-for="shipId in shipIds" :key="shipId" :class="$style.shipRow">
-        <div :class="$style.shipName">{{ shipLabel(shipId) }}</div>
+        <div :class="$style.shipName">
+          {{ shipLabel(shipId) }}
+          <span v-if="isConflicted(shipId)" :class="$style.conflictBadge">冲突待处理</span>
+        </div>
         <div :class="$style.side">
           <div :class="$style.colHead">本地</div>
           <template v-if="comparison.localShips.get(shipId)">
@@ -153,12 +140,6 @@ function stopCount(doc: ChainSyncDoc | undefined): number {
   margin-bottom: 4px;
 }
 
-.row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
 .shipRow {
   display: flex;
   gap: 12px;
@@ -170,6 +151,26 @@ function stopCount(doc: ChainSyncDoc | undefined): number {
 .shipName {
   min-width: 8em;
   font-weight: 600;
+}
+
+.conflictBadge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #5a2d1f;
+  color: #f0a35e;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.conflictTip {
+  margin-bottom: 0.6rem;
+  padding: 6px 8px;
+  border: 1px solid #5a3a1f;
+  background: #241a12;
+  color: #f0a35e;
+  font-size: 12px;
 }
 
 .side {
