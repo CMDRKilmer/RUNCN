@@ -189,13 +189,20 @@ export function planRoutes(
 // 服务器下发」）：服务器在起终点恒星连线上算跃迁点/转移段，离线无法精确复现；
 // 自建轨道模型（旧 `liftOffKmAt`）与统计中位数常数（旧 `STL_EST_*`）都已删除 ——
 // 宁可不动，也不写假值。查得规则：
-// - 跨星系航线：离港按 (出发天体, 首跳目标星系)、进近按 (末跳来源星系, 目标天体)；
+// - 任意航线（**首选**）：航线级记录 —— 整条航线所有 STL 段之和，按 (出发天体, 目标天体
+//   [, #gw]) 查（见 system-bodies.routeRecords）。对系内/纯自然/纯网关/混合四种形态统一适用；
+// - 回退（航线级记录还没到）：跨星系按 (出发天体, 首跳目标星系) / (末跳**起点**星系, 目标天体)
+//   查两张按跳键控的表；含网关跃迁的键带 `#gw` 后缀（不命中精确键时**不回退**通配键，
+//   见 system-bodies.getDeparture）。⚠️ 这套键只作回退 —— 真实混合航线的 APPROACH 段在中间、
+//   其 destination ≠ 最终目标，按首/末跳拼键必然失配（2026-09-23 第 5 轮按真实 16 段计划修正）；
 // - 同星系航线（legs 为空，无跳）：按 (出发天体, 目标天体) 查同星系表 —— 真实系内计划的
 //   结构是**单段「转移」（TRANSIT）**（见下 ⚠️），故取记录里的 `transit` 作为整段路程。
 // 两者查不到 → undefined → 下游 `missingModelInputs` 判缺 → 不写滑块，
 // 等服务器下发该航线的原生段记录（SFC 推送门按几何签名放行重算）。
-// ⚠️ **结构性**查不到（等再久也没有，由 missingModelInputs 给出提示）：
-// ① 跨星系网关跃迁：不产生按跳的离港/进近键。
+// ⚠️ 查不到时由 missingModelInputs 给出提示 —— 都是**数据未到**，不存在「结构上永远不产生」：
+// ① 跨星系网关跃迁：航线级记录（首选）与按跳键（回退）都会写，缺记录只是数据未到
+//    （段结构只在**纯网关**航线与自然航线同构；混合航线的真实段序见 system-bodies.ts
+//    文件头的 16 段表 —— APPROACH 在中间、到站段是 TRANSIT）。
 // ② 系内飞行（同星系）：真实段结构是单段「转移」（TRANSIT）（2026-09-23 用户 SFC 原生
 //    计划实测 ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km / 43分59秒 /
 //    2655 单位 STL）。**2026-09-23 本轮起 `recordStlSegments` 会记录这一段**
@@ -250,6 +257,10 @@ export function routeMetrics(route: PlannedRoute): {
   // 系内「转移」（TRANSIT）段的原生**整段**路程（km；只有真实系内结构才有）。
   // 与 departKm/approachKm 互斥：有转移段时不必也不该拆成两段。
   transitKm: number | undefined;
+  // 航线级 STL 总路程/总时长（整条航线所有 STL 段之和；**首选**几何来源，
+  // 见 system-bodies.routeRecords）。routeKm 有值时 stlDistanceKm 就是它。
+  routeKm: number | undefined;
+  routeSeconds: number | undefined;
   // 转移段的原生耗时（秒；随船/f 变，仅运行时记录有值）。
   transitSeconds: number | undefined;
   // 飞行计划记录的原生离港/进近段耗时（秒，随飞船变，仅运行时记录有值；
@@ -289,9 +300,12 @@ export function routeMetrics(route: PlannedRoute): {
       natJumpCount++;
     }
   }
-  // 飞行计划记录的原生离港/进近段：出发按 (出发天体, 首跳目标星系)、
-  // 进近按 (末跳来源星系, 目标天体)；同星系（无跳）按 (出发天体, 目标天体)。
-  // 网关航线（legs 全 viaGateway）无记录。
+  // 飞行计划记录的原生 STL 几何：**首选**航线级记录（整条航线所有 STL 段之和，见
+  // system-bodies.routeRecords）；按 (出发天体, 首跳星系) / (末跳起点星系, 目标天体) 拼的
+  // 离港/进近键**仅作回退** —— 真实混合航线（自然跳 + 网关跃迁）的 APPROACH 段在中间、
+  // destination ≠ 最终目标，按首/末跳拼键必然失配（用户症状「SFC 选择地址后没有计算燃料」）。
+  // 网关航线（含混合）的键带 `#gw` 后缀 —— 由 `viaGateway` 参数指定口径
+  // （网关不回退通配键：通配是自然口径，会高估 35-50%）。
   // ⚠️ 同星系表里真实会有的是**转移（TRANSIT）段**（整段路程，见 `transitKm`）——
   // DEPARTURE/APPROACH 拆分只出现在合成用例里（真实系内计划没有这两段）。
   // 天体侧分量（出发天体 / 目标天体）先反查：SFC 会把空间站目的地规范化成星系 id，
@@ -300,17 +314,23 @@ export function routeMetrics(route: PlannedRoute): {
   const toRecordKey = stlRecordKeyFor(route.toBody);
   const firstLeg = route.legs[0];
   const lastLeg = route.legs[route.legs.length - 1];
+  // 航线级记录（首选）：整条航线的 STL 总路程。含网关时用 #gw 键。
+  const viaGateway = route.gatewayCount > 0;
+  const routeRec =
+    fromRecordKey !== undefined && toRecordKey !== undefined
+      ? stlSegmentsStore.getRoute(fromRecordKey.key, toRecordKey.key, viaGateway)
+      : undefined;
   const sameSystemRec =
     fromRecordKey !== undefined && toRecordKey !== undefined && route.legs.length === 0
       ? stlSegmentsStore.getSameSystem(fromRecordKey.key, toRecordKey.key)
       : undefined;
   const departRec =
-    (fromRecordKey !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
-      ? stlSegmentsStore.getDeparture(fromRecordKey.key, firstLeg.to)
+    (fromRecordKey !== undefined && firstLeg !== undefined
+      ? stlSegmentsStore.getDeparture(fromRecordKey.key, firstLeg.to, firstLeg.viaGateway)
       : undefined) ?? sameSystemRec?.depart;
   const approachRec =
-    (toRecordKey !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
-      ? stlSegmentsStore.getApproach(lastLeg.from, toRecordKey.key)
+    (toRecordKey !== undefined && lastLeg !== undefined
+      ? stlSegmentsStore.getApproach(lastLeg.from, toRecordKey.key, lastLeg.viaGateway)
       : undefined) ?? sameSystemRec?.approach;
   // 系内「转移」段（真实结构）：整段路程，直接当 d 用 —— 口径已标定（燃料 0.98×罐×min(f,0.5)、
   // 时长 d/v_转移），能不能写滑块只看记录与罐容量是否齐（见 fuel-model.missingModelInputs）。
@@ -321,15 +341,20 @@ export function routeMetrics(route: PlannedRoute): {
   const departKm = departRec?.distanceKm;
   const approachKm = approachRec?.distanceKm;
   const twoLegRecorded = departRec !== undefined && approachRec !== undefined;
-  const stlRecorded = twoLegRecorded || transitRec !== undefined;
+  const stlRecorded = routeRec !== undefined || twoLegRecorded || transitRec !== undefined;
+  // 首选航线级总路程；没有该记录时才退回「离港 + 进近」或系内转移段（回退口径）。
   const stlDistanceKm =
-    departKm !== undefined && approachKm !== undefined ? departKm + approachKm : transitKm;
+    routeRec?.distanceKm ??
+    (departKm !== undefined && approachKm !== undefined ? departKm + approachKm : transitKm);
   return {
     stlDistanceKm,
     stlRecorded,
     departKm,
     approachKm,
     transitKm,
+    // 航线级 STL 总路程/总时长（首选几何来源；面板/诊断显示用）。
+    routeKm: routeRec?.distanceKm,
+    routeSeconds: routeRec?.seconds,
     transitSeconds:
       transitRec !== undefined && transitRec.seconds > 0 ? transitRec.seconds : undefined,
     departSeconds: departRec !== undefined && departRec.seconds > 0 ? departRec.seconds : undefined,

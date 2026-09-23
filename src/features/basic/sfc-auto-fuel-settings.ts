@@ -294,6 +294,9 @@ function geometrySignature() {
     // 「转移」（TRANSIT）记录计数：同星系表条数在「同键补上转移段」时不增，
     // 只看条数会漏掉这次几何变化（系内航线的几何正是这条）。
     stlSegmentsStore.sameSystemTransitCount,
+    // 航线级表条数：几何**首选**来源就是它（见 system-bodies.routeRecords）；
+    // 新航线写入不改变上面三张表的条数，漏掉这一项推送门会误判「几何没变」。
+    stlSegmentsStore.routeCount,
   ].join('|');
 }
 

@@ -148,8 +148,12 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
 // = 68.0562M km，差 9.2%（旧注释写「<5%」与数据矛盾）。所以通配键只做
 // 近似回退，精确键永远优先。
 // 这里从 SFC/BTF 飞行计划记录原生值，FTC 优先复用，即可精确复现原生 STL 路程：
-// - 跨星系：离港 = DEPARTURE 段 stlDistance/时长，按 (出发天体, 首跳目标星系) 记录
-//           进近 = APPROACH 段 stlDistance/时长，按 (末跳来源星系, 目标天体) 记录
+// - 任意航线（**首选**）：整条航线**所有** STL 段之和，按 (出发天体, 目标天体[, #gw])
+//           记录（见 routeRecords；为什么首选它见下方「混合航线」段）
+// - 跨星系（**回退**）：离港 = DEPARTURE 段 stlDistance/时长，按 (出发天体, 首跳目标星系) 记录
+//           进近 = APPROACH 段 stlDistance/时长，按 (末跳**起点**星系, 目标天体) 记录
+//           （2026-09-23 第 5 轮：该键仅作回退 —— 真实混合航线的 APPROACH 段在中间、
+//           其 destination ≠ 最终目标，按首/末跳拼键必然失配；几何首选 routeRecords）
 // - 同星系：计划没有 JUMP 段，键里拼不出首跳/末跳星系，按航线 (出发天体, 目标天体) 记录：
 //           DEPARTURE/APPROACH 段（合成/旧结构）+ **转移（TRANSIT）段**（2026-09-23 起，
 //           真实观测到的系内计划结构）。
@@ -174,7 +178,19 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
 //   只剩两条判缺理由 —— ① 原生转移段记录还没到（`stlDistanceKm` 缺失/为 0）；
 //   ② STL 罐容量/余量缺失（`ship.stlRemaining ?? ship.stlFuelCapacity` 为 undefined/≤0）。
 //   （标定式、误差与用户原生样本的交叉验证见 fuel-model.ts 的「系内转移段标定」块。）
-// 网关航线（无 DEPARTURE/APPROACH/JUMP 段）不记录，FTC 回退模型。
+// 网关航线**有** DEPARTURE/APPROACH 段（否则飞船到不了网关；去/回网关是星系内飞行），
+// 但「与自然航线同构（DEPARTURE → JUMP|JUMP_GATEWAY → APPROACH）」**只在纯网关航线成立**。
+// 混合航线（自然跃迁 + 网关跃迁）的真实段序（2026-09-23 用户 FTC 面板原生计划，
+// AVI-06JVV ZV-194h → HRT 勾「启用网关」，共 16 段）：
+//   0 起飞 / 1 离港 69.17M / 2 跃迁(自然) / 3 充能 / 4 跃迁(自然) / 5 进近 67.47M
+//   / 6 转移 0.01M / 7 锁定 / 8 网关跃迁 / 9 衰变 / 10 转移 0.01M / 11 锁定
+//   / 12 网关跃迁 / 13 衰变 / 14 转移 0.01M / 15 转移 93.43M（真正到站段）
+// ⇒ APPROACH 在**中间**且 destination = `Antares I - Hephaestus` ≠ 最终目标 `Hortus Station`；
+// 到站段是 TRANSIT；首跳是自然跳、末跳是网关跃迁（拼出混合后缀）。
+// 故按 (出发天体, 首跳星系) / (末跳星系, 目标天体) 拼的键**必然失配** —— 这是用户症状
+// 「SFC 选择地址后没有计算燃料」的根因。故几何**首选**航线级 routeRecords，
+// 下面这套按跳拼的键仅作回退（内置通配/单跳自然航线），键后缀仍按各自 jump 段类型
+// 加 `#gw` 区分口径（见 GW_KEY_SUFFIX）。
 export interface StlSegmentRecord {
   distanceKm: number;
   seconds: number;
@@ -192,6 +208,21 @@ export interface SameSystemStlRecord {
 const departRecords = new Map<string, StlSegmentRecord>();
 const approachRecords = new Map<string, StlSegmentRecord>();
 const sameSystemRecords = new Map<string, SameSystemStlRecord>();
+// 航线级 STL 记录：整条航线**所有** STL 段（TAKE_OFF/DEPARTURE/APPROACH/TRANSIT）的距离/时长之和，
+// 按 (出发天体, 目标天体[, #gw]) 键控。
+// 为什么必须按「航线」而不是按「首跳/末跳」：真实段结构证明二者不对应 —— 实测用户
+// AVI-06JVV ZV-194h → HRT（勾网关）的原生计划共 16 段：
+//   0 起飞 / 1 离港 69.1655M / 2 跃迁(自然) / 3 充能 / 4 跃迁(自然) / 5 进近 67.4728M
+//   / 6 转移 0.01M / 7 锁定 / 8 网关跃迁 / 9 衰变 / 10 转移 0.01M / 11 锁定
+//   / 12 网关跃迁 / 13 衰变 / 14 转移 0.01M / 15 转移 93.4251M（真正到站段）
+// ⇒ APPROACH 在中间且其 destination ≠ 最终目标；到站段是 TRANSIT；首跳是自然、末跳是网关。
+// 旧实现按 (出发天体, 首跳星系) / (末跳星系, 目标天体) 拼键 → 必然失配（用户症状的根因）。
+const routeRecords = new Map<string, StlSegmentRecord>();
+// 网关航线记录的键后缀：同一对 (出发天体, 目标星系) 的自然航线与网关航线几何**不同**
+// （自然离港 = 飞船 → 跃迁点（在起终点恒星连线上）；网关离港 = 飞船 → 网关（绕行星轨道，
+// 星系内，实测比自然低 35-50%））。键不加区分会互相覆盖 —— 玩家在 FTC/SFC 切换「使用
+// 跃迁点」时会串味。自然键保持原样（既有内置数据与持久化缓存零失效），网关键加此后缀。
+const GW_KEY_SUFFIX = '#gw';
 const STL_CACHE_KEY = 'rprun.ftc.stl-segments.v1';
 
 function systemNaturalId(address?: PrunApi.Address): string | undefined {
@@ -224,8 +255,15 @@ function recordStlSegments(segments: PrunApi.FlightSegment[]) {
   const approach = segments.find(s => s.type === 'APPROACH');
   // 系内计划的真实段结构：单段「转移」（TRANSIT）（段名/字段核实见文件头）。
   const transit = segments.find(s => s.type === 'TRANSIT');
-  const firstJump = segments.find(s => s.type === 'JUMP');
-  const lastJump = [...segments].reverse().find(s => s.type === 'JUMP');
+  // 首/末跳：自然航线是 JUMP，网关航线是 JUMP_GATEWAY（段结构同构**只在纯网关航线成立**，
+  // 混合航线见文件头 16 段真实表 —— 故这套按跳拼的键只是回退）。JUMP_GATEWAY 段的
+  // origin/destination 各含一条 SYSTEM 行 = 网关两端星系（见 infrastructure/fio/routes.ts 文件头）。
+  // 旧实现只认 'JUMP' → 网关航线的离港/进近段一条都不写 → 几何永远判缺
+  // （实机症状「SFC 选择地址后没有计算燃料」的直接成因）。
+  // ⚠️ 首末跳**分别**判定后缀：混合航线（自然跳 + 网关跃迁）两段类型可能不同。
+  const isJump = (s: PrunApi.FlightSegment) => s.type === 'JUMP' || s.type === 'JUMP_GATEWAY';
+  const firstJump = segments.find(isJump);
+  const lastJump = [...segments].reverse().find(isJump);
   const departRec = stlSegmentRecord(depart);
   const approachRec = stlSegmentRecord(approach);
   const transitRec = stlSegmentRecord(transit);
@@ -259,15 +297,45 @@ function recordStlSegments(segments: PrunApi.FlightSegment[]) {
       changed = true;
     }
   }
+  // 键后缀按**各自** jump 段的类型（网关 / 自然）—— 混合航线的首末跳可能不同。
+  const departGw = firstJump?.type === 'JUMP_GATEWAY' ? GW_KEY_SUFFIX : '';
+  const approachGw = lastJump?.type === 'JUMP_GATEWAY' ? GW_KEY_SUFFIX : '';
   const toStar = firstJump !== undefined ? systemNaturalId(firstJump.destination) : undefined;
   if (departRec !== undefined && fromBody !== undefined && toStar !== undefined) {
-    departRecords.set(`${fromBody.toUpperCase()}|${toStar.toUpperCase()}`, departRec);
+    departRecords.set(`${fromBody.toUpperCase()}|${toStar.toUpperCase()}${departGw}`, departRec);
     changed = true;
   }
+  // 进近键的星系分量 = 末跳【起点】星系（**仅回退用**：第 4 轮曾改成「到达星系」，
+  // 2026-09-23 第 5 轮按真实段结构回退 —— 混合航线的 APPROACH 段在中间、destination
+  // 不是最终目标，该键无论如何都命不中；几何**首选**来源是 routeRecords）。
   const fromStar = lastJump !== undefined ? systemNaturalId(lastJump.origin) : undefined;
   if (approachRec !== undefined && toBody !== undefined && fromStar !== undefined) {
-    approachRecords.set(`${fromStar.toUpperCase()}|${toBody.toUpperCase()}`, approachRec);
+    approachRecords.set(
+      `${fromStar.toUpperCase()}|${toBody.toUpperCase()}${approachGw}`,
+      approachRec,
+    );
     changed = true;
+  }
+  // 航线级记录：Σ 所有带 stlDistance 的 STL 段。出发天体取**首段 origin**、目标天体取
+  // **末段 destination**（不是 APPROACH 段的 —— 见上方表：APPROACH 可能在中间）。
+  // 键后缀统一按「整条航线是否含 JUMP_GATEWAY」判定（混合航线的首末跳类型可能不同）。
+  const stlSegs = segments.filter(s => (s.stlDistance ?? 0) > 0);
+  if (stlSegs.length > 0 && segments.length > 0) {
+    const fromEntity = locationEntityId(segments[0]?.origin);
+    const toEntity = locationEntityId(segments[segments.length - 1]?.destination);
+    if (fromEntity !== undefined && toEntity !== undefined) {
+      const hasGateway = segments.some(s => s.type === 'JUMP_GATEWAY');
+      const sumKm = stlSegs.reduce((a, s) => a + (s.stlDistance ?? 0), 0);
+      const sumSec = stlSegs.reduce(
+        (a, s) => a + ((s.arrival?.timestamp ?? 0) - (s.departure?.timestamp ?? 0)) / 1000,
+        0,
+      );
+      routeRecords.set(
+        `${fromEntity.toUpperCase()}|${toEntity.toUpperCase()}${hasGateway ? GW_KEY_SUFFIX : ''}`,
+        { distanceKm: sumKm, seconds: sumSec },
+      );
+      changed = true;
+    }
   }
   if (changed) {
     bodiesVersion.value++;
@@ -279,23 +347,38 @@ export const stlSegmentsStore = {
   // 离港距离/时长（出发天体 → 首跳目标星系）。
   // 精确键优先；无记录时回退到按出发天体的通配键（"BODY|*"，内置批量采集数据），
   // 让同一出发天体到任意自然目标星系都能复用近似值。
-  getDeparture(fromBody: string, toStar: string): StlSegmentRecord | undefined {
+  // ⚠️ 网关模式（viaGateway）只认精确键 `BODY|STAR#gw`，**不做通配回退**：通配键是
+  // **自然口径**（飞船 → 跃迁点），用于网关必然高估（网关离港实测低 35-50%）。
+  // 查不到即 undefined → 由 missingModelInputs 判缺（宁可不动，也不写不准的值）。
+  getDeparture(fromBody: string, toStar: string, viaGateway = false): StlSegmentRecord | undefined {
     void bodiesVersion.value;
+    const bodyKey = fromBody.toUpperCase();
     const starKey = toStar.toUpperCase();
-    return (
-      departRecords.get(`${fromBody.toUpperCase()}|${starKey}`) ??
-      departRecords.get(`${fromBody.toUpperCase()}|*`)
-    );
+    if (viaGateway) {
+      return departRecords.get(`${bodyKey}|${starKey}${GW_KEY_SUFFIX}`);
+    }
+    return departRecords.get(`${bodyKey}|${starKey}`) ?? departRecords.get(`${bodyKey}|*`);
   },
-  // 进近距离/时长（末跳来源星系 → 目标天体）。
+  // 进近距离/时长（末跳**起点**星系 → 目标天体）。**仅回退用**：混合航线按此键必然失配
+  // （见 routeRecords），几何首选来源是 getRoute。
   // 精确键优先；无记录时回退到按目标天体的通配键（"*|BODY"）。
-  getApproach(fromStar: string, toBody: string): StlSegmentRecord | undefined {
+  // ⚠️ 网关模式同 getDeparture：只认精确键 `STAR|BODY#gw`（网关进近同样是星系内绕行星段，
+  // 通配的自然口径会高估），查不到即 undefined。
+  getApproach(fromStar: string, toBody: string, viaGateway = false): StlSegmentRecord | undefined {
     void bodiesVersion.value;
+    const starKey = fromStar.toUpperCase();
     const bodyKey = toBody.toUpperCase();
-    return (
-      approachRecords.get(`${fromStar.toUpperCase()}|${bodyKey}`) ??
-      approachRecords.get(`*|${bodyKey}`)
-    );
+    if (viaGateway) {
+      return approachRecords.get(`${starKey}|${bodyKey}${GW_KEY_SUFFIX}`);
+    }
+    return approachRecords.get(`${starKey}|${bodyKey}`) ?? approachRecords.get(`*|${bodyKey}`);
+  },
+  // 航线级 STL 总路程/总时长（整条航线所有 STL 段之和），按 (出发天体, 目标天体[, #gw]) 键控。
+  // 这是**首选**几何来源：对系内/纯自然/纯网关/混合四种形态统一适用（见 routeRecords 声明处）。
+  getRoute(fromBody: string, toBody: string, viaGateway = false): StlSegmentRecord | undefined {
+    void bodiesVersion.value;
+    const key = `${fromBody.toUpperCase()}|${toBody.toUpperCase()}${viaGateway ? GW_KEY_SUFFIX : ''}`;
+    return routeRecords.get(key);
   },
   // 同星系（无跳）航线的原生段（离港/进近/转移），按 (出发天体, 目标天体) 键控（全大写）。
   // 同星系计划没有 JUMP 段，拼不出首跳/末跳星系的键，故单独一张表；只由无跳
@@ -324,15 +407,22 @@ export const stlSegmentsStore = {
     }
     return count;
   },
+  // 航线级表条数：几何签名要用（sfc-auto-fuel-settings 的 geometrySignature）——
+  // 新航线写入不改变上面三张表的条数，漏掉这一项会让推送门误判「几何没变」而 settled。
+  get routeCount(): number {
+    return routeRecords.size;
+  },
 };
 
 // 导出已积累的 STL 段数据（供 build-stl-data.mjs 精简内置）。
-// 键：跨星系离港 = "出发天体|首跳目标星系"、进近 = "末跳来源星系|目标天体"、
-// 同星系 = "出发天体|目标天体"（全大写）。
+// 键：跨星系离港 = "出发天体|首跳目标星系"、进近 = "末跳起点星系|目标天体"、
+// 同星系 = "出发天体|目标天体"、航线级 = "出发天体|目标天体"（全大写；
+// 网关航线用同样的键 + "#gw" 后缀）。
 export interface StlSegmentsExport {
   depart: [string, StlSegmentRecord][];
   approach: [string, StlSegmentRecord][];
   sameSystem: [string, SameSystemStlRecord][];
+  route: [string, StlSegmentRecord][];
 }
 
 export function exportStlSegments(): StlSegmentsExport {
@@ -340,6 +430,7 @@ export function exportStlSegments(): StlSegmentsExport {
     depart: [...departRecords],
     approach: [...approachRecords],
     sameSystem: [...sameSystemRecords],
+    route: [...routeRecords],
   };
 }
 
@@ -415,6 +506,7 @@ function persistSegments() {
           depart: [...departRecords],
           approach: [...approachRecords],
           sameSystem: [...sameSystemRecords],
+          route: [...routeRecords],
         }),
       );
     } catch {
@@ -433,6 +525,7 @@ function restoreSegments() {
       depart?: [string, StlSegmentRecord][];
       approach?: [string, StlSegmentRecord][];
       sameSystem?: [string, SameSystemStlRecord][];
+      route?: [string, StlSegmentRecord][];
     };
     for (const [k, v] of data.depart ?? []) {
       const rec = validRecord(v);
@@ -457,6 +550,13 @@ function restoreSegments() {
         (depart !== undefined || approach !== undefined || transit !== undefined)
       ) {
         sameSystemRecords.set(k.toUpperCase(), { depart, approach, transit });
+      }
+    }
+    // 航线级记录同为后加字段：旧缓存无 route → 跳过（新表从空开始，靠服务器重新下发重建）。
+    for (const [k, v] of data.route ?? []) {
+      const rec = validRecord(v);
+      if (typeof k === 'string' && rec !== undefined) {
+        routeRecords.set(k.toUpperCase(), rec);
       }
     }
   } catch {

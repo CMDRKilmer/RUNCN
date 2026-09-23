@@ -17,8 +17,12 @@
 //
 // 锁定的行为契约：
 //   ① 记录（真实 system-bodies.ts）：无 JUMP 计划 → 同星系表（键 出发天体|目标天体，
-//      全大写）；跨星系 → 仍按（出发天体｜首跳星系 / 末跳星系｜目标天体）记录，键与
-//      旧文件/内置数据完全一致；同星系记录不污染跨星系表，反之亦然；
+//      全大写）；跨星系 → 按（出发天体｜首跳目标星系 / 末跳**起点**星系｜目标天体）记录。
+//      ⚠️ 第 5 轮（2026-09-23）：第 4 轮曾把进近键的星系分量改成「末跳**到达**星系」，
+//      该改动**无真实数据依据**（真实混合航线的 APPROACH 段在中间、destination ≠ 最终目标，
+//      该键无论如何都命不中），已回退；几何**首选**来源改为航线级记录（routeRecords），
+//      下面这套按跳拼的键只作回退；
+//      同星系记录不污染跨星系表，反之亦然；
 //      rprun.ftc.stl-segments.v1 写入为旧格式的超集（depart/approach 原样 + sameSystem），
 //      旧格式（无 sameSystem）可读、内置数据旧格式可读。
 //   ② routeMetrics（真实 route-planner.ts）：同星系 + 有记录 → d 取记录值；**无记录 →
@@ -303,7 +307,7 @@ const persistedAfterSame = persistAvailable ? JSON.parse(storage.get(STL_CACHE_K
 
 api.dispatch({ type: 'SHIP_FLIGHT_MISSION', data: crossPlan });
 
-check('① 跨星系计划键与旧行为逐位一致（出发天体|首跳星系 / 末跳星系|目标天体）', f => {
+check('① 跨星系计划键（出发天体|首跳星系 / 末跳【起点】星系|目标天体）', f => {
   expectExact(f, '离港', stlSegmentsStore.getDeparture('ZV-307a', 'OT-580')?.distanceKm, 74327215);
   expectExact(
     f,
@@ -311,7 +315,11 @@ check('① 跨星系计划键与旧行为逐位一致（出发天体|首跳星�
     stlSegmentsStore.getDeparture('ZV-307a', 'OT-580')?.seconds,
     5000,
   );
-  // 进近按 (末跳来源星系, 目标天体) 记录：末跳 OT-580 → VH-331，来源星系 = OT-580。
+  // ⚠️ 断言变更记录（2026-09-23 第 5 轮）：第 4 轮曾把进近键的星系分量改成「末跳【到达】
+  // 星系」（VH-331|HRT），并按「旧语义键（末跳起点星系）不得再被写入」加了一条负断言。
+  // 本轮的真实段结构（用户 16 段原生计划）证明该改动无依据：混合航线的 APPROACH 段在中间、
+  // 其 destination ≠ 最终目标 ⇒ 按首/末跳拼的键必然失配，几何首选已改走航线级 routeRecords。
+  // 故这两处一并回退到改动前的形状：末跳起点星系 = OT-580（本用例末跳 OT-580 → VH-331）。
   expectExact(f, '进近', stlSegmentsStore.getApproach('OT-580', 'HRT')?.distanceKm, 21343591);
   expectExact(f, '进近时长（秒）', stlSegmentsStore.getApproach('OT-580', 'HRT')?.seconds, 2959);
   expectExact(f, '跨星系离港表 +1', stlSegmentsStore.departureCount, departBase + 1);
@@ -469,7 +477,10 @@ check('② 有跳航线不吃同星系记录 → 无按跳记录即 undefined（
 
 prepareGeometry();
 stub.stubSetDepartureRecord('zv-307a', 'OT-580', { distanceKm: 74327215, seconds: 5000 });
-// 单跳航线的末跳来源星系 = 出发星系（与真实记录键一致）。
+// ⚠️ 断言变更记录（2026-09-23 第 5 轮）：第 4 轮把进近记录换到「末跳【到达】星系」键
+// （OT-580|MOR），并加了「只登记旧键（末跳起点星系 = ZV-307）→ 进近必须拿不到几何」的
+// 负对照。本轮按真实段结构回退（见文件头 ①）：单跳航线 ZV-307 → OT-580 的末跳**起点**
+// 星系 = ZV-307，故查表键 = (ZV-307, MOR)；负对照相应改为「只登记到达侧键 → 拿不到几何」。
 stub.stubSetApproachRecord('ZV-307', 'MOR', { distanceKm: 72737809, seconds: 2959 });
 const crossRecorded = routeMetrics(crossRoute);
 
@@ -477,6 +488,10 @@ check('② 有跳航线仍按跳键取原生记录（跨星系行为未变）', 
   expectExact(f, '离港', crossRecorded.departKm, 74327215);
   expectExact(f, '进近', crossRecorded.approachKm, 72737809);
   expectExact(f, 'stlRecorded', crossRecorded.stlRecorded, true);
+  // 负对照：只登记到达侧键（第 4 轮语义）→ 进近必须拿不到几何（证明查表确实在末跳起点侧）。
+  stub.stubClearStlRecords();
+  stub.stubSetApproachRecord('OT-580', 'MOR', { distanceKm: 72737809, seconds: 2959 });
+  expectExact(f, '到达侧键不再被查表命中', routeMetrics(crossRoute).approachKm, undefined);
 });
 
 // ---- ③④ 编排层：真实 computeFtcPlan（browse:false = SFC 联动 / browse:true = 面板）----

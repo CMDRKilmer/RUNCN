@@ -8,7 +8,8 @@
 // RPrun 已劫持游戏 socket（socket-io-middleware），这里复用同一连接**真实发送**
 // 请求（sendServerMessage）并匹配响应（missionId/queryId），因此可以**不依赖
 // BTF 面板**批量请求。每次响应的 SHIP_FLIGHT_MISSION 会自动进入 system-bodies.ts
-// 的 recordStlSegments（离港/进近按 出发天体|首跳星系 / 末跳星系|目标天体 记录），
+// 的 recordStlSegments（航线级：整条航线所有 STL 段之和，键 出发天体|目标天体[#gw]；
+// 回退键：离港 出发天体|首跳星系 / 进近 末跳起点星系|目标天体 —— 见 system-bodies.ts 文件头），
 // 采集即自动入库，FTC 精确复用。
 //
 // 星球列表：内置 public/json/fallback-fio-responses/allplanets.json（完整 4155 行星）。

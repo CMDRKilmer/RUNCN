@@ -49,7 +49,9 @@ export interface ShipPerformance {
 
 // 航线距离指标（从 PlannedRoute 提取）。
 export interface RouteMetrics {
-  // 起降+进近的 STL 距离（km，游戏距离单位）；系内「转移」结构时 = transitKm。
+  // 起降+进近的 STL 距离（km，游戏距离单位）。**首选**航线级记录（整条航线所有 STL 段
+  // 之和，见 system-bodies.routeRecords）；无该记录时退回 departKm + approachKm
+  // （系内「转移」结构时 = transitKm）。
   stlDistanceKm?: number;
   // 离港/进近各自的距离（km，用于按段速度分别计时）。
   departKm?: number;
@@ -57,6 +59,10 @@ export interface RouteMetrics {
   // 系内「转移」（TRANSIT）段的**整段**原生路程（km）：真实系内计划的结构，
   // 与 departKm/approachKm 互斥（见 route-planner.routeMetrics）。
   transitKm?: number;
+  // 航线级 STL 总路程/总时长（整条航线所有 STL 段之和；首选几何来源，见
+  // system-bodies.routeRecords）。诊断/展示用。
+  routeKm?: number;
+  routeSeconds?: number;
   // 转移段的原生耗时（秒，仅运行时记录有值）。**不参与计时**：它对应记录当时那条
   // 计划的 f/质量，跨 f/换船复用会把时长钉死、把成本最优解带偏（见 computeFuelOption 的 ⚠️）。
   transitSeconds?: number;
@@ -866,9 +872,10 @@ export function scanFuelOptions(
 //
 // 为什么必须检查（2026-09-23 实测 bug「SFC 自动拉条 ≠ FTC 面板结果」）：
 // 同星系航线的 STL 燃料只有一个来源 —— stlDistanceKm（route-planner 的
-// departKm + approachKm，**系内真实结构时 = 「转移」（TRANSIT）段的整段路程 transitKm**）。
+// **首选**:航线级记录 routeKm，整条航线所有 STL 段之和；**回退**: departKm + approachKm，
+// 系内真实结构时 = 「转移」（TRANSIT）段的整段路程 transitKm）。
 // 它**只取服务器
-// 原生记录**（同星系按键 (出发天体, 目标天体) 记录 / 跨星系按跳键记录，见
+// 原生记录**（航线级 / 同星系按键 (出发天体, 目标天体) / 跨星系按跳键，见
 // system-bodies.recordStlSegments）；查不到就是 undefined —— **无回退**（2026-09-23 用户
 // 拍板「不需要回退，永远等服务器下发」：自建轨道模型 `liftOffKmAt` 与内置统计中位数常数
 // `STL_EST_*` 已删除）。
@@ -882,12 +889,18 @@ export function scanFuelOptions(
 // 系内航线同样需要罐：转移段燃料就是罐口径 2×0.49×罐×min(f,0.5)（2026-09-23 标定，
 // 见 STL_TRANSIT_F_SAT 上方），没有罐就没有燃料梯度 → 两条分支都要检查罐。
 // ⚠️ 跨星系分支也消费 stlDistanceKm（`stlHours` 的回退项 + `fuelEstimated`）：
-// 首/末段为网关段时 `departKm/approachKm` 本就拿不到原生记录，同样可能 undefined
-// → STL 时长被静默记 0。故该类检查必须放在两条分支之外。
+// 首选是**航线级**记录（`routeKm`，整条航线所有 STL 段之和，见 system-bodies.routeRecords）；
+// 该记录还没到时 `stlDistanceKm` 才退回 `departKm/approachKm`（按跳键，`#gw` 后缀见
+// system-bodies，**仅回退**：混合航线的 APPROACH 段在中间、destination ≠ 最终目标，
+// 按首/末跳拼键必然失配）→ 两者都拿不到同样 undefined → STL 时长被静默记 0。
+// 故该类检查必须放在两条分支之外。
 //
-// 判缺成因与提示都要求**可操作**（说清是结构性不可算、还是数据还没到，以及玩家能做什么）
-// ——2026-09-23 用户实机日志（ZV-307a → ZV-307 勾了「使用跃迁点」）显示原来只有一句
+// 判缺成因与提示都要求**可操作**（说清玩家能做什么）——2026-09-23 用户实机日志
+// （ZV-307a → ZV-307 勾了「使用跃迁点」）显示原来只有一句
 // 「等服务器下发」，玩家无从下手：
+//   ⚠️ 所有成因都是**数据未到**（「等再久也没有的结构性成因」= 错误认知，已删除）：
+//      跨星系航线的几何由服务器计划写入航线级记录（键带 `#gw` 后缀表示含网关跃迁），
+//      系内计划是用「转移」（TRANSIT）段记录 —— 生成一次计划都能等到。
 //   ① 系内飞行（同一星系）：服务器计划用的是「转移」（TRANSIT）段（实测 2026-09-23
 //      用户 SFC 原生计划 ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km /
 //      43分59秒 / 2655 单位 STL）。`recordStlSegments` 会记这一段
@@ -912,7 +925,10 @@ export function scanFuelOptions(
 //      lookupStationInSystem），反查成功后这条航线就能命中记录（见
 //      route-planner.stlRecordKeyFor）；反查不唯一（同星系多站 / 无站点数据）时仍拒绝
 //      反查，文案改为让玩家改目的地；
-//   ③ 其余：服务器还没为这条航线下发过原生段记录 → 生成一次计划等算完即可。
+//   ③ 其余（含跨星系网关跃迁）：服务器还没为这条航线下发过原生段记录
+//      → 生成一次计划等算完即可（网关航线的键带 `#gw` 后缀，与自然航线分开记录）。
+//      网关**不**通配回退：通配键是自然口径（飞船 → 跃迁点），用于网关会高估 35-50%
+//      （见 system-bodies.getDeparture）。
 // ⚠️ 文案预算（2026-09-23 第四轮，用户实机日志里一条 500 字警告每次开 SFC 都刷屏）：
 //   SFC 侧一条提示 = **≤2 句 + 一句动作指引**；口径细节（两口径互斥的数字、时长偏差倍数）
 //   不在这里，见 docs/feature-patterns.md 的「FTC 几何」条目与 FTC 面板的输入不完整提示。
@@ -920,43 +936,30 @@ export function scanFuelOptions(
 //   （旧文案照样拼上去 → 同一条提示里既说「几何已按转移段记录」又说「仍未命中该航线的
 //   记录」，自相矛盾）。
 // 返回缺失项的中文描述；空数组 = 输入完整。
-export interface MissingInputContext {
-  // 本次计算的航线是否走「使用跃迁点」（跨星系网关 / 系内勾选）：由 computeFtcPlan 传入。
-  // ⚠️ 2026-09-23 复核：勾选本身**不改变系内航线的路程**（`planRoutes` 对同星系两种模式
-  // 都返回 natural），对系内航线也不改变几何 —— 故只在**跨星系**网关航线上强制判缺
-  // （网关结构不产生按跳键）；系内勾选与不勾选是同一条路、同一份原生几何。
-  usesGatewayTransfer?: boolean;
-}
-
-export function missingModelInputs(
-  ship: ShipPerformance,
-  metrics: RouteMetrics,
-  context: MissingInputContext = {},
-): string[] {
+export function missingModelInputs(ship: ShipPerformance, metrics: RouteMetrics): string[] {
   const missing: string[] = [];
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
   const dMissing = metrics.stlDistanceKm === undefined || !(metrics.stlDistanceKm > 0);
   // 系内（同星系）：原生「转移」（TRANSIT）段的几何（`transitKm`，recordStlSegments 记录）
   // 与**口径**（燃料罐口径 + 时长转移段式，2026-09-23 标定）都已就绪 → 拿到记录即可写滑块，
   // 不再有「口径未标定」这一条判缺。
-  // stlDistanceKm（= departKm + approachKm；系内转移结构时 = transitKm）无条件检查，
-  // undefined 或 0 都算缺：
+  // stlDistanceKm（首选 = 航线级记录 routeKm；回退 = departKm + approachKm，
+  // 系内转移结构时 = transitKm）无条件检查，undefined 或 0 都算缺：
   // - 同星系：时长 = d / v_转移（无 d 即无时间梯度；燃料与 d 无关但是时长需要它）；
   // - 跨星系：见上（时长静默归零）。
-  // ⚠️ 2026-09-23 复核的事实：系内计划的段结构是「转移」（TRANSIT）（实测 ZV-307a →
+  // ⚠️ 2026-09-23 复核：系内计划的段结构是「转移」（TRANSIT）（实测 ZV-307a →
   // ZV-307/Antares Station = 单段 101,655,808 km），**与勾选「使用跃迁点」无关**（`planRoutes` 对同星系两种模式都返回 natural）。
   // 旧文案那句「101,655,808 vs 101.7053M，差 0.05%」比的是**已删除的自建轨道模型估算行**（68.0562M + 33.6491M），跨样本比较已作废。
-  // `usesGatewayTransfer` 只在**跨星系**网关航线上强制判缺（网关结构不产生按跳键）；
-  // 系内两种模式同路、几何相同，不再一律判缺（旧写法会把「已有原生转移段几何」的系内
-  // 航线也说成拿不到几何 —— 事实错误）。
-  const gatewayMissing = context.usesGatewayTransfer === true && isCrossSystem;
-  if (dMissing || gatewayMissing) {
+  // 跨星系网关航线同理**不再强制判缺**（旧写法假定「网关结构不产生按跳键」是**错误认知**：
+  // 服务器计划照常写出航线级记录，含网关跃迁时键带 `#gw` 后缀，见 system-bodies）。
+  // 唯一判据就是有没有拿到几何 —— 拿不到即数据未到，等服务器下发。
+  if (dMissing) {
     const bodies = [metrics.fromBody, metrics.toBody].filter(b => b !== undefined);
     const where = bodies.length > 0 ? bodies.join(' / ') : '起终点';
     // 成因分开说（2026-09-23 用户实机日志：ZV-307a → ZV-307 勾了「使用跃迁点」，
     // 原来只有一句「等服务器下发」，玩家无从下手）：
     // 系内 = 数据未到（原生段是「转移」，本模型已记录该段距离、口径也已标定）；
-    // 跨星系网关 = 段结构（不产生按跳键，等再久也没有）；
+    // 跨星系（含网关）= 数据未到（航线级记录键带 `#gw` 后缀，见 system-bodies）；
     // 星系 id = 查表键（已在 2026-09-23 反查修复）；其余 = 数据未到。
     // ★文案预算（2026-09-23 第四轮）：≤2 句 + 一句动作指引；数字**现算**，不拼历史样本
     //   （旧文案把「101,655,808 vs 101.7053M 差 0.05%」拼到新样本 88.87M 上 = 自相矛盾）。
@@ -969,12 +972,6 @@ export function missingModelInputs(
           '换「使用跃迁点」不改变系内航线的路程',
       );
       // 操作在 systemIds 段里按「反查是否被拒」二选一给出（见下）。
-    } else if (context.usesGatewayTransfer === true) {
-      causes.push(
-        '该航线走「使用跃迁点」（跨星系网关跃迁）：服务器计划是网关结构，' +
-          '不产生本模型消费的「出发天体|首跳星系」「末跳星系|目标天体」按跳键' +
-          '→ 拿不到原生离港/进近几何',
-      );
     }
     const systemIds = [
       metrics.fromIsSystem === true ? metrics.fromBody : undefined,

@@ -401,24 +401,14 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
   // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
-  // 勾选「使用跃迁点」的**跨星系**航线一律判缺（网关结构不产生按跳键）。2026-09-23 复核
-  // 修正了归因：
-  // - 系内（同星系）：服务器计划用的是「转移」（TRANSIT）段（实测 ZV-307a → ZV-307
-  //   单段 101,655,808 km → 已由 recordStlSegments 记录、routeMetrics 给出 transitKm），
-  //   **与勾选无关**（判据是 planRoutes 同星系两模式都返回 natural；旧注释的
-  //   「101.7053M km / 差 0.05%」比法已作废 —— 那是已删除的自建轨道模型的估算行）；
-  //   本 planner 同星系无跳 → gateway 候选恒空 → 两种模式都选 natural。
-  //   系内航线判缺的理由只剩两条：① 原生转移段记录还没到；② STL 罐容量/余量缺失
-  //   （口径已标定，不再判缺；见 fuel-model.missingModelInputs）—— 与勾选无关，
-  //   故本标志对系内不再起作用（missingModelInputs 只认跨星系）。
-  // - 跨星系：选中的是 gateway 候选（网关结构，不产生按跳的离港/进近键）。
-  // 传给缺失项判定，让提示可操作（文案见 fuel-model.missingModelInputs）。
-  const usesGatewayTransfer =
-    input.useGateway === true && (route.label === '网关' || !isCrossSystem);
+  // ⚠️ 2026-09-23：原先「勾选「使用跃迁点」的**跨星系**航线一律判缺（网关结构不产生按跳键）」
+  // 已删除 —— 那是错误认知。服务器计划照常写出航线级 STL 记录（含网关跃迁时键带 `#gw`
+  // 后缀，见 system-bodies.recordStlSegments），缺几何只意味着服务器还没下发这条航线的记录，
+  // 与是否勾选无关；系内勾选与不勾选是同一条路、同一份原生几何。
   // 输入完整性（决定结果能否写入 SFC 滑块）：仍缺关键几何/罐容量时模型必然退化
   // （同星系 stlFuel ≡ 0 → 燃料无梯度），此时绝不能把结果写进滑块 —— 宁可不动，
   // 也不要用残缺输入得出的假值覆盖掉面板已经算好的参数。
-  const inputIncomplete = missingModelInputs(perf, metrics, { usesGatewayTransfer });
+  const inputIncomplete = missingModelInputs(perf, metrics);
   const [landingEnv, departEnv] = await Promise.all([
     isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
     isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,
