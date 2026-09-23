@@ -313,6 +313,16 @@ Use Vue slots instead of adding new props to display custom text inside existing
 
 Files created on Windows (e.g. by an agent's file tool) default to CRLF line endings, but the repo is LF. ESLint then reports hundreds of `prettier/prettier` "Delete `␍`" warnings on every line of the new file — this is a line-ending issue, not a formatting one. Run `prettier --write <file>` on the new files (fixes line endings + formatting in one pass) and re-lint before considering it done.
 
+### Regression Scripts Drive Real Modules
+
+`scripts/verify-*.mjs` are exit-code-checked regression scripts (末行 `PASS n/n`；失败行 `FAIL <场景> expected=… actual=…`；用法写在文件头注释里，含明确局限)。
+
+- Prefer driving the **real** module: a Node loader hook (`scripts/lib/*-loader.mjs`) redirects only browser-side deps (`vue`, `@src/*`) to stubs while the logic under test (routing, model, orchestration) keeps its real implementation. Never re-implement the logic inside the stub — the test would then prove nothing about production.
+- If the logic lives in a file that cannot load in Node (Vue/DOM features), extract the pure part into its own module and drive that (e.g. `sfc-route-push-gate.ts` for the SFC push gate). Non-feature helper files living next to features are fine — see `src/features/basic/parse-safe-image.ts`.
+- A stub that turns a code path into a no-op makes every assertion about that path near-vacuous. Give the stub an observable difference instead (e.g. `showBuffer` records calls and `hasSystemData` only flips true after it) and assert the difference.
+- Each check prepares its own state (fixtures, store contents, timers). A check leaning on the previous check's leftovers silently drifts when run alone or reordered.
+- Debounced persistence means a synchronous `localStorage.getItem` right after a dispatch reads stale data — await the debounce first (`settlePersist()` in `verify-ftc-geometry-source.mjs`, matching the 1000ms debounce in `system-bodies.ts`).
+
 ### Code Scanning
 
 CodeQL runs via GitHub default setup (analysis key `dynamic/github-code-scanning/codeql` — no workflow file in the repo). Every push to `main` triggers a "dynamic Push on main" run containing the Analyze jobs. To resolve an alert: push a fix to `main`; the alert auto-flips to `fixed` after that run — no manual dismissal needed. Watch with `gh run watch <id>` then check states via `gh api repos/CMDRKilmer/RUNCN/code-scanning/alerts`.
