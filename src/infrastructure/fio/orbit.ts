@@ -98,10 +98,25 @@ export function getStationSystem(naturalId: string): string | undefined {
   return stationSystem.get(naturalId.toUpperCase());
 }
 
-// 空间站是否已持有轨道根数（predictPosition 可用）。
-export function hasStationOrbit(stationNaturalId: string): boolean {
-  const orbit = planets.get(stationNaturalId.toUpperCase());
-  return orbit !== undefined && orbit.semiMajorAxis > 0;
+// 反向索引：星系 id → 该星系内的空间站 naturalId（内置 stations.json 的 `s` 字段反查）。
+// 用途（2026-09-23）：SFC 的目的地/起点框会把**空间站规范化成所属星系 id**（ANT → ZV-307），
+// 而服务器下发的原生 STL 段记录按真实天体/空间站 id 键控（真实导出键 ZV-307A|ANT）——
+// 星系 id 查表永远命不中（5930 条记录里天体侧命中星系 id 的 = 0 条）。反查是唯一让
+// 「被规范化的星系 id」也能命中记录的途径（见 route-model.lookupStationInSystem 的
+// 唯一性守卫与 route-planner.routeMetrics 的应用点）。
+// 只做枚举、**不**判唯一性：唯一性还要合并游戏内运行时站点（stationsStore），由使用方判定。
+export function getStationsInSystem(systemId: string): string[] {
+  const needle = systemId.trim().toUpperCase();
+  if (needle === '') {
+    return [];
+  }
+  const out: string[] = [];
+  for (const [station, system] of stationSystem) {
+    if (system === needle) {
+      out.push(station);
+    }
+  }
+  return out;
 }
 
 // 是否已打开过某星系的星系详情（DATA_DATA["systems", id] 到达）。

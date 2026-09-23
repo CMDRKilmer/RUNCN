@@ -13,10 +13,14 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 import {
   getFtcFuelSlider,
   getFtcReactorUsage,
+  ftcRouteKey,
   ftcFuelSliders,
   ftcReactorUsages,
 } from '@src/features/XIT/FTC/ftc-fuel-settings';
 import { computeFtcPlan } from '@src/features/XIT/FTC/ftc-compute';
+import { orbitStore } from '@src/infrastructure/fio/orbit';
+import { stlSegmentsStore } from '@src/infrastructure/prun-api/data/system-bodies';
+import { RoutePushGate, incompleteLogLevel } from './sfc-route-push-gate';
 
 // 打开 SFC 时自动写入的燃料参数 = FTC 计算出的最优方案（燃料消耗 / 反应堆使用量）。
 // 未在 FTC 计算过（undefined）时不改动滑块，由玩家自行决定。
@@ -57,15 +61,33 @@ const pendingLabels = new WeakMap<Element, Set<string>>();
 // 已打开的 SFC 磁贴当前滑块（按标签），FTC 参数变化时自动重新写入。
 const tileSliders = new Map<PrunTile, Map<string, Element>>();
 
-// 读取该飞船 FTC 计算出的最优燃料参数；无结果（undefined）返回 undefined（不改滑块）。
-// 按飞船取各自的值：环线多船 SFC 面板同时打开时，每艘船用自己算出的最优燃料，
-// 避免后算完的船把全局值覆盖到其他船的面板（互相覆盖 + 反馈抖动）。
-function ftcValueFor(ship: string | undefined, label: string | undefined): number | undefined {
+// 每块 SFC 磁贴当前**航线上下文**（FTC 参数按航线键控：船 + 起终点 + 网关标志）。
+// 由 pushRouteToFtc 在推送时写入（那时才读得到航行计划的目的地输入框与「使用跃迁点」
+// 单选状态）；滑块首次渲染与 watch 触发的全量刷新都只能从这里取值 —— 拿不到上下文
+// （磁贴还没有目的地/起点）就返回 undefined，与「未计算过」同一行为：不改滑块。
+interface TileRoute {
+  ship: string;
+  from: string;
+  to: string;
+  useGateway: boolean;
+}
+
+const tileRoutes = new WeakMap<Element, TileRoute>();
+
+// 读取该 SFC 磁贴当前航线的 FTC 最优燃料参数；无航线上下文 / 未计算过（undefined）
+// 返回 undefined（不改滑块）。按航线取各自的值：多船并行时每块面板用自己的航线参数；
+// 同船换了目的地而新航线算不出来时，读不到上一条航线的值 —— 不会把旧航线的参数写进
+// 新航线（这是「按船键控」漏掉的错误写入面）。
+function ftcValueFor(tile: PrunTile, label: string | undefined): number | undefined {
+  const route = tileRoutes.get(tile.anchor);
+  if (route === undefined) {
+    return undefined;
+  }
   if (label === '燃料消耗') {
-    return getFtcFuelSlider(ship);
+    return getFtcFuelSlider(route.ship, route.from, route.to, route.useGateway);
   }
   if (label === '反应堆使用量') {
-    return getFtcReactorUsage(ship);
+    return getFtcReactorUsage(route.ship, route.from, route.to, route.useGateway);
   }
   return undefined;
 }
@@ -84,8 +106,8 @@ async function configureSlider(tile: PrunTile, slider: Element) {
   if (!label) {
     return;
   }
-  const value = ftcValueFor(tile.parameter, label);
-  // 无 FTC 计算结果：不改滑块，由玩家自行决定。
+  const value = ftcValueFor(tile, label);
+  // 无航线上下文或无该航线的 FTC 计算结果：不改滑块，由玩家自行决定。
   if (value === undefined) {
     return;
   }
@@ -208,6 +230,9 @@ async function maybeClickStart(tile: PrunTile) {
 // FTC 参数变化时，对已打开的 SFC 磁贴重新写入（先清除已配置标记，允许新值覆盖）。
 // 防抖合并：一次计算连续写入燃料/反应堆两个参数（或并发计算先后完成）时只执行一次，
 // 避免重复写滑块导致游戏多次重算/弹确认。
+// ⚠️ watch 是「任一航线的任一参数变化」都会触发，但每次刷新都按**该磁贴自己的航线**
+// 取值（ftcValueFor → tileRoutes），所以只有对应航线的面板真被改写；别的面板要么读到
+// 自己的值（已是目标值 → already 短路），要么读不到（undefined → 不动）。
 // onlyTile 不传时遍历所有 SFC 磁贴（FTC 面板手动计算场景）；传入时仅刷那一个磁贴，
 // 绕开 watch 的同值短路——用户切目的地后 pushRouteToFtc 末尾主动调一次，保证新航线
 // 参数一定被检查/写入。
@@ -236,9 +261,41 @@ function applyFtcSettings(onlyTile?: PrunTile) {
 }
 watch([ftcFuelSliders, ftcReactorUsages], applyFtcSettingsDebounced);
 
-// 已推送给 FTC 的航线（飞船|起|终|网关），防反馈循环：
-// FTC 写滑块 → SFC 重算（起终点不变）→ 不再重复推送；仅用户改起终点时才重新推送。
+// 本次已推送的航线（飞船|起|终|网关），用于丢弃过期计算（航线变了的旧结果不落地）。
 const lastPushedRoute = new WeakMap<Element, string>();
+
+// 每块 SFC 磁贴的航线推送门（同键同签名去重 + 永远等服务器下发），状态机见
+// sfc-route-push-gate.ts：算出完整结果的航线抑制后续推送（防「写滑块 → 重算 → 再推送」
+// 反馈循环）；残缺航线在同一「航线 key + 几何签名」下也不再重复计算，保持不写滑块
+// （首次设置目的地时，输入框 value 变化信号早于服务器 SHIP_FLIGHT_MISSION 到达，
+// 此时还查不到原生几何 → 判残缺 → 不写滑块）；几何补齐（签名变化 = 服务器数据到了）
+// 后门必放行重算，SFC 仍能拿到正确几何。**没有**「试满 N 次放弃」的上限。
+const routeGates = new WeakMap<Element, RoutePushGate>();
+
+// 每块 SFC 磁贴是否已收到过至少一次「服务器计划刷新」（T1：MissionPlan 表格文本变化）。
+// 只用于给「输入不完整」提示分级（见 sfc-route-push-gate.incompleteLogLevel）：tile ready
+// （T3）的首推发生在服务器计划到达之前，那一刻原生 STL 段记录必然还没入库 → 判定残缺是
+// **时序产物**、不是真问题 —— 旧实现一律 warn，每次打开 SFC 都刷一条无用警告（用户实机
+// 日志正是 T3 触发）。per-tile 状态（与 tileRoutes/routeGates 同形式），不新增全局状态。
+const planSeen = new WeakSet<Element>();
+
+// 几何/输入签名：只用**单调递增的信息量**计数（已入库的轨道天数、三张原生 STL 段表条数）。
+// 刻意**不**用 bodiesVersion（位置观测版本号）：拖滑块会触发服务器重算，每份新计划都带来
+// 新的位置/时刻观测 → bodiesVersion 每次都自增 → 签名每次都变 → 同签名抑制永远失效
+// （等价于退回无上限重算）。信息量计数不会因为同一份数据反复下发而自增，只在真的多出
+// 可用几何（浏览星系补上空间站轨道、服务器下发新的原生 STL 段）时变化 —— 那正是
+// 「服务器数据到了，必须放行重算」的信号。
+function geometrySignature() {
+  return [
+    orbitStore.bodyCount,
+    stlSegmentsStore.departureCount,
+    stlSegmentsStore.approachCount,
+    stlSegmentsStore.sameSystemCount,
+    // 「转移」（TRANSIT）记录计数：同星系表条数在「同键补上转移段」时不增，
+    // 只看条数会漏掉这次几何变化（系内航线的几何正是这条）。
+    stlSegmentsStore.sameSystemTransitCount,
+  ].join('|');
+}
 
 // 读 SFC 表单「使用跃迁点」单选当前状态（激活 → 走网关航线计算）。
 function readGatewayState(tile: PrunTile): boolean {
@@ -287,38 +344,93 @@ async function pushRouteToFtc(tile: PrunTile) {
     return;
   }
   const viaGateway = readGatewayState(tile);
-  const key = `${ship}|${from}|${to}|${viaGateway ? 'gw' : 'nat'}`;
-  if (lastPushedRoute.get(tile.anchor) === key) {
+  const key = ftcRouteKey(ship, from, to, viaGateway);
+  // 记录本磁贴当前航线上下文：FTC 参数按航线键控，而滑块写入/刷新（configureSlider）
+  // 拿不到起终点与网关状态，只能从这里取 —— 与本次推送用同一个 key，保证读的正是
+  // 本航线的值（同船换航线后读不到旧航线的值）。
+  tileRoutes.set(tile.anchor, { ship, from, to, useGateway: viaGateway });
+  let gate = routeGates.get(tile.anchor);
+  if (!gate) {
+    gate = new RoutePushGate();
+    routeGates.set(tile.anchor, gate);
+  }
+  // 同键同签名在途 → pending；同键同签名已算过（完整或残缺）→ settled；其余放行。
+  const signature = geometrySignature();
+  const decision = gate.begin(key, signature);
+  if (decision !== 'run') {
+    // pending = 同 key 同签名**已有一次计算在途**（不是「已算过」——本行原先一律写
+    // 「已算过（pending）」，与语义不符，日志会误导排查）。
+    // settled = 本签名已算过一次：完整结果 → 抑制后续推送（防反馈循环）；残缺 →
+    // 几何没变，再算还是同一结果，保持不写滑块，等服务器下发新几何（签名变必放行）。
+    console.log(
+      decision === 'pending'
+        ? `[sfc-auto-fuel-settings] ${key} 同几何签名已有计算在途（pending），跳过重复计算`
+        : `[sfc-auto-fuel-settings] ${key} 同几何签名已算过（settled），跳过重算`,
+    );
     return;
   }
   lastPushedRoute.set(tile.anchor, key);
   console.log(
     `[sfc-auto-fuel-settings] 推送航线给 FTC：${ship} ${from} → ${to}${viaGateway ? '（网关）' : ''}`,
   );
-  const result = await computeFtcPlan({
-    shipRegistration: ship,
-    from,
-    to,
-    useGateway: viaGateway,
-    // SFC 自动联动不开星系窗口：环线自动执行时开窗会抢占缓冲槽位干扰 SFC 面板。
-    browse: false,
-  });
-  // 计算期间航线已再次变化：丢弃过期结果，避免旧航线参数覆盖新航线（重复响应）。
-  if (lastPushedRoute.get(tile.anchor) !== key) {
-    console.log('[sfc-auto-fuel-settings] 航线已变化，丢弃过期计算结果');
-    return;
+  // 计算出栈（含抛异常）必须放行闸门，否则 pending 会永久卡住该航线。
+  let settled = false;
+  try {
+    const result = await computeFtcPlan({
+      shipRegistration: ship,
+      from,
+      to,
+      useGateway: viaGateway,
+      // SFC 自动联动不开星系窗口：环线自动执行时开窗会抢占缓冲槽位干扰 SFC 面板。
+      browse: false,
+    });
+    // 计算期间航线已再次变化：丢弃过期结果，避免旧航线参数覆盖新航线（重复响应）。
+    if (lastPushedRoute.get(tile.anchor) !== key) {
+      console.log('[sfc-auto-fuel-settings] 航线已变化，丢弃过期计算结果');
+      return;
+    }
+    if (!result.ok) {
+      console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
+      return;
+    }
+    // 输入残缺（起终点轨道数据/罐容量缺失）：模型必然退化（同星系 stlFuel ≡ 0 → 燃料
+    // 无梯度），结果只是假值 —— 此时 computeFtcPlan 也未写入共享参数，这里再显式跳过
+    // 后续滑块刷新，宁可不动（沿用当前设置），也不要覆盖玩家/面板已经设好的参数。
+    // 已知局限：非公司蓝图 / ensureShipBlueprint 6s 超时的船（跨星系缺罐容量）同样
+    // 会落到这里 —— 联动静默不写滑块，而旧行为会写一个 cF×f×d 估值（精度口径问题，
+    // 拆独立项处理；当前取舍是「宁可不动，也不写不准的值」）。
+    if (result.inputIncomplete !== undefined) {
+      // 分级（2026-09-23 第四轮降噪）：T3（tile ready 首推）时服务器计划还没到 → 必然残缺，
+      // 只 debug；表格刷新过（T1，服务器计划已到）仍残缺才是真问题 → warn。
+      // 写法用 `console[level]` 而不是两个 if 分支：级别由 incompleteLogLevel 单一处决定
+      // （Node 回归脚本直接锁它：false → 'debug'、true → 'warn'）。
+      // ⚠️ 语义不变：无论哪一级，都**不写滑块**、沿用当前设置（宁可不动，也不写假值）。
+      console[incompleteLogLevel(planSeen.has(tile.anchor))](
+        `[sfc-auto-fuel-settings] 输入不完整（缺 ${result.inputIncomplete.join('、')}）：` +
+          '已跳过滑块写入，沿用当前设置（几何只取原生段记录，无估算回退）',
+      );
+      // 未算出完整结果：不计入 settled，但**同签名也不再重复计算**（几何没变结果一样）。
+      // 服务器计划到达（表格文本变化 → schedulePushRoute）后几何签名变化，门必放行；
+      // 数据一直没到就一直在「不写滑块、等下一次信号」的状态 —— 没有放弃上限。
+      // ⚠️ 系内航线现在可以拿到**原生**几何（「转移」（TRANSIT）段的 stlDistance 已入库，
+      // 见 system-bodies.recordStlSegments），仍不写滑块的理由是**口径未标定**：转移段的
+      // 燃料（C_F×f×d 与罐口径互斥）与时长（未按加减速段标定）都没校准 → 写滑块等于用
+      // 未标定口径决定玩家的 f。另一类结构性拿不到记录的是网关/星系 id 目的地 ——
+      // 缺失项文案里已给出可操作说明（见 fuel-model.missingModelInputs）。
+      return;
+    }
+    // 已算出完整结果并写入参数：抑制同航线后续推送（防反馈循环）。
+    settled = true;
+    // 算完后立刻清掉自己的已配置标记，并主动遍历当前磁贴的滑块重新检查写入。
+    // 绕开 watch 的同值短路：本船 ftcFuelSlider/Reactor 同值赋值时 watch 不触发，
+    // applyFtcSettings 不跑，fuel/reactor slider 不会被"确认"过一次，用户的
+    // console 看不到 set 日志。主动调 applyFtcSettings(tile) 保证新航线参数
+    // 一定被 configureSlider 走过一次（current === value 时打 already 日志）。
+    configuredLabels.delete(tile.anchor);
+    applyFtcSettings(tile);
+  } finally {
+    gate.finish(key, signature, settled);
   }
-  if (!result.ok) {
-    console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
-    return;
-  }
-  // 算完后立刻清掉自己的已配置标记，并主动遍历当前磁贴的滑块重新检查写入。
-  // 绕开 watch 的同值短路：本船 ftcFuelSlider/Reactor 同值赋值时 watch 不触发，
-  // applyFtcSettings 不跑，fuel/reactor slider 不会被"确认"过一次，用户的
-  // console 看不到 set 日志。主动调 applyFtcSettings(tile) 保证新航线参数
-  // 一定被 configureSlider 走过一次（current === value 时打 already 日志）。
-  configuredLabels.delete(tile.anchor);
-  applyFtcSettings(tile);
 }
 
 // 等 MissionPlan 表格加载出来后再开始配置：滑块基于真实数据渲染，
@@ -326,17 +438,25 @@ async function pushRouteToFtc(tile: PrunTile) {
 async function onTileReady(tile: PrunTile) {
   const table = await $(tile.anchor, C.MissionPlan.table);
   // 磁贴关闭时清理追踪，避免对已卸载元素重复写入。
-  onNodeDisconnected(tile.anchor, () => tileSliders.delete(tile));
+  onNodeDisconnected(tile.anchor, () => {
+    tileSliders.delete(tile);
+    tileRoutes.delete(tile.anchor);
+  });
   // 以 MissionPlan 表格文本变化作为「重算完成」信号：服务器完成 SHIP_FLIGHT_MISSION 重算后
   // 才会刷新整个表格内容（含目的地/时长/燃料等列），地址输入中间状态不会触发推送。
   // （之前用 stats 文本，但 AddressSelector 输入过程中 stats 会被搜索响应间接带动，过敏。）
   watch(refTextContent(table), () => {
+    // T1 = 服务器计划已到（表格在有内容后每次重算完成都会再刷新）：此后判残缺才是真问题，
+    // 允许 console.warn（见 incompleteLogLevel）。
+    planSeen.add(tile.anchor);
     schedulePushRoute(tile);
   });
   // 补充信号：监听目的地输入框 value 变化。用户在 listbox 选中项目后 input.value
   // 立刻同步（无须等服务器重算），触发推送保证 FTC 不会漏掉新目的地。
   // 表单表格尚未刷新时 FTC 会先按新目的地计算（FTC 不依赖服务器计划），服务器后续
-  // 重算到位后 table 信号再次触发推送——key 未变则 lastPushedRoute 提前 return。
+  // 重算到位后 table 信号再次触发推送——此时若上一次已算出完整结果，推送门返回
+  // settled 提前 return（防反馈循环）；上一次残缺则同签名不重算（几何没变结果一样），
+  // 等原生 STL 段入库（几何签名变化 → 门必放行）再算；没有次数上限，永不放弃。
   const input = _$(tile.anchor, C.AddressSelector.input) as HTMLInputElement | undefined;
   if (input) {
     watch(refValue(input), () => {

@@ -63,11 +63,33 @@ function findSliderByLabel(tile: PrunTile, label: string): Element | undefined {
   return undefined;
 }
 
+// 读 SFC 表单「使用跃迁点」单选当前状态（与 sfc-auto-fuel-settings 的 readGatewayState
+// 同一口径）。为什么需要：FTC 参数按**航线**键控（船 + 起终点 + 网关标志），同一对起终点
+// 的直飞与网关是两条航线 —— 读错标志就会查不到值、误报「未在限定时间内应用」。
+// 该 DOM 读取只有 5 行，重复一份比把 basic 特性（含 features.add 副作用）引进 ACT 步骤更划算。
+function readGatewayState(tile: PrunTile): boolean {
+  for (const radio of _$$(tile.anchor, C.RadioItem.container)) {
+    const value = _$(radio, C.RadioItem.value);
+    if (value?.textContent?.trim() !== '使用跃迁点') {
+      continue;
+    }
+    const indicator = _$(radio, C.RadioItem.indicator);
+    return indicator?.classList.contains(C.RadioItem.active) ?? false;
+  }
+  return false;
+}
+
 // 等 FTC 最优燃料滑块应用到 SFC 面板（SFC 自动联动计算后写入滑块值）。
-// 按飞船读各自的最优参数：多船环线同时出发时，各自面板等自己的值，避免被
-// 其他船的参数（全局值）误导而带错燃料起飞。
-function waitForFtcFuelSlider(tile: PrunTile, registration: string): Promise<boolean> {
-  const target = getFtcFuelSlider(registration);
+// 按**航线**读各自的最优参数：多船环线同时出发时各自面板等自己航线的值；同一艘船换了
+// 目的地时也不会被上一条航线的值误导而带错燃料起飞。
+function waitForFtcFuelSlider(
+  tile: PrunTile,
+  registration: string,
+  from: string,
+  to: string,
+  useGateway: boolean,
+): Promise<boolean> {
+  const target = getFtcFuelSlider(registration, from, to, useGateway);
   if (target === undefined) {
     return Promise.resolve(false);
   }
@@ -102,14 +124,23 @@ export const DEPART = act.addActionStep<Data>({
       _$(tile.anchor, C.AddressSelector.input) as HTMLInputElement | undefined
     )?.value?.trim();
     if (from !== undefined && to) {
-      const computed = await waitForFtcCompute(registration, from, to, false, 8000);
-      if (computed) {
-        const applied = await waitForFtcFuelSlider(tile, registration);
+      // 「使用跃迁点」单选状态：FTC 参数按航线键控（键里带网关标志），等待计算完成与
+      // 之后读滑块值必须用同一个标志，否则会把另一次计算（另一条航线）当成本次结果。
+      const useGateway = readGatewayState(tile);
+      const computed = await waitForFtcCompute(registration, from, to, useGateway, 8000);
+      if (computed === 'ok') {
+        const applied = await waitForFtcFuelSlider(tile, registration, from, to, useGateway);
         if (applied) {
           log.info('已应用 FTC 最优燃料方案');
         } else {
           log.warning('FTC 最优燃料滑块未在限定时间内应用，沿用当前设置');
         }
+      } else if (computed === 'incomplete') {
+        // 输入残缺（缺起终点轨道数据/罐容量）：FTC 未写参数，立即沿用当前设置。
+        // 取舍：这里不再等满 8s 超时（属改进，减少无谓等待）；代价是与 SFC 自动联动
+        // 并行时可能读到更旧的滑块值 —— 但残缺输入下联动本就不写滑块，等待也没有
+        // 任何可能变好的结果。
+        log.warning('FTC 输入不完整（缺轨道/罐容量数据），沿用当前燃料设置');
       } else {
         log.warning('FTC 最优燃油计算超时，沿用当前燃料设置');
       }
