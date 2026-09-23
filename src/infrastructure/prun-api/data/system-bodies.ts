@@ -139,21 +139,55 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
   persist();
 }
 
-// ---- 原生 STL 段数据（跨星系自然航线的离港/进近距离与时长）----
+// ---- 原生 STL 段数据（离港/进近距离与时长，服务器下发）----
 // 游戏服务器计算跃迁点（在起终点恒星连线上），STL 离港/进近段距离由服务器
 // 决定，离线无法精确复现（已探明：跃迁点确定性、随出发天体变化，与目标
-// 恒星连线方向相关；同一出发天体的离港距离基本恒定，行星≈63-74M km、
-// 空间站≈21M km，目标依赖 <5%）。
+// 恒星连线方向相关；同一出发天体的离港距离大致恒定 —— 行星≈63-74M km、
+// 空间站≈21M km，但目标天体的影响不可忽略：自证数据里通配键
+// `ZV-307A|*` = 74.33M km，同一出发天体的精确记录（同星系直飞离港段）
+// = 68.0562M km，差 9.2%（旧注释写「<5%」与数据矛盾）。所以通配键只做
+// 近似回退，精确键永远优先。
 // 这里从 SFC/BTF 飞行计划记录原生值，FTC 优先复用，即可精确复现原生 STL 路程：
-// - 离港 = DEPARTURE 段 stlDistance/时长，按 (出发天体, 首跳目标星系) 记录
-// - 进近 = APPROACH 段 stlDistance/时长，按 (末跳来源星系, 目标天体) 记录
-// 网关航线（TRANSIT 结构，无 DEPARTURE/APPROACH/JUMP 段）不记录，FTC 回退模型。
+// - 跨星系：离港 = DEPARTURE 段 stlDistance/时长，按 (出发天体, 首跳目标星系) 记录
+//           进近 = APPROACH 段 stlDistance/时长，按 (末跳来源星系, 目标天体) 记录
+// - 同星系：计划没有 JUMP 段，键里拼不出首跳/末跳星系，按航线 (出发天体, 目标天体) 记录：
+//           DEPARTURE/APPROACH 段（合成/旧结构）+ **转移（TRANSIT）段**（2026-09-23 起，
+//           真实观测到的系内计划结构）。
+//           段名/字段已核实：`PrunApi.SegmentType` 含有 'TRANSIT'（flights.types.d.ts 第 42 行），
+//           `FlightSegment.stlDistance: number | null` 是段上的同一字段（同文件第 22 行）——
+//           只有一个候选段名，与离港/进近完全同口径（不是另一种段结构）。
+//           转移段的 stlDistance = **整段 STL 路程**（没有离港/进近两段拆分）：实测用户 SFC
+//           原生计划 ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km / 43分59秒 /
+//           2655 单位 STL，与直飞口径几何 101.7053M km 差 0.05% → 距离口径可比。
+//           故记进同星系表的**独立字段 `transit`**（不塞进 depart/approach：那是「两段拆分」
+//           的语义，塞进去等于伪造出不存在的离港/进近段）。
+// ⚠️ 转移段的**燃料口径仍未标定** —— 记录 ≠ 可用（本轮只放开记录/展示）：
+//   BTF 实测转移段燃料 = 2×0.49×罐×min(f,0.5)（与距离无关、f≥0.5 饱和；BTF 罐 1500、
+//   d = 520.38M km、f=0.05 → 74u，而 C_F×f×d 会给 741u，差 10×）；而上面那条原生计划
+//   2655u 在罐口径下（罐 3500）最大只到 0.98×3500×0.5 = 1715u（-35%），在 C_F×f×d 口径下
+//   要 f≈0.92 才凑得出 2655 —— 两组**原生**数据用任何单一简单律都无法同时解释（详见
+//   fuel-model.ts 的 ⚠️）。⇒ 同星系几何照记（原生数据，供展示/诊断），但
+//   `missingModelInputs` 仍**拦住滑块写入**，直到做一次受控实测：BTF 固定航线/固定 f、
+//   只换 STL 罐容量 —— 燃料随罐变 = 罐口径，不随罐变 = C_F×f×d 口径。
+//   绝不能拿未标定的口径去写玩家滑块的 f（宁可不动，也不写假值）。
+// 网关航线（无 DEPARTURE/APPROACH/JUMP 段）不记录，FTC 回退模型。
 export interface StlSegmentRecord {
   distanceKm: number;
   seconds: number;
 }
+// 同星系（无跳）航线的原生段记录：同一份计划里可能只有一种结构的段。
+// - depart/approach：DEPARTURE/APPROACH 两段拆分（合成/旧结构；真实系内计划里未见）；
+// - transit：「转移」（TRANSIT）单段，**整段 STL 路程**（真实系内计划的结构，见文件头）。
+// 三者字段口径一致（服务器原生 stlDistance + 段时长），但语义不同（拆分 vs 整段），
+// 故分开存放，由 route-planner 决定怎么消费。
+export interface SameSystemStlRecord {
+  depart?: StlSegmentRecord;
+  approach?: StlSegmentRecord;
+  transit?: StlSegmentRecord;
+}
 const departRecords = new Map<string, StlSegmentRecord>();
 const approachRecords = new Map<string, StlSegmentRecord>();
+const sameSystemRecords = new Map<string, SameSystemStlRecord>();
 const STL_CACHE_KEY = 'rprun.ftc.stl-segments.v1';
 
 function systemNaturalId(address?: PrunApi.Address): string | undefined {
@@ -165,43 +199,71 @@ function systemNaturalId(address?: PrunApi.Address): string | undefined {
   return undefined;
 }
 
+// 单段 → 原生记录（stlDistance/时刻缺失或非正 → undefined，不记录）。
+function stlSegmentRecord(segment?: PrunApi.FlightSegment): StlSegmentRecord | undefined {
+  if (
+    segment?.stlDistance == null ||
+    !(segment.stlDistance > 0) ||
+    segment.departure?.timestamp == null ||
+    segment.arrival?.timestamp == null
+  ) {
+    return undefined;
+  }
+  return {
+    distanceKm: segment.stlDistance,
+    seconds: (segment.arrival.timestamp - segment.departure.timestamp) / 1000,
+  };
+}
+
 function recordStlSegments(segments: PrunApi.FlightSegment[]) {
   const depart = segments.find(s => s.type === 'DEPARTURE');
   const approach = segments.find(s => s.type === 'APPROACH');
+  // 系内计划的真实段结构：单段「转移」（TRANSIT）（段名/字段核实见文件头）。
+  const transit = segments.find(s => s.type === 'TRANSIT');
   const firstJump = segments.find(s => s.type === 'JUMP');
   const lastJump = [...segments].reverse().find(s => s.type === 'JUMP');
+  const departRec = stlSegmentRecord(depart);
+  const approachRec = stlSegmentRecord(approach);
+  const transitRec = stlSegmentRecord(transit);
+  // 天体 id：优先离港/进近段（跨星系键正是它们），系内转移结构则取自转移段。
+  const fromBody = locationEntityId(depart?.origin) ?? locationEntityId(transit?.origin);
+  const toBody = locationEntityId(approach?.destination) ?? locationEntityId(transit?.destination);
   let changed = false;
-  if (
-    depart?.stlDistance != null &&
-    depart.stlDistance > 0 &&
-    depart.departure?.timestamp != null &&
-    depart.arrival?.timestamp != null
-  ) {
-    const fromBody = locationEntityId(depart.origin);
-    const toStar = firstJump ? systemNaturalId(firstJump.destination) : undefined;
-    if (fromBody && toStar) {
-      departRecords.set(`${fromBody.toUpperCase()}|${toStar.toUpperCase()}`, {
-        distanceKm: depart.stlDistance,
-        seconds: (depart.arrival.timestamp - depart.departure.timestamp) / 1000,
+  // 同星系直飞（无 JUMP）：按航线 (出发天体, 目标天体) 记录。该表只被同星系
+  // （无跳）航线查询，与下面按跳键控的跨星系表互不干扰；各段可缺 —— 真实系内计划
+  // 只有 TRANSIT（见文件头），DEPARTURE/APPROACH 结构仅合成用例覆盖。
+  // 无首跳即无末跳（同一个 JUMP 段同时决定两者），故只查 firstJump。
+  if (firstJump === undefined) {
+    const fromSystem = systemNaturalId(depart?.origin) ?? systemNaturalId(transit?.origin);
+    const toSystem =
+      systemNaturalId(approach?.destination) ?? systemNaturalId(transit?.destination);
+    if (
+      fromBody !== undefined &&
+      toBody !== undefined &&
+      (departRec !== undefined || approachRec !== undefined || transitRec !== undefined) &&
+      fromSystem !== undefined &&
+      fromSystem.toUpperCase() === toSystem?.toUpperCase()
+    ) {
+      // 合并写入（同一航线先后出现不同结构时互补、不互相覆盖）。
+      const key = `${fromBody.toUpperCase()}|${toBody.toUpperCase()}`;
+      const prev = sameSystemRecords.get(key);
+      sameSystemRecords.set(key, {
+        depart: departRec ?? prev?.depart,
+        approach: approachRec ?? prev?.approach,
+        transit: transitRec ?? prev?.transit,
       });
       changed = true;
     }
   }
-  if (
-    approach?.stlDistance != null &&
-    approach.stlDistance > 0 &&
-    approach.departure?.timestamp != null &&
-    approach.arrival?.timestamp != null
-  ) {
-    const toBody = locationEntityId(approach.destination);
-    const fromStar = lastJump ? systemNaturalId(lastJump.origin) : undefined;
-    if (toBody && fromStar) {
-      approachRecords.set(`${fromStar.toUpperCase()}|${toBody.toUpperCase()}`, {
-        distanceKm: approach.stlDistance,
-        seconds: (approach.arrival.timestamp - approach.departure.timestamp) / 1000,
-      });
-      changed = true;
-    }
+  const toStar = firstJump !== undefined ? systemNaturalId(firstJump.destination) : undefined;
+  if (departRec !== undefined && fromBody !== undefined && toStar !== undefined) {
+    departRecords.set(`${fromBody.toUpperCase()}|${toStar.toUpperCase()}`, departRec);
+    changed = true;
+  }
+  const fromStar = lastJump !== undefined ? systemNaturalId(lastJump.origin) : undefined;
+  if (approachRec !== undefined && toBody !== undefined && fromStar !== undefined) {
+    approachRecords.set(`${fromStar.toUpperCase()}|${toBody.toUpperCase()}`, approachRec);
+    changed = true;
   }
   if (changed) {
     bodiesVersion.value++;
@@ -231,25 +293,49 @@ export const stlSegmentsStore = {
       approachRecords.get(`*|${bodyKey}`)
     );
   },
+  // 同星系（无跳）航线的原生段（离港/进近/转移），按 (出发天体, 目标天体) 键控（全大写）。
+  // 同星系计划没有 JUMP 段，拼不出首跳/末跳星系的键，故单独一张表；只由无跳
+  // 计划写入、只被无跳航线查询，跨星系键不受影响。
+  getSameSystem(fromBody: string, toBody: string): SameSystemStlRecord | undefined {
+    void bodiesVersion.value;
+    return sameSystemRecords.get(`${fromBody.toUpperCase()}|${toBody.toUpperCase()}`);
+  },
   get departureCount(): number {
     return departRecords.size;
   },
   get approachCount(): number {
     return approachRecords.size;
   },
+  get sameSystemCount(): number {
+    return sameSystemRecords.size;
+  },
+  // 带「转移」（TRANSIT）记录的键数：几何签名要用（见 sfc-auto-fuel-settings 的
+  // geometrySignature）——同星系表条数在「同键补上转移段」时不变，只数条数会漏掉这次几何变化。
+  get sameSystemTransitCount(): number {
+    let count = 0;
+    for (const rec of sameSystemRecords.values()) {
+      if (rec.transit !== undefined) {
+        count++;
+      }
+    }
+    return count;
+  },
 };
 
 // 导出已积累的 STL 段数据（供 build-stl-data.mjs 精简内置）。
-// 键：离港 = "出发天体|首跳目标星系"，进近 = "末跳来源星系|目标天体"（全大写）。
+// 键：跨星系离港 = "出发天体|首跳目标星系"、进近 = "末跳来源星系|目标天体"、
+// 同星系 = "出发天体|目标天体"（全大写）。
 export interface StlSegmentsExport {
   depart: [string, StlSegmentRecord][];
   approach: [string, StlSegmentRecord][];
+  sameSystem: [string, SameSystemStlRecord][];
 }
 
 export function exportStlSegments(): StlSegmentsExport {
   return {
     depart: [...departRecords],
     approach: [...approachRecords],
+    sameSystem: [...sameSystemRecords],
   };
 }
 
@@ -263,6 +349,7 @@ async function loadBundledStlSegments() {
     const data = (await resp.json()) as {
       depart?: [string, number][];
       approach?: [string, number][];
+      sameSystem?: [string, { depart?: number; approach?: number; transit?: number }][];
     };
     for (const [k, d] of data.depart ?? []) {
       if (typeof k === 'string' && typeof d === 'number' && d > 0 && !departRecords.has(k)) {
@@ -274,6 +361,16 @@ async function loadBundledStlSegments() {
         approachRecords.set(k, { distanceKm: d, seconds: 0 });
       }
     }
+    for (const [k, rec] of data.sameSystem ?? []) {
+      if (typeof k === 'string' && rec !== undefined && !sameSystemRecords.has(k)) {
+        const depart = bundledRecord(rec.depart);
+        const approach = bundledRecord(rec.approach);
+        const transit = bundledRecord(rec.transit);
+        if (depart !== undefined || approach !== undefined || transit !== undefined) {
+          sameSystemRecords.set(k, { depart, approach, transit });
+        }
+      }
+    }
     bodiesVersion.value++;
   } catch {
     // 内置数据加载失败/无文件：忽略，靠运行记录。
@@ -281,15 +378,45 @@ async function loadBundledStlSegments() {
 }
 void loadBundledStlSegments();
 
-function persistSegments() {
-  try {
-    localStorage.setItem(
-      STL_CACHE_KEY,
-      JSON.stringify({ depart: [...departRecords], approach: [...approachRecords] }),
-    );
-  } catch {
-    // localStorage 不可用：仅内存缓存。
+// 内置数据的裸距离 → 记录（时长内置不含，置 0）。
+function bundledRecord(distanceKm?: number): StlSegmentRecord | undefined {
+  if (typeof distanceKm !== 'number' || !(distanceKm > 0)) {
+    return undefined;
   }
+  return { distanceKm, seconds: 0 };
+}
+
+// 校验持久化记录（distanceKm 必须为正有限数；旧格式/损坏项一律丢弃）。
+function validRecord(rec?: StlSegmentRecord): StlSegmentRecord | undefined {
+  if (rec === undefined || !Number.isFinite(rec.distanceKm) || !(rec.distanceKm > 0)) {
+    return undefined;
+  }
+  return { distanceKm: rec.distanceKm, seconds: Number.isFinite(rec.seconds) ? rec.seconds : 0 };
+}
+
+let segmentsPersistTimer: number | undefined;
+// 与上文 persist() 同口径的 1000ms 防抖：一份飞行计划就往三张表写记录，批量采集
+// （BTF 扫描）时几十条连着来，否则每条记录都同步全量 JSON.stringify + setItem，
+// 整体接近 O(n²) 的主线程阻塞。
+function persistSegments() {
+  if (segmentsPersistTimer !== undefined) {
+    return;
+  }
+  segmentsPersistTimer = window.setTimeout(() => {
+    segmentsPersistTimer = undefined;
+    try {
+      localStorage.setItem(
+        STL_CACHE_KEY,
+        JSON.stringify({
+          depart: [...departRecords],
+          approach: [...approachRecords],
+          sameSystem: [...sameSystemRecords],
+        }),
+      );
+    } catch {
+      // localStorage 不可用：仅内存缓存。
+    }
+  }, 1000);
 }
 
 function restoreSegments() {
@@ -301,25 +428,31 @@ function restoreSegments() {
     const data = JSON.parse(raw) as {
       depart?: [string, StlSegmentRecord][];
       approach?: [string, StlSegmentRecord][];
+      sameSystem?: [string, SameSystemStlRecord][];
     };
     for (const [k, v] of data.depart ?? []) {
-      if (
-        typeof k === 'string' &&
-        v !== undefined &&
-        Number.isFinite(v.distanceKm) &&
-        v.distanceKm > 0
-      ) {
-        departRecords.set(k, v);
+      const rec = validRecord(v);
+      if (typeof k === 'string' && rec !== undefined) {
+        departRecords.set(k.toUpperCase(), rec);
       }
     }
     for (const [k, v] of data.approach ?? []) {
+      const rec = validRecord(v);
+      if (typeof k === 'string' && rec !== undefined) {
+        approachRecords.set(k.toUpperCase(), rec);
+      }
+    }
+    // 同星系记录为后加字段：旧格式（无 sameSystem）直接跳过，向后兼容；
+    // `transit` 为再后加字段，旧缓存（只有 depart/approach）解出 transit = undefined。
+    for (const [k, v] of data.sameSystem ?? []) {
+      const depart = validRecord(v?.depart);
+      const approach = validRecord(v?.approach);
+      const transit = validRecord(v?.transit);
       if (
         typeof k === 'string' &&
-        v !== undefined &&
-        Number.isFinite(v.distanceKm) &&
-        v.distanceKm > 0
+        (depart !== undefined || approach !== undefined || transit !== undefined)
       ) {
-        approachRecords.set(k, v);
+        sameSystemRecords.set(k.toUpperCase(), { depart, approach, transit });
       }
     }
   } catch {

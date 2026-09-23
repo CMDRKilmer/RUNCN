@@ -163,16 +163,10 @@ export async function estimateChainFlightTimes(
         legs.push(leg);
         continue;
       }
-      // 第一轮：出发/到达位置都按出发时刻预测（到达时刻未知）。
-      let metrics = routeMetrics(route, { departMs: departAtMs, arriveMs: departAtMs });
-      let option = await bestOptionFor(perf, metrics, prices);
-      // 第二轮：用"出发时刻 + 该段时长"的到达时刻重算到达天体位置——
-      // 下游基地要用飞船到达时的未来预计位置计算航程。
-      if (option) {
-        const arriveAtMs = departAtMs + option.totalHours * 3600000;
-        metrics = routeMetrics(route, { departMs: departAtMs, arriveMs: arriveAtMs });
-        option = await bestOptionFor(perf, metrics, prices);
-      }
+      // STL 起降几何只取服务器原生记录，与时刻无关（自建轨道模型回退已删除），
+      // 故一轮计算即可 —— 旧实现按预测到达时刻重算第二轮几何，现已无意义。
+      const metrics = routeMetrics(route);
+      const option = await bestOptionFor(perf, metrics, prices);
       if (!option) {
         leg.error = '未能生成有效滑块组合';
         legs.push(leg);

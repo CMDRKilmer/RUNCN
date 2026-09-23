@@ -1,9 +1,5 @@
 import { routesStore } from '@src/infrastructure/fio/routes';
-import { predictPosition, gameNow } from '@src/infrastructure/fio/orbit';
-import {
-  systemBodiesStore,
-  stlSegmentsStore,
-} from '@src/infrastructure/prun-api/data/system-bodies';
+import { stlSegmentsStore } from '@src/infrastructure/prun-api/data/system-bodies';
 import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
 import {
   getEntityNaturalIdFromAddress,
@@ -20,8 +16,17 @@ import {
   stlLandingFactor,
   stlDepartureFSat,
 } from './fuel-model';
-import type { ShipPerformance } from './fuel-model';
-import { getStarPosition, distance3d, resolveSystemId } from './route-model';
+import type { ShipPerformance, RouteStationReverse } from './fuel-model';
+import {
+  getStarPosition,
+  distance3d,
+  isSystemId,
+  resolveSystemId,
+  lookupStationInSystem,
+} from './route-model';
+// StationSystemLookup 是 StlRecordKey.lookup 的类型（见下方 stlRecordKeyFor）——
+// 只作类型使用，故走 import type（不改运行时导入面）。
+import type { StationSystemLookup } from './route-model';
 
 // 航线规划与航线指标（XIT FTC 燃料计算器使用）。
 // 输入起终点（任意 naturalId：空间站/行星/星系），规划两条候选航线：
@@ -53,7 +58,7 @@ export interface PlannedRoute {
   totalPc: number;
   gatewayCount: number;
   // 起点/终点的原始输入实体 naturalId（空间站/行星/星系），
-  // 用于 STL 起降距离估算（systemBodiesStore 按天体观测）。
+  // 用于查服务器原生 STL 段记录（几何的**唯一**来源）。
   fromBody?: string;
   toBody?: string;
 }
@@ -178,60 +183,74 @@ export function planRoutes(
   return result;
 }
 
-// 行星/空间站到本星恒星的近似距离（游戏坐标单位，与恒星坐标同源）。
-// 优先实时观测（SFC 飞行计划标定，最准）；无观测时用轨道离线预测
-// （行星轨道全量内置；空间站轨道内置后亦可离线预测，无需游戏内观测）。
-// 指定时刻版本：用轨道模型预测天体在 timestampMs 时刻的位置（下游基地
-// 要用"未来预计位置"计算航程——飞船到达前，天体已沿轨道移动）。
-export function liftOffKmAt(
-  bodyNatural: string | undefined,
-  timestampMs: number,
-): number | undefined {
-  if (bodyNatural === undefined) {
-    return undefined;
-  }
-  const sys = resolveSystemId(bodyNatural);
-  const star = sys !== undefined ? getStarPosition(sys) : undefined;
-  if (star === undefined) {
-    return undefined;
-  }
-  const pos =
-    systemBodiesStore.getPosition(bodyNatural) ?? predictPosition(bodyNatural, timestampMs);
-  if (pos !== undefined) {
-    return distance3d(pos, star);
-  }
-  return undefined;
-}
-
-export function liftOffKm(bodyNatural: string | undefined): number | undefined {
-  return liftOffKmAt(bodyNatural, gameNow());
-}
-
-// 跨星系 STL 起降统计估算（无飞行计划记录时回退）：
-// 实测内置数据（2018 离港 + 1082 进近）中位数：离港≈70M、进近≈68M km。
-// 远优于"行星到本星系恒星"距离（liftOffKm）——那是本地轨道距离，不是到
-// 跃迁点的航程（跳点在恒星连线方向 ~75M 处），低估数倍。
-// 空间站/常飞天体通常已有通配记录（BODY|* / *|BODY），不落到此兜底。
-const STL_EST_DEPARTURE_KM = 70e6;
-const STL_EST_APPROACH_KM = 68e6;
-
-// 提取飞船性能模型所需的航线指标：STL 起降距离（原生记录优先，估算回退）、
+// 提取飞船性能模型所需的航线指标：STL 起降距离（**只看服务器原生记录，无回退**）、
 // 自然/网关 pc、自然跳数/网关段数。
-// 原生 STL 路程 = 离港段 + 进近段（跃迁点在起终点恒星连线上，段距离由服务器
-// 计算，离线无法精确复现）——优先用飞行计划记录的原生值（与飞船无关），
-// 无记录时回退：跨星系航段用内置数据统计估算，同星系/网关段用本地轨道距离。
-// times（可选）：起/终点天体位置预测时刻（毫秒，游戏世界时间）。链式多段
-// 规划时传未来时刻，使同星系/网关段的起降距离按"飞船到达时天体所在位置"计算。
-export function routeMetrics(
-  route: PlannedRoute,
-  times?: { departMs?: number; arriveMs?: number },
-): {
+// STL 起降几何**只信服务器下发的原生记录**（2026-09-23 用户拍板「不需要回退，永远等
+// 服务器下发」）：服务器在起终点恒星连线上算跃迁点/转移段，离线无法精确复现；
+// 自建轨道模型（旧 `liftOffKmAt`）与统计中位数常数（旧 `STL_EST_*`）都已删除 ——
+// 宁可不动，也不写假值。查得规则：
+// - 跨星系航线：离港按 (出发天体, 首跳目标星系)、进近按 (末跳来源星系, 目标天体)；
+// - 同星系航线（legs 为空，无跳）：按 (出发天体, 目标天体) 查同星系表 —— 真实系内计划的
+//   结构是**单段「转移」（TRANSIT）**（见下 ⚠️），故取记录里的 `transit` 作为整段路程。
+// 两者查不到 → undefined → 下游 `missingModelInputs` 判缺 → 不写滑块，
+// 等服务器下发该航线的原生段记录（SFC 推送门按几何签名放行重算）。
+// ⚠️ **结构性**查不到（等再久也没有，由 missingModelInputs 给出提示）：
+// ① 跨星系网关跃迁：不产生按跳的离港/进近键。
+// ② 系内飞行（同星系）：真实段结构是单段「转移」（TRANSIT）（2026-09-23 用户 SFC 原生
+//    计划实测 ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km / 43分59秒 /
+//    2655 单位 STL）。**2026-09-23 本轮起 `recordStlSegments` 会记录这一段**
+//    （段名/字段已核实：`SegmentType` 含 'TRANSIT'、`FlightSegment.stlDistance` 同字段
+//    —— 与离港/进近同口径，见 system-bodies.ts 文件头），于是 `transitKm` 有值；
+//    但量到的距离**能不能用来写滑块**仍受燃料口径未标定约束（missingModelInputs 拦住，
+//    见 fuel-model.ts 的 ⚠️）→ 系内航线暂时只展示原生几何，不自动写滑块。
+//    ⚠️ 这与是否勾选「使用跃迁点」**无关**（勾选不改变系内航线的路程：原生 101,655,808 km
+//    vs 直飞口径几何 101.7053M km，差 0.05%；planRoutes 同星系两模式都返回 natural）。
+//    旧注释把「转移结构」归因给勾选、并声称「同星系直飞计划同样带原生 DEPARTURE/
+//    APPROACH 段（实测 68.0562M + 33.6491M）」——那 68.0562M/33.6491M 是**本模型自己的
+//    估算行**（FTC 面板标题写明「航线分段（模型估算）」），不是服务器原生值（2026-09-23 复核）。
+// 另一条（旧成因②）**已修**：目的地/起点被 SFC 规范化成**星系 id**（空间站 → 所属星系，
+// 如 ANT → ZV-307）时，记录键用的是实际天体/空间站 id（真实导出键 ZV-307A|ANT）→ 星系 id
+// 直接查表命不中（5930 条记录里天体侧命中星系 id 的 = 0 条）。现在查表前先按内置
+// stations.json + 游戏内站点把星系 id **反查**为唯一空间站 id（见 stlRecordKeyFor /
+// route-model.lookupStationInSystem）；反查不唯一（同星系多站 / 无站点数据）时拒绝反查，
+// 保持「不写滑块 + 提示」。⚠️ 反查只改**记录查表键**：PlannedRoute.fromBody/toBody 的
+// 对外语义仍是「目的地实体」（fetchPlanetEnv / FTC.vue 的 nativePlan 匹配都依赖它）。
+
+// 记录查表键：天体/空间站 id 原样使用；星系 id 先反查为唯一空间站 id（见上）。
+export interface StlRecordKey {
+  // 实际用于查 stlSegmentsStore 的键（天体/空间站 id）。
+  key: string;
+  // 本身是星系 id 时的反查结果（唯一守卫在 lookupStationInSystem 里，这里原样透传给
+  // stationReverse，供缺失项文案区分「已反查」与「拒绝反查」）。
+  lookup?: StationSystemLookup;
+}
+
+function stlRecordKeyFor(body: string | undefined): StlRecordKey | undefined {
+  if (body === undefined) {
+    return undefined;
+  }
+  if (!isSystemId(body)) {
+    return { key: body };
+  }
+  const lookup = lookupStationInSystem(body);
+  if (lookup?.station !== undefined) {
+    return { key: lookup.station, lookup };
+  }
+  return { key: body, lookup };
+}
+
+export function routeMetrics(route: PlannedRoute): {
   stlDistanceKm: number | undefined;
-  // 是否使用了飞行计划记录的原生 STL 路程（否则为统计/轨道估算）。
+  // 飞行计划记录的原生 STL 路程（**无回退**：false 时几何缺失 → 判缺）。
   stlRecorded: boolean;
   // 离港/进近各自的值（用于展示）。
   departKm: number | undefined;
   approachKm: number | undefined;
+  // 系内「转移」（TRANSIT）段的原生**整段**路程（km；只有真实系内结构才有）。
+  // 与 departKm/approachKm 互斥：有转移段时不必也不该拆成两段。
+  transitKm: number | undefined;
+  // 转移段的原生耗时（秒；随船/f 变，仅运行时记录有值）。
+  transitSeconds: number | undefined;
   // 飞行计划记录的原生离港/进近段耗时（秒，随飞船变，仅运行时记录有值；
   // 内置数据不含时长）。有值时航线段展示直接用（精确复现服务器时长）。
   departSeconds: number | undefined;
@@ -244,9 +263,18 @@ export function routeMetrics(
   toBody?: string;
   // 出发地实体 naturalId（跨星系时用于 FIO 行星环境查询，判断起飞段）。
   fromBody?: string;
+  // 起点/终点文本本身是否就是星系 id（而非天体/空间站）。SFC 会把空间站目的地
+  // 规范化成星系 id（如 ANT → ZV-307），此时原生段记录的键（按实际天体/空间站
+  // 键控）需要先反查才能命中 —— 见下面的 stationReverse 与 stlRecordKeyFor。
+  fromIsSystem: boolean;
+  toIsSystem: boolean;
+  // 记录查表实际用的键（反查后可能与 fromBody/toBody 不同；无该分量时 undefined）。
+  fromLookup?: string;
+  toLookup?: string;
+  // 成因② 诊断：起终点里是星系 id 的分量及其反查结果（缺省 = 起终点都不是星系 id）。
+  // station 有值 = 已按反查后的空间站 id 查表；undefined = 反查不唯一/无数据（拒绝反查）。
+  stationReverse: RouteStationReverse[];
 } {
-  const departLift = liftOffKmAt(route.fromBody, times?.departMs ?? gameNow());
-  const approachLift = liftOffKmAt(route.toBody, times?.arriveMs ?? gameNow());
   let natPc = 0;
   let gwPc = 0;
   let gwCount = 0;
@@ -260,37 +288,49 @@ export function routeMetrics(
       natJumpCount++;
     }
   }
-  // 飞行计划记录的原生离港/进近距离：出发按 (出发天体, 首跳目标星系)、
-  // 进近按 (末跳来源星系, 目标天体)。网关航线（legs 全 viaGateway）无记录。
+  // 飞行计划记录的原生离港/进近段：出发按 (出发天体, 首跳目标星系)、
+  // 进近按 (末跳来源星系, 目标天体)；同星系（无跳）按 (出发天体, 目标天体)。
+  // 网关航线（legs 全 viaGateway）无记录。
+  // ⚠️ 同星系表里真实会有的是**转移（TRANSIT）段**（整段路程，见 `transitKm`）——
+  // DEPARTURE/APPROACH 拆分只出现在合成用例里（真实系内计划没有这两段）。
+  // 天体侧分量（出发天体 / 目标天体）先反查：SFC 会把空间站目的地规范化成星系 id，
+  // 反查成唯一空间站 id 后才可能命中服务器实际写下的键（星系侧分量是恒星 id，无需反查）。
+  const fromRecordKey = stlRecordKeyFor(route.fromBody);
+  const toRecordKey = stlRecordKeyFor(route.toBody);
   const firstLeg = route.legs[0];
   const lastLeg = route.legs[route.legs.length - 1];
+  const sameSystemRec =
+    fromRecordKey !== undefined && toRecordKey !== undefined && route.legs.length === 0
+      ? stlSegmentsStore.getSameSystem(fromRecordKey.key, toRecordKey.key)
+      : undefined;
   const departRec =
-    route.fromBody !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
-      ? stlSegmentsStore.getDeparture(route.fromBody, firstLeg.to)
-      : undefined;
+    (fromRecordKey !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
+      ? stlSegmentsStore.getDeparture(fromRecordKey.key, firstLeg.to)
+      : undefined) ?? sameSystemRec?.depart;
   const approachRec =
-    route.toBody !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
-      ? stlSegmentsStore.getApproach(lastLeg.from, route.toBody)
-      : undefined;
-  // 离港/进近估算：记录（精确）优先；跨星系航段回退统计中位数；其余用本地轨道距离。
-  const departKm =
-    departRec?.distanceKm ??
-    (route.fromBody !== undefined && firstLeg !== undefined && !firstLeg.viaGateway
-      ? STL_EST_DEPARTURE_KM
-      : departLift);
-  const approachKm =
-    approachRec?.distanceKm ??
-    (route.toBody !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
-      ? STL_EST_APPROACH_KM
-      : approachLift);
-  const stlRecorded = departRec !== undefined && approachRec !== undefined;
+    (toRecordKey !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
+      ? stlSegmentsStore.getApproach(lastLeg.from, toRecordKey.key)
+      : undefined) ?? sameSystemRec?.approach;
+  // 系内「转移」段（真实结构）：整段路程，直接当 d 用 —— 但**仅作展示/诊断**，
+  // 能不能写滑块由 missingModelInputs 按「转移段燃料口径未标定」拦住（见 fuel-model.ts）。
+  const transitRec = sameSystemRec?.transit;
+  const transitKm = transitRec?.distanceKm;
+  // 离港/进近几何 = 服务器原生记录（**唯一**来源，无回退）：取不到即 undefined。
+  // 数据没到就保持不写滑块，等下一次信号（新的原生 STL 段入库 → 推送门签名变化 → 放行）。
+  const departKm = departRec?.distanceKm;
+  const approachKm = approachRec?.distanceKm;
+  const twoLegRecorded = departRec !== undefined && approachRec !== undefined;
+  const stlRecorded = twoLegRecorded || transitRec !== undefined;
   const stlDistanceKm =
-    departKm !== undefined && approachKm !== undefined ? departKm + approachKm : undefined;
+    departKm !== undefined && approachKm !== undefined ? departKm + approachKm : transitKm;
   return {
     stlDistanceKm,
     stlRecorded,
     departKm,
     approachKm,
+    transitKm,
+    transitSeconds:
+      transitRec !== undefined && transitRec.seconds > 0 ? transitRec.seconds : undefined,
     departSeconds: departRec !== undefined && departRec.seconds > 0 ? departRec.seconds : undefined,
     approachSeconds:
       approachRec !== undefined && approachRec.seconds > 0 ? approachRec.seconds : undefined,
@@ -300,6 +340,14 @@ export function routeMetrics(
     natJumpCount,
     toBody: route.toBody,
     fromBody: route.fromBody,
+    // 纯文本判定（不查记录）：输入本身就是星系 id 时，同星系/跨星系键都拼不出
+    // 服务器实际写下的天体键（真实导出里的键是天体/空间站，如 ZV-307A|ANT）。
+    fromIsSystem: isSystemId(route.fromBody),
+    toIsSystem: isSystemId(route.toBody),
+    // 记录查表的实际键 + 星系 id 反查结果（诊断/文案用）。
+    fromLookup: fromRecordKey?.key,
+    toLookup: toRecordKey?.key,
+    stationReverse: [fromRecordKey?.lookup, toRecordKey?.lookup].filter(x => x !== undefined),
   };
 }
 

@@ -125,14 +125,15 @@ function exportStations() {
 // 对所有已采集航线精确复现原生 STL 路程，运行中记录继续校准。
 function exportStlSegmentsData() {
   const data = exportStlSegments();
-  if (data.depart.length === 0 && data.approach.length === 0) {
+  if (data.depart.length === 0 && data.approach.length === 0 && data.sameSystem.length === 0) {
     gatewayMessage.value =
       '暂无 STL 段数据：请先在 SFC/BTF 计划过相关航线（离港/进近段会自动记录），再导出';
     return;
   }
   downloadFile(data, 'prun-stl-segments.json', true);
   gatewayMessage.value =
-    `已导出 ${data.depart.length} 条离港 + ${data.approach.length} 条进近；` +
+    `已导出 ${data.depart.length} 条离港 + ${data.approach.length} 条进近 + ` +
+    `${data.sameSystem.length} 条同星系航线；` +
     '运行 node scripts/build-stl-data.mjs <文件> 精简后内置';
 }
 // ---- 全部星球 STL 自动采集 ----
@@ -242,6 +243,8 @@ interface PlanResult {
   segmentsNative: boolean;
   // 飞船当前剩余 STL/FTL 燃料（油罐 store 实测），用于面板显示当前油量与缺口警告。
   remaining?: NonNullable<FtcComputeOutput['remaining']>;
+  // 模型必需输入缺失（缺起终点轨道数据 / 罐容量）：结果退化，未应用到 SFC 滑块。
+  inputIncomplete?: string[];
 }
 
 const result = ref<PlanResult | undefined>(undefined);
@@ -312,6 +315,7 @@ async function planAndCompute() {
     segments,
     segmentsNative,
     remaining: out.remaining,
+    inputIncomplete: out.inputIncomplete,
   };
   const radiusText =
     out.landingRadius !== undefined ? `，目的地半径 ${fixed2v(out.landingRadius)}km` : '';
@@ -569,6 +573,17 @@ const balanceNote = computed(() => {
         </template>
         <template v-else-if="result.best.stlFuel > 0 || result.best.ftlFuel > 0">
           ｜ ✓ 当前油量足够
+        </template>
+      </div>
+      <div v-if="result.inputIncomplete" :class="$style.hint">
+        ⚠ 输入不完整（缺 {{ result.inputIncomplete.join('、') }}）：结果为残缺输入下的退化值，
+        <span :class="$style.warning">未应用到 SFC 滑块</span>。几何只取服务器下发的原生 STL
+        段记录（浏览星系不再补几何），请按上面缺失项里的说明处理后重算。
+        <template v-if="(result.metrics?.transitKm ?? 0) > 0">
+          <br />
+          系内「转移」（TRANSIT）段的燃料与时长口径尚未标定（两个候选燃料口径互斥、时长未按
+          加减速段标定）→ 上表系内航线的预计时长只能当粗略参考（可能偏快）。口径细节与实测数据见
+          <span :class="$style.warning">docs/feature-patterns.md 的「FTC 几何」条目</span>。
         </template>
       </div>
       <table :class="$style.table">

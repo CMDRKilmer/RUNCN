@@ -49,11 +49,17 @@ export interface ShipPerformance {
 
 // 航线距离指标（从 PlannedRoute 提取）。
 export interface RouteMetrics {
-  // 起降+进近的 STL 距离（km，游戏距离单位）。
+  // 起降+进近的 STL 距离（km，游戏距离单位）；系内「转移」结构时 = transitKm。
   stlDistanceKm?: number;
   // 离港/进近各自的距离（km，用于按段速度分别计时）。
   departKm?: number;
   approachKm?: number;
+  // 系内「转移」（TRANSIT）段的**整段**原生路程（km）：真实系内计划的结构，
+  // 与 departKm/approachKm 互斥（见 route-planner.routeMetrics）。
+  transitKm?: number;
+  // 转移段的原生耗时（秒，仅运行时记录有值）。**不参与计时**：它对应记录当时那条
+  // 计划的 f/质量，跨 f/换船复用会把时长钉死、把成本最优解带偏（见 computeFuelOption 的 ⚠️）。
+  transitSeconds?: number;
   // 自然跃迁总距离（pc）。
   natPc: number;
   // 网关跃迁总距离（pc）。
@@ -64,6 +70,28 @@ export interface RouteMetrics {
   natJumpCount?: number;
   // 目的地实体 naturalId（跨星系时用于 FIO 行星重力查询，精确着陆燃料）。
   toBody?: string;
+  // 出发地实体 naturalId（诊断/缺失项提示用）。
+  fromBody?: string;
+  // 起点/终点文本本身是否就是星系 id（而非天体/空间站）：SFC 会把空间站目的地
+  // 规范化成所属星系 id（ANT → ZV-307），此时原生段记录的键命不中 —— 只用于
+  // missingModelInputs 的成因文案（见 route-planner.routeMetrics）。
+  fromIsSystem?: boolean;
+  toIsSystem?: boolean;
+  // 成因② 诊断：起终点里是星系 id 的分量，其「反查为空间站 id」的结果
+  // （route-planner.stlRecordKeyFor → route-model.lookupStationInSystem）。
+  // station 有值 = 已按反查后的键查表；undefined = 候选 0 个/多于 1 个，拒绝反查
+  // （查表必然命不中）。仅用于缺失项文案，不参与任何物理计算。
+  stationReverse?: RouteStationReverse[];
+}
+
+// 成因② 的星系 id → 空间站 id 反查结果（见 route-model.lookupStationInSystem）。
+export interface RouteStationReverse {
+  // 原始星系 id（如 ZV-307）。
+  systemId: string;
+  // 唯一反查到的空间站 id（如 ANT）；不唯一/无候选时为 undefined。
+  station?: string;
+  // 候选空间站（诊断：不唯一时列出）。
+  candidates: string[];
 }
 
 export interface FuelOption {
@@ -344,6 +372,26 @@ export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number
   return stlSegmentSpeedFor(ship, fuel, stlSegmentCurveFor(ship).approach, true);
 }
 
+// 系内「转移」（TRANSIT）段平均速度（km/s @ f）：引擎表 × f 曲线 × 质量曲线
+// （标定块见 STL_TRANSIT_F_SAT 上方）。空载（m = 整备质量）时质量因子 = 1；
+// f ≥ 0.5 饱和（与燃料同拐点）。引擎未标定时回退标准引擎参数。
+export function stlTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
+  const p = STL_TRANSIT_SPEED[ship.stlEngineOption ?? ''] ?? DEFAULT_STL_TRANSIT_SPEED;
+  const f = Math.min(Math.max(fuel, 0.01), STL_TRANSIT_F_SAT);
+  const m = ship.mass;
+  const m0 = ship.operatingEmptyMass;
+  const massFactor =
+    m0 !== undefined && m0 > 0 && m !== undefined && m > 0
+      ? Math.pow(m0 / m, STL_TRANSIT_MASS_EXP)
+      : 1;
+  return p.vSat * Math.pow(f / STL_TRANSIT_F_SAT, p.fExp) * massFactor;
+}
+
+// 系内「转移」段燃料（u）：罐口径 2×0.49×罐×min(f,0.5)（**与距离无关**，见标定块）。
+export function stlTransitFuel(tank: number, fuel: number): number {
+  return STL_TRANSIT_FUEL_GROSS * tank * Math.min(fuel, STL_TRANSIT_F_SAT);
+}
+
 // STL 燃料系数（每 km·滑块）按引擎取。
 export function stlFuelCFor(engineOption: string | undefined, fallback: number): number {
   const p = stlEngineParams(engineOption);
@@ -373,11 +421,55 @@ export function conditionFactor(condition: number): number {
 //   （WCB Sabaton 进近 117/Mimar 90 vs 模型 171.5），结构不同待研究。
 // 跨星系（有跃迁）航线：stlFuel = 0.49×罐×min(f, f_cap) + 0.49×罐×f + 进近差 + 着陆 + 起飞。
 // 空间站无大气：到站无着陆、出发无起飞（起降段相互独立，R 缺失只影响自身段）。
-// 同星系航线仍用 C_F×f×d（转移段占比大，已校准）。
-// ⚠️ 已知差异（2026-08-29 BTF 实测）：同星系走「跃迁点」的转移段燃料 = 2×0.49×罐×min(f,0.5)，
-//   且 f 饱和点 = 0.5 与引擎无关（标准/节油均 740u 级）。与跨星系离港段的 f_cap=10.96×流量 不同，
-//   也非 C_F×f×d。未改代码（需区分直飞/跃迁点路线后再建模）。
-const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近）= 0.49×罐×f
+// 同星系（系内）航线：燃料与时长各用一条**独立标定式**（见下方「系内转移段标定」）。
+const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近/转移单程）= 0.49×罐×f
+
+// ---- 系内「转移」（TRANSIT）段标定（2026-09-23）----
+// 数据：data/ftc-calibration/btf-load-sweep-2026-08-29.md（BP-OHMI-3472：标准/节油引擎、
+// STL 罐满 1500、FTL 2000、状况 100%）：§1 载重扫描 7 点 + §2/§3 f 扫描 12 点 + §8 节油 6 点。
+//
+// 【燃料】F = 2 × 0.49 × 罐 × min(f, 0.5) —— 28 点最大误差 3.3%（§2 逐点 ≤0.7%）：
+//   · **与距离无关**：§2 同一航线距离只漂移 0.35%（520.38M→522.22M km），燃料却随 f 变
+//     9.9×；若 ∝ f×d，f=0.05 的实测 74u 要求系数 2.84e-6 km⁻¹（= 代码里 C_F 2.85e-5 的
+//     1/10），而同一个 C_F 在该段上给 742u（**高 10.0×**）⇒ `C_F×f×d` 口径被证伪。
+//   · **与载重无关**：§2 vs §3（同 f、载重 0 vs 3000t、同航线）最大差 2.2%；§1 载重
+//     0→3000t 也只 74→76u（+2.7%，在取整噪声内）。
+//   · **f 饱和点 0.5 与引擎无关**：§2（标准）与 §8（节油）在 f=1.0 处燃料与时长都与
+//     f=0.5 逐位相同（731/731、740/740）⇒ 服务器把转移段的 f 夹到 0.5。
+//   · 罐基准 = `stlRemaining ?? stlFuelCapacity`（与跨星系段同一基准；BTF 罐满 → 两者一致；
+//     罐不满时的差异**未实测**）。2×0.49 的口径解释：转移段 = 两段 0.49×罐×f
+//     （§5 单段「离港」实测 37u = 0.49×1500×0.05 ✓）。
+//
+// 【时长】v = V_SAT(引擎) × (min(f,0.5)/0.5)^k(引擎) × (整备质量/当前质量)^0.75：
+//   · f 曲线（§2，标准引擎）：v(0.05)=11,580 → v(≥0.5)=87,036 km/s（k=0.84，12 点最大
+//     误差 8.8%）；f≥0.5 饱和（与燃料同拐点）。旧「巡航速度」模型在此段形状全错
+//     （只有 1.4× f 跨度、f≈0.2 就饱和，实测是 7.5× 跨度到 f=0.5）。
+//   · 质量曲线（§1，f=0.05）：整备 1199t → 4199t 速度 11,577→4,351 km/s（逐点反推指数
+//     0.51~0.78；取 0.75 时最大误差 9.4%；§3 交叉检验 ≤7.8%）。
+//   · 节油引擎（§8）f 曲线更平缓（k=0.59、饱和 97,794 km/s）⇒ 引擎参数分表；
+//     **未实测引擎**（advanced/glass/hyperthrust）回退标准引擎参数（已知局限：形状可信、
+//     量级未标定）。
+//   · t = d / (v × 3600) / 状况；距离按 1:1 线性（**未实测**：数据只有一个距离族，
+//     仅能靠用户原生样本跨距离（101.66M vs 520M km）交叉校验）。
+//   · 刻意**不用** metrics.transitSeconds：那是记录当时那条计划的 f/质量下的原生时长，
+//     按当前 f 复用会把时长钉死（成本最优解会一路选最低 f），比估算更糟。
+//
+// ⚠️ 与用户原生样本的交叉验证（ZV-307a → ZV-307/Antares Station：101,655,808 km /
+//   2,639 s / 2,655 u，船 AVI-06JVV 整备 1271t）：本标定式**能同时复现**这一对数字，
+//   前提是该船 STL 罐 ≈ 8000（游戏大型罐）而非 FTC 面板显示的 3500：罐 8000 → f=0.339
+//   → 燃料 2,655u（0.0%）、时长 2,600 s（−1.5%，质量 2300t 时）。罐 3500 下单段转移
+//   燃料上限只有 0.98×3500×0.5 = 1,715u（−35.4%），且两个候选口径都要求 f > 0.5（与
+//   §2/§3/§8 的 0.5 饱和互斥）⇒ 罐容量读数需用户复核（见报告）。
+const STL_TRANSIT_F_SAT = 0.5; // 转移段 f 饱和点（与引擎无关：§2/§3/§8 三组 f=1.0 ≡ f=0.5）
+const STL_TRANSIT_FUEL_GROSS = 2 * STL_TANK_FUEL_COEF; // 0.98 = 两段 0.49×罐×f 的口径
+const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重扫描）
+const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
+  // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
+  STL_ENGINE_STANDARD: { vSat: 87036, fExp: 0.84 },
+  // 节油引擎（§8，同航线同质量）：饱和更快（k 更小）。
+  STL_ENGINE_FUEL_SAVING: { vSat: 97794, fExp: 0.59 },
+};
+const DEFAULT_STL_TRANSIT_SPEED = STL_TRANSIT_SPEED.STL_ENGINE_STANDARD;
 const STL_DEPARTURE_F_SAT_COEF = 10.96; // 离港 f 饱和系数：f_cap = 系数×流量（OOG LCB 0.0075→0.0822 实测）
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_DIST_C = 0.47; // 着陆燃料系数：fuel = C×√(R_km × P^-0.2)（WCB 实测 7 点 ±0.7u）
@@ -473,9 +565,8 @@ export function computeFuelOption(
   const cond = conditionFactor(ship.condition);
 
   // STL 时间（小时）：跨星系离港/进近分别用段速度（统一段模型：进近 0.52×巡航、
-  // 离港按巡航未饱和程度 0.28~0.42×巡航）；v(f) = min(V_BASE×f^K, V_SAT) 查引擎表。
+  // 离港按巡航未饱和程度 0.28~0.42×巡航）；系内「转移」段用转移段标定速度（见下）。
   const d = metrics.stlDistanceKm;
-  const v = stlSpeedFor(ship, fuel);
   const vDepart = stlDepartSpeedFor(ship, fuel);
   const vApproach = stlApproachSpeedFor(ship, fuel);
   const departKm = metrics.departKm;
@@ -490,13 +581,19 @@ export function computeFuelOption(
   if (stlHours > 0) {
     stlHours /= cond;
   } else if (d !== undefined && d > 0) {
-    stlHours = d / (v * 3600) / cond;
+    // 系内（同星系）航线走到这里：d = 「转移」（TRANSIT）段的原生整段路程。
+    // 时长用**转移段标定式**（2026-09-23，见 STL_TRANSIT_F_SAT 上方标定块）：
+    //   t = d / (V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75 × 3600) / 状况
+    // 12 个 BTF 点最大误差 8.8%（§1 质量曲线另算 ≤9.4%）；f≥0.5 饱和。
+    // 刻意**不用** metrics.transitSeconds（绑定记录当时那条计划的 f/质量 → 会把时长钉死、
+    // 把成本最优解带向最低 f）。
+    stlHours = d / (stlTransitSpeedFor(ship, fuel) * 3600) / cond;
   }
   // STL 燃料：跨星系（有跃迁）用罐模型。
   // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（仅行星目的地，有大气减速）
   // 起飞 = 船体系数 × 0.455 × √(半径_km × P^+0.2)（仅行星出发地，有大气冲出）
   // 空间站无大气：到站无着陆、出发无起飞；两段相互独立（R 缺失只影响自身段）。
-  // 同星系用 C_F×f×d（转移段，已校准）。
+  // 系内「转移」段 = 罐口径 2×0.49×罐×min(f,0.5)（**与距离无关**；标定块见 STL_TRANSIT_F_SAT）。
   // ★2026-08-27 实测：段燃料基准用「当前 STL 罐余量」而非罐容量
   // （Q = 0.49×余量×f；余量少 → Q 小 → 段燃料少且段速度慢）。缺余量回退罐容量。
   const cF = settings.stlFuelC ?? stlFuelCFor(ship.stlEngineOption, 3.05e-5);
@@ -535,7 +632,12 @@ export function computeFuelOption(
       STL_TANK_FUEL_COEF * tank * fuel +
       (settings.stlApproachExtra ?? STL_APPROACH_EXTRA) +
       lf * (landing + takeoff) * (1 + landingLoadCoef * load);
+  } else if (!isCrossSystem && tank !== undefined && tank > 0) {
+    // 系内「转移」段（2026-09-23 标定）：F = 2×0.49×罐×min(f,0.5)，与距离/载重无关。
+    stlFuel = stlTransitFuel(tank, fuel);
   } else {
+    // 退化路径（罐容量/余量缺失，或跨星系缺罐）：只能用已证伪的 C_F×f×d 兜底，
+    // 会被 missingModelInputs 判缺 → **不写入滑块**（宁可不动，也不写不准的值）。
     stlFuel = d !== undefined ? cF * fuel * d : 0;
   }
 
@@ -635,24 +737,89 @@ export function paretoFrontier(options: FuelOption[]): FuelOption[] {
     .sort((a, b) => a.totalHours - b.totalHours);
 }
 
+// 平衡点退化判定阈值：燃料（u）/ 时间（h）维度的跨度小于该值即视为「无差异」。
+// 1e-9 是浮点噪声量级——正常航线燃料跨度数百 u、时间跨度数十分钟，远超阈值，
+// 因此非退化航线的选优结果不受影响（只用于识别恒等/全并列的退化输入）。
+const BALANCE_TIE_EPS = 1e-9;
+
+// 最省油方案：燃料总量最小；并列时取反应堆使用量最小；再并列取燃料滑块最小。
+// 退化情形（燃料或时间在所有候选方案中无差异）的兜底——此时「折衷」无意义，
+// 只能退到最省油端，绝不能退到最快端（f = 1 拉满）。
+function cheapestFuelOption(options: FuelOption[]): FuelOption | undefined {
+  let best: FuelOption | undefined;
+  for (const o of options) {
+    if (best === undefined) {
+      best = o;
+      continue;
+    }
+    const fuelDelta = totalFuelOf(o) - totalFuelOf(best);
+    if (fuelDelta < -BALANCE_TIE_EPS) {
+      best = o;
+      continue;
+    }
+    if (fuelDelta > BALANCE_TIE_EPS) {
+      continue;
+    }
+    const reactorDelta = o.reactor - best.reactor;
+    if (reactorDelta < -BALANCE_TIE_EPS) {
+      best = o;
+      continue;
+    }
+    if (reactorDelta > BALANCE_TIE_EPS) {
+      continue;
+    }
+    if (o.fuel < best.fuel) {
+      best = o;
+    }
+  }
+  return best;
+}
+
 // 平衡点：Pareto 前沿的拐点（knee）。
 // 把「最快方案」（时间最短、燃料最多）与「最省油方案」（燃料最少、时间最长）连成一条线，
 // 前沿上离这条线最远的点就是折衷平衡点——用尽量少的额外燃料换取尽量多的时间节省，
 // 两端都不极端。未设置时间价值时的默认最优。
+//
+// ⚠️ 退化保护（2026-09-23 修复）：拐点算法要求两个方向都有真实差异。
+// 若燃料在所有候选方案中恒等，归一化后每个点的 y 都是 0，|x + y - 1| 退化成 |x - 1|，
+// 最大值恒落在 x = 0 的「最快方案」（f = 1 拉满）；更糟的是此时最快方案在 Pareto
+// 过滤中支配其余全部方案，前沿只剩它自己（pareto.length === 1 → 直接返回）——
+// 两条路径都返回 f = 1。用户实测「同星系飞空间站（ZV-307a → ZV-307）时燃料消耗
+// 被自动写成 1」即此：进近段缺失 → stlDistanceKm undefined → 同星系分支 stlFuel
+// 恒为 0（无燃料梯度）而段速度仍给出时间梯度。
+// 因此：燃料或时间任一维度无差异时绝不返回最快方案，而是返回最省油方案。
+// 反过来**不允许**用「极小 span 归一化」（旧代码的 Math.max(1e-9, span)）把无意义的
+// 浮点噪声放大成满量程——那正是本 bug 的放大机制。
 export function findBalanceOption(options: FuelOption[]): FuelOption | undefined {
   const pareto = paretoFrontier(options);
   if (pareto.length === 0) {
     return undefined;
   }
+  const cheapest = cheapestFuelOption(options);
+  // 退化判定用「全部候选方案」的跨度（比只看前沿更严格）：全域无差异 ⟹ 前沿也无差异。
+  const allFuels = options.map(totalFuelOf);
+  const fuelSpan = Math.max(...allFuels) - Math.min(...allFuels);
+  const allHours = options.map(o => o.totalHours);
+  const timeSpan = Math.max(...allHours) - Math.min(...allHours);
+  // 燃料无差异：全无梯度（含 NaN 传播）→ 退到最省油端。
+  if (!(fuelSpan > BALANCE_TIE_EPS)) {
+    return cheapest ?? pareto[0];
+  }
+  // 时间无差异：同样无法做折衷（旧代码靠归一化恰好落到最省油端，但依赖并列顺序）。
+  if (!(timeSpan > BALANCE_TIE_EPS)) {
+    return cheapest ?? pareto[0];
+  }
   if (pareto.length === 1) {
     return pareto[0];
   }
   const fastest = pareto[0];
-  const cheapest = pareto[pareto.length - 1];
-  const tSpan = Math.max(1e-9, cheapest.totalHours - fastest.totalHours);
-  const fuels = pareto.map(totalFuelOf);
-  const fMin = Math.min(...fuels);
-  const fSpan = Math.max(1e-9, Math.max(...fuels) - fMin);
+  const slowest = pareto[pareto.length - 1];
+  // 归一化基准保持修复前的「前沿」口径（tSpan/fSpan 均 > 阈值，不做任何放大）
+  // ——非退化情形的选优结果与修复前逐位一致。
+  const tSpan = slowest.totalHours - fastest.totalHours;
+  const paretoFuels = pareto.map(totalFuelOf);
+  const fMin = Math.min(...paretoFuels);
+  const fSpan = Math.max(...paretoFuels) - fMin;
   // 归一化后：最快点 (0,1)、最省油点 (1,0)，连线 x+y=1；拐点 = 距连线最远的点。
   let best = fastest;
   let bestDist = -1;
@@ -693,4 +860,194 @@ export function scanFuelOptions(
     }
   }
   return plans.sort((a, b) => a.totalCost - b.totalCost);
+}
+
+// 模型必需输入的完整性检查（判定「结果是否可采信 / 可写入 SFC 滑块」）。
+//
+// 为什么必须检查（2026-09-23 实测 bug「SFC 自动拉条 ≠ FTC 面板结果」）：
+// 同星系航线的 STL 燃料只有一个来源 —— stlDistanceKm（route-planner 的
+// departKm + approachKm，**系内真实结构时 = 「转移」（TRANSIT）段的整段路程 transitKm**）。
+// 它**只取服务器
+// 原生记录**（同星系按键 (出发天体, 目标天体) 记录 / 跨星系按跳键记录，见
+// system-bodies.recordStlSegments）；查不到就是 undefined —— **无回退**（2026-09-23 用户
+// 拍板「不需要回退，永远等服务器下发」：自建轨道模型 `liftOffKmAt` 与内置统计中位数常数
+// `STL_EST_*` 已删除）。
+// 于是（修复前反复出现的问题）：
+//   FTC 面板路径（browse=true，会浏览起终点星系）→ 轨道几何完整 → f = 0.2（正确）；
+//   SFC 联动路径（browse=false，设计上不许开窗）→ approachKm undefined →
+//   stlDistanceKm undefined → 同星系分支 stlFuel ≡ 0（燃料无梯度、时间仍有梯度）
+//   → findBalanceOption 退化 → 修复前 f = 1、修复后 f = 0.05（都不是真最优）。
+// 跨星系航线缺 STL 罐容量/余量时，罐模型（0.49×罐×f 段结构）无法使用，只能
+// 退回同星系的 C_F×f×d 线性式，误差方向不确定 —— 同样不可采信。
+// 系内航线同样需要罐：转移段燃料就是罐口径 2×0.49×罐×min(f,0.5)（2026-09-23 标定，
+// 见 STL_TRANSIT_F_SAT 上方），没有罐就没有燃料梯度 → 两条分支都要检查罐。
+// ⚠️ 跨星系分支也消费 stlDistanceKm（`stlHours` 的回退项 + `fuelEstimated`）：
+// 首/末段为网关段时 `departKm/approachKm` 本就拿不到原生记录，同样可能 undefined
+// → STL 时长被静默记 0。故该类检查必须放在两条分支之外。
+//
+// 判缺成因与提示都要求**可操作**（说清是结构性不可算、还是数据还没到，以及玩家能做什么）
+// ——2026-09-23 用户实机日志（ZV-307a → ZV-307 勾了「使用跃迁点」）显示原来只有一句
+// 「等服务器下发」，玩家无从下手：
+//   ① 系内飞行（同一星系）：服务器计划用的是「转移」（TRANSIT）段（实测 2026-09-23
+//      用户 SFC 原生计划 ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km /
+//      43分59秒 / 2655 单位 STL）。`recordStlSegments` 会记这一段
+//      （段名/字段已核实：`SegmentType` 含 'TRANSIT'、字段就是 `FlightSegment.stlDistance`
+//      —— 与离港/进近同口径，只有这一个候选段名），故 `transitKm` 有值时几何是**原生**的，
+//      且该段的燃料/时长口径已于 2026-09-23 用 BTF 受控数据标定（见 STL_TRANSIT_F_SAT
+//      上方）→ 拿到记录即可算、可写滑块。还没有记录时 → 生成一次计划即可。
+//      ⚠️ **该段距离不是航线常数**（2026-09-23 第四轮复核）：同一航线不同计划的原生
+//      stlDistance 会不同（`recordStlSegments` 每份计划都覆盖该键）。证据：BTF 同航线同船
+//      同 f 的点间漂移（`data/ftc-calibration/btf-load-sweep-2026-08-29.md` 开头写明
+//      「转移/离港/进近距离随轨道运动缓慢漂移」；HRT→VH-331g 报 520,267,630 → 522,220,425）；
+//      且该值**大于两体轨道半径之和**（46.81M + 440.95M = 487.8M km）⇒ 是转移路径的弧长、
+//      不是两点直线距离，故随计划时刻（相位）变化。文案因此**只打印本次读到的值**，禁止与
+//      历史样本/模型估算做跨样本比较（旧文案把上一轮的「101,655,808 vs 101.7053M 差 0.05%」
+//      拼到新样本 88.87M 上 —— 12.6% 与 0.05% 并存 = 自相矛盾；且 101.7053M 根本不是原生值，
+//      是已删除的自建轨道模型的估算行 68.0562M+33.6491M）。
+//      **与是否勾选「使用跃迁点」无关**（勾选不改变系内航线的路程：`planRoutes` 对同星系
+//      两种模式都返回 natural；旧文案里「取消勾选改走直飞」是错误归因）；
+//   ② 目的地是星系 id（SFC 把空间站目的地规范化成所属星系）：服务器记录按实际天体/
+//      空间站 id 键控 → 星系 id 直接查表永远命不中。**2026-09-23 已修**：查表前先按
+//      stations.json / 游戏内站点把星系 id 反查为**唯一**空间站 id（route-model.
+//      lookupStationInSystem），反查成功后这条航线就能命中记录（见
+//      route-planner.stlRecordKeyFor）；反查不唯一（同星系多站 / 无站点数据）时仍拒绝
+//      反查，文案改为让玩家改目的地；
+//   ③ 其余：服务器还没为这条航线下发过原生段记录 → 生成一次计划等算完即可。
+// ⚠️ 文案预算（2026-09-23 第四轮，用户实机日志里一条 500 字警告每次开 SFC 都刷屏）：
+//   SFC 侧一条提示 = **≤2 句 + 一句动作指引**；口径细节（两口径互斥的数字、时长偏差倍数）
+//   不在这里，见 docs/feature-patterns.md 的「FTC 几何」条目与 FTC 面板的输入不完整提示。
+//   同时**只列真正成立的成因**：系内已从转移段拿到几何时「星系 id 查表没命中」不成立
+//   （旧文案照样拼上去 → 同一条提示里既说「几何已按转移段记录」又说「仍未命中该航线的
+//   记录」，自相矛盾）。
+// 返回缺失项的中文描述；空数组 = 输入完整。
+export interface MissingInputContext {
+  // 本次计算的航线是否走「使用跃迁点」（跨星系网关 / 系内勾选）：由 computeFtcPlan 传入。
+  // ⚠️ 2026-09-23 复核：勾选本身**不改变系内航线的路程**（`planRoutes` 对同星系两种模式
+  // 都返回 natural），对系内航线也不改变几何 —— 故只在**跨星系**网关航线上强制判缺
+  // （网关结构不产生按跳键）；系内勾选与不勾选是同一条路、同一份原生几何。
+  usesGatewayTransfer?: boolean;
+}
+
+export function missingModelInputs(
+  ship: ShipPerformance,
+  metrics: RouteMetrics,
+  context: MissingInputContext = {},
+): string[] {
+  const missing: string[] = [];
+  const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
+  const dMissing = metrics.stlDistanceKm === undefined || !(metrics.stlDistanceKm > 0);
+  // 系内（同星系）：原生「转移」（TRANSIT）段的几何（`transitKm`，recordStlSegments 记录）
+  // 与**口径**（燃料罐口径 + 时长转移段式，2026-09-23 标定）都已就绪 → 拿到记录即可写滑块，
+  // 不再有「口径未标定」这一条判缺。
+  // stlDistanceKm（= departKm + approachKm；系内转移结构时 = transitKm）无条件检查，
+  // undefined 或 0 都算缺：
+  // - 同星系：时长 = d / v_转移（无 d 即无时间梯度；燃料与 d 无关但是时长需要它）；
+  // - 跨星系：见上（时长静默归零）。
+  // ⚠️ 2026-09-23 复核的事实：系内计划的段结构是「转移」（TRANSIT）（实测 ZV-307a →
+  // ZV-307/Antares Station = 单段 101,655,808 km），**与勾选「使用跃迁点」无关**（`planRoutes` 对同星系两种模式都返回 natural）。
+  // 旧文案那句「101,655,808 vs 101.7053M，差 0.05%」比的是**已删除的自建轨道模型估算行**（68.0562M + 33.6491M），跨样本比较已作废。
+  // `usesGatewayTransfer` 只在**跨星系**网关航线上强制判缺（网关结构不产生按跳键）；
+  // 系内两种模式同路、几何相同，不再一律判缺（旧写法会把「已有原生转移段几何」的系内
+  // 航线也说成拿不到几何 —— 事实错误）。
+  const gatewayMissing = context.usesGatewayTransfer === true && isCrossSystem;
+  if (dMissing || gatewayMissing) {
+    const bodies = [metrics.fromBody, metrics.toBody].filter(b => b !== undefined);
+    const where = bodies.length > 0 ? bodies.join(' / ') : '起终点';
+    // 成因分开说（2026-09-23 用户实机日志：ZV-307a → ZV-307 勾了「使用跃迁点」，
+    // 原来只有一句「等服务器下发」，玩家无从下手）：
+    // 系内 = 数据未到（原生段是「转移」，本模型已记录该段距离、口径也已标定）；
+    // 跨星系网关 = 段结构（不产生按跳键，等再久也没有）；
+    // 星系 id = 查表键（已在 2026-09-23 反查修复）；其余 = 数据未到。
+    // ★文案预算（2026-09-23 第四轮）：≤2 句 + 一句动作指引；数字**现算**，不拼历史样本
+    //   （旧文案把「101,655,808 vs 101.7053M 差 0.05%」拼到新样本 88.87M 上 = 自相矛盾）。
+    const causes: string[] = [];
+    const actions: string[] = [];
+    const inSystem = !isCrossSystem;
+    if (inSystem) {
+      causes.push(
+        '系内飞行（同一星系）：服务器计划用「转移」（TRANSIT）段，这条航线还没有原生记录；' +
+          '换「使用跃迁点」不改变系内航线的路程',
+      );
+      // 操作在 systemIds 段里按「反查是否被拒」二选一给出（见下）。
+    } else if (context.usesGatewayTransfer === true) {
+      causes.push(
+        '该航线走「使用跃迁点」（跨星系网关跃迁）：服务器计划是网关结构，' +
+          '不产生本模型消费的「出发天体|首跳星系」「末跳星系|目标天体」按跳键' +
+          '→ 拿不到原生离港/进近几何',
+      );
+    }
+    const systemIds = [
+      metrics.fromIsSystem === true ? metrics.fromBody : undefined,
+      metrics.toIsSystem === true ? metrics.toBody : undefined,
+    ].filter(b => b !== undefined);
+    // 反查诊断（routeMetrics 对每个「本身就是星系 id」的分量给一条）：候选恰 1 个 = 已反查
+    // （键对了，缺的只是记录）；候选 ≠1 / 无站点数据 = 拒绝反查（宁可不写也不猜）。
+    // ⚠️ 声明在 `systemIds` 判定**之外**：下面给「系内动作」时还要用 `refused`。
+    const reverse = metrics.stationReverse ?? [];
+    const refused = reverse.filter(x => x.station === undefined);
+    if (systemIds.length > 0) {
+      // 成因② 分两种（2026-09-23 反查上线后），必须分开说，否则给出的操作是错的：
+      //   已反查到唯一空间站 → 键已经对了，缺的是「服务器还没下发这条航线的记录」→
+      //     操作是生成一次计划等算完（再说「改目的地」是误导）；
+      //   反查不唯一/无站点数据 → 拒绝反查（宁可不写也不猜）→ 操作才是改目的地。
+      // routeMetrics 对每个「本身就是星系 id」的分量都会给出一条 stationReverse
+      // （station 有无值分别对应上述两种），故这里直接按它分类。
+      // ⚠️ 系内也照给这两个操作（2026-09-23 标定后）：系内记录同样按 (出发天体, 目标天体)
+      // 键控，反查成功后生成一次计划就能命中。
+      const reversed = reverse.filter(x => x.station !== undefined);
+      if (reversed.length > 0) {
+        const pairs = reversed.map(x => `${x.systemId} → ${x.station}`).join('、');
+        causes.push(
+          `起终点里的 ${reversed.map(x => x.systemId).join(' / ')} 是星系 id：` +
+            'SFC 会把空间站目的地规范化成所属星系 id，服务器记录按实际天体/空间站 id 键控' +
+            `（已按 ${pairs} 反查后查表${dMissing ? '，仍未命中该航线的记录' : ''}）`,
+        );
+        actions.push('在 SFC 里为该航线生成一次飞行计划并等服务器算完');
+      }
+      if (refused.length > 0) {
+        const why = refused
+          .map(x =>
+            x.candidates.length === 0
+              ? `${x.systemId}（无空间站数据）`
+              : `${x.systemId}（候选 ${x.candidates.join('、')}）`,
+          )
+          .join('；');
+        causes.push(
+          `起终点里的 ${refused.map(x => x.systemId).join(' / ')} 是星系 id（不是具体天体）：` +
+            `服务器记录按实际天体/空间站 id 键控，星系 id 命不中，而这里无法反查出唯一空间站 ` +
+            `id（${why}）—— 反查不安全，宁可不写也不猜`,
+        );
+        // 反查被拒时这条航线**只能**靠改目的地救（生成计划也没用：查表键推不出来）。
+        // 系内同样成立（2026-09-23 口径标定后，系内记录按 (出发天体, 目标天体) 键控，
+        // 目标端是星系 id 且推不出唯一空间站 → 永远命不中）。
+        actions.push('把目的地改成具体天体/空间站');
+      }
+    }
+    if (inSystem && refused.length === 0) {
+      // 系内的有效操作是「生成一次计划」（系内记录按 (出发天体, 目标天体) 键控，生成后该键
+      // 就能命中）；反查被拒时上面已经给了改目的地，不再重复。
+      // ⚠️ 2026-09-23 回归修复：这一行原来嵌在 `systemIds.length > 0` 里 → 起终点**都不是**
+      // 星系 id 的系内航线（最常见形状 zv-307a → ANT）只报成因、**不给任何操作**，连
+      // 「否则请手动设置燃料滑块」的兜底都没有 —— 与本文档顶部契约「给出可操作文案」矛盾。
+      // 回归用例：verify-ftc-gap-guidance.mjs ⑤「系内航线（尚无同星系记录）」。
+      actions.push('在 SFC 里为该航线生成一次飞行计划并等服务器算完');
+    }
+    if (causes.length === 0) {
+      // 走到这里只可能是跨星系（系内分支必然给出成因）且没有星系 id 分量。
+      causes.push('服务器尚未为该航线下发原生 STL 段记录');
+      actions.push('在 SFC 里为该航线生成一次飞行计划并等服务器算完');
+    }
+    // 同一操作可能由多条成因给出（系内 + 星系 id 反查）→ 去重，守住文案预算。
+    const uniqueActions = [...new Set(actions)];
+    const tail =
+      uniqueActions.length > 0 ? ` —— ${uniqueActions.join('、')}，否则请手动设置燃料滑块` : '';
+    missing.push(`起终点轨道距离（${where}）：${causes.join('；')}${tail}`);
+  }
+  // STL 罐容量/余量：两条分支都要（跨星系 = 离港/进近的 0.49×罐×f；系内「转移」段 =
+  // 2×0.49×罐×min(f,0.5)，2026-09-23 标定）—— 没有罐就没有燃料梯度。
+  const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
+  if (tank === undefined || !(tank > 0)) {
+    missing.push('STL 罐容量（飞船蓝图性能）');
+  }
+  return missing;
 }
