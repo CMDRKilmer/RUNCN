@@ -272,6 +272,19 @@ The extension does make some background server requests (e.g., `XIT BURN` opens 
 
 Don't modify `CHANGELOG.md` in PRs. The maintainer adds changelog notes right before merging. This avoids merge conflicts.
 
+### Release
+
+Releases are cut by CI (`.github/workflows/release.yml`); never tag or zip by hand.
+
+- **Trigger:** a push to `main` that touches `CHANGELOG.md`, or a manual `workflow_dispatch` (optional `keep` input). Pushing anything else never publishes.
+- **Version:** today's date in `Asia/Shanghai` as `y.m.d` (e.g. `26.9.23`), with `.1`/`.2` appended for a second release on the same day — it never rolls over to the next day. Existing tags are skipped.
+- **An empty `[Unreleased]` fails loudly:** the parse step exits with code 78, which makes the `build` job **red** (it is not a graceful skip). Don't push a `CHANGELOG.md` edit just to probe the pipeline.
+- **Output:** a GitHub Release with `琉璃小工具-<version>.zip` + `.crx`, plus automatic submissions to Chrome, Edge and Firefox (AMO). Those store jobs have **no approval gate**, and a published store version cannot be rolled back — proofread the notes before pushing.
+- **`archive` job:** runs as `github-actions[bot]`, moves the `[Unreleased]` body into a versioned section, syncs `package.json` `version`, then pushes back to `main`. It pushes with `GITHUB_TOKEN`, so it does not re-trigger the workflow. Run `git pull --ff-only` after a release before pushing again.
+- **`prune` job:** keeps the newest `KEEP_RELEASES` (env, default 10) releases and deletes older ones **including their tags**.
+- **Edge key expiry:** `EDGE_API_KEY_EXPIRY` in `release.yml` must stay in sync with `edge-key-expiry.yml` — update both when renewing.
+- Notes are parsed with `^## \[Unreleased\][\s\S]*?(?=^## \[|^---$)`, so a bare `---` line inside the body truncates the release notes.
+
 ### Check Open PRs Before Starting Work
 
 Before beginning new feature work, run `gh pr list --state open` (or equivalent) to see what's already in flight. Code search and the working tree reflect only `main` (or the current branch); unmerged feature branches are invisible to the search agent and to file reads. Duplicating an already-developed feature wastes effort and produces conflicting PRs.
@@ -304,6 +317,16 @@ Use Vue slots instead of adding new props to display custom text inside existing
   {material}
 </PrunLink>
 ```
+
+### Keep Docs and Comments in Sync
+
+A behavior change must be propagated to **every** place that asserts the old behavior: `docs/`, `guides/`, source file-header comments, and the header comments of `scripts/verify-*.mjs`. These files accumulate "round N" narratives that describe superseded behavior, so a stale claim can end up sitting right next to a correct one and contradicting it (including comments that say a feature is still gated when the gate was deleted).
+
+After changing an interface, constant, or calibration:
+
+1. Grep the old conclusion's keywords (e.g. `未标定`, `待办`, `偏快`, or the old numeric sample) across `docs/`, `guides/`, `src/` and `scripts/`.
+2. Run `find docs/ -name "*.md" | sort` and check every affected file.
+3. User-facing text must compute its numbers from the current run — never hardcode a value taken from a historical sample, because the next reader will silently compare it against a fresh reading and get a contradiction.
 
 ### Local Lint Noise (`dist-firefox`)
 
