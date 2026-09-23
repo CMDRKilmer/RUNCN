@@ -37,7 +37,7 @@ import {
   blueprintInfoFor,
   FtcComputeOutput,
 } from './ftc-compute';
-import { FuelOption } from './fuel-model';
+import { FuelOption, GW_COST_PER_JUMP } from './fuel-model';
 import $style from './FTC.module.css';
 
 // XIT FTC：飞船性能驱动的飞行燃料性价比计算器。
@@ -236,6 +236,8 @@ interface PlanResult {
   route: PlannedRoute;
   metrics: NonNullable<FtcComputeOutput['metrics']>;
   best: FuelOption;
+  // 邻档对比：最优燃料滑块前后各 5 档（同反应堆固定为最优值）的方案，展示边际代价。
+  nearby?: FuelOption[];
   // 是否有自然跃迁（否 = 全程系内/纯网关飞行，反应堆滑块不影响结果，无需计算）。
   reactorRelevant: boolean;
   // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
@@ -249,6 +251,21 @@ interface PlanResult {
 
 const result = ref<PlanResult | undefined>(undefined);
 const calcMessage = ref<string | undefined>(undefined);
+
+// 差额显示：与最优行无差异时用「—」，否则带符号（+ 更贵/更慢，- 更省/更快）。
+const DELTA_EPS_MS = 1000;
+function deltaDuration(ms: number): string {
+  if (Math.abs(ms) < DELTA_EPS_MS) {
+    return '—';
+  }
+  return `${ms > 0 ? '+' : '-'}${formatDuration(Math.abs(ms))}`;
+}
+function deltaCurrency(v: number): string {
+  if (Math.abs(v) < 0.5) {
+    return '—';
+  }
+  return `${v > 0 ? '+' : '-'}${formatCurrency(Math.abs(v))}`;
+}
 
 async function planAndCompute() {
   calcMessage.value = undefined;
@@ -289,9 +306,14 @@ async function planAndCompute() {
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
-  // 用解析后的起/终点实体（非原始输入别名）匹配，输入 'Euu'/'Liuli Central Sector - Euu'
-  // 等别名也能命中原生计划。
-  const nativePlan = findNativeFlightPlan(route.fromBody ?? from, route.toBody ?? to);
+  // ⚠️ 必须用**反查后的实体键**（metrics.fromLookup/toLookup）：SFC 会把空间站目的地
+  // 规范化成所属星系 id（如 vh-331），而原生计划的目标端是不可变实体 id（HRT）→
+  // 用输入原文匹配永远失败，面板会退化成「模型估算」分段、段明细与服务器不一致
+  // （2026-09-24 用户实测）；输入 'Euu' 这类别名仍由 route.fromBody/toBody 兜底。
+  const nativePlan = findNativeFlightPlan(
+    metrics.fromLookup ?? route.fromBody ?? from,
+    metrics.toLookup ?? route.toBody ?? to,
+  );
   let segments: RouteSegmentRow[];
   let segmentsNative: boolean;
   if (nativePlan) {
@@ -311,6 +333,7 @@ async function planAndCompute() {
     route,
     metrics,
     best,
+    nearby: out.nearby,
     reactorRelevant,
     segments,
     segmentsNative,
@@ -324,12 +347,21 @@ async function planAndCompute() {
       ? `，STL ${Math.round(best.stlFuel)} + FTL ${Math.round(best.ftlFuel)} 燃料`
       : '';
   const reactorText = reactorRelevant ? ` / 反应堆 ${best.reactor}` : '';
+  // 网关费单列：总成本已含它（fuel-model 的 gatewayCost），不单列玩家看不出这笔钱花在哪。
+  // 金额与单价都现算（gwCount × GW_COST_PER_JUMP）——本文件不写 6,000 字面量，常数只有
+  // fuel-model 一份。紧贴「总成本」拼接（「含…」修饰的总成本），末尾的网关/自然后缀不动。
+  const gatewayFeeText =
+    metrics.gwCount > 0
+      ? `，含网关费 ${formatCurrency(metrics.gwCount * GW_COST_PER_JUMP)}` +
+        `（${formatCurrency(GW_COST_PER_JUMP)} × ${metrics.gwCount} 段）`
+      : '';
   calcMessage.value =
     `最优方案（平衡点）：燃料滑块 ${best.fuel}` +
     reactorText +
     `，预计 ${formatDuration(best.totalHours * 3600000)}` +
     fuelText +
     `，总成本 ${formatCurrency(best.totalCost)}` +
+    gatewayFeeText +
     radiusText +
     (useGateway.value && metrics.gwCount > 0
       ? '（网关航线：FTL 燃料为 0）'
@@ -617,6 +649,38 @@ const balanceNote = computed(() => {
           </tr>
         </tbody>
       </table>
+      <details v-if="result.nearby && result.nearby.length > 1" :class="$style.costDetails" open>
+        <summary>邻档对比（燃料 ±5 档，反应堆固定 {{ result.best.reactor }}）</summary>
+        <table :class="$style.table">
+          <thead>
+            <tr>
+              <th>燃料滑块</th>
+              <th>总时长</th>
+              <th>Δ总时长</th>
+              <th>STL 燃料</th>
+              <th>FTL 燃料</th>
+              <th>总成本</th>
+              <th>Δ总成本</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="o in result.nearby"
+              :key="o.fuel"
+              :class="{ [$style.best]: o.fuel === result.best.fuel }">
+              <td>{{ o.fuel }}</td>
+              <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
+              <td>{{
+                deltaDuration(o.totalHours * 3600000 - result.best.totalHours * 3600000)
+              }}</td>
+              <td>{{ o.fuelEstimated ? formatFuel(o.stlFuel) : '需位置观测' }}</td>
+              <td>{{ formatFuel(o.ftlFuel) }}</td>
+              <td>{{ formatCurrency(o.totalCost) }}</td>
+              <td>{{ deltaCurrency(o.totalCost - result.best.totalCost) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </details>
       <details :class="$style.costDetails">
         <summary>航线明细</summary>
         <div :class="$style.hint">

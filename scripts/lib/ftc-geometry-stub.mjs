@@ -214,7 +214,18 @@ export const routesStore = {
   isGatewayEdge: (a, b) => gatewayEdges.has(edgeKey(a, b)),
 };
 
+// 原生飞行计划（真实 flightPlansStore 的替身）：默认**空表** —— findNativeFlightPlan 在
+// 无计划时返回 undefined，既有用例行为逐位不变。用例按需注入（形状 = SHIP_FLIGHT_MISSION
+// 的 FlightPlan：segments[].origin/destination 为 address、首段 departure.timestamp 用于
+// 「多条时取最新」）。2026-09-24 追加：用于断言「原生计划匹配要用反查后的实体键
+// （metrics.fromLookup/toLookup），用输入原文（星系 id）永远命不中」。
 export const flightPlansStore = { all: { value: [] } };
+export function stubSetFlightPlans(list) {
+  flightPlansStore.all.value.length = 0;
+  for (const plan of list) {
+    flightPlansStore.all.value.push(plan);
+  }
+}
 
 // ---- 浏览星系 / 开窗（真实 browseSystems 会 showBuffer("MS <星系>") 并在 DATA_DATA
 // 到达后关窗）----

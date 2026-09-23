@@ -14,7 +14,8 @@
 //   STL 燃料：F = C_F_engine × f × d（线性，随引擎类型不同）
 // 自然 FTL（蓝图性能驱动，2026-08-26 多船/多配置实测校准）：
 //   速度 v = ftlMax×r^(a(1+1.5r))、充能 = (eT/m)×r 秒/跳、燃料 = 0.00293×功率×r×pc
-// 网关 FTL：速度 3.0 pc/h 固定，燃料 0，每段 +20min 锁定/衰减。
+// 网关 FTL：速度 3.0 pc/h 固定，燃料 0，每段 20 秒锁定/衰变（GW_LOCK_HOURS）
+//   + 6,000 ICA 网关使用费（GW_COST_PER_JUMP，见下方实测依据）。
 
 export interface ShipPerformance {
   // 当前质量（含装载，t）。
@@ -70,9 +71,9 @@ export interface RouteMetrics {
   natPc: number;
   // 网关跃迁总距离（pc）。
   gwPc: number;
-  // 网关段数（每段含锁定+衰减 20min）。
+  // 网关段数（每段含锁定 10s + 衰变 10s = 20s，并收 6,000 ICA 网关使用费）。
   gwCount: number;
-  // 自然跃迁跳数（每跳含充能 CHARGE 段）。
+  // 自然跃迁跳数（**跳数**，不是充能次数 —— 充能 = 为下一跳充电，次数 = 跳数 − 1）。
   natJumpCount?: number;
   // 目的地实体 naturalId（跨星系时用于 FIO 行星重力查询，精确着陆燃料）。
   toBody?: string;
@@ -239,9 +240,18 @@ export function ftlFuelCFor(ship: ShipPerformance): number {
   }
   return 21.4;
 }
-// 网关跃迁速度（pc/h）与每段锁定+衰减（h），真实服务器数据校准。
-const GW_PC_PER_H = 3.0;
-const GW_LOCK_HOURS = 20 / 60;
+// 网关跃迁速度（pc/h）、每段锁定+衰变时长（h）、每段网关使用费（ICA）。
+// 三者被 route-planner（路径权重）与 computeFuelOption（时长/成本）分别消费，故在这里
+// 定义**唯一一份**再导出（本文件无任何 import，作常数宿主不会形成循环依赖）。
+export const GW_PC_PER_H = 3.0;
+// 网关跃迁的锁定 + 衰变：实测**各 10 秒**（用户 SFC 原生 16 段计划：段 7「锁定」10秒、
+// 段 9「衰变」10秒）→ 合计 20 **秒**/段。旧值 20/60（20 分钟）是单位错误：每条网关段
+// 多算 19分40秒（实测 2 段航线多算 40 分钟），是「FTC 总时长与服务器不一致」成因之一。
+export const GW_LOCK_HOURS = 20 / 3600;
+// 网关使用费：实测 **6,000 ICA/段**（同一份原生计划：网关跃迁前的「锁定」段费用列
+// 6,000 ICA；全航线 12,000 ICA / 2 段）。旧实现硬编码 gatewayCost = 0 → totalCost 漏掉
+// 这笔支出；它不随 f 变化，故不影响最优 f（只是总额偏低）。
+export const GW_COST_PER_JUMP = 6000;
 // 船体条件衰减阈值（<80% 性能下降）与衰减强度。
 const CONDITION_THRESHOLD = 0.8;
 
@@ -570,30 +580,40 @@ export function computeFuelOption(
 ): FuelOption {
   const cond = conditionFactor(ship.condition);
 
-  // STL 时间（小时）：跨星系离港/进近分别用段速度（统一段模型：进近 0.52×巡航、
-  // 离港按巡航未饱和程度 0.28~0.42×巡航）；系内「转移」段用转移段标定速度（见下）。
+  // STL 时间（小时）= 离港段（离港段速度）+ 进近段（进近段速度）+ **其余**（转移段速度）。
+  // 三段按航线的**总路程** d 分配（段速度见 stlDepartSpeedFor / stlApproachSpeedFor /
+  // stlTransitSpeedFor，统一段模型）。
   const d = metrics.stlDistanceKm;
   const vDepart = stlDepartSpeedFor(ship, fuel);
   const vApproach = stlApproachSpeedFor(ship, fuel);
   const departKm = metrics.departKm;
   const approachKm = metrics.approachKm;
+  // 「其余」必须显式算：混合航线（自然跃迁 + 网关跃迁）的 STL 段远多于「离港 + 进近」——
+  // 实测 AVI-06JVV 的 zv-194h → HRT（勾网关）16 段原生计划里有 6 个 STL 段（起飞/离港/
+  // 进近/3 个转移），而末跳是网关段时进近记录还查不到（getApproach 的键是「末跳起点
+  // 星系|目标天体」）⇒ 旧实现只累加 departKm + approachKm，把进近 1h29m 与末尾到站
+  // TRANSIT 3h59m 静默丢掉，总时长比服务器短约 4 小时（2026-09-24 用户实测）。
+  // d 是**航线级**总路程（Σ 所有 STL 段，见 system-bodies.routeRecords），故按 d 分配余量。
+  // 等价性：系内航线 depart/approach 都缺 → rest = d，与旧「系内」分支逐位相同；
+  // 纯自然跨星系 depart + approach === d → rest = 0，同样逐位不变。
+  // d 缺失（残缺输入，会被 missingModelInputs 拦下、不写滑块）时退回已知段之和，
+  // 免得把已知的离港/进近静默记成 0。
+  const totalKm = d ?? (departKm ?? 0) + (approachKm ?? 0);
   let stlHours = 0;
-  if (departKm !== undefined && departKm > 0) {
-    stlHours += departKm / (vDepart * 3600);
-  }
-  if (approachKm !== undefined && approachKm > 0) {
-    stlHours += approachKm / (vApproach * 3600);
-  }
-  if (stlHours > 0) {
-    stlHours /= cond;
-  } else if (d !== undefined && d > 0) {
-    // 系内（同星系）航线走到这里：d = 「转移」（TRANSIT）段的原生整段路程。
-    // 时长用**转移段标定式**（2026-09-23，见 STL_TRANSIT_F_SAT 上方标定块）：
+  if (totalKm > 0) {
+    const depKm = Math.min(Math.max(0, departKm ?? 0), totalKm);
+    const appKm = Math.min(Math.max(0, approachKm ?? 0), totalKm - depKm);
+    const restKm = Math.max(0, totalKm - depKm - appKm);
+    // 「其余」用**转移段标定式**（2026-09-23，见 STL_TRANSIT_F_SAT 上方标定块）：
     //   t = d / (V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75 × 3600) / 状况
     // 12 个 BTF 点最大误差 8.8%（§1 质量曲线另算 ≤9.4%）；f≥0.5 饱和。
     // 刻意**不用** metrics.transitSeconds（绑定记录当时那条计划的 f/质量 → 会把时长钉死、
     // 把成本最优解带向最低 f）。
-    stlHours = d / (stlTransitSpeedFor(ship, fuel) * 3600) / cond;
+    stlHours =
+      (depKm / (vDepart * 3600) +
+        appKm / (vApproach * 3600) +
+        restKm / (stlTransitSpeedFor(ship, fuel) * 3600)) /
+      cond;
   }
   // STL 燃料：跨星系（有跃迁）用罐模型。
   // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（仅行星目的地，有大气减速）
@@ -655,11 +675,14 @@ export function computeFuelOption(
   const natSpeed = ftlSpeedFor(ship, r);
   const natJumpHours = metrics.natPc > 0 && natSpeed > 0 ? metrics.natPc / natSpeed : 0;
   const chargeSeconds = ftlChargeSecondsFor(ship, r);
-  const natChargeHours =
-    (metrics.natJumpCount ?? 0) > 0 ? ((metrics.natJumpCount as number) * chargeSeconds) / 3600 : 0;
+  // 充能 = 为**下一跳**充电 → 次数 = 跳数 − 1（末跳后直接进近，无充能段）。旧值用
+  // natJumpCount（= 跳数）多算一次充能，与 buildEstimatedSegmentRows 的「只在
+  // i < legs.length - 1 加充能」口径不一致（后者本来就是对的）。
+  const chargeCount = Math.max(0, (metrics.natJumpCount ?? 0) - 1);
+  const natChargeHours = (chargeCount * chargeSeconds) / 3600;
   const ftlFuelC = settings.ftlFuelC ?? ftlFuelCFor(ship);
   const ftlFuelNat = ftlFuelC * r * metrics.natPc;
-  // 网关 FTL：速度固定 3.0 pc/h，燃料 0，每段 +20min 锁定/衰减。
+  // 网关 FTL：速度固定 3.0 pc/h，燃料 0，每段 +20 秒锁定/衰变（GW_LOCK_HOURS）。
   const gwHours =
     metrics.gwPc > 0 ? metrics.gwPc / GW_PC_PER_H + metrics.gwCount * GW_LOCK_HOURS : 0;
 
@@ -667,8 +690,8 @@ export function computeFuelOption(
   const totalHours = stlHours + ftlHours;
   const fuelCost = stlFuel * prices.stlPrice + ftlFuelNat * prices.ftlPrice;
   const timeCost = totalHours * prices.timeValue;
-  // 网关现金费用（目前无记录，预留 0）。
-  const gatewayCost = 0;
+  // 网关使用费：6,000 ICA/段（GW_COST_PER_JUMP）。不随 f 变 → 不影响最优 f，只影响总额。
+  const gatewayCost = metrics.gwCount * GW_COST_PER_JUMP;
 
   return {
     fuel,
@@ -839,6 +862,31 @@ export function findBalanceOption(options: FuelOption[]): FuelOption | undefined
     }
   }
   return best;
+}
+
+/** 邻档对比的默认半径（档 = autoFuelGrid 的步长 0.05，即前后各 5 档 = 最优 ±0.25）。 */
+export const NEARBY_FUEL_SPAN = 5;
+
+// 邻档对比：以最优方案为中心，取**同一反应堆使用量**下燃料滑块前后各 span 档的方案。
+// 复用 scanFuelOptions 已算出的全部组合，不重算。
+//
+// 反应堆**固定为最优值**（2026-09-24 用户拍板）：玩家要评估的是「只动燃料滑块」的代价，
+// 若每档各取自身最优反应堆，相邻两行的差异就混入了反应堆变量，无法归因。
+// 越界侧按实际可用档截断（最优落在网格端点或靠近端点时，一侧不足 span 档）。
+export function nearbyFuelOptions(
+  options: FuelOption[],
+  best: FuelOption,
+  span = NEARBY_FUEL_SPAN,
+): FuelOption[] {
+  const eps = 1e-9;
+  const sameReactor = options
+    .filter(o => Math.abs(o.reactor - best.reactor) < eps)
+    .sort((a, b) => a.fuel - b.fuel);
+  const idx = sameReactor.findIndex(o => Math.abs(o.fuel - best.fuel) < eps);
+  if (idx < 0) {
+    return [];
+  }
+  return sameReactor.slice(Math.max(0, idx - span), idx + span + 1);
 }
 
 // 扫描滑块组合，按综合成本（燃料费+时间价值）升序返回。

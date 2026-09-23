@@ -60,6 +60,7 @@
 // 航线级/网关口径的生产实现由 ①②④⑤ 直接驱动真实 store 断言。
 import { register } from 'node:module';
 import { readFileSync } from 'node:fs';
+import { SHIP } from './lib/ftc-node-fixtures.mjs';
 
 const summary = { pass: 0, fail: 0 };
 
@@ -834,6 +835,372 @@ await checkAsync(
     console.log(`[证据] ⑧ 网关航线无记录 文案：${out.inputIncomplete?.[0]}`);
   },
 );
+
+// ============================================================================
+// ⑨~⑭ 时间/成本口径（2026-09-24，用户实测「FTC 与服务器 SFC 不一致」驱动）。
+// 依据 = 同一份 16 段原生计划（脚本已按真实表建立 fixture）：
+//   ① 混合航线有 6 个 STL 段（起飞/离港/进近/3 个转移）——旧实现只算「离港 + 进近」，
+//      末跳是网关段时进近记录还查不到 → 进近 1h29m 与到站 TRANSIT 3h59m 静默丢失；
+//   ② 充能段只在两次自然跃迁之间出现 **1 次**（末跳后直接进近）；
+//   ③ 锁定段与衰变段实测**各 10 秒**（= 20 秒/段，不是 20 分钟）；
+//   ④ 网关费实测 **6,000 ICA/段**（2 段 = 12,000 ICA）；
+//   ⑤（⑭）**估算分段表**里网关跃迁段的时长必须用固定 3.0 pc/h，不是自然跃迁速度 vFtl
+//      （随反应堆 r 变；截图船 r=1 时 ≈2.84 pc/h）——用户实测面板把 17.08 pc 网关段显示成
+//      6h01m，服务器原生同段 5h41m。
+// 断言里的常数一律写**字面量**（20/3600、6000、3.0），不引生产导出的同名字面量 ——
+// 否则常数被改错时断言会跟着一起漂移（假绿）。
+// ============================================================================
+const {
+  computeFuelOption,
+  ftlSpeedFor,
+  ftlChargeSecondsFor,
+  conditionFactor,
+  stlDepartSpeedFor,
+  stlApproachSpeedFor,
+  stlTransitSpeedFor,
+} = await import('../src/features/XIT/FTC/fuel-model.ts');
+const { findNativeFlightPlan, buildNativeSegmentRows, buildEstimatedSegmentRows } = await import(
+  '../src/features/XIT/FTC/route-planner.ts'
+);
+// 截图实测船（fixtures 单一来源）+ 蓝图侧充能参数（同 stubBlueprint：0.3 / 135s）。
+const PERF = { ...SHIP, minReactorUsage: 0.3, emitterChargeTime: 135 };
+const COND = conditionFactor(PERF.condition);
+const MIX_DEPART_KM = MIX_STL_SEGMENTS.find(s => s.type === 'DEPARTURE').km;
+// 16 段混合航线的计算指标（真实形状：末跳是网关段 → 进近段记录查不到）。
+const mixMetrics = {
+  stlDistanceKm: MIX_ROUTE_KM,
+  departKm: MIX_DEPART_KM,
+  approachKm: undefined,
+  natPc: MIX_FTL_NAT1_PC + MIX_FTL_NAT2_PC,
+  gwPc: MIX_FTL_GW1_PC + MIX_FTL_GW2_PC,
+  gwCount: 2,
+  natJumpCount: 2,
+};
+
+check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线总路程分配，不再漏段）', f => {
+  const fuel = 0.5;
+  const vDep = stlDepartSpeedFor(PERF, fuel);
+  const vApp = stlApproachSpeedFor(PERF, fuel);
+  const vTransit = stlTransitSpeedFor(PERF, fuel);
+  const restKm = MIX_ROUTE_KM - MIX_DEPART_KM;
+  const mix = computeFuelOption(PERF, mixMetrics, fuel, 1, NO_PRICES);
+  // 期望 = 离港段按离港速度 + 进近段（未记录 → 0）+ 其余按转移段速度，整体除以船体状况。
+  const expected =
+    (MIX_DEPART_KM / (vDep * 3600) + 0 / (vApp * 3600) + restKm / (vTransit * 3600)) / COND;
+  expectExact(f, 'stlHours = 离港 + 其余（逐位）', mix.stlHours, expected);
+  // 反例（旧实现的形状）：只累加离港段 → 必须显著更短，证明其余 161.0M km 已计入。
+  const departOnly = computeFuelOption(
+    PERF,
+    { ...mixMetrics, stlDistanceKm: undefined },
+    fuel,
+    1,
+    NO_PRICES,
+  );
+  expectExact(f, '对照：只算离港段（逐位）', departOnly.stlHours, MIX_DEPART_KM / (vDep * 3600) / COND);
+  expectCondition(
+    f,
+    '混合航线时长 > 只算离港段 × 1.5（进近 + 转移段已计入）',
+    mix.stlHours > departOnly.stlHours * 1.5,
+    `> ${departOnly.stlHours * 1.5}`,
+    String(mix.stlHours),
+  );
+  console.log(
+    `[证据] ⑨ 混合航线 stlHours=${mix.stlHours.toFixed(4)}h（只算离港段 ${departOnly.stlHours.toFixed(4)}h，` +
+      `其余 ${(restKm / 1e6).toFixed(1)}M km 按转移段速度 ${Math.round(vTransit)} km/s 计时）`,
+  );
+});
+
+check('⑨ 等价性：纯自然（depart + approach === 总路程）与系内（只有总路程）与旧公式逐位一致', f => {
+  const fuel = 0.35;
+  const vDep = stlDepartSpeedFor(PERF, fuel);
+  const vApp = stlApproachSpeedFor(PERF, fuel);
+  const vTransit = stlTransitSpeedFor(PERF, fuel);
+  // 纯自然跨星系：旧公式 = 离港/进近各自计时（rest = 0）。
+  const natDep = NAT_DEPART_ZV307A;
+  const natApp = NAT_APPROACH_MOR;
+  const natHours = computeFuelOption(
+    PERF,
+    {
+      ...mixMetrics,
+      stlDistanceKm: natDep + natApp,
+      departKm: natDep,
+      approachKm: natApp,
+      natPc: 6,
+      gwPc: 0,
+      gwCount: 0,
+      natJumpCount: 1,
+    },
+    fuel,
+    1,
+    NO_PRICES,
+  ).stlHours;
+  expectExact(
+    f,
+    '纯自然逐位一致（旧公式：离港 + 进近）',
+    natHours,
+    (natDep / (vDep * 3600) + natApp / (vApp * 3600)) / COND,
+  );
+  // 系内：总路程全按转移段速度（旧 else-if 分支）。
+  const transitHours = computeFuelOption(
+    PERF,
+    {
+      ...mixMetrics,
+      stlDistanceKm: 101655808,
+      departKm: undefined,
+      approachKm: undefined,
+      natPc: 0,
+      gwPc: 0,
+      gwCount: 0,
+      natJumpCount: 0,
+    },
+    fuel,
+    1,
+    NO_PRICES,
+  ).stlHours;
+  expectExact(
+    f,
+    '系内逐位一致（旧 else-if）',
+    transitHours,
+    101655808 / (vTransit * 3600) / COND,
+  );
+  // 残缺（缺总路程、只有离港段）：沿用旧的单段口径，**不得**静默归零
+  // （该输入会被 missingModelInputs 拦下、不写滑块，但面板仍会显示它）。
+  const partial = computeFuelOption(
+    PERF,
+    { ...mixMetrics, stlDistanceKm: undefined, approachKm: undefined },
+    fuel,
+    1,
+    NO_PRICES,
+  ).stlHours;
+  expectExact(f, '残缺：只有离港段 → 单段计时', partial, MIX_DEPART_KM / (vDep * 3600) / COND);
+  expectCondition(f, '残缺：不静默归零', partial > 0, '> 0', String(partial));
+});
+
+check('⑩ 充能次数 = 跳数 − 1（末跳后直接进近，无充能段）', f => {
+  const r = 1;
+  const chargeSec = ftlChargeSecondsFor(PERF, r);
+  const twoJumps = computeFuelOption(
+    PERF,
+    { ...mixMetrics, gwPc: 0, gwCount: 0 },
+    0.5,
+    r,
+    NO_PRICES,
+  );
+  const expected = mixMetrics.natPc / ftlSpeedFor(PERF, r) + (1 * chargeSec) / 3600;
+  expectExact(f, 'ftlHours = 跃迁 + 1 次充能（逐位）', twoJumps.ftlHours, expected);
+  const withTwoCharges = mixMetrics.natPc / ftlSpeedFor(PERF, r) + (2 * chargeSec) / 3600;
+  expectCondition(
+    f,
+    '≠ 旧值（跳数次充能）',
+    Math.abs(twoJumps.ftlHours - withTwoCharges) > chargeSec / 3600 / 2,
+    `≠ ${withTwoCharges}`,
+    String(twoJumps.ftlHours),
+  );
+  // 负对照：1 跳 → 0 次充能。
+  const oneJump = computeFuelOption(
+    PERF,
+    { ...mixMetrics, gwPc: 0, gwCount: 0, natJumpCount: 1 },
+    0.5,
+    r,
+    NO_PRICES,
+  );
+  expectExact(f, '1 跳 → 无充能', oneJump.ftlHours, mixMetrics.natPc / ftlSpeedFor(PERF, r));
+  // 0 跳（纯网关）→ 也不得出现负充能。
+  const noJump = computeFuelOption(
+    PERF,
+    { ...mixMetrics, natPc: 0, natJumpCount: 0 },
+    0.5,
+    r,
+    NO_PRICES,
+  );
+  expectExact(f, '0 跳 → 无充能', noJump.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 3600));
+  console.log(`[证据] ⑩ 充能 ${chargeSec.toFixed(0)}s/次，2 跳 → 1 次（旧值 2 次）`);
+});
+
+check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/3600（锁定 10s + 衰变 10s）', f => {
+  const o = computeFuelOption(
+    PERF,
+    { ...mixMetrics, stlDistanceKm: undefined, departKm: undefined, natPc: 0, natJumpCount: 0 },
+    0.5,
+    1,
+    NO_PRICES,
+  );
+  expectExact(f, 'ftlHours（逐位）', o.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 3600));
+  // 反例：旧「20 分钟/段」会多算 2×(20/60 − 20/3600) ≈ 0.6556h。
+  const oldValue = mixMetrics.gwPc / 3.0 + 2 * (20 / 60);
+  expectCondition(
+    f,
+    '≠ 旧 20min/段',
+    Math.abs(o.ftlHours - oldValue) > 0.6,
+    `≠ ${oldValue}`,
+    String(o.ftlHours),
+  );
+  // 单段也按同一常数（gwCount = 1 → 20 秒）。
+  const single = computeFuelOption(
+    PERF,
+    { ...mixMetrics, stlDistanceKm: undefined, departKm: undefined, natPc: 0, natJumpCount: 0, gwCount: 1 },
+    0.5,
+    1,
+    NO_PRICES,
+  );
+  expectExact(f, '单段锁定+衰变 = 20/3600h', single.ftlHours, mixMetrics.gwPc / 3.0 + 20 / 3600);
+});
+
+check('⑫ 网关费 6,000 ICA/段 计入 totalCost（不随 f 变）', f => {
+  const prices = { stlPrice: 12000, ftlPrice: 30000, timeValue: 2500 };
+  const o = computeFuelOption(PERF, mixMetrics, 0.5, 1, prices);
+  expectExact(f, 'gatewayCost = 2 × 6,000', o.gatewayCost, 2 * 6000);
+  expectExact(f, 'totalCost = 燃料费 + 时间成本 + 网关费', o.totalCost, o.fuelCost + o.timeCost + o.gatewayCost);
+  expectExact(f, '含网关费（旧实现恒 0）', o.totalCost - (o.fuelCost + o.timeCost), 12000);
+  // 与 f 无关：换燃料滑块网关费不变、只有燃料费变。
+  const atLowFuel = computeFuelOption(PERF, mixMetrics, 0.1, 1, prices);
+  expectExact(f, 'gatewayCost 与 f 无关', atLowFuel.gatewayCost, o.gatewayCost);
+  // 负对照：无网关段 → 0（纯自然航线不许多收）。
+  const noGw = computeFuelOption(PERF, { ...mixMetrics, gwPc: 0, gwCount: 0 }, 0.5, 1, prices);
+  expectExact(f, '无网关段 → 0', noGw.gatewayCost, 0);
+  expectCondition(
+    f,
+    '同 f/反应堆下含网关总额更高',
+    o.totalCost > noGw.totalCost,
+    `> ${noGw.totalCost}`,
+    String(o.totalCost),
+  );
+  console.log(`[证据] ⑫ 网关费 ${o.gatewayCost} ICA（2 段），totalCost=${o.totalCost.toFixed(0)}`);
+});
+
+// ⑬ 原生计划匹配：用**反查后的实体键**（FTC.vue 的调用口径），输入原文命中不了。
+// ⚠️ 局限：FTC.vue 的调用点（Vue SFC）在 Node 里不可加载 —— 本 check 断言的是
+// findNativeFlightPlan 的**匹配能力**（用 metrics.fromLookup/toLookup 能命中、用输入
+// 原文命不中），调用点的接线由代码评审保证。
+check('⑬ 原生计划匹配用反查键（metrics.fromLookup/toLookup）命中，输入原文命不中', f => {
+  stub.stubSetStar('VH-331', { x: 0, y: 0, z: 24 });
+  stub.stubSetStation('HRT', 'VH-331');
+  stub.stubSetFlightPlans([mixedPlan]);
+  // 用户输入的形状：终点写的是星系 id（SFC 把空间站目的地规范化成所属星系）。
+  const userRoute = {
+    label: '网关',
+    systemIds: [MIX_FROM_SYS, MIX_NAT2_SYS, 'ZV-307', MIX_GW2_SYS, MIX_TO_SYS],
+    legs: [
+      { from: MIX_FROM_SYS, to: MIX_NAT2_SYS, pc: MIX_FTL_NAT1_PC, viaGateway: false },
+      { from: MIX_NAT2_SYS, to: 'ZV-307', pc: MIX_FTL_NAT2_PC, viaGateway: false },
+      { from: 'ZV-307', to: MIX_GW2_SYS, pc: MIX_FTL_GW1_PC, viaGateway: true },
+      { from: MIX_GW2_SYS, to: MIX_TO_SYS, pc: MIX_FTL_GW2_PC, viaGateway: true },
+    ],
+    totalPc: MIX_FTL_NAT1_PC + MIX_FTL_NAT2_PC + MIX_FTL_GW1_PC + MIX_FTL_GW2_PC,
+    gatewayCount: 2,
+    fromBody: MIX_FROM_BODY,
+    toBody: 'vh-331',
+  };
+  const m = routeMetrics(userRoute);
+  expectExact(f, 'fromLookup（天体原样）', m.fromLookup, MIX_FROM_BODY);
+  expectExact(f, 'toLookup = 反查后的空间站 id', m.toLookup, MIX_TO_BODY);
+  // 旧调用口径（输入原文）→ 原生计划的目标端是不可变实体 id（HRT）→ 永远命不中，
+  // 面板退化成「模型估算」分段（用户症状：16 段原生 → 7 段估算）。
+  expectExact(
+    f,
+    '负对照：输入原文匹配 = undefined（旧口径必然退化）',
+    findNativeFlightPlan(userRoute.fromBody, userRoute.toBody),
+    undefined,
+  );
+  // 新调用口径（FTC.vue）：命中原生计划，段表 = 16 段（与游戏 SFC 表格一致）。
+  const plan = findNativeFlightPlan(m.fromLookup ?? userRoute.fromBody, m.toLookup ?? userRoute.toBody);
+  expectCondition(f, '反查键命中原生计划', plan !== undefined, '计划', 'undefined');
+  if (plan !== undefined) {
+    const rows = buildNativeSegmentRows(plan);
+    expectExact(f, '段数 = 16（原生计划）', rows.length, 16);
+    expectCondition(f, '全部为原生段', rows.every(r => r.native), 'true', 'false');
+    expectExact(f, '首段 = 起飞', rows[0]?.typeKey, 'TAKE_OFF');
+    // 充能口径的真实依据：16 段里 CHARGE 恰好 = 自然跳数 − 1（1 次），网关跃迁前无充能。
+    const charges = rows.filter(r => r.typeKey === 'CHARGE').length;
+    const jumps = rows.filter(r => r.typeKey === 'JUMP').length;
+    const gateways = rows.filter(r => r.typeKey === 'JUMP_GATEWAY').length;
+    expectExact(f, '自然跳数 = 2', jumps, 2);
+    expectExact(f, '网关段数 = 2', gateways, 2);
+    expectExact(f, 'CHARGE 段数 = 自然跳数 − 1', charges, jumps - 1);
+    // 锁定/衰变各 10 秒（全部 16 段里这两类段的时长都是 10,000 ms）。
+    const locks = rows.filter(r => r.typeKey === 'LOCK' || r.typeKey === 'DECAY');
+    expectExact(f, '锁定 + 衰变段数', locks.length, gateways * 2);
+    expectCondition(
+      f,
+      '锁定/衰变各 10 秒（20 秒/网关段）',
+      locks.every(r => r.durationMs === 10000),
+      '全部 10000ms',
+      locks.map(r => r.durationMs).join(','),
+    );
+  }
+  console.log(`[证据] ⑬ 反查键匹配：fromLookup=${m.fromLookup} toLookup=${m.toLookup} → 16 段原生计划`);
+});
+
+// ⑭ 估算分段表（无原生计划时的回退展示）：**网关跃迁行的时长口径**。
+// 症状（2026-09-24 用户截图）：面板「航线分段」把 17.08 pc 网关段显示成 6h01m17s
+// （17.08 ÷ 2.836 = 自然 FTL 速度），服务器原生同段 5h41m（17.08 ÷ 3.0）。
+// 本 check 直接调 buildEstimatedSegmentRows（生产函数）断言两类跃迁行的**分流**：
+// 网关 → 固定 3.0 pc/h；自然 → 仍用 vFtl（随反应堆变）。只断言跃迁行（不给起降几何，
+// 故 rows 里只有跃迁/充能行），避免把不相关的段模型拉进这条断言。
+check('⑭ 估算分段：网关跃迁行时长用固定 3.0 pc/h，自然跃迁行仍用 vFtl', f => {
+  const r = 1;
+  const vFtl = ftlSpeedFor(PERF, r);
+  // 守卫：本用例的反应堆档位下两种速度必须**不同**，否则下面正/负断言同时成立（假绿）。
+  expectCondition(
+    f,
+    '守卫 vFtl ≠ 3.0（否则两类段无法区分）',
+    vFtl !== 3.0,
+    '≠ 3.0',
+    String(vFtl),
+  );
+  // 与 ⑬ 同形状的混合航线（自然 ×2 + 网关 ×1），但不给原生计划 → 走估算分段分支。
+  const route = {
+    label: '网关',
+    systemIds: [MIX_FROM_SYS, MIX_NAT2_SYS, 'ZV-307', MIX_GW2_SYS],
+    legs: [
+      { from: MIX_FROM_SYS, to: MIX_NAT2_SYS, pc: MIX_FTL_NAT1_PC, viaGateway: false },
+      { from: MIX_NAT2_SYS, to: 'ZV-307', pc: MIX_FTL_NAT2_PC, viaGateway: false },
+      { from: 'ZV-307', to: MIX_GW2_SYS, pc: MIX_FTL_GW1_PC, viaGateway: true },
+    ],
+    totalPc: MIX_FTL_NAT1_PC + MIX_FTL_NAT2_PC + MIX_FTL_GW1_PC,
+    gatewayCount: 1,
+  };
+  // 不给 fromBody/toBody → 查不到离港/进近几何 → 只出跃迁 + 充能行（本用例只断言跃迁行）。
+  const rows = buildEstimatedSegmentRows(route, routeMetrics(route), PERF, 0.5, r);
+  const gwRows = rows.filter(x => x.typeKey === 'JUMP_GATEWAY');
+  const natRows = rows.filter(x => x.typeKey === 'JUMP');
+  expectExact(f, '网关跃迁行数', gwRows.length, 1);
+  expectExact(f, '自然跃迁行数', natRows.length, 2);
+  const gwRow = gwRows[0];
+  const gwNew = (MIX_FTL_GW1_PC / 3.0) * 3600000;
+  expectExact(f, '网关跃迁行时长 = pc / 3.0 × 3600000（逐位）', gwRow?.durationMs, gwNew);
+  // 反例：旧实现（用 vFtl）在 17.08 pc 上多算 ≈19 分钟，必须已被修掉。
+  const gwOld = (MIX_FTL_GW1_PC / vFtl) * 3600000;
+  expectCondition(
+    f,
+    '网关跃迁行 ≠ 自然 FTL 速度口径（旧 bug）',
+    Math.abs((gwRow?.durationMs ?? 0) - gwOld) > 60_000,
+    `≠ ${gwOld}`,
+    String(gwRow?.durationMs),
+  );
+  // 自然跃迁行**仍**用 vFtl —— 防「两类段一起改成 3.0」这种过度修正。
+  const natLegs = [route.legs[0], route.legs[1]];
+  for (let i = 0; i < natLegs.length; i++) {
+    const leg = natLegs[i];
+    expectExact(
+      f,
+      `自然跃迁行 ${i} 时长 = pc / vFtl × 3600000（逐位）`,
+      natRows[i]?.durationMs,
+      (leg.pc / vFtl) * 3600000,
+    );
+    expectCondition(
+      f,
+      `自然跃迁行 ${i} ≠ 固定 3.0 pc/h（防两类段一起改错）`,
+      Math.abs((natRows[i]?.durationMs ?? 0) - (leg.pc / 3.0) * 3600000) > 60_000,
+      '≠ 3.0 口径',
+      String(natRows[i]?.durationMs),
+    );
+  }
+  console.log(
+    `[证据] ⑭ 网关段 ${MIX_FTL_GW1_PC} pc：新 ${(gwNew / 3.6e6).toFixed(4)}h（${gwNew}ms，3.0 pc/h）` +
+      ` vs 旧 vFtl=${vFtl.toFixed(3)} ${(gwOld / 3.6e6).toFixed(4)}h（${gwOld.toFixed(0)}ms）`,
+  );
+});
 
 console.log(`PASS ${summary.pass}/${summary.pass + summary.fail}`);
 process.exit(summary.fail === 0 ? 0 : 1);

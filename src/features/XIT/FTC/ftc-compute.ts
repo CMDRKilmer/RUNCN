@@ -13,6 +13,7 @@ import {
   autoFuelGrid,
   autoReactorGrid,
   findBalanceOption,
+  nearbyFuelOptions,
   missingModelInputs,
   FuelOption,
   ShipPerformance,
@@ -348,6 +349,9 @@ export interface FtcComputeOutput {
   route?: PlannedRoute;
   metrics?: ReturnType<typeof routeMetrics>;
   best?: FuelOption;
+  // 邻档对比：最优燃料滑块前后各 5 档（同反应堆）的方案，供面板展示边际代价。
+  // 残缺输入时同样返回（玩家可借它看到退化形态），面板按 inputIncomplete 自行提示。
+  nearby?: FuelOption[];
   reactorRelevant?: boolean;
   // 跨星系航线起/终点行星环境（模型分段用）。
   landingRadius?: number;
@@ -473,6 +477,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     route,
     metrics,
     best,
+    nearby: nearbyFuelOptions(options, best),
     reactorRelevant,
     inputIncomplete: inputIncomplete.length > 0 ? inputIncomplete : undefined,
     landingRadius: landingEnv?.radiusKm,

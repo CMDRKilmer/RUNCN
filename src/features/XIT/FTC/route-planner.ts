@@ -15,6 +15,8 @@ import {
   ftlFuelCFor,
   stlLandingFactor,
   stlDepartureFSat,
+  GW_PC_PER_H,
+  GW_LOCK_HOURS,
 } from './fuel-model';
 import type { ShipPerformance, RouteStationReverse } from './fuel-model';
 import {
@@ -34,13 +36,13 @@ import type { StationSystemLookup } from './route-model';
 // - 网关：内置连接 + 已观测/配对的网关连接（打开星图后自动建图）
 // 时间模型用真实服务器数据校准：
 // - 自然跃迁（充能+跃迁）等效速度 2.26 pc/h
-// - 网关跃迁 3.0 pc/h，另加锁定+衰减 20min/段；网关跃迁不消耗 FTL 燃料
+// - 网关跃迁 3.0 pc/h（GW_PC_PER_H），另加锁定+衰变 20 **秒**/段（GW_LOCK_HOURS：
+//   锁定 10s + 衰变 10s，实测）；网关跃迁不消耗 FTL 燃料，但每段收 6,000 ICA
+//   （GW_COST_PER_JUMP，见 fuel-model）
 // 燃料/时长的绝对数值由 fuel-model.ts 根据飞船实时性能（质量/加速度/船体
 // 条件/FTL 最大航速）计算；本文件只提供航线结构与几何指标（pc、STL 距离）。
 
 const NAT_PC_PER_H = 2.26;
-const GW_PC_PER_H = 3.0;
-const GW_LOCK_HOURS = 20 / 60;
 // 恒星坐标单位 → pc（游戏 ParsecLength=12，已用真实网关跃迁校准）。
 const PARSEC_LENGTH = 12;
 
@@ -222,7 +224,8 @@ export function planRoutes(
 // stations.json + 游戏内站点把星系 id **反查**为唯一空间站 id（见 stlRecordKeyFor /
 // route-model.lookupStationInSystem）；反查不唯一（同星系多站 / 无站点数据）时拒绝反查，
 // 保持「不写滑块 + 提示」。⚠️ 反查只改**记录查表键**：PlannedRoute.fromBody/toBody 的
-// 对外语义仍是「目的地实体」（fetchPlanetEnv / FTC.vue 的 nativePlan 匹配都依赖它）。
+// 对外语义仍是「目的地实体」（fetchPlanetEnv 依赖它）；FTC.vue 匹配原生飞行计划改用
+// 反查后的键（metrics.fromLookup/toLookup，见该文件 2026-09-24 的 ⚠️）。
 
 // 记录查表键：天体/空间站 id 原样使用；星系 id 先反查为唯一空间站 id（见上）。
 export interface StlRecordKey {
@@ -576,21 +579,24 @@ export function buildEstimatedSegmentRows(
       type: leg.viaGateway ? '网关跃迁' : '跃迁',
       typeKey: leg.viaGateway ? 'JUMP_GATEWAY' : 'JUMP',
       destination: `${starName(leg.to)}（环绕轨道）`,
-      durationMs: (leg.pc / vFtl) * 3600000,
+      // 网关跃迁速度固定 GW_PC_PER_H（3.0 pc/h），与反应堆无关；自然跃迁才是 vFtl。
+      // 旧写法对网关段也用 vFtl → 段时长偏长（实测 17.08 pc 段：6h1m vs 服务器 5h41m）。
+      durationMs: (leg.viaGateway ? leg.pc / GW_PC_PER_H : leg.pc / vFtl) * 3600000,
       distancePc: leg.pc,
       damage: 0,
       native: false,
     });
-    if (i < route.legs.length - 1) {
+    // 充能只为**自然跃迁**充电（网关跃迁不需要）：实测 16 段原生计划里两次网关跃迁前
+    // 都没有充能段（2026-09-24 用户证据）；旧实现给网关段前也插了一段充能 → 多算一段。
+    if (i < route.legs.length - 1 && !route.legs[i + 1].viaGateway) {
       const nextLeg = route.legs[i + 1];
-      const chargeFuel = nextLeg.viaGateway ? 0 : ftlC * reactor * nextLeg.pc;
       rows.push({
         type: '充能',
         typeKey: 'CHARGE',
         destination: `${starName(leg.to)}（环绕轨道）`,
         durationMs: chargeSec * 1000,
         damage: 0,
-        ftlFuel: chargeFuel,
+        ftlFuel: ftlC * reactor * nextLeg.pc,
         native: false,
       });
     }

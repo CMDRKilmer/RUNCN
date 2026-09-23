@@ -68,7 +68,7 @@ function dijkstra(adj, useGw) {
       const pc = ftlPc(cur, nx);
       const gw = gwSet.has([cur, nx].sort().join('|'));
       let w = gw ? pc / 3.0 : pc / 2.26;
-      if (useGw && gw) w += 20 / 60; // LOCK+DECAY 固定 20min
+      if (useGw && gw) w += 20 / 3600; // LOCK+DECAY 实测各 10s（= 20 秒/段，旧值 20/60 是单位错误）
       const nd = dist.get(cur) + w;
       if (nd < (dist.get(nx) ?? Infinity)) { dist.set(nx, nd); prev.set(nx, cur); q.set(nx, nd); }
     }
@@ -89,7 +89,7 @@ function show(r, label) {
     const pc = ftlPc(a, b);
     const gw = gwSet.has([a, b].sort().join('|'));
     const h = gw ? pc / 3.0 : pc / 2.26;
-    if (gw) { gwPc += pc; gwN++; lock += 20 / 60; } else natPc += pc;
+    if (gw) { gwPc += pc; gwN++; lock += 20 / 3600; } else natPc += pc;
     console.log(`  ${a} → ${b} | ${gw ? '🛰网关' : '自然'} | ${pc.toFixed(2)}pc | ${h.toFixed(1)}h`);
   }
   console.log(`  网关 ${gwN} 段 ${gwPc.toFixed(2)}pc + 自然 ${natPc.toFixed(2)}pc | 锁定衰减 ${lock.toFixed(1)}h`);
