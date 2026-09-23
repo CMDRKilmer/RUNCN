@@ -581,8 +581,11 @@ const balanceNote = computed(() => {
         段记录（浏览星系不再补几何），请按上面缺失项里的说明处理后重算。
         <template v-if="(result.metrics?.transitKm ?? 0) > 0">
           <br />
-          系内「转移」（TRANSIT）段的燃料与时长口径尚未标定（两个候选燃料口径互斥、时长未按
-          加减速段标定）→ 上表系内航线的预计时长只能当粗略参考（可能偏快）。口径细节与实测数据见
+          系内「转移」（TRANSIT）段的燃料与时长已按 BTF 实测标定：燃料只由 STL 罐与燃料滑块
+          决定（与距离、载重无关），滑块拉到 0.5 以上没有收益；补齐上面缺失的输入后，上表结果
+          即可用于决策。残余偏差：时长约一成以内（只在一个距离族上标定）、燃料更小；未实测引擎
+          （advanced/glass/hyperthrust）回退标准引擎参数，转移段路程随计划时刻漂移、不是航线
+          常数。口径细节与实测数据见
           <span :class="$style.warning">docs/feature-patterns.md 的「FTC 几何」条目</span>。
         </template>
       </div>
