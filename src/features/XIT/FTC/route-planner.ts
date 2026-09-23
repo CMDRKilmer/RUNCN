@@ -201,10 +201,11 @@ export function planRoutes(
 //    2655 单位 STL）。**2026-09-23 本轮起 `recordStlSegments` 会记录这一段**
 //    （段名/字段已核实：`SegmentType` 含 'TRANSIT'、`FlightSegment.stlDistance` 同字段
 //    —— 与离港/进近同口径，见 system-bodies.ts 文件头），于是 `transitKm` 有值；
-//    但量到的距离**能不能用来写滑块**仍受燃料口径未标定约束（missingModelInputs 拦住，
-//    见 fuel-model.ts 的 ⚠️）→ 系内航线暂时只展示原生几何，不自动写滑块。
-//    ⚠️ 这与是否勾选「使用跃迁点」**无关**（勾选不改变系内航线的路程：原生 101,655,808 km
-//    vs 直飞口径几何 101.7053M km，差 0.05%；planRoutes 同星系两模式都返回 natural）。
+//    该段口径已标定（2026-09-23，BTF 受控数据：燃料 = 0.98×罐×min(f,0.5)、时长 = d/v_转移，
+//    见 fuel-model.ts 的「系内转移段标定」块）→ 拿到记录即可算、可写滑块，不再受口径约束。
+//    ⚠️ 这与是否勾选「使用跃迁点」**无关**（判据是 `planRoutes` 对同星系两种模式都返回
+//    `natural`（legs 为空），不是数字比较 —— 旧注释比的「101.7053M km，差 0.05%」已作废：
+//    那是已删除的自建轨道模型的估算行，不是原生值）。
 //    旧注释把「转移结构」归因给勾选、并声称「同星系直飞计划同样带原生 DEPARTURE/
 //    APPROACH 段（实测 68.0562M + 33.6491M）」——那 68.0562M/33.6491M 是**本模型自己的
 //    估算行**（FTC 面板标题写明「航线分段（模型估算）」），不是服务器原生值（2026-09-23 复核）。
@@ -311,8 +312,8 @@ export function routeMetrics(route: PlannedRoute): {
     (toRecordKey !== undefined && lastLeg !== undefined && !lastLeg.viaGateway
       ? stlSegmentsStore.getApproach(lastLeg.from, toRecordKey.key)
       : undefined) ?? sameSystemRec?.approach;
-  // 系内「转移」段（真实结构）：整段路程，直接当 d 用 —— 但**仅作展示/诊断**，
-  // 能不能写滑块由 missingModelInputs 按「转移段燃料口径未标定」拦住（见 fuel-model.ts）。
+  // 系内「转移」段（真实结构）：整段路程，直接当 d 用 —— 口径已标定（燃料 0.98×罐×min(f,0.5)、
+  // 时长 d/v_转移），能不能写滑块只看记录与罐容量是否齐（见 fuel-model.missingModelInputs）。
   const transitRec = sameSystemRec?.transit;
   const transitKm = transitRec?.distanceKm;
   // 离港/进近几何 = 服务器原生记录（**唯一**来源，无回退）：取不到即 undefined。

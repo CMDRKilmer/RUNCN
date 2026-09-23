@@ -413,9 +413,10 @@ async function pushRouteToFtc(tile: PrunTile) {
       // 服务器计划到达（表格文本变化 → schedulePushRoute）后几何签名变化，门必放行；
       // 数据一直没到就一直在「不写滑块、等下一次信号」的状态 —— 没有放弃上限。
       // ⚠️ 系内航线现在可以拿到**原生**几何（「转移」（TRANSIT）段的 stlDistance 已入库，
-      // 见 system-bodies.recordStlSegments），仍不写滑块的理由是**口径未标定**：转移段的
-      // 燃料（C_F×f×d 与罐口径互斥）与时长（未按加减速段标定）都没校准 → 写滑块等于用
-      // 未标定口径决定玩家的 f。另一类结构性拿不到记录的是网关/星系 id 目的地 ——
+      // 见 system-bodies.recordStlSegments），且该段口径已标定（2026-09-23：燃料 = 罐口径
+      // 0.98×罐×min(f,0.5)、时长 = d/v_转移，见 fuel-model.ts 的「系内转移段标定」块）——
+      // 落到这里说明判缺的理由只剩「转移段记录未到」或「罐容量/余量缺失」，
+      // 等服务器下发该航线的记录即可。另一类结构性拿不到记录的是网关/星系 id 目的地 ——
       // 缺失项文案里已给出可操作说明（见 fuel-model.missingModelInputs）。
       return;
     }

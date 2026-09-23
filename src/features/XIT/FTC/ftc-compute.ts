@@ -405,10 +405,12 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 修正了归因：
   // - 系内（同星系）：服务器计划用的是「转移」（TRANSIT）段（实测 ZV-307a → ZV-307
   //   单段 101,655,808 km → 已由 recordStlSegments 记录、routeMetrics 给出 transitKm），
-  //   **与勾选无关**（勾选/取消路程相同：101,655,808 km vs 直飞口径几何 101.7053M km，
-  //   差 0.05%）；本 planner 同星系无跳 → gateway 候选恒空 → 两种模式都选 natural。
-  //   系内航线现在仍判缺的理由只剩「转移段的燃料/时长口径未标定」（见 fuel-model 的 ⚠️），
-  //   与勾选无关 —— 故本标志对系内不再起作用（missingModelInputs 只认跨星系）。
+  //   **与勾选无关**（判据是 planRoutes 同星系两模式都返回 natural；旧注释的
+  //   「101.7053M km / 差 0.05%」比法已作废 —— 那是已删除的自建轨道模型的估算行）；
+  //   本 planner 同星系无跳 → gateway 候选恒空 → 两种模式都选 natural。
+  //   系内航线判缺的理由只剩两条：① 原生转移段记录还没到；② STL 罐容量/余量缺失
+  //   （口径已标定，不再判缺；见 fuel-model.missingModelInputs）—— 与勾选无关，
+  //   故本标志对系内不再起作用（missingModelInputs 只认跨星系）。
   // - 跨星系：选中的是 gateway 候选（网关结构，不产生按跳的离港/进近键）。
   // 传给缺失项判定，让提示可操作（文案见 fuel-model.missingModelInputs）。
   const usesGatewayTransfer =
