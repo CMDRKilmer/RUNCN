@@ -27,7 +27,6 @@ import { formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import {
   PlannedRoute,
   RouteSegmentRow,
-  findNativeFlightPlan,
   buildNativeSegmentRows,
   buildEstimatedSegmentRows,
 } from './route-planner';
@@ -247,6 +246,9 @@ interface PlanResult {
   remaining?: NonNullable<FtcComputeOutput['remaining']>;
   // 模型必需输入缺失（缺起终点轨道数据 / 罐容量）：结果退化，未应用到 SFC 滑块。
   inputIncomplete?: string[];
+  // 服务器当前对该航线下发的原生 FlightPlan（与 SFC「蓝图试航模拟」一致）——面板用
+  // 它显示「实测总时长」与最优方案并行展示，不随 FTC 建议的 f 变化（与「最优」独立）。
+  nativePlan?: PrunApi.FlightPlan;
 }
 
 const result = ref<PlanResult | undefined>(undefined);
@@ -306,14 +308,9 @@ async function planAndCompute() {
   // 完整航线段（严格按游戏 SFC 表格）：
   // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
   // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
-  // ⚠️ 必须用**反查后的实体键**（metrics.fromLookup/toLookup）：SFC 会把空间站目的地
-  // 规范化成所属星系 id（如 vh-331），而原生计划的目标端是不可变实体 id（HRT）→
-  // 用输入原文匹配永远失败，面板会退化成「模型估算」分段、段明细与服务器不一致
-  // （2026-09-24 用户实测）；输入 'Euu' 这类别名仍由 route.fromBody/toBody 兜底。
-  const nativePlan = findNativeFlightPlan(
-    metrics.fromLookup ?? route.fromBody ?? from,
-    metrics.toLookup ?? route.toBody ?? to,
-  );
+  // 原生计划查询统一在 computeFtcPlan 里完成（out.nativePlan），FTC.vue 只消费结果，
+  // 避免两处重复调用并确保「航线明细」与「实测总时长」来自同一份原生计划。
+  const nativePlan = out.nativePlan;
   let segments: RouteSegmentRow[];
   let segmentsNative: boolean;
   if (nativePlan) {
@@ -339,6 +336,7 @@ async function planAndCompute() {
     segmentsNative,
     remaining: out.remaining,
     inputIncomplete: out.inputIncomplete,
+    nativePlan,
   };
   const radiusText =
     out.landingRadius !== undefined ? `，目的地半径 ${fixed2v(out.landingRadius)}km` : '';
@@ -431,6 +429,38 @@ function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
 const balanceNote = computed(() => {
   const tv = timeValue.value ?? 0;
   return tv > 0 ? '按总成本（燃料费 + 时间价值）最优' : '快与省油的折衷（Pareto 拐点）';
+});
+
+// 服务器当前对该航线下发的原生计划「实测总时长」（秒）：按 (arrival - departure) 累加
+// 各段 ms，除以 1000 转秒。对应 BTF「蓝图试航模拟」的总耗时（与当前飞船 f/载重绑定），
+// 独立于 FTC 建议的 f（≠ 最优方案的总时长，故并行展示而非替代）。
+const totalNativeSeconds = computed(() => {
+  const plan = result.value?.nativePlan;
+  if (!plan) {
+    return 0;
+  }
+  let total = 0;
+  for (const sg of plan.segments) {
+    total += ((sg.arrival?.timestamp ?? 0) - (sg.departure?.timestamp ?? 0)) / 1000;
+  }
+  return total;
+});
+
+// 邻档对比的「最省」（按 totalCost 最小）与「最快」（按 totalHours 最小）：
+// out.best 已是「平衡点」，与这两类标记**独立**；同一行最多可同时满足两类（如极端支配点）。
+const nearbyCheapest = computed(() => {
+  const nearby = result.value?.nearby;
+  if (!nearby || nearby.length === 0) {
+    return undefined;
+  }
+  return nearby.reduce((a, b) => (a.totalCost <= b.totalCost ? a : b));
+});
+const nearbyFastest = computed(() => {
+  const nearby = result.value?.nearby;
+  if (!nearby || nearby.length === 0) {
+    return undefined;
+  }
+  return nearby.reduce((a, b) => (a.totalHours <= b.totalHours ? a : b));
 });
 </script>
 
@@ -649,6 +679,14 @@ const balanceNote = computed(() => {
           </tr>
         </tbody>
       </table>
+      <!-- 服务器当前对该航线下发的原生计划「实测总时长」（与「最优方案」并列、不替代）：
+           不随 FTC 建议的 f 变化（与最佳方案的 fuel/reactor 独立绑定）；仅在原生 STL 段记录
+           已存在（result.metrics.stlRecorded）时展示，避免误导「无原生计划还显示对比」。 -->
+      <div v-if="result.nativePlan && result.metrics?.stlRecorded" :class="$style.hint">
+        服务器当前计划实测：{{ formatDuration(totalNativeSeconds * 1000) }}（{{
+          result.nativePlan.segments.length
+        }}段原生，含起飞/着陆）
+      </div>
       <details v-if="result.nearby && result.nearby.length > 1" :class="$style.costDetails" open>
         <summary>邻档对比（燃料 ±5 档，反应堆固定 {{ result.best.reactor }}）</summary>
         <table :class="$style.table">
@@ -667,7 +705,11 @@ const balanceNote = computed(() => {
             <tr
               v-for="o in result.nearby"
               :key="o.fuel"
-              :class="{ [$style.best]: o.fuel === result.best.fuel }">
+              :class="{
+                [$style.best]: o.fuel === result.best.fuel,
+                [$style.cheapest]: nearbyCheapest && o.fuel === nearbyCheapest.fuel,
+                [$style.fastest]: nearbyFastest && o.fuel === nearbyFastest.fuel,
+              }">
               <td>{{ o.fuel }}</td>
               <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
               <td>{{

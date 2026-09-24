@@ -36,9 +36,9 @@ import type { StationSystemLookup } from './route-model';
 // - 网关：内置连接 + 已观测/配对的网关连接（打开星图后自动建图）
 // 时间模型用真实服务器数据校准：
 // - 自然跃迁（充能+跃迁）等效速度 2.26 pc/h
-// - 网关跃迁 3.0 pc/h（GW_PC_PER_H），另加锁定+衰变 20 **秒**/段（GW_LOCK_HOURS：
-//   锁定 10s + 衰变 10s，实测）；网关跃迁不消耗 FTL 燃料，但每段收 6,000 ICA
-//   （GW_COST_PER_JUMP，见 fuel-model）
+// - 网关跃迁 3.0 pc/h（GW_PC_PER_H），另加锁定+衰变 **20 分钟**/段（GW_LOCK_HOURS：
+//   对锁 10min + 场衰 10min，服务器 BTF 实测，与 f/载重无关）；网关跃迁不消耗 FTL 燃料，
+//   但每段收 6,000 ICA（GW_COST_PER_JUMP，见 fuel-model）
 // 燃料/时长的绝对数值由 fuel-model.ts 根据飞船实时性能（质量/加速度/船体
 // 条件/FTL 最大航速）计算；本文件只提供航线结构与几何指标（pc、STL 距离）。
 
@@ -107,6 +107,9 @@ function dijkstra(from: string, to: string, allowGateway: boolean): string[] | u
         continue;
       }
       const gw = allowGateway && routesStore.isGatewayEdge(cur, nx);
+      // ⚠️ 该权重含 20 分钟/段的网关锁定+衰变（服务器实测；回滚前误为 20 秒）。2 段网关航线即
+      // +40 分钟固定开销，故「网关 vs 自然」的选择对 GW_LOCK_HOURS 敏感 —— 改这个常数必须
+      // 同步复核选路回归（scripts/verify-ftc-route-key.mjs / route-time.mjs）。
       const w = gw ? pc / GW_PC_PER_H + GW_LOCK_HOURS : pc / NAT_PC_PER_H;
       const nd = (dist.get(cur) ?? 0) + w;
       if (nd < (dist.get(nx) ?? Infinity)) {

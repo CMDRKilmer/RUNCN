@@ -319,6 +319,10 @@ async function computeTimeAlloc() {
       if (token !== allocToken) {
         return; // 计划/配置已变化，丢弃过期结果。
       }
+      // 判缺段 ⇒ est.ok = false（chain-flight-time：ok = legs.every(l => l.ok)，判缺段
+      // 不再把 0 小时伪装成 ok）⇒ complete = false ⇒ alloc = undefined ⇒ allocFor 返回
+      // undefined ⇒ splitChainPlanAcrossShips 退回舱容贪心（旧行为）。判缺段的 0 小时
+      // 因此永远到不了 planTimeBalancedSegments，故此门不放宽。
       if (!est.ok || est.legs.length !== stopIds.length + 1) {
         complete = false;
         break;
@@ -468,6 +472,13 @@ const arrivalHoursByNaturalId = computed(() => {
   for (const sp of baseShipPlans.value) {
     const est = flightEstimates.value.get(sp.ship.ship.id);
     if (!est) {
+      continue;
+    }
+    // 预估不完整（含判缺段）⇒ 整船不提供到达时刻，退回基础规划（= 未就绪时同一路径）。
+    // 判缺段不推进累计时长，其后各段的 arriveAtMs 都按「缺的那段 0 小时」算、系统偏早；
+    // 而缺段自身那一站，下面的 !leg.ok 只剔除它自己（其余站点的偏早时刻仍会被当成真值）。
+    // 偏早的时刻传下去 = 到港产出/消耗被算成更早到货。宁可不算到港产出，也不传偏早值。
+    if (!est.ok) {
       continue;
     }
     const startAtMs = est.legs[0]?.departAtMs ?? gameNow();
@@ -2139,27 +2150,54 @@ function arrivalClockText(ms: number): string {
   return sameDay ? clock : `${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${clock}`;
 }
 
-// 各段飞行列文本（模板「飞行」列）：
-// - 已完成阶段 → 「已完成」；
-// - 在途阶段 → 真实剩余时间 + 真实到达时间（HH:MM 到达）；
-// - 其余阶段 → 预估飞行时间（预估到达时间）。
-function flightCellText(
+// 判缺段的固定文案（与 chain-flight-time 落地的 leg.error 一致；成因全文走 data-tooltip）。
+const MISSING_STL_RECORD = '缺原生 STL 段记录';
+
+// 「飞行」列的显示态。判定条件与重构前的 flightCellText 逐字一致，只是搬移：
+// - done：已完成阶段（含归航段）；
+// - transit：在途阶段（正文是真实剩余时间）；
+// - estimate：预估阶段（含判缺段、近似段）；
+// - none：没有该段的预估数据。
+// 正文与悬停说明共用同一判定——否则会出现「正文显示真实剩余时间、悬停却吐出预估
+// 成因」的自相矛盾（同格文案对不上）。
+function flightCellState(
   sp: { shipId: string; plan?: ChainPlan; progress?: RunProgress },
   legIndex: number,
-): string {
+): 'done' | 'transit' | 'estimate' | 'none' {
   // 已完成（含归航段）。
   const p = sp.progress;
   if (p !== undefined) {
     const n = sp.plan?.stops.length ?? p.stops.length;
     const done = legIndex < n ? p.stops[legIndex]?.state === 'done' : p.finalState === 'done';
     if (done) {
-      return ' 已完成';
+      return 'done';
     }
   }
   // 在途：真实剩余时间与真实到达时间。
   // 仅执行中的环线（有 progress）显示在途——规划中的环线即使船当前恰好在飞，
   // 那是另一个环线的真实飞行，混入会把预估时间覆盖成错误的时间。
   if (sp.progress !== undefined && legInTransit(sp.shipId, legIndex)) {
+    return 'transit';
+  }
+  return flightLegFor(sp.shipId, legIndex) ? 'estimate' : 'none';
+}
+
+// 各段飞行列文本（模板「飞行」列）：
+// - 已完成阶段 → 「已完成」；
+// - 在途阶段 → 真实剩余时间 + 真实到达时间（HH:MM 到达）；
+// - 预估阶段（判缺）→ 「--（缺原生 STL 段记录）」，成因全文见 flightCellTitle；
+// - 预估阶段（近似段）→ 时长前缀 ≈；
+// - 其余阶段 → 预估飞行时间（预估到达时间）。
+function flightCellText(
+  sp: { shipId: string; plan?: ChainPlan; progress?: RunProgress },
+  legIndex: number,
+): string {
+  const state = flightCellState(sp, legIndex);
+  if (state === 'done') {
+    return ' 已完成';
+  }
+  // 在途：真实剩余时间与真实到达时间。
+  if (state === 'transit') {
     const ship = shipsStore.getById(sp.shipId);
     const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
     if (flight) {
@@ -2167,15 +2205,64 @@ function flightCellText(
       return ` 剩余 ${formatFlightDuration(remainMs)}（${arrivalClockText(flight.arrival.timestamp)}到达）`;
     }
   }
-  // 预估：飞行时间（预计到达时间）。
+  // 预估：飞行时间（预计到达时间）。state === 'none' 时下面的 !leg 直接返回空串。
   const leg = flightLegFor(sp.shipId, legIndex);
   if (!leg) {
     return '';
   }
   if (!leg.ok) {
+    // 输入残缺（成因全文见 flightCellTitle）：显式标缺。
+    // 写成「--（…）」而不是「0 小时」——否则会被读成「与出发同一时刻到达」。
+    if (leg.missingInputs !== undefined && leg.missingInputs.length > 0) {
+      return `--（${leg.error ?? MISSING_STL_RECORD}）`;
+    }
     return leg.error ? `（${leg.error}）` : '';
   }
-  return ` · ${formatFlightDuration(leg.hours * 3600000)}（${arrivalClockText(leg.arriveAtMs)}到达）`;
+  // 近似段（时长来自反方向原生记录）：前缀 ≈ 标明不是原生前向记录。
+  const approx = leg.approximated !== undefined ? '≈' : '';
+  return ` · ${approx}${formatFlightDuration(leg.hours * 3600000)}（${arrivalClockText(leg.arriveAtMs)}到达）`;
+}
+
+// 「飞行」列的悬停说明（模板 :data-tooltip，两处单元格都绑定）。
+// 为什么不用 title：浏览器原生悬停有 ~2 秒延迟、玩家基本看不到，仓库统一用 PrUn 原生的
+// data-tooltip 即时提示（见 docs/contributing.md §Tooltips）。
+// 为什么无文案必须返回 undefined 而不是 ''：空串会渲染成一个空白 tooltip 框；
+// Vue 3 对非布尔属性的 undefined 会直接移除该属性（同 CopyButton.vue 的写法）。
+// 为什么必须与显示态一致：只有预估态的正文才是「预估」，才需要补充说明：
+// - 判缺段 → fuel-model.missingModelInputs 的成因全文（含可操作指引），不截断、不改写；
+// - 近似段 → 说明时长来源是反方向原生记录 + 为何是近似值；
+// - 已完成 / 在途 / 无数据 → undefined：正文是真实数据或本就无正文，
+//   此时再挂预估成因会与同一行的正文自相矛盾。
+function flightCellTitle(
+  sp: { shipId: string; plan?: ChainPlan; progress?: RunProgress },
+  legIndex: number,
+): string | undefined {
+  if (flightCellState(sp, legIndex) !== 'estimate') {
+    return undefined;
+  }
+  const leg = flightLegFor(sp.shipId, legIndex);
+  if (!leg) {
+    return undefined;
+  }
+  if (!leg.ok) {
+    return leg.missingInputs !== undefined && leg.missingInputs.length > 0
+      ? leg.missingInputs.join('；')
+      : undefined;
+  }
+  const a = leg.approximated;
+  if (a === undefined) {
+    return undefined;
+  }
+  return (
+    `本段时长按反方向原生记录（${a.from} → ${a.to}，${fixed0(a.distanceKm)} km）近似；` +
+    '计划时刻不同 → 相位不同，为近似值。'
+  );
+}
+
+// 归航段（表格末行）的段序号 = 站点数；末行两个分支（plan / progress）在此合并，
+// 使末行单元格可以用一个表达式绑定 data-tooltip。
+function finalLegIndex(sp: { plan?: ChainPlan; progress?: RunProgress }): number {
+  return sp.plan?.stops.length ?? sp.progress?.stops.length ?? 0;
 }
 
 // 环线总飞行时长文本。
@@ -2187,7 +2274,9 @@ function flightTotalText(shipId: string): string {
   if (!est.ok) {
     return '（部分航段无法计算）';
   }
-  return `约 ${formatFlightDuration(est.totalHours * 3600000)}`;
+  // 有近似段时必须标注：总时长不是全部来自原生记录。
+  const approx = est.approximatedLegs > 0 ? `（含 ${est.approximatedLegs} 段反向近似）` : '';
+  return `约 ${formatFlightDuration(est.totalHours * 3600000)}${approx}`;
 }
 </script>
 
@@ -2455,7 +2544,10 @@ function flightTotalText(shipId: string): string {
                 </template>
                 <span v-else>—</span>
               </td>
-              <td :class="$style.matCell">
+              <td
+                :class="$style.matCell"
+                :data-tooltip="flightCellTitle(sp, i)"
+                data-tooltip-position="top">
                 <template v-if="sp.plan">
                   → {{ sp.plan.stops[i]?.planetName ?? sp.plan.originNaturalId
                   }}{{ flightCellText(sp, i) }}
@@ -2508,7 +2600,10 @@ function flightTotalText(shipId: string): string {
                 </template>
                 <span v-else>—</span>
               </td>
-              <td :class="$style.matCell">
+              <td
+                :class="$style.matCell"
+                :data-tooltip="flightCellTitle(sp, finalLegIndex(sp))"
+                data-tooltip-position="top">
                 <template v-if="sp.plan">
                   → {{ sp.plan.originNaturalId }}{{ flightCellText(sp, sp.plan.stops.length) }}
                 </template>

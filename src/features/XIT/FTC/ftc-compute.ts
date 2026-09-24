@@ -5,7 +5,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 import { hasSystemData, exportStationOrbits } from '@src/infrastructure/fio/orbit';
-import { planRoutes, routeMetrics } from './route-planner';
+import { planRoutes, routeMetrics, findNativeFlightPlan } from './route-planner';
 import type { PlannedRoute } from './route-planner';
 import { resolveSystemId } from './route-model';
 import {
@@ -360,6 +360,10 @@ export interface FtcComputeOutput {
   departurePressure?: number;
   // 飞船当前剩余 STL/FTL 燃料（油罐 store 实测），供面板显示当前油量与缺口。
   remaining?: { stlRemaining: number; ftlRemaining: number; stlCap: number; ftlCap: number };
+  // 服务器当前对该航线下发的原生 FlightPlan（与 SFC「蓝图试航模拟」显示一致）——
+  // 供面板展示「实测总时长」对照（与最优方案并列）；不随 FTC 建议的 f 变化，故仅作并行展示。
+  // 缺值（= 服务器还没下发该航线计划）→ 面板不显示该提示，与 best 的可选标记独立。
+  nativePlan?: PrunApi.FlightPlan;
   // 模型必需输入缺失（见 fuel-model.missingModelInputs）：undefined = 输入完整、
   // best 可采信且已写入共享参数；有值时 best 基于残缺输入（退化），**未**写入共享参数，
   // SFC 自动联动须跳过滑块写入。
@@ -467,6 +471,13 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     at: Date.now(),
     complete: inputIncomplete.length === 0,
   };
+  // 服务器当前对该航线下发的原生 FlightPlan（用于面板并行展示实测总时长）。
+  // 用反查后的实体键匹配（SFC 把空间站目的地规范化成所属星系 id，原生计划的目标端是
+  // 不可变实体 id，与 metrics.fromLookup/toLookup 一致）；查不到即 undefined，面板不显示。
+  const nativePlan = findNativeFlightPlan(
+    metrics.fromLookup ?? route.fromBody ?? from,
+    metrics.toLookup ?? route.toBody ?? to,
+  );
   return {
     ok: true,
     message:
@@ -485,5 +496,6 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     departureRadius: departEnv?.radiusKm,
     departurePressure: departEnv?.pressure,
     remaining,
+    nativePlan,
   };
 }
