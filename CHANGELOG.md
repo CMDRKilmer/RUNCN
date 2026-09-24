@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
-> 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
+### ✨ Features
+
+- **`XIT/FLEET`**：环线预估系内航段显式判缺（A）+ 反方向原生记录近似（C）—— 旧实现把缺几何段标 `ok=true`（`hours=0`、`arriveAtMs === departAtMs`），`elapsedMs` 不推进 → 后续段在出发时刻算几何（到港库存预测系统性偏早），多船时间均衡门（`complete = legs.every(ok)`）把 0 当真值消费。现每段先跑 `missingModelInputs` 判缺（`ok=false`、`error='缺原生 STL 段记录'`、`missingInputs=[成因全文]`、`hours=0`、不推进），近似仅当**系内 + 前向几何缺失 + `getSameSystem(to, from).transit.distanceKm > 0`** 三条同时成立才用（用近似 metrics 重算后再判缺，罐容量/余量缺失仍判缺，近似不得掩盖残缺）；面板「飞行」列判缺段显 `--（缺原生 STL 段记录）` + `data-tooltip` 成因全文，近似段时长加 `≈` 前缀，汇总在 `approximatedLegs > 0` 时追加「含 N 段反向近似」。⚠️ 近似**不得**用于写滑块（FTC 路径仍按 `missingModelInputs` 严格判缺、宁可不写）。
+- **`XIT/FTC`**：面板并列展示服务器当前对该航线下发的原生飞行计划总时长 —— 由各段 `(arrival - departure)` 累加，与 FTC 建议的 f 无关（按当前飞船 f/载重，独立于最优方案）；缺值（计划未下发）时不显示。邻档对比表新增「最省」/「最快」标签（同一行可同时满足两类，如极端支配点）。
+
+### 🔧 Improvements
+
+- **`XIT/FTC`**：系内 STL 转移段速度改用 BTF 直采实测常数 27,512 km/s —— 与 f、距离无关（替换原 87,036×(f/0.5)^0.84 Weibull 拟合式在 500M km 量级偏快 ~2×），时长 = `d / (27,512 × 3600) / cond`；面板与 SFC 自动联动两边口径一致。代价：平衡退化（`tSpan = 0`）→ 最省油即 `f = 0.05`。
+- **`XIT/FTC`**：`findNativeFlightPlan` 查询下沉到 `computeFtcPlan`（`out.nativePlan`），FTC.vue 只消费结果 —— 避免两处重复调用并确保「航线明细」与「实测总时长」来自同一份原生计划；查表统一用反查后的实体键（`metrics.fromLookup/toLookup`），SFC 把空间站目的地规范化成所属星系 id 的命不中问题同时修复。
+
+### 🐞 Fixes
+
+- **`XIT/FTC`**：网关 LOCK+DECAY 当日曾据误读截图（各 10 秒）改为 `20/3600`（20 秒/段），现回滚 `20/60`（20 分钟/段 = 各 10 分钟）—— BTF「蓝图试航模拟」CDP 直采 `ZV-194h → HRT` 两组参数（f≈0.03/载重 0 与 f≈0.05/载重 3000t）读数完全一致，与 f、载重无关。
 
 ---
 
