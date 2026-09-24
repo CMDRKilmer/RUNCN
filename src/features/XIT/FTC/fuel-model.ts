@@ -14,7 +14,7 @@
 //   STL 燃料：F = C_F_engine × f × d（线性，随引擎类型不同）
 // 自然 FTL（蓝图性能驱动，2026-08-26 多船/多配置实测校准）：
 //   速度 v = ftlMax×r^(a(1+1.5r))、充能 = (eT/m)×r 秒/跳、燃料 = 0.00293×功率×r×pc
-// 网关 FTL：速度 3.0 pc/h 固定，燃料 0，每段 20 秒锁定/衰变（GW_LOCK_HOURS）
+// 网关 FTL：速度 3.0 pc/h 固定，燃料 0，每段 20 分钟锁定/衰变（GW_LOCK_HOURS）
 //   + 6,000 ICA 网关使用费（GW_COST_PER_JUMP，见下方实测依据）。
 
 export interface ShipPerformance {
@@ -244,10 +244,11 @@ export function ftlFuelCFor(ship: ShipPerformance): number {
 // 三者被 route-planner（路径权重）与 computeFuelOption（时长/成本）分别消费，故在这里
 // 定义**唯一一份**再导出（本文件无任何 import，作常数宿主不会形成循环依赖）。
 export const GW_PC_PER_H = 3.0;
-// 网关跃迁的锁定 + 衰变：实测**各 10 秒**（用户 SFC 原生 16 段计划：段 7「锁定」10秒、
-// 段 9「衰变」10秒）→ 合计 20 **秒**/段。旧值 20/60（20 分钟）是单位错误：每条网关段
-// 多算 19分40秒（实测 2 段航线多算 40 分钟），是「FTC 总时长与服务器不一致」成因之一。
-export const GW_LOCK_HOURS = 20 / 3600;
+// 网关跃迁段的锁定 + 衰变：服务器实测**各 10 分钟**（CDP 驱动游戏 BTF「蓝图试航模拟」
+// 直采 ZV-194h → HRT，两组参数 f≈0.03/载重0 与 f≈0.05/载重3000t 完全一致；段名在 BTF 里
+// 显示为「对锁」/「场衰」，对应 LOCK/DECAY）→ 合计 **20 分钟/网关段**，且与 f、载重无关。
+// ⚠️ 2026-09-24 曾据「用户 SFC 截图读到 10 秒」误改为 20/3600，已按服务器实测回滚。
+export const GW_LOCK_HOURS = 20 / 60;
 // 网关使用费：实测 **6,000 ICA/段**（同一份原生计划：网关跃迁前的「锁定」段费用列
 // 6,000 ICA；全航线 12,000 ICA / 2 段）。旧实现硬编码 gatewayCost = 0 → totalCost 漏掉
 // 这笔支出；它不随 f 变化，故不影响最优 f（只是总额偏低）。
@@ -479,6 +480,13 @@ const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近/转移单程）= 0.49
 const STL_TRANSIT_F_SAT = 0.5; // 转移段 f 饱和点（与引擎无关：§2/§3/§8 三组 f=1.0 ≡ f=0.5）
 const STL_TRANSIT_FUEL_GROSS = 2 * STL_TANK_FUEL_COEF; // 0.98 = 两段 0.49×罐×f 的口径
 const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重扫描）
+// 系内「转移」段整段平均速度（km/s）实测常数（2026-09-24 BTF「蓝图试航模拟」直采）：
+//   来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）
+//     d = 599,220,390 km / t = 21,780 s → v ≈ 27,512 km/s。
+//   旧拟合式 vSat(引擎) × (min(f,0.5)/0.5)^k(引擎) × (整备/当前质量)^0.75 在 500M km 量级
+//   比实测快 ~2×（空载 WCB 拟合 v≈58k km/s vs 实测 27,512 km/s），改为船无关的常数。
+//   残余偏差待更长距离/更多引擎（advanced/glass/hyperthrust）的 BTF 采样再做形状拟合。
+const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
   STL_ENGINE_STANDARD: { vSat: 87036, fExp: 0.84 },
@@ -604,15 +612,17 @@ export function computeFuelOption(
     const depKm = Math.min(Math.max(0, departKm ?? 0), totalKm);
     const appKm = Math.min(Math.max(0, approachKm ?? 0), totalKm - depKm);
     const restKm = Math.max(0, totalKm - depKm - appKm);
-    // 「其余」用**转移段标定式**（2026-09-23，见 STL_TRANSIT_F_SAT 上方标定块）：
-    //   t = d / (V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75 × 3600) / 状况
-    // 12 个 BTF 点最大误差 8.8%（§1 质量曲线另算 ≤9.4%）；f≥0.5 饱和。
-    // 刻意**不用** metrics.transitSeconds（绑定记录当时那条计划的 f/质量 → 会把时长钉死、
-    // 把成本最优解带向最低 f）。
+    // 「其余」用**BTF 实测常数**（2026-09-24，见 STL_INTRA_TRANSIT_SPEED_KM_S 上方标定块）：
+    //   t = restKm / (27512 × 3600) / 状况
+    // 旧拟合式 V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75（2026-09-23 BTF 标定式）
+    // 在 500M km 量级高估 ~2×，改为船无关的实测常数。刻意**不用** metrics.transitSeconds
+    // （绑定记录当时那条计划的 f/质量 → 会把时长钉死、把成本最优解带向最低 f），改用常数
+    // 同理避免单点绑定；残余偏差待更长距离/更多引擎（advanced/glass/hyperthrust）的 BTF
+    // 采样再做形状拟合。
     stlHours =
       (depKm / (vDepart * 3600) +
         appKm / (vApproach * 3600) +
-        restKm / (stlTransitSpeedFor(ship, fuel) * 3600)) /
+        restKm / (STL_INTRA_TRANSIT_SPEED_KM_S * 3600)) /
       cond;
   }
   // STL 燃料：跨星系（有跃迁）用罐模型。
@@ -682,7 +692,7 @@ export function computeFuelOption(
   const natChargeHours = (chargeCount * chargeSeconds) / 3600;
   const ftlFuelC = settings.ftlFuelC ?? ftlFuelCFor(ship);
   const ftlFuelNat = ftlFuelC * r * metrics.natPc;
-  // 网关 FTL：速度固定 3.0 pc/h，燃料 0，每段 +20 秒锁定/衰变（GW_LOCK_HOURS）。
+  // 网关 FTL：速度固定 3.0 pc/h，燃料 0，每段 +20 分钟锁定/衰变（GW_LOCK_HOURS）。
   const gwHours =
     metrics.gwPc > 0 ? metrics.gwPc / GW_PC_PER_H + metrics.gwCount * GW_LOCK_HOURS : 0;
 

@@ -68,7 +68,9 @@ function dijkstra(adj, useGw) {
       const pc = ftlPc(cur, nx);
       const gw = gwSet.has([cur, nx].sort().join('|'));
       let w = gw ? pc / 3.0 : pc / 2.26;
-      if (useGw && gw) w += 20 / 3600; // LOCK+DECAY 实测各 10s（= 20 秒/段，旧值 20/60 是单位错误）
+      // LOCK+DECAY：服务器 BTF 直采**各 10 分钟** → 20 分钟/网关段（与 f、载重无关）。
+      // 2026-09-24 曾据误读截图改成 20/3600（20 秒/段），已回滚 —— 别再改小这个数。
+      if (useGw && gw) w += 20 / 60;
       const nd = dist.get(cur) + w;
       if (nd < (dist.get(nx) ?? Infinity)) { dist.set(nx, nd); prev.set(nx, cur); q.set(nx, nd); }
     }
@@ -89,7 +91,8 @@ function show(r, label) {
     const pc = ftlPc(a, b);
     const gw = gwSet.has([a, b].sort().join('|'));
     const h = gw ? pc / 3.0 : pc / 2.26;
-    if (gw) { gwPc += pc; gwN++; lock += 20 / 3600; } else natPc += pc;
+    // 同上：20 分钟/网关段（服务器实测，见 dijkstra 处的说明）。
+    if (gw) { gwPc += pc; gwN++; lock += 20 / 60; } else natPc += pc;
     console.log(`  ${a} → ${b} | ${gw ? '🛰网关' : '自然'} | ${pc.toFixed(2)}pc | ${h.toFixed(1)}h`);
   }
   console.log(`  网关 ${gwN} 段 ${gwPc.toFixed(2)}pc + 自然 ${natPc.toFixed(2)}pc | 锁定衰减 ${lock.toFixed(1)}h`);

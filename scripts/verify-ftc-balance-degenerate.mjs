@@ -426,10 +426,10 @@ checkScenario(
 );
 
 // i：纯网关（gwPc>0、起终点段全缺）→ 时间与 f 无关（tSpan 退化）、燃料随 f 线性。
-// ⚠️ 断言变更记录（2026-09-24）：`totalHours` 由 **4.6667 改为 4.0111**（= 12/3.0 +
-// 2×(20/3600)）。旧值按「锁定+衰变 20 **分钟**/段」算（12/3 + 2×20/60 = 4.6667），而该常数
-// 是**单位错误**：用户 SFC 原生 16 段计划的锁定段与衰变段实测**各 10 秒**（合计 20 秒/段）
-// —— 旧断言锁的是错值本身（每条网关段虚增 19分40秒）。属**断言过时**，非实现回归。
+// ⚠️ 断言变更记录（2026-09-24，两次）：当日一度把 `totalHours` 由 **4.6667 改为 4.0111**
+// （= 12/3.0 + 2×(20/3600)），依据是「用户 SFC 截图里锁定/衰变各 10 秒」——**该读数看错了**。
+// 服务器 BTF（蓝图试航模拟，CDP 直采 ZV-194h → HRT）实测「对锁」与「场衰」**各 10 分钟 0 秒**，
+// 与 f、载重无关 ⇒ 原值 **4.6667**（= 12/3.0 + 2×(20/60)）正确，已回滚；4.0111 锁的是错常数。
 checkScenario(
   'i 纯网关（时间与f无关、燃料线性）',
   scanRoute(
@@ -454,7 +454,7 @@ checkScenario(
     timeSpan: 'zero',
     notFastest: true,
     totalFuel: 400,
-    totalHours: 4.0111,
+    totalHours: 4.6667,
   },
 );
 
@@ -475,6 +475,61 @@ checkScenario(
     totalFuel: 1220.95,
     totalHours: 16.925,
   },
+);
+
+// m：系内航线 + 整段 TRANSIT（仅 d 已知）→ stlHours = d / 27512 / 3600 / cond 逐位相同。
+// 依据（2026-09-24）：BTF「蓝图试航模拟」直采 VH-331g → HRT（同星系纯 TRANSIT）：
+//   d = 599,220,390 km / t = 21,780 s → v ≈ 27,512 km/s。fuel-model 已把 restKm 段速度
+//   从「引擎表拟合式」改为该常数（见 STL_INTRA_TRANSIT_SPEED_KM_S 上方）。构造：natPc=0、
+//   gwPc=0、d=520,000,000 km、departKm/approachKm 缺失 → restKm = d → stlHours = 5.2522 h
+//   （cond=1）；ftlHours=0 ⇒ totalHours ≡ stlHours。验证**所有候选** stlHours 与公式
+//   逐位相同（误差 < 1 秒 = 0.000278 h）——锁定「用 BTF 实测常数、不再用旧拟合式」。
+function checkStlSpeedConstant(name, options, expectedStlHours) {
+  const failures = [];
+  const TOL_SEC = 1 / 3600; // 1 秒
+  const expectedStr = expectedStlHours.toFixed(6);
+  let checked = 0;
+  for (const o of options) {
+    checked++;
+    if (Math.abs(o.stlHours - expectedStlHours) > TOL_SEC) {
+      failures.push(
+        `f=${o.fuel} stlHours=${o.stlHours.toFixed(6)}h 期望 ${expectedStr}±${TOL_SEC.toFixed(6)}h`,
+      );
+    }
+    if (Math.abs(o.totalHours - expectedStlHours) > TOL_SEC) {
+      failures.push(
+        `f=${o.fuel} totalHours=${o.totalHours.toFixed(6)}h 期望 ${expectedStr}±${TOL_SEC.toFixed(6)}h`,
+      );
+    }
+  }
+  if (failures.length === 0 && checked === 0) {
+    failures.push('expected=候选>0 actual=候选=0 (空候选集)');
+  }
+  finish(
+    name,
+    failures,
+    `候选 ${options.length} | stlHours≡${expectedStr}h (±1s=${TOL_SEC.toFixed(6)}h)`,
+  );
+}
+
+const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
+const INTRA_TRANSIT_D_KM = 520_000_000;
+// cond = wcb.condition = 1（见 wcb 定义）；验证 d / 27512 / 3600 / cond 逐位相同。
+const EXPECTED_INTRA_TRANSIT_HOURS =
+  INTRA_TRANSIT_D_KM / (STL_INTRA_TRANSIT_SPEED_KM_S * 3600) / 1;
+const metricsIntraTransit = {
+  stlDistanceKm: INTRA_TRANSIT_D_KM,
+  departKm: undefined,
+  approachKm: undefined,
+  natPc: 0,
+  gwPc: 0,
+  gwCount: 0,
+  natJumpCount: 0,
+};
+checkStlSpeedConstant(
+  'm 系内整段 TRANSIT 用 BTF 实测速度常数 27512 km/s（误差 < 1s）',
+  scanRoute(wcb, metricsIntraTransit, NO_REACTOR_SCAN, {}),
+  EXPECTED_INTRA_TRANSIT_HOURS,
 );
 
 // ---- 结果 ----

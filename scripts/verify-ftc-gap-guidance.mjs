@@ -594,15 +594,22 @@ check('⑥ 转移段记录 → 几何取整段原生路程（不伪造离港/进
 check('⑥ 转移段口径已标定 → 不报缺、按罐口径算燃料并写入滑块', f => {
   expectExact(f, 'inputIncomplete', transitOnly.inputIncomplete, undefined);
   expectExact(f, 'ok', transitOnly.ok, true);
-  expectExact(f, 'best.fuel', transitOnly.best?.fuel, 0.15);
+  // ⚠️ 断言变更记录（2026-09-24）：原值 **best.fuel=0.15**（旧拟合式 vSat×(f/0.5)^k 让 f=0.15
+  //   与 f=0.05 仍有时长差异，findBalanceOption 取 Pareto 拐点 = 0.15）→ 改为 **best.fuel=0.05**。
+  //   新口径用船无关常数 27,512 km/s，stlHours 对所有 f 都相同 → 时间跨度 = 0 →
+  //   findBalanceOption 退到「最省油端」（f=网格最小 0.05，见 fuel-model.findBalanceOption
+  //   「时间无差异同样无法做折衷」分支）。
+  expectExact(f, 'best.fuel', transitOnly.best?.fuel, 0.05);
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
-  expectExact(f, '写入的燃料值', stub.sliderWrites[0]?.value, 0.15);
+  expectExact(f, '写入的燃料值', stub.sliderWrites[0]?.value, 0.05);
   expectExact(f, '写入的航线键', stub.sliderWrites[0]?.key, 'STUB-01|ZV-307A|ANT|nat');
-  // 燃料 = 0.98×罐×min(f,0.5)：罐 3500、f=0.15 → 514.5u（旧 C_F×f×d 口径给 434.6u）。
-  expectClose(f, 'STL 燃料 = 0.98×罐×min(f,0.5)', transitOnly.best?.stlFuel, 514.5, 0.5);
-  // 时长 = d / v_转移（标定式）：f=0.15 → v=21,418 km/s → 1.3184h。旧「巡航模型」同 d
-  // 给 0.44h 级（f≥0.2 饱和到 55,009 km/s）—— 这行锁住「时长确实换了转移段标定式」。
-  expectClose(f, 'STL 时长（小时）', transitOnly.best?.stlHours, 1.3184, 0.01);
+  // 燃料 = 0.98×罐×min(f,0.5)：罐 3500、f=0.05 → 171.5u（旧 f=0.15 给 514.5u）。
+  expectClose(f, 'STL 燃料 = 0.98×罐×min(f,0.5)', transitOnly.best?.stlFuel, 171.5, 0.5);
+  // ⚠️ 断言变更记录（2026-09-24）：原值 **1.3184h**（旧拟合式 v≈21,418 km/s）→
+  //   改为 **1.0264h**（BTF 实测常数 27,512 km/s，d=101,655,808 km → t=d/v/3600）。
+  //   旧拟合式在 500M km 量级高估 ~2×，本次同时把 computeFuelOption 的 restKm 段速度
+  //   改为该常数。属**断言过时**，非回归。
+  expectClose(f, 'STL 时长（小时）', transitOnly.best?.stlHours, 1.0264, 0.01);
 });
 console.log(
   `[证据] ⑥ 转移段（d=101,655,808 km、罐 3500）→ f=${transitOnly.best?.fuel} ` +
@@ -623,10 +630,14 @@ check('⑦ 已有转移段几何 + 星系 id 目的地 → 直接可算（不报
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
   // 航线键用**输入原文**（起点/终点文本）：终点写的是星系 id，故键里是 ZV-307 + gw 标志。
   expectExact(f, '写入的航线键', stub.sliderWrites[0]?.key, 'STUB-01|ZV-307A|ZV-307|gw');
-  // 燃料与距离无关（88.87M 与 101.66M 同为 514.5u）—— 这正是罐口径的核心结论。
-  expectClose(f, 'STL 燃料（与 d 无关）', transitSysId.best?.stlFuel, 514.5, 0.5);
-  // 时长按 d 线性：88.87M / 101.655808M × 1.3184h = 1.1526h。
-  expectClose(f, 'STL 时长（小时，d=88.87M）', transitSysId.best?.stlHours, 1.1526, 0.01);
+  // ⚠️ 断言变更记录（2026-09-24）：原值 **514.5u**（旧 f=0.15 给的）→ **171.5u**（f=0.05）。
+  //   新口径下时间跨度 = 0 → findBalanceOption 退到「最省油端」（f=0.05）。
+  //   燃料与距离无关这一结论不变：旧 88.87M/101.66M 同样 514.5u；新 88.87M/101.66M 同样 171.5u。
+  expectClose(f, 'STL 燃料（与 d 无关）', transitSysId.best?.stlFuel, 171.5, 0.5);
+  // ⚠️ 断言变更记录（2026-09-24）：原值 **1.1526h**（旧拟合式 v≈21,418 km/s × 88.87M/101.66M）
+  //   → **0.8973h**（BTF 实测常数 27,512 km/s，d=88,870,000 km → t=d/v/3600）。
+  //   与 d 线性这一结论不变：88.87M / 101.66M × 1.0264h = 0.8973h。
+  expectClose(f, 'STL 时长（小时，d=88.87M）', transitSysId.best?.stlHours, 0.8973, 0.01);
 });
 console.log(
   `[证据] ⑦ 系内 + 星系 id + 转移段已记录：f=${transitSysId.best?.fuel} ` +

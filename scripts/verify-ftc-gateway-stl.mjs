@@ -38,8 +38,9 @@
 //
 // 夹具真实性（哪些是真实数据、哪些是合成 —— 别把合成值当实测值引用）：
 //   - 距离/时长**真实**：直接抄自上面那张 16 段真实表（面板按 0.0001M km 显示，故夹具值
-//     是「显示值 × 1e6」的整数，非服务器原始精度）；3 段纯网关计划的距离是**合成**的
-//     （仓库内无 `#gw` 真实样本，见 ⓪）；
+//     是「显示值 × 1e6」的整数，非服务器原始精度）；其中锁定/衰变段的 10 分钟时长取同航线
+//     服务器 BTF 实测值（2026-09-24 夹具重抄，原 10,000 ms 为误读）；3 段纯网关计划的距离
+//     是**合成**的（仓库内无 `#gw` 真实样本，见 ⓪）；
 //   - 天体/星系 id **真实**：ZV-194h（ZV-194 的行星，面板显示 `Antares III h`）、ZV-307 =
 //     `Antares I`（src/infrastructure/prun-api/data/stations.default.ts 的 ANT 地址行）、
 //     ZV-307c = `Hephaestus`（public/json/fallback-fio-responses/allplanets.json）、
@@ -278,15 +279,21 @@ const MIX_STL_SEGMENTS = [
   { type: 'DEPARTURE', km: 69165500, seconds: 11944 }, // 1
   { type: 'APPROACH', km: 67472800, seconds: 10048 }, // 5
   { type: 'TRANSIT', km: 10000, seconds: 10 }, // 6
-  { type: 'LOCK', km: 10000, seconds: 10 }, // 7
-  { type: 'DECAY', km: 10000, seconds: 10 }, // 9
+  // ⚠️ 夹具重抄（2026-09-24）：锁定/衰变 = 600s（10 分钟）而非误读的 10s —— 依据同一航线的
+  // 服务器 BTF 实测（对锁 10min + 场衰 10min/段，与 f/载重无关，见 fuel-model.GW_LOCK_HOURS）。
+  // 这是**数据**修正（夹具对齐服务器值），不是放宽断言；转移段（km/时长）保持原表值。
+  { type: 'LOCK', km: 10000, seconds: 600 }, // 7
+  { type: 'DECAY', km: 10000, seconds: 600 }, // 9
   { type: 'TRANSIT', km: 10000, seconds: 10 }, // 10
-  { type: 'LOCK', km: 10000, seconds: 10 }, // 11
-  { type: 'DECAY', km: 10000, seconds: 10 }, // 13
+  { type: 'LOCK', km: 10000, seconds: 600 }, // 11
+  { type: 'DECAY', km: 10000, seconds: 600 }, // 13
   { type: 'TRANSIT', km: 10000, seconds: 10 }, // 14
   { type: 'TRANSIT', km: 93425100, seconds: 14366 }, // 15（真正到站段）
 ];
 const MIX_ROUTE_KM = MIX_STL_SEGMENTS.reduce((a, s) => a + s.km, 0);
+// ⚠️ 夹具重抄（2026-09-24）后的推导：37536（真实段 1178+11944+10048+14366）
+// + 3×10（转移 6/10/14）+ 4×600（锁定 7/11 + 衰变 9/13）= **39966**（原 37606，差额 = 4×(600−10)）。
+// 依赖它的断言（② 的航线级 seconds、⑥ 的 routeSeconds）都是**现算**这个常量，未手改期望值。
 const MIX_ROUTE_SECONDS = MIX_STL_SEGMENTS.reduce((a, s) => a + s.seconds, 0);
 // 表里的 STL 总和锚点（≈ 230.2M km）：用户证据里就是这么合的，断言它没被夹具抄错。
 const MIX_ROUTE_KM_ANCHOR = 230.2e6;
@@ -310,15 +317,17 @@ const mixedPlan = {
     // 5 进近：Antares I → `Antares I - Hephaestus`（**不是**最终目标 —— 本轮的核心证据）。
     segment('APPROACH', starAddress('ZV-307'), planetAddress('ZV-307', MIX_APPROACH_BODY), 67472800, 10048 * 1000),
     segment('TRANSIT', planetAddress('ZV-307', MIX_APPROACH_BODY), planetAddress('ZV-307', MIX_APPROACH_BODY), 10000, 10000),
-    segment('LOCK', starAddress('ZV-307'), planetAddress('ZV-307', MIX_APPROACH_BODY), 10000, 10000),
+    // ⚠️ 夹具重抄（2026-09-24）：锁定/衰变时长 = 10 分钟（600,000 ms）。原值 10,000 ms 源自那次
+    // 「各 10 秒」误读，与服务器 BTF 实测不符；km 不变（转移段的 km/时长保持原表值）。
+    segment('LOCK', starAddress('ZV-307'), planetAddress('ZV-307', MIX_APPROACH_BODY), 10000, 600_000),
     // 8 网关跃迁：Antares I 端网关 → Amethyst 端网关。
     segment('JUMP_GATEWAY', gatewayAddress('ZV-307', MIX_GW_LOCAL), gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE), null, 20499 * 1000, MIX_FTL_GW1_PC),
-    segment('DECAY', gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 10000),
+    segment('DECAY', gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 600_000),
     segment('TRANSIT', planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 10000),
-    segment('LOCK', planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 10000),
+    segment('LOCK', planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 600_000),
     // 12 网关跃迁：Amethyst 端网关 → Hortus（VH-331）端网关。
     segment('JUMP_GATEWAY', gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE2), gatewayAddress(MIX_TO_SYS, MIX_GW_END), null, 20603 * 1000, MIX_FTL_GW2_PC),
-    segment('DECAY', gatewayAddress(MIX_TO_SYS, MIX_GW_END), planetAddress(MIX_TO_SYS, 'VH-331a'), 10000, 10000),
+    segment('DECAY', gatewayAddress(MIX_TO_SYS, MIX_GW_END), planetAddress(MIX_TO_SYS, 'VH-331a'), 10000, 600_000),
     segment('TRANSIT', planetAddress(MIX_TO_SYS, 'VH-331a'), planetAddress(MIX_TO_SYS, 'VH-331a'), 10000, 10000),
     // 15 转移：→ Hortus Station（**真正到站的 STL 段**）。
     segment('TRANSIT', planetAddress(MIX_TO_SYS, 'VH-331a'), stationAddress(MIX_TO_SYS, MIX_TO_BODY), 93425100, 14366 * 1000),
@@ -842,13 +851,15 @@ await checkAsync(
 //   ① 混合航线有 6 个 STL 段（起飞/离港/进近/3 个转移）——旧实现只算「离港 + 进近」，
 //      末跳是网关段时进近记录还查不到 → 进近 1h29m 与到站 TRANSIT 3h59m 静默丢失；
 //   ② 充能段只在两次自然跃迁之间出现 **1 次**（末跳后直接进近）；
-//   ③ 锁定段与衰变段实测**各 10 秒**（= 20 秒/段，不是 20 分钟）；
+//   ③ 锁定段与衰变段 = 服务器 BTF 实测**各 10 分钟**（= 20 分钟/网关段，与 f、载重无关）；
+//      ⚠️ 2026-09-24 曾据误读截图当成「各 10 秒」并把常数改成 20/3600，已按服务器实测回滚；
+//      同日夹具也按此重抄（LOCK/DECAY 由 10,000 ms 改 600,000 ms，见 MIX_STL_SEGMENTS 的 ⚠️）；
 //   ④ 网关费实测 **6,000 ICA/段**（2 段 = 12,000 ICA）；
 //   ⑤（⑭）**估算分段表**里网关跃迁段的时长必须用固定 3.0 pc/h，不是自然跃迁速度 vFtl
 //      （随反应堆 r 变；截图船 r=1 时 ≈2.84 pc/h）——用户实测面板把 17.08 pc 网关段显示成
 //      6h01m，服务器原生同段 5h41m。
-// 断言里的常数一律写**字面量**（20/3600、6000、3.0），不引生产导出的同名字面量 ——
-// 否则常数被改错时断言会跟着一起漂移（假绿）。
+// 断言里的常数一律写**字面量**（20/60、6000、3.0），不引生产导出的同名字面量 ——
+// 否则常数被改错时断言会跟着一起漂移（假绿）。被回滚的错值（20/3600）只出现在**反例**里。
 // ============================================================================
 const {
   computeFuelOption,
@@ -857,8 +868,13 @@ const {
   conditionFactor,
   stlDepartSpeedFor,
   stlApproachSpeedFor,
-  stlTransitSpeedFor,
 } = await import('../src/features/XIT/FTC/fuel-model.ts');
+// ⚠️ 断言变更记录（2026-09-24）：computeFuelOption 的 restKm 段速度已从「引擎拟合式
+//   stlTransitSpeedFor」改为船无关的 BTF 实测常数 **27,512 km/s**（见
+//   fuel-model.ts STL_INTRA_TRANSIT_SPEED_KM_S 上方）。旧拟合式在 500M km 量级
+//   高估 ~2×，本轮锁定用 BTF 组 4 VH-331g→HRT 的实测值。验证用同一常数（不再 import
+//   旧的 stlTransitSpeedFor——它在 fuel-model 中只保留给诊断用，不再被生产代码消费）。
+const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
 const { findNativeFlightPlan, buildNativeSegmentRows, buildEstimatedSegmentRows } = await import(
   '../src/features/XIT/FTC/route-planner.ts'
 );
@@ -881,7 +897,10 @@ check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线�
   const fuel = 0.5;
   const vDep = stlDepartSpeedFor(PERF, fuel);
   const vApp = stlApproachSpeedFor(PERF, fuel);
-  const vTransit = stlTransitSpeedFor(PERF, fuel);
+  // ⚠️ 断言变更记录（2026-09-24）：vTransit 由旧 `stlTransitSpeedFor(PERF, fuel)`（= 引擎拟合式）
+  //   改为 BTF 实测常数 **27,512 km/s**（fuel-model.STL_INTRA_TRANSIT_SPEED_KM_S）。
+  //   与 computeFuelOption 现在用的速度**逐位相同**，断言才锁得住「其余按转移段速度计时」。
+  const vTransit = STL_INTRA_TRANSIT_SPEED_KM_S;
   const restKm = MIX_ROUTE_KM - MIX_DEPART_KM;
   const mix = computeFuelOption(PERF, mixMetrics, fuel, 1, NO_PRICES);
   // 期望 = 离港段按离港速度 + 进近段（未记录 → 0）+ 其余按转移段速度，整体除以船体状况。
@@ -914,7 +933,9 @@ check('⑨ 等价性：纯自然（depart + approach === 总路程）与系内�
   const fuel = 0.35;
   const vDep = stlDepartSpeedFor(PERF, fuel);
   const vApp = stlApproachSpeedFor(PERF, fuel);
-  const vTransit = stlTransitSpeedFor(PERF, fuel);
+  // ⚠️ 断言变更记录（2026-09-24）：同上一条，vTransit 由引擎拟合式改为 BTF 实测常数
+  //   27,512 km/s。系内分支的「逐位一致」锁定与 computeFuelOption 的新口径相同。
+  const vTransit = STL_INTRA_TRANSIT_SPEED_KM_S;
   // 纯自然跨星系：旧公式 = 离港/进近各自计时（rest = 0）。
   const natDep = NAT_DEPART_ZV307A;
   const natApp = NAT_APPROACH_MOR;
@@ -1013,11 +1034,11 @@ check('⑩ 充能次数 = 跳数 − 1（末跳后直接进近，无充能段）
     r,
     NO_PRICES,
   );
-  expectExact(f, '0 跳 → 无充能', noJump.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 3600));
+  expectExact(f, '0 跳 → 无充能', noJump.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 60));
   console.log(`[证据] ⑩ 充能 ${chargeSec.toFixed(0)}s/次，2 跳 → 1 次（旧值 2 次）`);
 });
 
-check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/3600（锁定 10s + 衰变 10s）', f => {
+check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/60（锁定 10min + 衰变 10min）', f => {
   const o = computeFuelOption(
     PERF,
     { ...mixMetrics, stlDistanceKm: undefined, departKm: undefined, natPc: 0, natJumpCount: 0 },
@@ -1025,17 +1046,18 @@ check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/3600（锁定 10s + 衰变 10
     1,
     NO_PRICES,
   );
-  expectExact(f, 'ftlHours（逐位）', o.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 3600));
-  // 反例：旧「20 分钟/段」会多算 2×(20/60 − 20/3600) ≈ 0.6556h。
-  const oldValue = mixMetrics.gwPc / 3.0 + 2 * (20 / 60);
+  expectExact(f, 'ftlHours（逐位）', o.ftlHours, mixMetrics.gwPc / 3.0 + 2 * (20 / 60));
+  // 反例：2026-09-24 曾据误读截图把常数改成「20 秒/段」（20/3600），会少算
+  // 2×(20/60 − 20/3600) ≈ 0.6556h。该误值已按服务器 BTF 实测回滚，这里把它锁成「必须显著不同」防再犯。
+  const wrong20s = mixMetrics.gwPc / 3.0 + 2 * (20 / 3600);
   expectCondition(
     f,
-    '≠ 旧 20min/段',
-    Math.abs(o.ftlHours - oldValue) > 0.6,
-    `≠ ${oldValue}`,
+    '≠ 误值 20s/段',
+    Math.abs(o.ftlHours - wrong20s) > 0.6,
+    `≠ ${wrong20s}`,
     String(o.ftlHours),
   );
-  // 单段也按同一常数（gwCount = 1 → 20 秒）。
+  // 单段也按同一常数（gwCount = 1 → 20 分钟）。
   const single = computeFuelOption(
     PERF,
     { ...mixMetrics, stlDistanceKm: undefined, departKm: undefined, natPc: 0, natJumpCount: 0, gwCount: 1 },
@@ -1043,7 +1065,7 @@ check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/3600（锁定 10s + 衰变 10
     1,
     NO_PRICES,
   );
-  expectExact(f, '单段锁定+衰变 = 20/3600h', single.ftlHours, mixMetrics.gwPc / 3.0 + 20 / 3600);
+  expectExact(f, '单段锁定+衰变 = 20/60h', single.ftlHours, mixMetrics.gwPc / 3.0 + 20 / 60);
 });
 
 check('⑫ 网关费 6,000 ICA/段 计入 totalCost（不随 f 变）', f => {
@@ -1117,14 +1139,16 @@ check('⑬ 原生计划匹配用反查键（metrics.fromLookup/toLookup）命中
     expectExact(f, '自然跳数 = 2', jumps, 2);
     expectExact(f, '网关段数 = 2', gateways, 2);
     expectExact(f, 'CHARGE 段数 = 自然跳数 − 1', charges, jumps - 1);
-    // 锁定/衰变各 10 秒（全部 16 段里这两类段的时长都是 10,000 ms）。
+    // 锁定/衰变时长 = 各 10 分钟（600,000 ms）：夹具已于 2026-09-24 按服务器 BTF 实测重抄
+    // （见 MIX_STL_SEGMENTS 处的 ⚠️ 夹具重抄），故此处恢复为正常的口径断言，与 ⑪ 的常数口径一致
+    // （⑪ 锁常数本身，本断言锁「原生计划 → 段行」的转写不丢时长）。
     const locks = rows.filter(r => r.typeKey === 'LOCK' || r.typeKey === 'DECAY');
     expectExact(f, '锁定 + 衰变段数', locks.length, gateways * 2);
     expectCondition(
       f,
-      '锁定/衰变各 10 秒（20 秒/网关段）',
-      locks.every(r => r.durationMs === 10000),
-      '全部 10000ms',
+      '锁定/衰变行 durationMs = 600,000（各 10 分钟，服务器 BTF 实测）',
+      locks.every(r => r.durationMs === 600000),
+      '全部 600000ms（10 分钟）',
       locks.map(r => r.durationMs).join(','),
     );
   }

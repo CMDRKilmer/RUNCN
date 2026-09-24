@@ -249,11 +249,16 @@ check('敏感性：系内燃料与 d 无关（罐口径）；时长在固定 f �
     String(ratio),
   );
   const vTransit = dNear / (hoursAt(dNear) * 3600);
+  // ⚠️ 断言变更记录（2026-09-24）：原值 **27,273 km/s**（旧引擎表拟合式 f=0.2 给的速率，
+  //   V_SAT×(f/0.5)^0.84×massFactor）→ 改为 **27,512 km/s**（BTF 组 4 VH-331g→HRT
+  //   实测，见 fuel-model.ts STL_INTRA_TRANSIT_SPEED_KM_S 上方）。本次同时把 computeFuelOption
+  //   的 restKm 段速度从「引擎拟合式」改为该船无关常数，旧拟合式在 500M km 量级高估 ~2×
+  //   （同输入旧式给 55,009 → 与新值 27,512 差 ~2×）。属**断言过时**，非回归。
   expectCondition(
     f,
-    '转移段速度 = 标定值 27,273 km/s（旧巡航式给 55,009）',
-    Math.abs(vTransit - 27273) < 5,
-    '27,273 ±5 km/s',
+    '转移段速度 = BTF 实测常数 27,512 km/s（旧拟合式给 55,009）',
+    Math.abs(vTransit - 27512) < 5,
+    '27,512 ±5 km/s',
     String(Math.round(vTransit)),
   );
 });
