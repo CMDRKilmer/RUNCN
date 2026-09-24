@@ -2218,7 +2218,7 @@ function flightCellText(
     }
     return leg.error ? `（${leg.error}）` : '';
   }
-  // 近似段（时长来自反方向原生记录）：前缀 ≈ 标明不是原生前向记录。
+  // 近似段（时长按轨道几何公式估算）：前缀 ≈ 标明不是原生前向记录。
   const approx = leg.approximated !== undefined ? '≈' : '';
   return ` · ${approx}${formatFlightDuration(leg.hours * 3600000)}（${arrivalClockText(leg.arriveAtMs)}到达）`;
 }
@@ -2230,7 +2230,7 @@ function flightCellText(
 // Vue 3 对非布尔属性的 undefined 会直接移除该属性（同 CopyButton.vue 的写法）。
 // 为什么必须与显示态一致：只有预估态的正文才是「预估」，才需要补充说明：
 // - 判缺段 → fuel-model.missingModelInputs 的成因全文（含可操作指引），不截断、不改写；
-// - 近似段 → 说明时长来源是反方向原生记录 + 为何是近似值；
+// - 近似段 → 说明时长按轨道几何公式估算 + 为何是近似值；
 // - 已完成 / 在途 / 无数据 → undefined：正文是真实数据或本就无正文，
 //   此时再挂预估成因会与同一行的正文自相矛盾。
 function flightCellTitle(
@@ -2253,10 +2253,7 @@ function flightCellTitle(
   if (a === undefined) {
     return undefined;
   }
-  return (
-    `本段时长按反方向原生记录（${a.from} → ${a.to}，${fixed0(a.distanceKm)} km）近似；` +
-    '计划时刻不同 → 相位不同，为近似值。'
-  );
+  return '本段时长按轨道几何公式估算；弧长为均值圆弧初版，与服务器原生 TRANSIT 弧长存在相位偏差';
 }
 
 // 归航段（表格末行）的段序号 = 站点数；末行两个分支（plan / progress）在此合并，
@@ -2275,7 +2272,7 @@ function flightTotalText(shipId: string): string {
     return '（部分航段无法计算）';
   }
   // 有近似段时必须标注：总时长不是全部来自原生记录。
-  const approx = est.approximatedLegs > 0 ? `（含 ${est.approximatedLegs} 段反向近似）` : '';
+  const approx = est.approximatedLegs > 0 ? `（含 ${est.approximatedLegs} 段公式估算）` : '';
   return `约 ${formatFlightDuration(est.totalHours * 3600000)}${approx}`;
 }
 </script>

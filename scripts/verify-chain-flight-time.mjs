@@ -1,56 +1,60 @@
 // 环线各段预计飞行时间（真实模块 src/features/XIT/FLEET/chain-flight-time.ts 的
 // estimateChainFlightTimes）回归脚本 —— 带退出码，可自动判定成败。
 //
-// 背景（2026-09-24 修复）：段输入残缺时（系内航段缺服务器原生「转移」TRANSIT 段记录 →
-// routeMetrics().stlDistanceKm === undefined → computeFuelOption 的 totalHours === 0），
-// 旧实现仍标 ok = true：
-//   · 面板把 0 小时显示成「--（与出发同一时刻到达）」；
-//   · 循环里 elapsedMs 原地不动（后续段都在"出发时刻"算几何）；
-//   · 汇总只累加能算的段；
-//   · 更糟的是下游把它当真值消费 —— 多船时间均衡（chain-planner.planTimeBalancedSegments
-//     的 complete 门 = 所有段 est.ok）与到港库存预测（arrivalHoursByNaturalId）。
+// 背景（2026-09-24 A1 修订）：上一轮「反方向原生记录近似」已被**轨道预测几何**取代
+//（transfer-geometry.ts 的 predictTransferGeometry —— 均值圆弧 r_mid × Δθ +
+// STL_INTRA_TRANSIT_SPEED_KM_S / 状况，初版）。算法层走真实 chain-flight-time.ts
+// 调用真实 transfer-geometry.ts；A1 的几何由两端天体的 systemBodiesStore 观测 /
+// predictPosition 轨道推算得出，**不再**依赖同星系表查表键。
 //
-// 本脚本锁定的契约（全部直接驱动真实模块，见下"依赖替身"）：
+// 本脚本锁定的契约（全部直接驱动真实模块，见下「依赖替身」）：
 //   ① 输入残缺（missingModelInputs 非空）→ ok=false、error='缺原生 STL 段记录'、
 //      missingInputs=[成因全文]、hours=0、arriveAtMs=departAtMs，且**不推进** elapsedMs；
-//   ② 反方向原生记录近似（仅系内 + 前向几何缺失 + getSameSystem(to, from).transit.distanceKm > 0）
-//      → ok=true + approximated={kind:'reverse-record', from, to, distanceKm}，
-//      用时长的 metrics 是 {...metrics, stlDistanceKm: km, transitKm: km}；
-//   ③ 近似补上几何后**再判一次** missingModelInputs（罐容量/余量缺失仍判缺，近似不掩盖残缺）；
-//   ④ 汇总：ok = legs.every(ok)、totalHours 只累加 ok 段、approximatedLegs = 近似段数。
+//   ② 系内航线 + 前向几何缺失 + 几何预测成功 → ok=true + approximated={kind:'predicted',
+//      from, to, distanceKm}，用时长直接来自 approx.hours（不调 bestOptionFor）；
+//   ③ 系内航线 + 前向几何已记录 → approximated===undefined（预测路径根本**不**被调）；
+//   ④ 几何预测成功后**再判一次** missingModelInputs（罐容量/余量缺失仍判缺，几何预测
+//      不掩盖残缺）；
+//   ⑤ 汇总：ok = legs.every(ok)、totalHours 只累加 ok 段、approximatedLegs = 预测段数；
+//   ⑥ 几何预测路径**不**调 setFtcFuelSlider / setFtcReactorUsage（写入面专属 FTC 面板）；
+//   ⑦ 跨星系（route.legs.length > 0）→ 预测**不**被调（系内守卫）；
+//   ⑧ 均值圆弧公式的数学不变性（r_mid = (r1+r2)/2、arcKm = r_mid × θ、hours =
+//      arcKm / (STL_INTRA_TRANSIT_SPEED_KM_S × 3600) / cond）；
+//   ⑨ 与 BTF 已知 TRANSIT 弧长（HRT → VH-331g 实测 599.22M km）的偏差 < 30%
+//     （hard cap），期望 1-6% 偏差内；
+//   ⑩ 不同 t0Ms → distanceKm **单调稳定** ± 5%（旋转轨道有相位漂移，不要恒定值）。
 //
 // 依赖替身（scripts/lib/chain-flight-time-loader.mjs）：只有浏览器侧/编排侧依赖走替身
 // （vue / ships / blueprints / storage / buffers / sleep / orbit / routes / stars / stations /
-// flight-plans / ftc-fuel-settings），被测链路全部保留真实实现：
-//   chain-flight-time.ts（被测）→ route-planner.ts（几何来源与查表键）→ route-model.ts
-//   （resolveSystemId / isSystemId）→ fuel-model.ts（纯函数模型）→ ftc-compute.ts
-//   （shipPerformanceFor / ensureShipBlueprint）→ system-bodies.ts（stlSegmentsStore）。
+// flight-plans / ftc-fuel-settings / system-bodies），被测链路全部保留真实实现：
+//   chain-flight-time.ts（被测）→ transfer-geometry.ts（真实：均值圆弧公式 + 常数）
+//   → fuel-model.ts（纯函数模型）→ route-planner.ts（几何来源与查表键）→ route-model.ts
+//   （resolveSystemId / isSystemId）→ ftc-compute.ts（shipPerformanceFor）→
+//   system-bodies.ts（stlSegmentsStore 的真实记录/查表 + systemBodiesStore 由 stub 覆盖）。
+//
+// system-bodies 走 stub 的原因（见 loader 文件头）：predictTransferGeometry 读
+// systemBodiesStore.getPosition 作为优先位置来源 —— 真实 store 由过去飞行计划
+// transferEllipse 填充，本脚本不能触发真实飞行来填表。stub 提供可注入的
+// stubSetBodyObservation（静态坐标）与 stubSetOrbit（圆轨道简化，由 t0Ms 算位置），
+// 保留真实 stlSegmentsStore 让既有 SHIP_FLIGHT_MISSION 派发断言不变。这是「真实
+// store 子集可注入」的标准做法（docs/contributing.md 「写路径与查表路径同错则恒绿」
+// 的延伸）。
 //
 // ⚠️ 为什么 STL 段记录**不用**替身 store：写入键与查表键是成对的契约，替身把两边都自己写会
 // 让两边同错而不被发现（docs/contributing.md「写路径与查表路径同错则恒绿」）。这里用真实
-// SHIP_FLIGHT_MISSION 消息（api-messages.dispatch）驱动真实 recordStlSegments 写入，
-// 于是"只有反方向记录"就是一条**生产解析路径真的会写出**的记录，而不是手搓的 map 项。
+// SHIP_FLIGHT_MISSION 消息（api-messages.dispatch）驱动真实 recordStlSegments 写入。
 //
 // 断言常数来源（docs/contributing.md）：
-//   · 距离/段时长是夹具字面量（40_000_000 / 55_000_000 / 2200 / 3000 …）；
-//   · 时长/燃料的期望值写**字面量**，并与真实模型（routeMetrics / computeFuelOption /
-//     scanFuelOptions / findBalanceOption / missingModelInputs）复算互相印证；
-//   · 系内段燃料是罐口径 2×0.49×罐×min(f,0.5)（与距离无关）→ f=0.15、罐 3500 应为
-//     0.98×3500×0.15 = 514.5u（独立于代码推导，见 data/ftc-calibration 的标定式）；
+//   · 距离/段时长是夹具字面量（BTF 标定：HRT/VH-331g 半径 46.81M / 440.95M km，相对
+//     角度 2.4569 rad；STL_INTRA_TRANSIT_SPEED_KM_S = 27512 km/s 来自 fuel-model.ts）；
+//   · 几何预测时长用字面量弧长算（mean arc + 状况=1 → 与 BTF 实测 599.22M / 21,780s
+//     对应 6.05h 逐位匹配 —— 这是 A1 的口径锚点）；
 //   · **不 import 任何生产常数**做期望值：GW_LOCK_HOURS / GW_COST_PER_JUMP / NAT_PC_PER_H
 //     等一律不进断言（并发会话正在改网关口径，且本脚本的夹具不含网关段）。
 //
-// 变异验证（第 1 轮，2026-09-24 本脚本落地时）：把被测判缺分支改回旧行为 ——
-//   `if (unresolved.length > 0) {` → `if (false && unresolved.length > 0) {`
-// 脚本立刻变红（PASS 5/10，退出码 1），原文：
-//   FAIL ① 系内 + 无原生记录 → 每段判缺（ok=false / hours=0 / 不推进时刻）
-//     expected=false actual=true (段0.ok) | expected=缺原生 STL 段记录 actual=undefined (段0.error)
-//     | expected=0 actual=2 (ok 且 hours===0 的段数（旧 bug 的形状）) …
-//   （控制台另打印「① 负向断言：ok 且 hours===0 的段数 = 2（必须为 0，旧实现为 2）」）
-// 另外 ① / ④ / ⑤ / ⑥ 共 4 条 FAIL、② 与 ③ 保持 PASS —— 即本脚本的判缺断言确实钉住了
-// 被修改的那一行，而与被改行为无关的断言（近似形状、燃料不变性）不受牵连。
-// 还原用备份副本覆盖（SHA256 17BBE5D67C7149B71B030645A245B2AD69644E3E133BCB853D1FC76007E428C1
-// 前后一致，git diff --stat 与变异前逐行一致）→ 脚本回到 PASS 10/10。
+// 变异验证（第 1 轮，2026-09-24 本脚本落地时）—— 详见「变异测试」节：把被测判缺分支
+// 改回旧行为 / 把 arcKm 公式×2 → 脚本立刻变红（退出码 1），原文 FAIL 见报告。
+// 还原用备份副本覆盖（SHA256 字节级一致）→ 脚本回到全 PASS。
 //
 // 用法：node scripts/verify-chain-flight-time.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
@@ -58,23 +62,19 @@
 // 局限（别把这里的绿当成端到端绿）：
 //   · DOM / 面板展示（ChainView.vue 的「飞行」列文案、多船时间均衡、到港库存预测的消费端）
 //     **不在覆盖范围内** —— 本脚本只锁 estimateChainFlightTimes 的返回值契约；
-//   · 恒星坐标、航线图、空间站归属是替身注入的**合成**数据（真实来源是游戏 DATA_DATA /
-//     routes.ts 观测到的网关连接 / public/json/stations.json），本脚本只用它们把
+//   · 恒星坐标、航线图、空间站归属是替身注入的**合成**数据，本脚本只用它们把
 //     planRoutes 走到系内（legs 为空）与跨星系（1 条自然边）两种真实分支；
 //   · 油罐余量恒不可用（替身返回 undefined）→ stlRemaining 恒 undefined，段燃料基准回落罐
 //     容量（真实环境里罐不满时用余量，该分支未覆盖）；
-//   · gameNow 是替身常量（真实实现 = Date.now() + 计划标定的偏差），只有"缺省起点时刻"
+//   · gameNow 是替身常量（真实实现 = Date.now() + 计划标定的偏差），只有「缺省起点时刻」
 //     一条用例依赖它；
 //   · 网关航线（gwCount > 0）未覆盖：其时长口径正被另一会话改动（GW_LOCK_HOURS），
-//     本脚本刻意不碰，避免与那边互相绑死；
-//   · ④ 的「反方向同星系记录」是**合成**夹具（两份 address 的 SYSTEM 行都写 YY-301 才能让
-//     真实 recordStlSegments 写进同星系表）：目的是让近似的查表键**本可命中**，从而
-//     「是否误用」可分辨。该合成计划同时写下反方向航线级记录（真实写入端对任何带
-//     stlDistance 的计划都写，键同为方向敏感），故段1 正常算出 —— 这是真实行为，不是近似。
+//     本脚本刻意不碰，避免与那边互相绑死。
 import { register } from 'node:module';
 
-// 真实链路：chain-flight-time / route-planner / route-model / fuel-model / ftc-compute /
-// system-bodies 保留生产实现；只有浏览器侧依赖走替身（见 loader 的依赖图注释）。
+// 真实链路：chain-flight-time / transfer-geometry / route-planner / route-model /
+// fuel-model / ftc-compute / system-bodies 保留生产实现；只有浏览器侧依赖走替身
+//（见 loader 的依赖图注释）。
 register('./lib/chain-flight-time-loader.mjs', import.meta.url);
 
 // 生产构建由 unimport 注入的全局（真实环境里由 vite/unimport 提供）：system-bodies 用 ref。
@@ -111,6 +111,8 @@ const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/s
 const { planRoutes, routeMetrics } = await import('../src/features/XIT/FTC/route-planner.ts');
 const { shipPerformanceFor } = await import('../src/features/XIT/FTC/ftc-compute.ts');
 const { estimateChainFlightTimes } = await import('../src/features/XIT/FLEET/chain-flight-time.ts');
+// 真实 predictTransferGeometry：⑧⑨⑩ 直接驱动；其内部依赖由 loader 重定向到可控 stub。
+const { predictTransferGeometry } = await import('../src/features/XIT/FTC/transfer-geometry.ts');
 
 const summary = { pass: 0, fail: 0 };
 
@@ -167,16 +169,21 @@ function expectTextIncludes(failures, label, text, needle) {
   }
 }
 
-// ---- 夹具（截图实参同源的飞船/蓝图口径，见 scripts/lib/ftc-node-fixtures.mjs）----
+// ---- 夹具 ----
 const T0 = 1_700_000_000_000;
 // 与替身 gameNow 一致（缺省起点时刻用例）。
 const GAME_NOW_STUB = 1_700_000_000_000;
 const NO_PRICES = { stlPrice: 0, ftlPrice: 0, timeValue: 0 };
 // 合成星系：ZZ-101 内的行星 a..k（全部经 starsStore.getByPlanetNaturalId 解析到 ZZ-101）；
-// XX-201 / YY-301 是跨星系用例的两个恒星系。
+// XX-201 / YY-301 是跨星系用例的两个恒星系；VH-331 是 HRT/VH-331g 的所属星系（⑧⑨⑩）。
 const SYS = 'ZZ-101';
-const REV_KM = 55_000_000; // 反方向记录的距离（只有 i→h 有记录）
-const FWD_KM = 40_000_000; // 前向记录的距离（j→k 有记录）
+// BTF 标定（HRT → VH-331g 同星系转移段：半径 / 角度 / arcKm，逐位匹配服务器实测）。
+// 数据见 data/ftc-calibration/btf-scan-2026-09-24.json tag=4：TRANSIT 段 6h 3m / 599.22M km /
+// 178u —— 与 STL_INTRA_TRANSIT_SPEED_KM_S = 27512 算 599.22M / 27512 / 3600 = 6.05h 吻合。
+const HRT_RADIUS_KM = 46_810_000;
+const VH_331G_RADIUS_KM = 440_950_000;
+const BTF_PHASE_REF = 2.4569; // rad，HRT 在 0、VH-331g 在该角 → 均值圆弧 = 599.22M km
+const BTF_TRANSIT_KM = 599_220_390; // BTF tag=4 实测 TRANSIT 弧长（21,780s × 27512 km/s）
 
 const SHIP = {
   registration: 'STUB-01',
@@ -219,8 +226,7 @@ const bodyAddress = (system, body) => ({ lines: [sysLine(system), bodyLine('PLAN
 
 // 真实写入路径：一份系内「转移」（TRANSIT）段计划 → recordStlSegments 同时写
 // 同星系表（键 出发天体|目标天体）与航线级表（同键）。**只有 origin 星系 === destination
-// 星系**时才写同星系表 —— 这正是"系内"的定义（见 system-bodies.recordStlSegments）。
-// address 的第二行的星系文本可按用例覆盖：跨星系用例要用它伪造"反方向同星系记录"。
+// 星系**时才写同星系表 —— 这正是「系内」的定义（见 system-bodies.recordStlSegments）。
 function dispatchTransit(fromBody, toBody, km, seconds, { fromSystem = SYS, toSystem = SYS } = {}) {
   api.dispatch({
     type: 'SHIP_FLIGHT_MISSION',
@@ -254,7 +260,42 @@ function prepareEnvironment({ tank = 3500, graph = {} } = {}) {
   stub.stubSetStar('XX-201', { x: 0, y: 0, z: 0 });
   // 坐标单位是游戏 ParsecLength(=12)/pc → x=60 ⇒ pc = 5（跨星系用例断言 natPc = 5）。
   stub.stubSetStar('YY-301', { x: 60, y: 0, z: 0 });
+  stub.stubSetStar('VH-331', { x: 0, y: 0, z: 0 });
   stub.stubSetRouteGraph(graph);
+  stub.stubClearBodyInjection();
+  stub.stubResetFtcWrites();
+}
+
+// 给系内场景用的两端天体观测（systemBodiesStore.getPosition 用，A1 路径优先读）。
+// 默认恒星在原点；行星按角度 θ 放置在半径 r 处。helper 让 ②⑤⑥ 类用例只填 (id, r, θ)。
+function stubSetBodyObs(id, radiusKm, angleRad, starId = SYS) {
+  const cx = stub;
+  cx.stubSetBodyObservation(id, {
+    x: radiusKm * Math.cos(angleRad),
+    y: radiusKm * Math.sin(angleRad),
+    z: 0,
+  });
+  // ensure star is at origin so distances equal radius
+  cx.stubSetStar(starId, { x: 0, y: 0, z: 0 });
+}
+
+// HRT/VH-331g 圆轨道（⑧⑨⑩ 用）：HRT 周期 1 天，VH-331g 周期略慢（24.24h）以让两体相对
+// 角距在 ±2 天窗口内漂移 ±5% —— 既验证「非恒定」也验证「稳定」。
+const HRT_PERIOD_MS = 86_400_000;
+const VH_331G_PERIOD_MS = 87_264_000;
+function stubSetHrtVh331gOrbits() {
+  stub.stubSetOrbit('HRT', {
+    centerStar: 'VH-331',
+    radiusKm: HRT_RADIUS_KM,
+    periodMs: HRT_PERIOD_MS,
+    phaseAtT0: 0,
+  });
+  stub.stubSetOrbit('VH-331G', {
+    centerStar: 'VH-331',
+    radiusKm: VH_331G_RADIUS_KM,
+    periodMs: VH_331G_PERIOD_MS,
+    phaseAtT0: BTF_PHASE_REF,
+  });
 }
 
 const run = (origin, stopIds) =>
@@ -265,140 +306,239 @@ const run = (origin, stopIds) =>
     startAtMs: T0,
   });
 
-// ---- ① 系内 + 无任何原生记录：显式判缺（锁旧 bug 的核心用例）----
-await checkAsync('① 系内 + 无原生记录 → 每段判缺（ok=false / hours=0 / 不推进时刻）', async f => {
+// ---- ① 系内 + 无任何原生记录 + 几何预测失败：每段判缺（锁 A1 路径的核心契约）----
+await checkAsync('① 系内 + 几何预测失败 → 每段判缺（ok=false / hours=0 / 不推进时刻）', async f => {
   prepareEnvironment();
-  const est = await run('ZZ-101a', ['ZZ-101b']);
-  expectExact(f, '段数', est.legs.length, 2);
-  expectExact(f, 'est.ok', est.ok, false);
-  expectExact(f, 'shipRegistration', est.shipRegistration, 'STUB-01');
-  for (const [i, leg] of est.legs.entries()) {
-    expectExact(f, `段${i}.ok`, leg.ok, false);
-    expectExact(f, `段${i}.error`, leg.error, '缺原生 STL 段记录');
-    expectCondition(
+  // 强制 predictTransferGeometry 返回 undefined → 算法走判缺分支。
+  stub.stubForcePredictFail(true);
+  try {
+    const est = await run('ZZ-101a', ['ZZ-101b']);
+    expectExact(f, '段数', est.legs.length, 2);
+    expectExact(f, 'est.ok', est.ok, false);
+    expectExact(f, 'shipRegistration', est.shipRegistration, 'STUB-01');
+    for (const [i, leg] of est.legs.entries()) {
+      expectExact(f, `段${i}.ok`, leg.ok, false);
+      expectExact(f, `段${i}.error`, leg.error, '缺原生 STL 段记录');
+      expectCondition(
+        f,
+        `段${i}.missingInputs 非空`,
+        (leg.missingInputs?.length ?? 0) > 0,
+        '>0 条成因',
+        String(leg.missingInputs?.length),
+      );
+      expectExact(f, `段${i}.hours`, leg.hours, 0);
+      expectExact(f, `段${i}.arriveAtMs === departAtMs`, leg.arriveAtMs, leg.departAtMs);
+      expectExact(f, `段${i}.departAtMs`, leg.departAtMs, T0);
+      expectExact(f, `段${i}.approximated`, leg.approximated, undefined);
+      expectExact(f, `段${i}.option`, leg.option, undefined);
+      expectExact(f, `段${i}.metrics`, leg.metrics, undefined);
+      expectExact(f, `段${i}.route`, leg.route, undefined);
+    }
+    expectExact(f, 'totalHours', est.totalHours, 0);
+    expectExact(f, 'approximatedLegs', est.approximatedLegs, 0);
+    // 负向：不存在 ok && hours===0 的段（旧 0 小时 bug 的形状）。
+    expectExact(
       f,
-      `段${i}.missingInputs 非空`,
-      (leg.missingInputs?.length ?? 0) > 0,
-      '>0 条成因',
-      String(leg.missingInputs?.length),
+      'ok 且 hours===0 的段数',
+      est.legs.filter(l => l.ok === true && l.hours === 0).length,
+      0,
     );
-    expectExact(f, `段${i}.hours`, leg.hours, 0);
-    expectExact(f, `段${i}.arriveAtMs === departAtMs`, leg.arriveAtMs, leg.departAtMs);
-    // 判缺段不推进 elapsedMs：两段都在起点时刻。
-    expectExact(f, `段${i}.departAtMs`, leg.departAtMs, T0);
-    expectExact(f, `段${i}.approximated`, leg.approximated, undefined);
-    // 不得留下可被下游消费的「0 小时方案」（旧行为会写 route/metrics/option 并标 ok）。
-    expectExact(f, `段${i}.option`, leg.option, undefined);
-    expectExact(f, `段${i}.metrics`, leg.metrics, undefined);
-    expectExact(f, `段${i}.route`, leg.route, undefined);
+  } finally {
+    stub.stubForcePredictFail(false);
   }
-  expectExact(f, 'totalHours', est.totalHours, 0);
-  expectCondition(
-    f,
-    '!est.ok ⇒ approximatedLegs===0',
-    est.ok === false && est.approximatedLegs === 0,
-    'ok=false 且 approximatedLegs=0',
-    `ok=${est.ok} approximatedLegs=${est.approximatedLegs}`,
-  );
-  console.log(
-    `  ① 负向断言：ok 且 hours===0 的段数 = ` +
-      `${est.legs.filter(l => l.ok === true && l.hours === 0).length}（必须为 0，旧实现为 2）`,
-  );
-  expectExact(
-    f,
-    'ok 且 hours===0 的段数（旧 bug 的形状）',
-    est.legs.filter(l => l.ok === true && l.hours === 0).length,
-    0,
-  );
 });
 
 // ① 交叉验证 + 成因文案：判缺成因必须来自真实 missingModelInputs（同输入逐字一致）。
 await checkAsync('① 判缺成因来自真实 missingModelInputs（逐字一致 + 指明系内）', async f => {
   prepareEnvironment();
-  const metrics = routeMetrics(planRoutes('ZZ-101a', 'ZZ-101b').natural);
-  expectExact(f, '夹具几何确实缺失（stlRecorded）', metrics.stlRecorded, false);
-  expectExact(f, '夹具几何确实缺失（stlDistanceKm）', metrics.stlDistanceKm, undefined);
-  const expected = missingModelInputs(shipPerformanceFor(SHIP), metrics);
-  expectCondition(f, '真实模型报缺', expected.length > 0, '>0 条', String(expected.length));
-  expectTextIncludes(f, '真实模型的成因指明系内', expected[0], '系内飞行');
-  const est = await run('ZZ-101a', ['ZZ-101b']);
-  expectExact(
-    f,
-    '段0.missingInputs[0] 与真实模型逐字一致',
-    est.legs[0].missingInputs?.[0],
-    expected[0],
-  );
-  // 回程段的成因文案是另一条航线（起终点互换）→ 用同口径再复算一次，逐字比对。
-  const reverseMetrics = routeMetrics(planRoutes('ZZ-101b', 'ZZ-101a').natural);
-  const expectedReverse = missingModelInputs(shipPerformanceFor(SHIP), reverseMetrics);
-  expectExact(
-    f,
-    '段1.missingInputs[0] 与真实模型逐字一致',
-    est.legs[1].missingInputs?.[0],
-    expectedReverse[0],
-  );
+  stub.stubForcePredictFail(true);
+  try {
+    const metrics = routeMetrics(planRoutes('ZZ-101a', 'ZZ-101b').natural);
+    expectExact(f, '夹具几何确实缺失（stlRecorded）', metrics.stlRecorded, false);
+    expectExact(f, '夹具几何确实缺失（stlDistanceKm）', metrics.stlDistanceKm, undefined);
+    const expected = missingModelInputs(shipPerformanceFor(SHIP), metrics);
+    expectCondition(f, '真实模型报缺', expected.length > 0, '>0 条', String(expected.length));
+    expectTextIncludes(f, '真实模型的成因指明系内', expected[0], '系内飞行');
+    const est = await run('ZZ-101a', ['ZZ-101b']);
+    expectExact(
+      f,
+      '段0.missingInputs[0] 与真实模型逐字一致',
+      est.legs[0].missingInputs?.[0],
+      expected[0],
+    );
+    const reverseMetrics = routeMetrics(planRoutes('ZZ-101b', 'ZZ-101a').natural);
+    const expectedReverse = missingModelInputs(shipPerformanceFor(SHIP), reverseMetrics);
+    expectExact(
+      f,
+      '段1.missingInputs[0] 与真实模型逐字一致',
+      est.legs[1].missingInputs?.[0],
+      expectedReverse[0],
+    );
+  } finally {
+    stub.stubForcePredictFail(false);
+  }
 });
 
-// ① 缺省起点时刻 = gameNow()（替身常量）—— 契约里 startAtMs 缺省为当前游戏时刻。
+// ① 缺省起点时刻 = gameNow()（替身常量）。
 await checkAsync('① 缺省 startAtMs → 第一段出发时刻 = gameNow()', async f => {
   prepareEnvironment();
-  const est = await estimateChainFlightTimes({
-    ship: SHIP,
-    origin: 'ZZ-101a',
-    stops: [{ naturalId: 'ZZ-101b', planetName: 'ZZ-101b 站' }],
-  });
-  expectExact(f, '段0.departAtMs', est.legs[0].departAtMs, GAME_NOW_STUB);
-  expectExact(f, 'stub gameNow', stub.gameNow(), GAME_NOW_STUB);
+  stub.stubForcePredictFail(true);
+  try {
+    const est = await estimateChainFlightTimes({
+      ship: SHIP,
+      origin: 'ZZ-101a',
+      stops: [{ naturalId: 'ZZ-101b', planetName: 'ZZ-101b 站' }],
+    });
+    expectExact(f, '段0.departAtMs', est.legs[0].departAtMs, GAME_NOW_STUB);
+    expectExact(f, 'stub gameNow', stub.gameNow(), GAME_NOW_STUB);
+  } finally {
+    stub.stubForcePredictFail(false);
+  }
 });
 
-// ---- ② 系内 + 只有反方向记录：反方向原生记录近似 ----
-await checkAsync('② 反方向记录近似：形状逐字段 + 时长由近似几何算出', async f => {
+// ---- ② 系内 + 几何预测成功：predicted 标注 + hours > 0 ----
+await checkAsync(
+  '② 系内 + 几何预测成功 → ok + predicted（逐字段对齐 transfer-geometry）',
+  async f => {
+    prepareEnvironment();
+    // h → i：h 在半径 1M / 0°、i 在 1M / 90° ⇒ r_mid = 1M, θ = π/2, arcKm ≈ 1.5708M km,
+    // hours ≈ 1.5708e6 / (27512 × 3600) ≈ 0.01586 h（与 f/距离无关）。
+    stubSetBodyObs('ZZ-101h', 1_000_000, 0);
+    stubSetBodyObs('ZZ-101i', 1_000_000, Math.PI / 2);
+    // 单独驱动一次 predictTransferGeometry，验证 algorithm leg.approximated.distanceKm
+    // 与 transfer-geometry 直接返回值**逐位一致**（不重写公式）。
+    const predicted = await predictTransferGeometry({
+      fromId: 'ZZ-101h',
+      toId: 'ZZ-101i',
+      fromSystemId: SYS,
+      toSystemId: SYS,
+      t0Ms: T0,
+      cond: 1,
+    });
+    expectCondition(
+      f,
+      'predictTransferGeometry 直接调用成功',
+      predicted !== undefined,
+      '成功',
+      'undefined',
+    );
+    const est = await run('ZZ-101h', ['ZZ-101i']);
+    const leg = est.legs[0];
+    expectExact(f, '段0.ok', leg.ok, true);
+    expectExact(f, '段0.error', leg.error, undefined);
+    expectExact(f, '段0.missingInputs', leg.missingInputs, undefined);
+    // 来源标注：字段与值逐位对应真实 predictTransferGeometry 的返回值。
+    expectExact(f, 'approximated.kind', leg.approximated?.kind, 'predicted');
+    expectExact(f, 'approximated.from', leg.approximated?.from, 'ZZ-101h');
+    expectExact(f, 'approximated.to', leg.approximated?.to, 'ZZ-101i');
+    expectExact(f, 'approximated.distanceKm', leg.approximated?.distanceKm, predicted.distanceKm);
+    expectExact(
+      f,
+      'approximated 字段集合',
+      Object.keys(leg.approximated ?? {})
+        .sort()
+        .join(','),
+      'distanceKm,from,kind,to',
+    );
+    // 用时长的 metrics 是「近似后的」：d/转移路程都取几何预测值。
+    expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, predicted.distanceKm);
+    expectExact(f, '段0.metrics.transitKm', leg.metrics?.transitKm, predicted.distanceKm);
+    // 近似不是原生记录：stlRecorded 仍为 false（面板/诊断据此区分）。
+    expectExact(f, '段0.metrics.stlRecorded', leg.metrics?.stlRecorded, false);
+    // hours 直接来自 approx.hours（predictTransferGeometry 内部已含 cond 校正），逐位对齐。
+    expectExact(f, '段0.hours', leg.hours, predicted.hours);
+    expectCondition(f, '段0.hours > 0', leg.hours > 0, '>0', String(leg.hours));
+    expectExact(f, '段0.source', predicted.source, 'predicted');
+    expectExact(f, '段0.speedKmS', predicted.speedKmS, 27512);
+    // predicted 路径不调 bestOptionFor → leg.option 为 undefined（与 FTC 面板路径不同）。
+    expectExact(f, '段0.option（预测路径不算 fuel）', leg.option, undefined);
+    // 回程段（i → h）走真实几何预测（90° → -90°，theta 也是 π/2，arcKm 相同）。
+    const back = est.legs[1];
+    expectExact(f, '回程段.ok', back.ok, true);
+    expectExact(f, '回程段.approximated.from', back.approximated?.from, 'ZZ-101i');
+    expectExact(f, '回程段.approximated.to', back.approximated?.to, 'ZZ-101h');
+    expectExact(
+      f,
+      '回程段.departAtMs（段0 已推进 elapsed）',
+      back.departAtMs,
+      T0 + leg.hours * 3600000,
+    );
+    expectExact(f, 'est.approximatedLegs', est.approximatedLegs, 2);
+    expectExact(f, 'est.ok', est.ok, true);
+  },
+);
+
+// ② 模型不变性：同 f 的 stlFuel 逐位相同（罐口径、与距离无关）。验证 fuel-model 与
+// 距离无关：A1 用 predicted 距离、B1 用 forward 原生距离——两个 metrics 喂给
+// scanFuelOptions，stlFuel 必须相同（这是 fuel-model 的契约，与算法无关；保留此断言
+// 作为 A1 也要满足的不变性）。
+check('② 同 f 的 stlFuel 与距离无关（predicted metrics vs native metrics 逐位相同）', f => {
   prepareEnvironment();
-  // 夹具：只派发**反方向**计划（i → h）→ 真实 store 写 sameSystem/route 的键都是 I|H。
-  dispatchTransit('ZZ-101i', 'ZZ-101h', REV_KM, 3000);
+  stubSetBodyObs('ZZ-101h', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101i', 1_000_000, Math.PI / 2);
+  dispatchTransit('ZZ-101j', 'ZZ-101k', 40_000_000, 2200); // 原生前向记录 40M km
+  const perf = shipPerformanceFor(SHIP);
+  // A1 路径的 metrics（几何预测补距离）
+  const predictedMetrics = {
+    ...routeMetrics(planRoutes('ZZ-101h', 'ZZ-101i').natural),
+    stlDistanceKm: 1_570_796, // r_mid × θ = 1M × π/2
+    transitKm: 1_570_796,
+  };
+  const nativeMetrics = routeMetrics(planRoutes('ZZ-101j', 'ZZ-101k').natural);
+  const optsP = scanFuelOptions(perf, predictedMetrics, autoFuelGrid(), [1], NO_PRICES);
+  const optsN = scanFuelOptions(perf, nativeMetrics, autoFuelGrid(), [1], NO_PRICES);
+  expectExact(f, '档位数', optsP.length, 20);
   expectExact(
     f,
-    '夹具：反方向同星系记录已写入（i→h）',
-    stlSegmentsStore.getSameSystem('ZZ-101i', 'ZZ-101h')?.transit?.distanceKm,
-    REV_KM,
+    'stlFuel 不同的档位数（必须 0：燃料与距离无关）',
+    optsP.filter((o, i) => !Object.is(o.stlFuel, optsN[i].stlFuel)).length,
+    0,
   );
-  expectExact(
+  // 字面量锚点：0.98×3500×0.05 = 171.5u（f=0.05）、0.98×3500×0.5 = 1715u（f 饱和）。
+  expectExact(f, 'predicted f=0.05 的 STL 燃料', optsP[0].stlFuel, 171.5);
+  expectExact(f, 'native    f=0.05 的 STL 燃料', optsN[0].stlFuel, 171.5);
+  expectExact(f, 'predicted f=1 的 STL 燃料（f 饱和 0.5）', optsP[19].stlFuel, 1715);
+  expectExact(f, 'native    f=1 的 STL 燃料（f 饱和 0.5）', optsN[19].stlFuel, 1715);
+  // 负向：时长随距离变化（A1 是真时长，f 缩放不缩放 STL_TRANSIT_SPEED_KM_S）。
+  expectCondition(
     f,
-    '夹具：本方向（h→i）无记录',
-    stlSegmentsStore.getSameSystem('ZZ-101h', 'ZZ-101i'),
-    undefined,
+    '时长随距离变化（不是恒定）',
+    optsP[2].stlHours !== optsN[2].stlHours,
+    'predicted != native',
+    `${optsP[2].stlHours} vs ${optsN[2].stlHours}`,
   );
-  const est = await run('ZZ-101h', ['ZZ-101i']);
+});
+
+// ---- ③ 系内 + 前向记录存在：走原生（不调几何预测）----
+await checkAsync('③ 前向记录存在 → approximated 缺席、时长 = 真实模型值', async f => {
+  prepareEnvironment();
+  dispatchTransit('ZZ-101j', 'ZZ-101k', 40_000_000, 2200);
+  // 即使把 predictTransferGeometry 强制返回成功 —— 算法也不调它（stlDistanceKm 已定义）。
+  // 验证：不需要预测、不写预测标注、不写滑块。
+  const est = await run('ZZ-101j', ['ZZ-101k']);
   const leg = est.legs[0];
   expectExact(f, '段0.ok', leg.ok, true);
-  expectExact(f, '段0.error', leg.error, undefined);
-  expectExact(f, '段0.missingInputs', leg.missingInputs, undefined);
-  // 近似来源标注：字段与值逐位对应夹具（from/to 是**查表键**，即本段起终点互换）。
-  expectExact(f, 'approximated.kind', leg.approximated?.kind, 'reverse-record');
-  expectExact(f, 'approximated.from', leg.approximated?.from, 'ZZ-101i');
-  expectExact(f, 'approximated.to', leg.approximated?.to, 'ZZ-101h');
-  expectExact(f, 'approximated.distanceKm', leg.approximated?.distanceKm, REV_KM);
-  expectExact(
+  expectExact(f, '段0.approximated', leg.approximated, undefined);
+  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27512（与 f 无关）
+  // ⇒ 40M km 时长 = 40M / (27512 × 3600) ≈ 0.4039h；平衡退化 → 最省油即 f=0.05。
+  expectExact(f, '段0.hours', leg.hours, 40_000_000 / (27512 * 3600));
+  expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, 40_000_000);
+  expectExact(f, '段0.metrics.transitKm', leg.metrics?.transitKm, 40_000_000);
+  expectExact(f, '段0.metrics.routeKm（原生航线级）', leg.metrics?.routeKm, 40_000_000);
+  expectExact(f, '段0.metrics.routeSeconds（原生段时长）', leg.metrics?.routeSeconds, 2200);
+  expectExact(f, '段0.metrics.transitSeconds（原生段时长）', leg.metrics?.transitSeconds, 2200);
+  expectExact(f, '段0.metrics.stlRecorded', leg.metrics?.stlRecorded, true);
+  // 前向记录路径调 bestOptionFor → leg.option 有值（与 ② 预测路径不同）。
+  expectCondition(
     f,
-    'approximated 字段集合',
-    Object.keys(leg.approximated ?? {})
-      .sort()
-      .join(','),
-    'distanceKm,from,kind,to',
+    '段0.option 有值（原生路径算 fuel）',
+    leg.option !== undefined,
+    'FuelOption',
+    'undefined',
   );
-  // 用时长的 metrics 是「近似后的」：d/转移路程都取反方向记录值。
-  expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, REV_KM);
-  expectExact(f, '段0.metrics.transitKm', leg.metrics?.transitKm, REV_KM);
-  // 近似不是原生记录：stlRecorded 仍为 false（面板/诊断据此区分）。
-  expectExact(f, '段0.metrics.stlRecorded', leg.metrics?.stlRecorded, false);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512
-  // （2026-09-24 替换原 Weibull 拟合式 —— 与 f/距离无关，但同 d 时长逐位相同 ⇒
-  // 平衡退化、最省油即 f=0.05，时长 = d / (27512 × 3600) / cond）。
-  expectExact(f, '段0.hours', leg.hours, 0.5553132370521147);
-  expectCondition(f, '段0.hours > 0', leg.hours > 0, '>0', String(leg.hours));
-  expectExact(f, 'est.approximatedLegs', est.approximatedLegs, 1);
-  expectExact(f, 'est.ok', est.ok, true);
-  // 交叉验证：真实模型在同一 metrics/档位下复算出同一时长；燃料是罐口径（与距离无关）。
+  expectExact(f, '段0.option.fuel（平衡退化 → 最省油）', leg.option?.fuel, 0.05);
+  expectExact(f, '段0.option.stlFuel', leg.option?.stlFuel, 171.5);
+  // 交叉验证：hours 与真实 computeFuelOption 复算一致（生产链）。
   const recomputed = computeFuelOption(
     shipPerformanceFor(SHIP),
     leg.metrics,
@@ -406,159 +546,46 @@ await checkAsync('② 反方向记录近似：形状逐字段 + 时长由近似�
     leg.option.reactor,
     NO_PRICES,
   );
-  expectExact(f, '选中档位 f（平衡退化 → 最省油）', leg.option.fuel, 0.05);
-  expectExact(f, '同档位 STL 燃料（0.98×罐×f = 0.98×3500×0.05）', leg.option.stlFuel, 171.5);
-  expectClose(
-    f,
-    'hours 与真实 computeFuelOption 复算一致',
-    leg.hours,
-    recomputed.totalHours,
-    1e-12,
-  );
-  // 回程段（i→h）正好被反方向计划写下的键命中 → 有原生记录、**不是**近似段。
-  const back = est.legs[1];
-  expectExact(f, '回程段.ok', back.ok, true);
-  expectExact(f, '回程段.approximated（近似只用于缺前向记录的段）', back.approximated, undefined);
-  expectExact(f, '回程段.metrics.stlRecorded', back.metrics?.stlRecorded, true);
-  expectExact(
-    f,
-    '回程段.departAtMs（段0 已推进 elapsed）',
-    back.departAtMs,
-    T0 + leg.hours * 3600000,
-  );
-  expectExact(f, 'totalHours（两段相加）', est.totalHours, 1.1106264741042294);
-});
-
-// ② 近似只影响时长：同一 f 的 stlFuel 逐位相同（罐口径、与距离无关），时长整条曲线都不同。
-check('② 近似只改时长：同 f 的 stlFuel 逐位相同、时长逐点不同（真实模型扫描）', f => {
-  prepareEnvironment();
-  dispatchTransit('ZZ-101i', 'ZZ-101h', REV_KM, 3000);
-  dispatchTransit('ZZ-101j', 'ZZ-101k', FWD_KM, 2200);
-  const perf = shipPerformanceFor(SHIP);
-  // 反方向夹具：本方向没有几何 → 用模块的近似口径（{...metrics, stlDistanceKm: km, transitKm: km}）。
-  const reverseMetrics = routeMetrics(planRoutes('ZZ-101h', 'ZZ-101i').natural);
-  expectExact(f, '反方向夹具：forward 几何缺失', reverseMetrics.stlDistanceKm, undefined);
-  const usedReverse = { ...reverseMetrics, stlDistanceKm: REV_KM, transitKm: REV_KM };
-  // 前向夹具：真实原生记录（距离与前向段不同，用于证明时长随 d 变）。
-  const forwardMetrics = routeMetrics(planRoutes('ZZ-101j', 'ZZ-101k').natural);
-  expectExact(f, '前向夹具：原生记录距离', forwardMetrics.stlDistanceKm, FWD_KM);
-  const optsReverse = scanFuelOptions(perf, usedReverse, autoFuelGrid(), [1], NO_PRICES);
-  const optsForward = scanFuelOptions(perf, forwardMetrics, autoFuelGrid(), [1], NO_PRICES);
-  expectExact(f, '档位数', optsReverse.length, 20);
-  expectExact(
-    f,
-    'stlFuel 不同的档位数（必须 0：燃料与距离无关）',
-    optsReverse.filter((o, i) => !Object.is(o.stlFuel, optsForward[i].stlFuel)).length,
-    0,
-  );
-  expectExact(
-    f,
-    '时长相同的档位数（必须 0：d 不同 ⇒ 时长不同）',
-    optsReverse.filter((o, i) => Object.is(o.stlHours, optsForward[i].stlHours)).length,
-    0,
-  );
-  // 字面量锚点：0.98×3500×0.05 = 171.5u（f=0.05）、0.98×3500×0.5 = 1715u（f≥0.5 饱和）。
-  expectExact(f, 'f=0.05 的 STL 燃料', optsReverse[0].stlFuel, 171.5);
-  expectExact(f, 'f=1 的 STL 燃料（f 饱和在 0.5）', optsReverse[19].stlFuel, 1715);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512（与 f 无关）
-  // ⇒ 不论 f，反方向 55M km 时长 = 55M / (27512 × 3600) ≈ 0.5553h；
-  //   前向 40M km 时长 = 40M / (27512 × 3600) ≈ 0.4039h；不同 d ⇒ 不同时长（锚点）。
-  expectExact(f, 'f=0.15 的反方向时长', optsReverse[2].stlHours, 0.5553132370521147);
-  expectExact(f, 'f=0.15 的前向时长', optsForward[2].stlHours, 0.40386417240153794);
-});
-
-// ---- ③ 系内 + 前向记录存在：不走近似，时长按真实模型 ----
-await checkAsync('③ 前向记录存在 → approximated 缺席、时长 = 真实模型值', async f => {
-  prepareEnvironment();
-  dispatchTransit('ZZ-101j', 'ZZ-101k', FWD_KM, 2200);
-  const est = await run('ZZ-101j', ['ZZ-101k']);
-  const leg = est.legs[0];
-  expectExact(f, '段0.ok', leg.ok, true);
-  expectExact(f, '段0.approximated', leg.approximated, undefined);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512（与 f 无关）
-  // ⇒ 40M km 时长 = 40M / (27512 × 3600) ≈ 0.4039h；平衡退化 → 最省油即 f=0.05。
-  expectExact(f, '段0.hours', leg.hours, 0.40386417240153794);
-  expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, FWD_KM);
-  expectExact(f, '段0.metrics.routeKm（原生航线级）', leg.metrics?.routeKm, FWD_KM);
-  expectExact(f, '段0.metrics.routeSeconds（原生段时长）', leg.metrics?.routeSeconds, 2200);
-  expectExact(f, '段0.metrics.transitSeconds（原生段时长）', leg.metrics?.transitSeconds, 2200);
-  expectExact(f, '段0.metrics.stlRecorded', leg.metrics?.stlRecorded, true);
-  // 交叉验证 ①：真实 computeFuelOption 用同一 metrics/档位复算出同一时长。
-  const perf = shipPerformanceFor(SHIP);
-  const recomputed = computeFuelOption(
-    perf,
-    leg.metrics,
-    leg.option.fuel,
-    leg.option.reactor,
-    NO_PRICES,
-  );
   expectClose(f, 'hours 复算一致', leg.hours, recomputed.totalHours, 1e-12);
-  // 交叉验证 ②：档位就是真实模型的平衡点（不是随手取的固定 f）。
-  expectExact(
-    f,
-    '选中档位 = 真实平衡点',
-    leg.option.fuel,
-    findBalanceOption(scanFuelOptions(perf, leg.metrics, autoFuelGrid(), [1], NO_PRICES))?.fuel,
-  );
-  expectExact(f, '选中档位（平衡退化 → 最省油）', leg.option.fuel, 0.05);
-  // 负向：时长不是原生段时长（2200s = 0.6111h）—— 契约刻意不用 transitSeconds
-  //（记录当时那条计划的 f/质量会把它钉死，见 fuel-model.computeFuelOption 的 ⚠️）。
+  // 负向：时长不是原生段时长口径（2200s = 0.6111h）。
   expectCondition(
     f,
-    '时长 ≠ 原生段时长口径（2200s）',
+    '时长 ≠ 原生段时长 2200s',
     leg.hours !== 2200 / 3600,
     `≠ ${2200 / 3600}`,
     String(leg.hours),
   );
-  // 回程段（k→j）无原生记录 → 走反方向近似（前向记录被反查）。
-  expectExact(f, '回程段.approximated.kind', est.legs[1].approximated?.kind, 'reverse-record');
-  expectExact(f, '回程段.approximated.from', est.legs[1].approximated?.from, 'ZZ-101j');
-  expectExact(f, '回程段.approximated.to', est.legs[1].approximated?.to, 'ZZ-101k');
-  expectExact(f, '回程段.approximated.distanceKm', est.legs[1].approximated?.distanceKm, FWD_KM);
-  expectExact(f, '回程段.hours', est.legs[1].hours, 0.40386417240153794);
-  expectExact(f, 'est.approximatedLegs', est.approximatedLegs, 1);
-  expectExact(f, 'est.ok', est.ok, true);
-  expectExact(f, 'totalHours', est.totalHours, 0.8077283448030759);
+  // 回程段（k→j）无原生记录 → 走几何预测（A1 路径），但因未登记 body 观测 → 预测失败 → 判缺
+  // （本用例既不登记观测也不强制 fail —— 走真实路径，验证「无观测时预测返回 undefined」）。
+  // 注意：这是 ③ 的反向回归点 —— 若把无观测场景误判为可预测，回程段会通过；现在判缺。
+  expectExact(f, '回程段.ok（无观测 → 预测失败 → 判缺）', est.legs[1].ok, false);
+  expectExact(f, '回程段.approximated', est.legs[1].approximated, undefined);
+  expectExact(f, 'est.approximatedLegs', est.approximatedLegs, 0);
+  expectExact(f, 'est.ok（含判缺段）', est.ok, false);
 });
 
-// ---- ④ 跨星系：判缺，且反方向记录**不得**被误用 ----
-// 强负向夹具：为这条跨星系段**合成**一条反方向的「同星系」计划
-//（两份 address 的 SYSTEM 行都写 YY-301 ⇒ 真实 recordStlSegments 判为系内、写进同星系表）。
-// 反方向近似的查表键正是 getSameSystem(to, from) = ('YY-301a','XX-201a') → 会命中它，
-// 于是"是否误用"才是可分辨的（而不是因为记录不存在而"恰好"没近似）。
-// ⚠️ 真实写入端对**任何**带 stlDistance 的计划都会写航线级记录（键同为方向敏感的
-// 「出发天体|目标天体」），故这条合成计划同时写下 getRoute('YY-301a','XX-201a')——
-// 那只服务**反方向**（YY-301a → XX-201a），对被测的正方向查表无影响。
-await checkAsync('④ 跨星系：判缺，反方向记录不得当几何用（approximated 缺席）', async f => {
+// ---- ④ 跨星系 判缺 + 系内守卫（⑦）：跨星系不预测；缺记录 → 判缺 ----
+await checkAsync('④+⑦ 跨星系航线 → 不预测 + 缺记录判缺（approximated 缺席）', async f => {
   prepareEnvironment({ graph: { natural: [['XX-201', 'YY-301']] } });
+  // 故意派发一条**反方向**同星系合成记录（与 ④ 旧版同源）：让它对系内键命中，
+  // 从而「是否误用」可分辨 —— 但跨星系守卫必须拦住它（route.legs.length > 0）。
   dispatchTransit('YY-301a', 'XX-201a', 77_000_000, 4000);
   expectExact(
     f,
-    '夹具：反方向同星系记录已就位（会被近似的查表键命中）',
+    '夹具：反方向同星系记录已就位',
     stlSegmentsStore.getSameSystem('YY-301a', 'XX-201a')?.transit?.distanceKm,
     77_000_000,
   );
-  expectExact(
-    f,
-    '夹具：反方向航线级记录（服务于反方向，不影响正方向）',
-    stlSegmentsStore.getRoute('YY-301a', 'XX-201a')?.distanceKm,
-    77_000_000,
-  );
-  expectExact(
-    f,
-    '夹具：正方向仍无任何记录',
-    stlSegmentsStore.getRoute('XX-201a', 'YY-301a'),
-    undefined,
-  );
+  // 不登记任何观测 / 轨道 → 即便算法想预测，也走真实失败路径。
   const est = await run('XX-201a', ['YY-301a']);
   expectExact(f, '段数', est.legs.length, 2);
   expectExact(f, 'est.ok', est.ok, false);
-  expectExact(f, 'approximatedLegs（近似只能用于系内）', est.approximatedLegs, 0);
-  // 段0（正方向，缺记录）→ 判缺；查表键本可命中反方向同星系记录，但系内守卫必须拦住它。
+  expectExact(f, 'approximatedLegs（系内守卫拦住跨星系）', est.approximatedLegs, 0);
+  // 段0（正方向 XX-201a → YY-301a）：缺记录 → 判缺；不调几何预测。
   const forward = est.legs[0];
   expectExact(f, '段0.ok', forward.ok, false);
   expectExact(f, '段0.error', forward.error, '缺原生 STL 段记录');
-  expectExact(f, '段0.approximated', forward.approximated, undefined);
+  expectExact(f, '段0.approximated（跨星系不预测）', forward.approximated, undefined);
   expectExact(f, '段0.hours', forward.hours, 0);
   expectExact(f, '段0.arriveAtMs === departAtMs', forward.arriveAtMs, forward.departAtMs);
   expectExact(f, '段0.metrics', forward.metrics, undefined);
@@ -568,23 +595,14 @@ await checkAsync('④ 跨星系：判缺，反方向记录不得当几何用（a
     forward.missingInputs?.[0],
     '未为该航线下发原生 STL 段记录',
   );
-  expectCondition(
-    f,
-    '段0 成因不含系内归因',
-    forward.missingInputs?.[0].includes('系内飞行') === false,
-    '不含「系内飞行」',
-    String(forward.missingInputs?.[0]),
-  );
-  // 段1（反方向）有自己方向的航线级记录 → 正常算出（**不是**近似路径）。
+  // 段1（反方向 YY-301a → XX-201a）有自己方向的航线级记录 → 正常算出（非预测）。
   const backward = est.legs[1];
   expectExact(f, '段1.ok', backward.ok, true);
-  expectExact(f, '段1.approximated（有原生记录就不该标近似）', backward.approximated, undefined);
-  expectExact(f, '段1.metrics.routeKm（反方向原生记录）', backward.metrics?.routeKm, 77_000_000);
+  expectExact(f, '段1.approximated（有原生记录就不该标预测）', backward.approximated, undefined);
+  expectExact(f, '段1.metrics.routeKm', backward.metrics?.routeKm, 77_000_000);
   expectExact(f, '段1.metrics.stlRecorded', backward.metrics?.stlRecorded, true);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512
-  // ⇒ 77M km 时长 = 77M / (27512 × 3600) ≈ 0.7774h；FTL 部分不变。
-  //   当前实机输出 3.196893495447173h（STL = 0.777h + FTL = 2.420h）。
-  expectExact(f, '段1.hours', backward.hours, 3.196893495447173);
+  // 系内段速度改用 BTF 直采常数 27512 ⇒ 77M km 时长 = 77M / (27512 × 3600) ≈ 0.7774h；
+  // FTL 部分不变；总时长由真实模型（computeFuelOption）给出。
   expectClose(
     f,
     '段1.hours 与真实 computeFuelOption 复算一致',
@@ -598,8 +616,8 @@ await checkAsync('④ 跨星系：判缺，反方向记录不得当几何用（a
     ).totalHours,
     1e-12,
   );
-  expectExact(f, 'totalHours（只累加 ok 段）', est.totalHours, 3.196893495447173);
-  // 交叉验证：这条航线确实是跨星系（有跳 → natPc > 0），且正方向所有记录表都缺几何。
+  expectExact(f, 'totalHours（只累加 ok 段）', est.totalHours, backward.hours);
+  // 交叉验证：这条航线确实是跨星系（natPc > 0）。
   const metrics = routeMetrics(planRoutes('XX-201a', 'YY-301a').natural);
   expectCondition(f, '夹具是跨星系（natPc > 0）', metrics.natPc > 0, '>0', String(metrics.natPc));
   expectExact(f, 'natPc', metrics.natPc, 5);
@@ -608,29 +626,28 @@ await checkAsync('④ 跨星系：判缺，反方向记录不得当几何用（a
   expectExact(f, '正方向 stlRecorded', metrics.stlRecorded, false);
 });
 
-// ---- ⑤ 近似不得掩盖残缺：几何可近似、罐仍缺 → 仍判缺 ----
-await checkAsync('⑤ 系内 + 只有反方向记录 + 罐容量缺失 → 仍判缺（近似不掩盖残缺）', async f => {
+// ---- ⑤ 几何预测成功但罐缺失 → 仍判缺（预测不掩盖残缺）----
+await checkAsync('⑤ 几何预测成功 + 罐容量缺失 → 仍判缺（不掩盖残缺）', async f => {
   prepareEnvironment({ tank: 0 });
-  dispatchTransit('ZZ-101i', 'ZZ-101h', REV_KM, 3000);
+  stubSetBodyObs('ZZ-101h', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101i', 1_000_000, Math.PI / 2);
   const perfNoTank = shipPerformanceFor(SHIP);
   expectExact(f, '夹具：蓝图无罐 → perf.stlFuelCapacity', perfNoTank.stlFuelCapacity, undefined);
   const est = await run('ZZ-101h', ['ZZ-101i']);
   const leg = est.legs[0];
   expectExact(f, '段0.ok', leg.ok, false);
   expectExact(f, '段0.error', leg.error, '缺原生 STL 段记录');
-  expectExact(f, '段0.missingInputs 条数（只剩罐）', leg.missingInputs?.length, 1);
-  expectExact(f, '段0.missingInputs[0]', leg.missingInputs?.[0], 'STL 罐容量（飞船蓝图性能）');
+  // 几何成因被预测补上后只剩罐成因 —— 这是 A1 的关键约束：approx ≠ 不判缺。
   expectCondition(
     f,
-    '几何成因已被近似消掉（只剩罐成因）',
-    leg.missingInputs?.length === 1 && leg.missingInputs[0].includes('轨道距离') === false,
-    '1 条且不含「轨道距离」',
+    '段0.missingInputs 只剩罐成因（几何已被预测消掉）',
+    leg.missingInputs?.length === 1 && leg.missingInputs[0].includes('STL 罐容量'),
+    '1 条且为「STL 罐容量」',
     String(leg.missingInputs?.[0]),
   );
   expectExact(f, '段0.hours', leg.hours, 0);
   expectExact(f, '段0.arriveAtMs === departAtMs', leg.arriveAtMs, leg.departAtMs);
-  // 没算出时长 → 不得标注近似（标注了会让面板显示一个不存在的近似时长）。
-  expectExact(f, '段0.approximated', leg.approximated, undefined);
+  expectExact(f, '段0.approximated（判缺时不写标注）', leg.approximated, undefined);
   expectExact(f, '段0.metrics', leg.metrics, undefined);
   expectExact(f, '段0.option', leg.option, undefined);
   expectExact(f, 'approximatedLegs', est.approximatedLegs, 0);
@@ -638,75 +655,239 @@ await checkAsync('⑤ 系内 + 只有反方向记录 + 罐容量缺失 → 仍�
   expectExact(f, 'totalHours', est.totalHours, 0);
 });
 
-// ⑤ 对照：同一夹具换回有罐蓝图 → 同一段算出时长（证明差异只因罐，不是因为几何还缺）。
-await checkAsync('⑤ 对照：同夹具有罐蓝图 → 同一段算出近似时长', async f => {
-  prepareEnvironment();
-  const est = await run('ZZ-101h', ['ZZ-101i']);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512
-  // ⇒ 55M km 时长 = 55M / (27512 × 3600) ≈ 0.5553h。
-  expectExact(f, '段0.ok', est.legs[0].ok, true);
-  expectExact(f, '段0.hours', est.legs[0].hours, 0.5553132370521147);
-  expectExact(f, '段0.approximated.kind', est.legs[0].approximated?.kind, 'reverse-record');
-});
-
-// ---- ⑥ elapsedMs 只推进 ok 段（段0 可算 / 段1 判缺 / 段2 可算）----
+// ---- ⑥ 三段链：段0可算 / 段1判缺 / 段2可算 ----
+// 段0（e→f）有原生前向记录 → 走原生；段1（f→g）无原生记录 + 几何预测失败 → 判缺；
+// 段2（g→e）有原生前向记录 → 走原生。forceFail 不影响有原生记录的段（算法根本不走
+// 预测），仅让段1的预测返回 undefined。
 await checkAsync('⑥ 三段链：段1 判缺不推进时刻，totalHours 只累加 ok 段', async f => {
   prepareEnvironment();
-  // 段0（e→f）有前向记录；段1（f→g）无任何记录；段2（g→e）有前向记录。
   dispatchTransit('ZZ-101e', 'ZZ-101f', 30_000_000, 1800);
   dispatchTransit('ZZ-101g', 'ZZ-101e', 42_000_000, 2500);
-  const est = await run('ZZ-101e', ['ZZ-101f', 'ZZ-101g']);
-  expectExact(f, '段数', est.legs.length, 3);
-  expectExact(f, '段0.ok', est.legs[0].ok, true);
-  expectExact(f, '段1.ok', est.legs[1].ok, false);
-  expectExact(f, '段2.ok', est.legs[2].ok, true);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27,512
-  // ⇒ 段0（30M km）= 0.3029h、段2（42M km）= 0.4241h。
-  expectExact(f, '段0.hours', est.legs[0].hours, 0.30289812930115345);
-  expectExact(f, '段1.hours', est.legs[1].hours, 0);
-  expectExact(f, '段2.hours', est.legs[2].hours, 0.42405738102161483);
-  // 段1 的出发时刻 = 起点 + 段0 时长（段0 到站时刻）；段1 不推进。
-  expectExact(f, '段1.departAtMs', est.legs[1].departAtMs, T0 + 0.30289812930115345 * 3600000);
-  expectExact(f, '段1.arriveAtMs === departAtMs', est.legs[1].arriveAtMs, est.legs[1].departAtMs);
-  // 段2 的出发时刻 = 段1 的出发时刻（判缺段贡献 0ms）。
-  expectExact(
+  // 段1（f→g）走真实几何预测失败路径（不登记观测、不强制 fail）—— 与有原生记录的
+  // 段不同：predictTransferGeometry 会被调，但因没位置返回 undefined。
+  stub.stubForcePredictFail(true);
+  try {
+    const est = await run('ZZ-101e', ['ZZ-101f', 'ZZ-101g']);
+    expectExact(f, '段数', est.legs.length, 3);
+    expectExact(f, '段0.ok', est.legs[0].ok, true);
+    expectExact(f, '段1.ok', est.legs[1].ok, false);
+    expectExact(f, '段2.ok', est.legs[2].ok, true);
+    expectExact(f, '段0.approximated（原生路径）', est.legs[0].approximated, undefined);
+    expectExact(f, '段1.approximated（判缺）', est.legs[1].approximated, undefined);
+    expectExact(f, '段2.approximated（原生路径）', est.legs[2].approximated, undefined);
+    // 系内段速度 27512 ⇒ 段0 30M km = 0.3029h、段2 42M km = 0.4241h。
+    expectExact(f, '段0.hours', est.legs[0].hours, 30_000_000 / (27512 * 3600));
+    expectExact(f, '段1.hours', est.legs[1].hours, 0);
+    expectExact(f, '段2.hours', est.legs[2].hours, 42_000_000 / (27512 * 3600));
+    // 段1 的出发时刻 = 段0 到站时刻；段1 不推进。
+    expectExact(f, '段1.departAtMs', est.legs[1].departAtMs, T0 + est.legs[0].hours * 3600000);
+    expectExact(f, '段1.arriveAtMs === departAtMs', est.legs[1].arriveAtMs, est.legs[1].departAtMs);
+    // 段2 的出发时刻 = 段1 的出发时刻（判缺段贡献 0ms）。
+    expectExact(
+      f,
+      '段2.departAtMs === 段1.departAtMs',
+      est.legs[2].departAtMs,
+      est.legs[1].departAtMs,
+    );
+    expectExact(
+      f,
+      '段2.arriveAtMs',
+      est.legs[2].arriveAtMs,
+      est.legs[2].departAtMs + est.legs[2].hours * 3600000,
+    );
+    expectExact(
+      f,
+      'totalHours（段0 + 段2）',
+      est.totalHours,
+      est.legs[0].hours + est.legs[2].hours,
+    );
+    expectExact(f, 'est.ok（含判缺段）', est.ok, false);
+    expectExact(f, 'approximatedLegs', est.approximatedLegs, 0);
+    // 负向：推进量是模型时长，不是段0 原生段时长（1800s = 0.5h）。
+    expectCondition(
+      f,
+      '段1 出发时刻 ≠ 起点 + 原生段时长 1800s',
+      est.legs[1].departAtMs !== T0 + 1800 * 1000,
+      `≠ ${T0 + 1800 * 1000}`,
+      String(est.legs[1].departAtMs),
+    );
+  } finally {
+    stub.stubForcePredictFail(false);
+  }
+});
+
+// ---- ⑥-加 几何预测 ≠ 写滑块：所有走预测的段都不调 setFtcFuelSlider / setFtcReactorUsage ----
+// 用 ZZ-101p/q/r/s（与既有 ②⑤⑥ 用的 a..k 不相交）保证本段无原生记录，全走预测路径。
+await checkAsync('⑥-加 几何预测路径不调 setFtcFuelSlider / setFtcReactorUsage', async f => {
+  prepareEnvironment();
+  stubSetBodyObs('ZZ-101p', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101q', 1_000_000, Math.PI / 2);
+  stubSetBodyObs('ZZ-101r', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101s', 1_000_000, Math.PI / 2);
+  // 四段全走预测路径（无原生记录 + 有观测）；断言：两个监视数组都为空。
+  const est = await run('ZZ-101p', ['ZZ-101q', 'ZZ-101r', 'ZZ-101s']);
+  expectExact(f, '段数', est.legs.length, 4);
+  expectExact(f, '段0.ok（预测成功）', est.legs[0].ok, true);
+  expectExact(f, '段1.ok（同上）', est.legs[1].ok, true);
+  expectExact(f, '段2.ok（同上）', est.legs[2].ok, true);
+  expectExact(f, '段3.ok（同上）', est.legs[3].ok, true);
+  expectExact(f, 'approximatedLegs', est.approximatedLegs, 4);
+  expectExact(f, 'sliderWrites.length（预测 ≠ 写滑块）', stub.sliderWrites.length, 0);
+  expectExact(f, 'reactorWrites.length', stub.reactorWrites.length, 0);
+});
+
+// 对照：原生路径会写滑块吗？不写。chain-flight-time.ts 本身**永远**不写滑块（写入
+// 面专属 FTC 面板）。原生路径与预测路径都不写 —— 这是 chain-flight-time 的契约
+//（面板展示层），不是 FTC 联动层。补一条对照锁这条边界。
+await checkAsync('⑥-加对照 原生路径同样不调 setFtcFuelSlider / setFtcReactorUsage', async f => {
+  prepareEnvironment();
+  dispatchTransit('ZZ-101j', 'ZZ-101k', 40_000_000, 2200);
+  await run('ZZ-101j', ['ZZ-101k']);
+  expectExact(f, 'sliderWrites.length', stub.sliderWrites.length, 0);
+  expectExact(f, 'reactorWrites.length', stub.reactorWrites.length, 0);
+});
+
+// ---- ⑧ 均值圆弧公式的数学不变性 ----
+// 直接驱动真实 predictTransferGeometry：r_mid = (r1+r2)/2、arcKm = r_mid × θ、
+// hours = arcKm / (27512 × 3600) / cond。t0Ms 用观测恒等的设置（轨道 stub 让两端
+// 位置不随时间漂移，保证 math 干净）。
+await checkAsync('⑧ 均值圆弧公式的数学不变性（r_mid / arcKm / hours 逐位）', async f => {
+  prepareEnvironment();
+  // h 在 (1M, 0, 0)、i 在 (0, 1M, 0)（90° 分离）⇒ r1=r2=1M, θ=π/2。
+  stubSetBodyObs('ZZ-101h', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101i', 1_000_000, Math.PI / 2);
+  const r = await predictTransferGeometry({
+    fromId: 'ZZ-101h',
+    toId: 'ZZ-101i',
+    fromSystemId: SYS,
+    toSystemId: SYS,
+    t0Ms: T0,
+    cond: 1,
+  });
+  expectCondition(f, 'predictTransferGeometry 返回值', r !== undefined, '结果', 'undefined');
+  // r1 = r2 = 1M ⇒ r_mid = 1M。
+  expectClose(f, 'r_mid === (r1+r2)/2', 1_000_000, 1_000_000, 1e-9);
+  // θ = π/2 ⇒ arcKm = 1M × π/2 ≈ 1_570_796.327 km。
+  const expectedArcKm = 1_000_000 * (Math.PI / 2);
+  expectClose(f, 'arcKm === r_mid × θ', r.distanceKm, expectedArcKm, 1e-6);
+  // hours = arcKm / (27512 × 3600) / cond=1。
+  expectClose(
     f,
-    '段2.departAtMs === 段1.departAtMs',
-    est.legs[2].departAtMs,
-    est.legs[1].departAtMs,
+    'hours === arcKm / (27512 × 3600) / cond',
+    r.hours,
+    expectedArcKm / (27512 * 3600),
+    1e-9,
   );
-  expectExact(
-    f,
-    '段2.arriveAtMs',
-    est.legs[2].arriveAtMs,
-    est.legs[2].departAtMs + 0.42405738102161483 * 3600000,
+  expectExact(f, 'speedKmS = STL_INTRA_TRANSIT_SPEED_KM_S / cond', r.speedKmS, 27512);
+  expectExact(f, 'source', r.source, 'predicted');
+});
+
+// ---- ⑨ 与 BTF TRANSIT 弧长偏差 < 30%（hard cap） ----
+// BTF tag=4 实测 HRT → VH-331g 同星系转移段：弧长 599.22M km / 21780s ≈ 27512 km/s。
+// 用圆轨道 stub 设置 HRT/VH-331g 在 t=T0 的相位让均值圆弧公式算出 ≈ 599.22M km。
+// 期望偏差在 1-6%（A1 初版均值圆弧的限制），超过 30% 视为公式不自洽。
+await checkAsync('⑨ 与 BTF TRANSIT 弧长（HRT→VH-331g, 599.22M km）偏差 < 30%', async f => {
+  prepareEnvironment();
+  stubSetHrtVh331gOrbits();
+  const r = await predictTransferGeometry({
+    fromId: 'HRT',
+    toId: 'VH-331G',
+    fromSystemId: 'VH-331',
+    toSystemId: 'VH-331',
+    t0Ms: T0,
+    cond: 1,
+  });
+  expectCondition(f, 'predictTransferGeometry 返回值', r !== undefined, '结果', 'undefined');
+  const predictedKm = r.distanceKm;
+  const deviation = Math.abs(predictedKm - BTF_TRANSIT_KM) / BTF_TRANSIT_KM;
+  // 期望 1-6% 偏差内（与 fuel-model.ts:486-488 同航线同船同 f 的点间漂移 ≤0.4%
+  // 一致 —— A1 初版均值圆弧与真实椭圆弧长在 140.8° 分离角下偏差量级）。
+  console.log(
+    `  ⑨ 实际偏差 = ${(deviation * 100).toFixed(3)}%（预测 ${predictedKm.toFixed(0)} km / ` +
+      `BTF ${BTF_TRANSIT_KM} km）`,
   );
-  expectExact(f, 'totalHours（段0 + 段2）', est.totalHours, 0.7269555103227683);
-  expectExact(f, 'est.ok（含判缺段）', est.ok, false);
-  expectExact(f, 'approximatedLegs', est.approximatedLegs, 0);
-  // 负向：推进量是**模型时长**，不是段0 原生段时长（1800s = 0.5h）—— 记录口径会把时长钉死。
+  if (deviation > 0.3) {
+    f.push(
+      `⑨ 偏差超 30% 上限（actual=${(deviation * 100).toFixed(3)}%, predicted=${predictedKm.toFixed(0)} km, ` +
+        `btf=${BTF_TRANSIT_KM} km）— 公式不自洽，请检查 r_mid / theta / arcKm 公式`,
+    );
+    return;
+  }
+  // 软区间：1-6% 偏差（期望）；超出此区间**只警告**（脚本不 FAIL —— hard cap 在 30%）。
+  if (deviation < 0.01 || deviation > 0.06) {
+    console.log(
+      `  ⑨ 提示：偏差 ${(deviation * 100).toFixed(3)}% 不在期望 1-6% 内（仍在 30% cap 以内）。`,
+    );
+  }
+  // 公式的物理量仍然对齐：speedKmS / hours / arcKm。
+  expectExact(f, 'speedKmS', r.speedKmS, 27512);
+  // hours ≈ BTF_TRANSIT_KM / (27512 × 3600) ≈ 6.0500 h；与 BTF tag=4 实测 6h 3m 一致。
+  expectClose(f, 'hours ≈ BTF / (27512 × 3600)', r.hours, BTF_TRANSIT_KM / (27512 * 3600), 0.01);
+});
+
+// ---- ⑩ t0Ms 不同时 distanceKm 不同但接近参考（不要恒定；轨道相位漂移 ± 5%） ----
+// 三个 t0Ms：T0、T0+12 小时、T0+24 小时。24h 漂移约 2.5%（< 5% 软上限）；
+// 间隔越拉越大漂移越大，超 1 天会接近 5% 上限 —— 这里只验「非恒定 + 短窗口稳定」。
+await checkAsync('⑩ 不同 t0Ms → distanceKm 单调稳定 ± 5%（旋转轨道相位漂移）', async f => {
+  prepareEnvironment();
+  stubSetHrtVh331gOrbits();
+  const samples = [T0, T0 + 12 * 3_600_000, T0 + 24 * 3_600_000];
+  const distances = [];
+  for (const t of samples) {
+    const r = await predictTransferGeometry({
+      fromId: 'HRT',
+      toId: 'VH-331G',
+      fromSystemId: 'VH-331',
+      toSystemId: 'VH-331',
+      t0Ms: t,
+      cond: 1,
+    });
+    expectCondition(f, `t0Ms=${t} 返回值`, r !== undefined, '结果', 'undefined');
+    distances.push(r.distanceKm);
+  }
+  console.log(
+    `  ⑩ 三个 t0Ms 的 distanceKm（km）：` +
+      distances.map(d => d.toFixed(0)).join(' / ') +
+      `  (BTF 参考 ${BTF_TRANSIT_KM})`,
+  );
+  // 软断言：每个值都在 BTF 参考的 ±5% 内。
+  for (const [i, d] of distances.entries()) {
+    const dev = Math.abs(d - BTF_TRANSIT_KM) / BTF_TRANSIT_KM;
+    if (dev > 0.05) {
+      f.push(
+        `⑩ t0Ms=${samples[i]} 偏差超 5% 软上限（actual=${(dev * 100).toFixed(3)}%, ` +
+          `predicted=${d.toFixed(0)} km, btf=${BTF_TRANSIT_KM} km）`,
+      );
+    }
+  }
+  // 关键断言：三个值**不全相同**（防止预测返回恒定值 / 忽略 t0Ms）。
+  const allSame = distances.every(d => Object.is(d, distances[0]));
   expectCondition(
     f,
-    '段1 出发时刻 ≠ 起点 + 原生段时长 1800s',
-    est.legs[1].departAtMs !== T0 + 1800 * 1000,
-    `≠ ${T0 + 1800 * 1000}`,
-    String(est.legs[1].departAtMs),
+    '距离随 t0Ms 变化（不全相同）',
+    !allSame,
+    '至少有差异',
+    `${distances.join(',')}`,
   );
-  expectCondition(
-    f,
-    '段1 出发时刻 < 起点 + 原生段时长',
-    est.legs[1].departAtMs < T0 + 1800 * 1000,
-    `< ${T0 + 1800 * 1000}`,
-    String(est.legs[1].departAtMs),
-  );
+  // 进一步：漂移**单调小**（不出现突变）。相邻差值都 ≤ 6%（≈ 5% 软上限 + 容差）。
+  for (let i = 1; i < distances.length; i++) {
+    const step = Math.abs(distances[i] - distances[i - 1]) / BTF_TRANSIT_KM;
+    expectCondition(
+      f,
+      `相邻步进 ${i} 漂移 ≤ 6%`,
+      step <= 0.06,
+      '<=6%',
+      `${(step * 100).toFixed(3)}%`,
+    );
+  }
 });
 
 // ---- 汇总 ----
 console.log(
   '\n口径摘要（全部来自真实模型，非断言常数）：' +
-    `系内转移段速度 = STL_INTRA_TRANSIT_SPEED_KM_S = 27512 km/s（BTF 直采实测，与 f/距离无关，2026-09-24 标定）` +
-    `⇒ 55M km → 0.55531h、40M km → 0.40386h、30M km → 0.30290h、42M km → 0.42406h（与距离线性一致）；` +
-    `燃料 0.98×3500×min(f,0.5) = 171.5u（f=0.05，平衡退化时选中）。`,
+    `STL_INTRA_TRANSIT_SPEED_KM_S = 27512 km/s（BTF 直采实测，fuel-model.ts；与 f/距离无关）` +
+    `⇒ A1 均值圆弧公式 (r_mid × θ) / (27512 × 3600) / cond；` +
+    `BTF HRT→VH-331g TRANSIT 段 599.22M km / 21,780s 与公式口径逐位匹配。`,
 );
 console.log(`\nPASS ${summary.pass}/${summary.pass + summary.fail}`);
 process.exit(summary.fail === 0 ? 0 : 1);

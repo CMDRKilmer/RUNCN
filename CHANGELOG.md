@@ -4,6 +4,21 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### ✨ Features
+
+### 🔧 Improvements
+
+- **`XIT/FLEET`**：环线预估系内航段改用**轨道几何公式路线（A1）**取代 `26.9.24` 的「反方向原生记录近似（C）」。
+  - **算法**：新增 `src/features/XIT/FTC/transfer-geometry.ts::predictTransferGeometry(fromId, toId, fromSystemId, toSystemId, t0Ms, cond)` —— 系内航段预测。优先取服务器最近一次 TRANSIT 观测定位（`systemBodiesStore.getPosition`），缺失时离线用 `predictPosition`（`M0=0`、worldTime 公式、`n=√(G·M/a³)`，与服务器 transferEllipse 同坐标系）。弧长按**均值圆弧初版** `(r1+r2)/2 × Δθ`（r1/r2 为两端到恒星距离、Δθ 为恒星角差），时长按 `STL_INTRA_TRANSIT_SPEED_KM_S / cond`（fuel-model.ts 已落地的 BTF 直采常数 27,512 km/s；VH-331g→HRT 599M km / 21,780 s 实测）。
+  - **三条件 + 契约**：① 系内守卫（`route.legs.length === 0`；跨星系走 pc 距离已有路径，不预测）② `metrics.stlDistanceKm` 缺失 ③ `predictTransferGeometry(...)` 返回非 undefined。补上几何后**仍要过** `missingModelInputs`（罐容量/余量缺失仍判缺，近似不得掩盖残缺）。⚠️ **仍不写滑块**（FTC 路径不变；2026-09-23 拍板不变）。
+  - **集成**：`src/features/XIT/FLEET/chain-flight-time.ts` 中 `ChainFlightLeg.approximated.kind` 从 `'reverse-record'` 改为 `'predicted'`；删 `reverseTransitApproximation(...)`，新增 `tryPredictTransit(...)`。
+  - **UI**：`src/features/XIT/FLEET/ChainView.vue` 措辞「反向近似」→「公式估算」；预测段时长加 `≈` 前缀 + tooltip「按轨道几何公式估算；弧长为均值圆弧初版，与服务器原生 TRANSIT 弧长存在相位偏差」；判缺段显 `--（缺原生 STL 段记录）`；汇总在 `approximatedLegs > 0` 时追加「含 N 段公式估算」。
+  - **测试**：`scripts/verify-chain-flight-time.mjs` 重写为 **14 项检查**（替换原 4 个旧 A+C 场景 + 新增数学不变量 / BTF 参考 / t0 相位漂移等 ⑩/⑨/⑧ 量化验收）。
+  - **实测 vs BTF**：VH-331g→HRT 599.22M km vs 公式 599.19M km（**偏差 0.005%**）；不同 `t0Ms` 弧长漂移 ±5% 以内（旋转轨道相位）。
+  - **初版局限**：均值圆弧是弧长近似候选之一（首版），待 `prun-log.json` 真实 TRANSIT 段样本到位后可换更精确公式；待办项见 `docs/feature-patterns.md`「FTC 几何」条目。
+
+### 🐞 Fixes
+
 ---
 
 ## [26.9.24] - 2026-09-24

@@ -486,7 +486,9 @@ const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重�
 //   旧拟合式 vSat(引擎) × (min(f,0.5)/0.5)^k(引擎) × (整备/当前质量)^0.75 在 500M km 量级
 //   比实测快 ~2×（空载 WCB 拟合 v≈58k km/s vs 实测 27,512 km/s），改为船无关的常数。
 //   残余偏差待更长距离/更多引擎（advanced/glass/hyperthrust）的 BTF 采样再做形状拟合。
-const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
+// ⚠️ 本轮（2026-09-24）唯一修改：加 `export` 让 transfer-geometry.ts 能 import。
+// 常量值与公式未改；其他文件无需感知这个改动（无人引用此符号）。
+export const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
   STL_ENGINE_STANDARD: { vSat: 87036, fExp: 0.84 },
