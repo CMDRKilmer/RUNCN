@@ -392,6 +392,11 @@ export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number
 // 系内「转移」（TRANSIT）段平均速度（km/s @ f）：引擎表 × f 曲线 × 质量曲线
 // （标定块见 STL_TRANSIT_F_SAT 上方）。空载（m = 整备质量）时质量因子 = 1；
 // f ≥ 0.5 饱和（与燃料同拐点）。引擎未标定时回退标准引擎参数。
+// ⚠️ 2026-09-25：`computeFuelOption()` **不再走本函数**（改用 BTF 实测参考速度 + 质量幂律，
+// 见 STL_INTRA_TRANSIT_SPEED_KM_S 上方）—— 本函数只在 500M km 量级被证伪（高估 ~2×）而
+// 降级为诊断用：保留它是因为它承载「引擎 f 曲线」这条**尚未被参考速度口径覆盖**的信息
+// （advanced/glass/hyperthrust 的转移段形状未实测），删掉会连带给 STL_TRANSIT_SPEED /
+// DEFAULT_STL_TRANSIT_SPEED / STL_TRANSIT_MASS_EXP 三个常量找新家。
 export function stlTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = STL_TRANSIT_SPEED[ship.stlEngineOption ?? ''] ?? DEFAULT_STL_TRANSIT_SPEED;
   const f = Math.min(Math.max(fuel, 0.01), STL_TRANSIT_F_SAT);
@@ -480,15 +485,20 @@ const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近/转移单程）= 0.49
 const STL_TRANSIT_F_SAT = 0.5; // 转移段 f 饱和点（与引擎无关：§2/§3/§8 三组 f=1.0 ≡ f=0.5）
 const STL_TRANSIT_FUEL_GROSS = 2 * STL_TANK_FUEL_COEF; // 0.98 = 两段 0.49×罐×f 的口径
 const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重扫描）
-// 系内「转移」段整段平均速度（km/s）实测常数（2026-09-24 BTF「蓝图试航模拟」直采）：
-//   来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）
-//     d = 599,220,390 km / t = 21,780 s → v ≈ 27,512 km/s。
-//   旧拟合式 vSat(引擎) × (min(f,0.5)/0.5)^k(引擎) × (整备/当前质量)^0.75 在 500M km 量级
-//   比实测快 ~2×（空载 WCB 拟合 v≈58k km/s vs 实测 27,512 km/s），改为船无关的常数。
-//   残余偏差待更长距离/更多引擎（advanced/glass/hyperthrust）的 BTF 采样再做形状拟合。
-// ⚠️ 本轮（2026-09-24）唯一修改：加 `export` 让 transfer-geometry.ts 能 import。
-// 常量值与公式未改；其他文件无需感知这个改动（无人引用此符号）。
+// 系内「转移」（TRANSIT）段的**参考速度**：BTF 实测 599,220,390 km / 21,780 s = 27,512 km/s，
+// 该样本载重 0（质量 = 整备质量 1,271 t）。⚠️ 速度**随质量下降**，不是一个船无关常数 ——
+// 用户实测（VH-192B → VH-192C，619,312,100 km / 40,781 s = 15,186 km/s，质量 2,727 t）
+// 与 27512 × (1271/2727)^0.78 = 15,166 km/s 吻合到 0.1%。
+// 来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）。
+// ⚠️ 本常量对外仍是「质量 = 1,271t 时的参考速度」：`transfer-geometry.ts` 直接 `import` 它
+// 并按 `速度 / 状况` 计时（**无质量项**）—— 那里对重船的时长同样偏快，本轮未改（超范围）。
 export const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
+// 上述参考速度对应的**参考质量**（kg 无关，用吨即可，只参与比值）。
+const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
+// 质量幂指数：由「质量比 2.145、速度比 1.812」解出 ≈0.78（与 BTF 标定式里转移段的 0.75 同源，
+// 取实测 0.78 更贴合）。⚠️ 不要用段速度（离港/进近）的 `stlLoadFactor` 指数（`loadExp`
+// 标准引擎 0.6）—— 那是**段速度**口径，与转移段不是同一个指数。
+const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
   STL_ENGINE_STANDARD: { vSat: 87036, fExp: 0.84 },
@@ -591,8 +601,8 @@ export function computeFuelOption(
   const cond = conditionFactor(ship.condition);
 
   // STL 时间（小时）= 离港段（离港段速度）+ 进近段（进近段速度）+ **其余**（转移段速度）。
-  // 三段按航线的**总路程** d 分配（段速度见 stlDepartSpeedFor / stlApproachSpeedFor /
-  // stlTransitSpeedFor，统一段模型）。
+  // 三段按航线的**总路程** d 分配（离港/进近段速度见 stlDepartSpeedFor / stlApproachSpeedFor；
+  // 转移段速度见下方 transitSpeed，统一段模型）。
   const d = metrics.stlDistanceKm;
   const vDepart = stlDepartSpeedFor(ship, fuel);
   const vApproach = stlApproachSpeedFor(ship, fuel);
@@ -614,17 +624,25 @@ export function computeFuelOption(
     const depKm = Math.min(Math.max(0, departKm ?? 0), totalKm);
     const appKm = Math.min(Math.max(0, approachKm ?? 0), totalKm - depKm);
     const restKm = Math.max(0, totalKm - depKm - appKm);
-    // 「其余」用**BTF 实测常数**（2026-09-24，见 STL_INTRA_TRANSIT_SPEED_KM_S 上方标定块）：
-    //   t = restKm / (27512 × 3600) / 状况
-    // 旧拟合式 V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75（2026-09-23 BTF 标定式）
-    // 在 500M km 量级高估 ~2×，改为船无关的实测常数。刻意**不用** metrics.transitSeconds
-    // （绑定记录当时那条计划的 f/质量 → 会把时长钉死、把成本最优解带向最低 f），改用常数
-    // 同理避免单点绑定；残余偏差待更长距离/更多引擎（advanced/glass/hyperthrust）的 BTF
-    // 采样再做形状拟合。
+    // 「其余」用**BTF 实测参考速度 + 质量幂律**（见 STL_INTRA_TRANSIT_SPEED_KM_S 上方标定块）：
+    //   transitSpeed = 27512 × (参考质量 1271t / 当前质量)^0.78
+    //   t = restKm / (transitSpeed × 3600) / 状况
+    // **为什么必须带质量项**：2026-09-24 那版把 27,512 km/s 当「船无关常数」，用户实测立刻
+    // 证伪（2,727t 船 15,186 km/s，慢 1.81× = 质量比 2.145 的 0.78 次方）—— 参考样本是载重 0
+    // 的 1,271t 船，重船按幂律减速（与离港/进近段的 stlLoadFactor 同族，但指数不同）。
+    // 刻意**不用** metrics.transitSeconds：那是记录当时那条计划的 f/质量下的原生时长，按
+    // 当前 f 复用会把时长钉死（成本最优解会一路选最低 f）；改用「参考速度 + 质量幂律」保留了
+    // 质量这条真实物理依赖，又不绑定单条记录的时刻。
+    // 转移段速度 = 参考速度 × (参考质量 / 当前质量)^0.78（参考质量 = BTF 标定样本的整备质量：
+    // 该样本载重 0 ⇒ 质量 = 整备质量）。
+    const transitSpeed =
+      STL_INTRA_TRANSIT_SPEED_KM_S *
+      Math.pow(
+        STL_INTRA_TRANSIT_SPEED_REF_MASS_T / Math.max(1, ship.mass),
+        STL_INTRA_TRANSIT_MASS_EXP,
+      );
     stlHours =
-      (depKm / (vDepart * 3600) +
-        appKm / (vApproach * 3600) +
-        restKm / (STL_INTRA_TRANSIT_SPEED_KM_S * 3600)) /
+      (depKm / (vDepart * 3600) + appKm / (vApproach * 3600) + restKm / (transitSpeed * 3600)) /
       cond;
   }
   // STL 燃料：跨星系（有跃迁）用罐模型。

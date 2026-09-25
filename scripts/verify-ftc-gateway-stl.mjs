@@ -870,16 +870,26 @@ const {
   stlApproachSpeedFor,
 } = await import('../src/features/XIT/FTC/fuel-model.ts');
 // ⚠️ 断言变更记录（2026-09-24）：computeFuelOption 的 restKm 段速度已从「引擎拟合式
-//   stlTransitSpeedFor」改为船无关的 BTF 实测常数 **27,512 km/s**（见
+//   stlTransitSpeedFor」改为 BTF 直采的 **27,512 km/s**（见
 //   fuel-model.ts STL_INTRA_TRANSIT_SPEED_KM_S 上方）。旧拟合式在 500M km 量级
-//   高估 ~2×，本轮锁定用 BTF 组 4 VH-331g→HRT 的实测值。验证用同一常数（不再 import
+//   高估 ~2×，本轮锁定用 BTF 组 4 VH-331g→HRT 的实测值。验证用同一口径（不再 import
 //   旧的 stlTransitSpeedFor——它在 fuel-model 中只保留给诊断用，不再被生产代码消费）。
+// ⚠️ 断言变更记录（2026-09-25）：27,512 **不是船无关常数**，而是「参考质量 1,271t 时」的
+//   参考速度 —— 用户实测（2,727t 船 619.3M km / 40,781 s = 15,186 km/s）证明速度随质量下降，
+//   下面 vTransit 改为字面量 `27512 × (1271 / PERF.mass)^0.78`（PERF = SHIP，质量 2,140t
+//   → 18,324.5 km/s）。用**字面量**复算，不 import 生产常量（否则公式改错时断言一起变绿）。
 const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
+const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
+const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
 const { findNativeFlightPlan, buildNativeSegmentRows, buildEstimatedSegmentRows } = await import(
   '../src/features/XIT/FTC/route-planner.ts'
 );
 // 截图实测船（fixtures 单一来源）+ 蓝图侧充能参数（同 stubBlueprint：0.3 / 135s）。
 const PERF = { ...SHIP, minReactorUsage: 0.3, emitterChargeTime: 135 };
+// 本脚本所有 ⑨/⑩ 用例的转移段速度（PERF.mass = 2,140t → 18,324.5 km/s）。
+const V_TRANSIT =
+  STL_INTRA_TRANSIT_SPEED_KM_S *
+  Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / PERF.mass, STL_INTRA_TRANSIT_MASS_EXP);
 const COND = conditionFactor(PERF.condition);
 const MIX_DEPART_KM = MIX_STL_SEGMENTS.find(s => s.type === 'DEPARTURE').km;
 // 16 段混合航线的计算指标（真实形状：末跳是网关段 → 进近段记录查不到）。
@@ -899,8 +909,10 @@ check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线�
   const vApp = stlApproachSpeedFor(PERF, fuel);
   // ⚠️ 断言变更记录（2026-09-24）：vTransit 由旧 `stlTransitSpeedFor(PERF, fuel)`（= 引擎拟合式）
   //   改为 BTF 实测常数 **27,512 km/s**（fuel-model.STL_INTRA_TRANSIT_SPEED_KM_S）。
+  // ⚠️ 断言变更记录（2026-09-25）：常数口径**已证伪**——vTransit 改为
+  //   `27512 × (1271 / PERF.mass)^0.78`（PERF.mass = 2,140t → 18,324.5 km/s）。
   //   与 computeFuelOption 现在用的速度**逐位相同**，断言才锁得住「其余按转移段速度计时」。
-  const vTransit = STL_INTRA_TRANSIT_SPEED_KM_S;
+  const vTransit = V_TRANSIT;
   const restKm = MIX_ROUTE_KM - MIX_DEPART_KM;
   const mix = computeFuelOption(PERF, mixMetrics, fuel, 1, NO_PRICES);
   // 期望 = 离港段按离港速度 + 进近段（未记录 → 0）+ 其余按转移段速度，整体除以船体状况。
@@ -935,7 +947,8 @@ check('⑨ 等价性：纯自然（depart + approach === 总路程）与系内�
   const vApp = stlApproachSpeedFor(PERF, fuel);
   // ⚠️ 断言变更记录（2026-09-24）：同上一条，vTransit 由引擎拟合式改为 BTF 实测常数
   //   27,512 km/s。系内分支的「逐位一致」锁定与 computeFuelOption 的新口径相同。
-  const vTransit = STL_INTRA_TRANSIT_SPEED_KM_S;
+  // ⚠️ 断言变更记录（2026-09-25）：同上，改为带质量项的口径（`V_TRANSIT` = 18,324.5 km/s）。
+  const vTransit = V_TRANSIT;
   // 纯自然跨星系：旧公式 = 离港/进近各自计时（rest = 0）。
   const natDep = NAT_DEPART_ZV307A;
   const natApp = NAT_APPROACH_MOR;

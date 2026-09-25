@@ -477,13 +477,21 @@ checkScenario(
   },
 );
 
-// m：系内航线 + 整段 TRANSIT（仅 d 已知）→ stlHours = d / 27512 / 3600 / cond 逐位相同。
-// 依据（2026-09-24）：BTF「蓝图试航模拟」直采 VH-331g → HRT（同星系纯 TRANSIT）：
-//   d = 599,220,390 km / t = 21,780 s → v ≈ 27,512 km/s。fuel-model 已把 restKm 段速度
-//   从「引擎表拟合式」改为该常数（见 STL_INTRA_TRANSIT_SPEED_KM_S 上方）。构造：natPc=0、
-//   gwPc=0、d=520,000,000 km、departKm/approachKm 缺失 → restKm = d → stlHours = 5.2522 h
-//   （cond=1）；ftlHours=0 ⇒ totalHours ≡ stlHours。验证**所有候选** stlHours 与公式
-//   逐位相同（误差 < 1 秒 = 0.000278 h）——锁定「用 BTF 实测常数、不再用旧拟合式」。
+// m：系内航线 + 整段 TRANSIT（仅 d 已知）→
+//   stlHours = d / (27512 × (1271 / ship.mass)^0.78) / 3600 / cond 逐位相同。
+// 依据（2026-09-24 BTF 直采 + 2026-09-25 用户实测修正）：BTF 组 4（VH-331g → HRT，同星系
+//   纯 TRANSIT）d = 599,220,390 km / t = 21,780 s → 27,512 km/s，**该样本载重 0（质量 =
+//   整备质量 1,271 t）**；用户实测（VH-192B → VH-192C，619,312,100 km / 40,781 s、质量
+//   2,727t = 15,186 km/s）证明速度**随质量下降**（速度比 1.812 ≈ 质量比 2.145 的 0.78 次方）
+//   ⇒ 27,512 是「质量 1,271t 时」的**参考速度**，不是船无关常数（见 fuel-model
+//   STL_INTRA_TRANSIT_SPEED_KM_S 上方）。构造：natPc=0、gwPc=0、d=520,000,000 km、
+//   departKm/approachKm 缺失 → restKm = d（wcb 质量 880t、cond=1）；ftlHours=0 ⇒
+//   totalHours ≡ stlHours。验证**所有候选** stlHours 与公式逐位相同（误差 < 1 秒 =
+//   0.000278 h）——锁定「参考速度 × 质量幂律」。
+// ⚠️ 断言变更记录（2026-09-25）：期望值分母由 `27512`（无质量项）→
+//   `27512 × (1271 / ship.mass)^0.78`；旧值 5.2522 h → 新值 **3.9413 h**（wcb 质量 880t）。
+//   理由：用户实测证伪了「船无关常数」（2,727t 船实测 15,186 km/s，比参考样本慢 1.81×）。
+
 function checkStlSpeedConstant(name, options, expectedStlHours) {
   const failures = [];
   const TOL_SEC = 1 / 3600; // 1 秒
@@ -513,10 +521,16 @@ function checkStlSpeedConstant(name, options, expectedStlHours) {
 }
 
 const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
+const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
+const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
+// 参考速度 × 质量幂律（**字面量**写期望值：不 import 生产常量，否则公式改错时断言会一起变绿）。
+const transitSpeedFor = massT =>
+  STL_INTRA_TRANSIT_SPEED_KM_S *
+  Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / massT, STL_INTRA_TRANSIT_MASS_EXP);
 const INTRA_TRANSIT_D_KM = 520_000_000;
-// cond = wcb.condition = 1（见 wcb 定义）；验证 d / 27512 / 3600 / cond 逐位相同。
+// cond = wcb.condition = 1、wcb.mass = 880（见 wcb 定义）；验证 d / (v(880t) × 3600) / cond 逐位相同。
 const EXPECTED_INTRA_TRANSIT_HOURS =
-  INTRA_TRANSIT_D_KM / (STL_INTRA_TRANSIT_SPEED_KM_S * 3600) / 1;
+  INTRA_TRANSIT_D_KM / (transitSpeedFor(880) * 3600) / 1;
 const metricsIntraTransit = {
   stlDistanceKm: INTRA_TRANSIT_D_KM,
   departKm: undefined,
@@ -527,9 +541,54 @@ const metricsIntraTransit = {
   natJumpCount: 0,
 };
 checkStlSpeedConstant(
-  'm 系内整段 TRANSIT 用 BTF 实测速度常数 27512 km/s（误差 < 1s）',
+  'm 系内整段 TRANSIT 用「参考速度 27512 × (1271/质量)^0.78」（误差 < 1s）',
   scanRoute(wcb, metricsIntraTransit, NO_REACTOR_SCAN, {}),
   EXPECTED_INTRA_TRANSIT_HOURS,
+);
+
+// m2：**用户实测黄金样本**（2026-09-25）—— 用真实观测反锁「参考速度 + 质量幂律」。
+// 数据来源两条独立读数一致：BTF「蓝图试航模拟」直采 + 用户 SFC 截图（VH-192B → VH-192C，
+//   同星系 TRANSIT）：d = 619,312,100 km、t = 40,781 s（面板 11h25m00s）、飞船质量 2,727t
+//   （整备 1,271t + 载重 1,456t）。模型给 27512 × (1271/2727)^0.78 = 15,167.8 km/s → 40,830.8 s
+//   （+0.12%）。容差 ±2%（±816 s）。
+// 反例保护：旧的「无质量项」口径（d / 27512）给 22,510.6 s —— 比实测快 **1.81×**（= 质量比
+//   2.145 的 0.78 次方），必须被排除。
+const GOLDEN_D_KM = 619_312_100;
+const GOLDEN_MASS_T = 2727;
+const GOLDEN_EMPTY_MASS_T = 1271;
+const GOLDEN_SECONDS = 40_781;
+const GOLDEN_TOL_SEC = GOLDEN_SECONDS * 0.02;
+const goldenOptions = scanRoute(
+  { ...wcb, mass: GOLDEN_MASS_T, operatingEmptyMass: GOLDEN_EMPTY_MASS_T },
+  { ...metricsIntraTransit, stlDistanceKm: GOLDEN_D_KM },
+  NO_REACTOR_SCAN,
+  {},
+);
+const goldenFailures = [];
+if (goldenOptions.length === 0) {
+  goldenFailures.push('expected=候选>0 actual=候选=0 (空候选集)');
+}
+for (const o of goldenOptions) {
+  const seconds = o.stlHours * 3600;
+  if (Math.abs(seconds - GOLDEN_SECONDS) > GOLDEN_TOL_SEC) {
+    goldenFailures.push(
+      `f=${o.fuel} stlHours×3600=${seconds.toFixed(1)}s 期望 ${GOLDEN_SECONDS}±${GOLDEN_TOL_SEC.toFixed(0)}s`,
+    );
+  }
+}
+// 反例（旧「无质量项」口径）：d / 27512 = 22,510.6 s，与实测差 81%。
+const noMassSeconds = GOLDEN_D_KM / STL_INTRA_TRANSIT_SPEED_KM_S;
+const goldenSeconds = goldenOptions.at(0)?.stlHours !== undefined ? goldenOptions[0].stlHours * 3600 : Number.NaN;
+if (!(Math.abs(goldenSeconds - noMassSeconds) / noMassSeconds > 0.5)) {
+  goldenFailures.push(
+    `expected=与无质量项口径(=${noMassSeconds.toFixed(1)}s)差 >50% actual=${goldenSeconds.toFixed(1)}s`,
+  );
+}
+finish(
+  'm2 用户实测黄金样本（2,727t / 619.3M km → 40,781 s ±2%，反例：无质量项口径快 1.81×）',
+  goldenFailures,
+  `候选 ${goldenOptions.length} | 模型 ${goldenSeconds.toFixed(1)}s vs 实测 ${GOLDEN_SECONDS}s ` +
+    `| 无质量项口径 ${noMassSeconds.toFixed(1)}s`,
 );
 
 // ---- 结果 ----
