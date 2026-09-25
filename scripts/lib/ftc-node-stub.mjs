@@ -108,8 +108,21 @@ export const blueprintsStore = {
   getByNaturalId: () => currentBlueprint,
 };
 
-// '@src/infrastructure/prun-api/data/storage'（无油罐 → remaining 全 0）
+// '@src/infrastructure/prun-api/data/storage'
+// 按 **store id** 查表（key = 生产里的 `Ship.stlFuelStoreId` / `ftlFuelStoreId`）。
+// 2026-09-25 追加：生产实现误用 getByAddressableId（键 = 仓库可寻址地址 / siteId）导致
+// 油量恒 0，已改为 getById —— 替身必须提供同名字段，否则用例只能断言「查不到」。
+// 默认空表（无油罐 → 余量 0），用例用 stubSetStores 注入。
+const storesById = new Map();
+export function stubSetStores(stores = []) {
+  storesById.clear();
+  for (const store of stores) {
+    storesById.set(store.id, store);
+  }
+}
 export const storagesStore = {
+  getById: id => (id === undefined || id === null ? undefined : storesById.get(id)),
+  // 保留导出面（生产已不再对油罐调用它；此处恒空避免用例误以为「按地址查得到」）。
   getByAddressableId: () => undefined,
 };
 

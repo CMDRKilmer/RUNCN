@@ -164,14 +164,14 @@ export interface ShipFuelRemaining {
 }
 
 export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
-  const stlStores = s.idStlFuelStore
-    ? storagesStore.getByAddressableId(s.idStlFuelStore)
-    : undefined;
-  const ftlStores = s.idFtlFuelStore
-    ? storagesStore.getByAddressableId(s.idFtlFuelStore)
-    : undefined;
-  const stlStore = stlStores?.[0];
-  const ftlStore = ftlStores?.[0];
+  // ⚠️ 必须用 getById（键 = store id），**不是** getByAddressableId（键 = 仓库可寻址地址 /
+  // siteId / warehouseId）：两者键类型不同，传 store id 进后者永远查不到 → 余量恒 0
+  // （用户 2026-09-25 实测症状「当前油量 STL 0/0 ｜ FTL 0/0」+ 假缺口警告的根因）。
+  // 飞船同时有 stlFuelStoreId 与 idStlFuelStore 两个字段（见 ships.types.d.ts），与
+  // QuickRefuelDialog.vue 同口径：优先前者、回退后者（实测两者都下发，留回退防缺字段）。
+  // getById 对 undefined/未 fetched 入参安全（create-entity-store.ts 内 `!id` 判空）。
+  const stlStore = storagesStore.getById(s.stlFuelStoreId ?? s.idStlFuelStore);
+  const ftlStore = storagesStore.getById(s.ftlFuelStoreId ?? s.idFtlFuelStore);
   const sumQty = (store?: PrunApi.Store) =>
     store?.items
       .filter(i => i.type === 'INVENTORY')

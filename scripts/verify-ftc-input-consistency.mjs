@@ -34,6 +34,10 @@
 //   ④ 门控集成（2026-09-23 复核后新增）：stub loader 驱动**真实** computeFtcPlan
 //      （scripts/lib/ftc-node-loader.mjs + ftc-node-stub.mjs），断言
 //      「残缺输入 → inputIncomplete 非空 → 未进入 setFtcFuelSlider/setFtcReactorUsage」。
+//   ⑤ 油罐查表（2026-09-25 新增）：shipFuelRemainingFor 必须按 **store id** 查
+//      （storagesStore.getById），不是 getByAddressableId（键 = 仓库可寻址地址）——
+//      后者键类型不匹配 → 余量/容量恒 0（用户实测「当前油量 STL 0/0 ｜ FTL 0/0」+ 假缺口），
+//      并连带把 ShipPerformance.stlRemaining（转移段燃料/速度的乘性基准）打回 0。
 //
 // 用法：node scripts/verify-ftc-input-consistency.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
@@ -361,7 +365,9 @@ globalThis.config = { url: { planetEnv: 'https://stub.invalid/planet-env.json' }
 globalThis.fetch = async () => ({ json: async () => ({}) });
 
 const stub = await import('./lib/ftc-node-stub.mjs');
-const { computeFtcPlan } = await import('../src/features/XIT/FTC/ftc-compute.ts');
+const { computeFtcPlan, shipPerformanceFor, shipFuelRemainingFor } = await import(
+  '../src/features/XIT/FTC/ftc-compute.ts'
+);
 
 const stubRoute = (metrics, stlFuelCapacity = SHIP.stlFuelCapacity) => {
   stub.stubSetShip(stub.STUB_SHIP);
@@ -445,6 +451,83 @@ await checkAsync('门控：跨星系几何完整（有罐容量）→ 不报缺�
   const out = await runCompute();
   expectExact(f, 'inputIncomplete', out.inputIncomplete, undefined);
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
+});
+
+// ---- ⑤ 油罐查表口径：必须按 **store id** 查（getById）----
+// 背景（2026-09-25 用户实测 bug）：FTC 面板显示「当前油量：STL 0/0 ｜ FTL 0/0」+ 假缺口
+// 警告，而游戏里实际 STL 3,238/3,500、FTL 1,974/2,000。根因：shipFuelRemainingFor 用
+// storagesStore.getByAddressableId（键 = 仓库可寻址地址）去查 Ship.stlFuelStoreId
+// （store id）—— 键类型不同，永远查不到 → 余量/容量全回退 0，并连带污染
+// ShipPerformance.stlRemaining（转移段燃料/速度的乘性基准 0.49×余量×f）与缺口判断。
+// 黄金样本 = 用户实测那组数（3,238 / 3,500 与 1,974 / 2,000），字面量写死，禁止从实现反推。
+// 替身侧：storagesStore.getById 见 scripts/lib/ftc-node-stub.mjs（stubSetStores 注入）。
+const fuelStore = (id, type, weightCapacity, amount) => ({
+  id,
+  type,
+  weightCapacity,
+  items: [{ type: 'INVENTORY', quantity: { amount } }],
+});
+const STL_3238 = fuelStore('stl-1', 'STL_FUEL_STORE', 3500, 3238);
+const FTL_1974 = fuelStore('ftl-1', 'FTL_FUEL_STORE', 2000, 1974);
+
+check('油罐查表：stlFuelStoreId/ftlFuelStoreId 有值、idStlFuelStore 为空 → 读到实测余量', f => {
+  stub.stubSetStores([STL_3238, FTL_1974]);
+  // 故意留 idStlFuelStore / idFtlFuelStore 为空：锁定「优先读 stlFuelStoreId」这条。
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl-1', ftlFuelStoreId: 'ftl-1' };
+  const r = shipFuelRemainingFor(ship);
+  expectExact(f, 'stlRemaining（用户实测 3,238）', r.stlRemaining, 3238);
+  expectExact(f, 'ftlRemaining（用户实测 1,974）', r.ftlRemaining, 1974);
+  expectExact(f, 'stlCap（用户实测 3,500）', r.stlCap, 3500);
+  expectExact(f, 'ftlCap（用户实测 2,000）', r.ftlCap, 2000);
+  // 反例保护：旧实现（getByAddressableId，键类型不匹配）在此输入下返回全 0 ——
+  // 结果必须不同，否则本用例对「查表键口径」零区分度（docs/contributing.md「同错则恒绿」）。
+  expectCondition(
+    f,
+    '不等于旧 getByAddressableId 行为（全 0）',
+    !(r.stlRemaining === 0 && r.ftlRemaining === 0 && r.stlCap === 0 && r.ftlCap === 0),
+    '至少一个非 0',
+    JSON.stringify(r),
+  );
+  stub.stubSetStores();
+});
+
+check('油罐查表：余量传导到 ShipPerformance.stlRemaining（转移段燃料/速度的乘性基准）', f => {
+  stub.stubSetStores([STL_3238, FTL_1974]);
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl-1', ftlFuelStoreId: 'ftl-1' };
+  const perf = shipPerformanceFor(ship);
+  expectExact(f, 'ShipPerformance.stlRemaining', perf.stlRemaining, 3238);
+  // 旧实现下余量 0 → shipPerformanceFor 把它落成 undefined（回退蓝图罐容量）→ 燃料基准错。
+  expectCondition(
+    f,
+    '不等于旧行为的 undefined（回落罐容量）',
+    perf.stlRemaining !== undefined,
+    '3238',
+    String(perf.stlRemaining),
+  );
+  stub.stubSetStores();
+});
+
+check('油罐查表：stlFuelStoreId 为空、idStlFuelStore 有值 → 回退分支仍读到余量', f => {
+  stub.stubSetStores([STL_3238, FTL_1974]);
+  const ship = {
+    ...stub.STUB_SHIP,
+    stlFuelStoreId: undefined,
+    ftlFuelStoreId: undefined,
+    idStlFuelStore: 'stl-1',
+    idFtlFuelStore: 'ftl-1',
+  };
+  const r = shipFuelRemainingFor(ship);
+  expectExact(f, 'stlRemaining', r.stlRemaining, 3238);
+  expectExact(f, 'ftlRemaining', r.ftlRemaining, 1974);
+  stub.stubSetStores();
+});
+
+check('油罐查表：两个字段都缺 → 余量/容量 0（未停靠或未下发时不得误报）', f => {
+  stub.stubSetStores([STL_3238, FTL_1974]);
+  const r = shipFuelRemainingFor(stub.STUB_SHIP);
+  expectExact(f, 'stlRemaining', r.stlRemaining, 0);
+  expectExact(f, 'stlCap', r.stlCap, 0);
+  stub.stubSetStores();
 });
 
 console.log(`PASS ${summary.pass}/${summary.pass + summary.fail}`);

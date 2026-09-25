@@ -53,7 +53,11 @@ export const blueprintsStore = {
 };
 // 油罐不可用 → stlRemaining = 0 → shipPerformanceFor 里落到 undefined
 // （真实实现在飞船未停靠/油罐 store 未就绪时同样返回 0，见 ftc-compute）。
+// 2026-09-25：ftc-compute 的查表 API 由 getByAddressableId（键 = 可寻址地址，永远查不到
+// store id → 余量恒 0）改为 getById（键 = store id）——替身必须补上该方法，否则「油罐
+// 不可用」这条替身语义会变成调用即抛 TypeError（同为空实现，但覆盖面不同）。
 export const storagesStore = {
+  getById: () => undefined,
   getByAddressableId: () => undefined,
 };
 
