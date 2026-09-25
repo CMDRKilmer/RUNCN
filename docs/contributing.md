@@ -280,6 +280,7 @@ Releases are cut by CI (`.github/workflows/release.yml`); never tag or zip by ha
 - **Version:** today's date in `Asia/Shanghai` as `y.m.d` (e.g. `26.9.23`), with `.1`/`.2` appended for a second release on the same day — it never rolls over to the next day. Existing tags are skipped.
 - **An empty `[Unreleased]` fails loudly:** the parse step exits with code 78, which makes the `build` job **red** (it is not a graceful skip). Don't push a `CHANGELOG.md` edit just to probe the pipeline.
 - **Output:** a GitHub Release with `琉璃小工具-<version>.zip` + `.crx`, plus automatic submissions to Chrome, Edge and Firefox (AMO). Those store jobs have **no approval gate**, and a published store version cannot be rolled back — proofread the notes before pushing.
+- **Asset names must be literals inside the `run` script.** A non-ASCII value in the workflow-level `env:` block reaches the shell as an **empty string**: `PROJECT_NAME: 琉璃小工具` expanded to nothing, so every release up to and including `26.9.25.1` shipped assets named `-<version>.zip` / `-<version>.crx`. The release *title* kept its Chinese only because it was already written inline. Add non-ASCII env values only as script literals, never as workflow `env`.
 - **`archive` job:** runs as `github-actions[bot]`, moves the `[Unreleased]` body into a versioned section, syncs `package.json` `version`, then pushes back to `main`. It pushes with `GITHUB_TOKEN`, so it does not re-trigger the workflow. Run `git pull --ff-only` after a release before pushing again.
 - **`prune` job:** keeps the newest `KEEP_RELEASES` (env, default 10) releases and deletes older ones **including their tags**.
 - **Edge key expiry:** `EDGE_API_KEY_EXPIRY` in `release.yml` must stay in sync with `edge-key-expiry.yml` — update both when renewing.
@@ -328,9 +329,18 @@ After changing an interface, constant, or calibration:
 2. Run `find docs/ -name "*.md" | sort` and check every affected file.
 3. User-facing text must compute its numbers from the current run — never hardcode a value taken from a historical sample, because the next reader will silently compare it against a fresh reading and get a contradiction.
 
-### Local Lint Noise (`dist-firefox`)
+### Type Checking Covers `.vue` Too
 
-`pnpm run lint` fails locally with ~1250 "Parsing error ... TSConfig does not include this file" errors when `dist-firefox/` build output exists in the working tree. The flat config in `eslint.config.mjs` ignores `dist/**/*` but not `dist-firefox/**/*`, and `dist-firefox` is gitignored, so CI lint is clean. Don't try to fix it in config — lint only the files you changed (`pnpm exec eslint <file>`). Note `scripts/*.mjs` are excluded from eslint entirely (they are only type/format checked via prettier).
+`pnpm run compile` runs `vue-tsc --noEmit`, not `tsc --noEmit`. Plain `tsc` cannot parse `.vue`, so every `<script setup lang="ts"` block was invisible to both `compile` and CI, and its errors surfaced only in the editor (Volar). Four of them survived ~3 weeks and three releases. `lint.yml` already runs `pnpm compile && pnpm lint` on every push/PR, so changing the script gave CI full coverage with no workflow edit. Keep `vue-tsc` in `devDependencies`; `typescript` alone does not check `.vue`. A `get_errors`/editor read on a file that was never opened in the session reports nothing — run `pnpm exec vue-tsc --noEmit --pretty` when you need the real list.
+
+### Local Lint Noise (`dist-firefox`, `.tmp`)
+
+ESLint does not read `.gitignore`, so every non-source directory that can exist in a working tree has to be listed in `eslint.config.mjs`'s `ignores`. Two were missing:
+
+- `dist-firefox/` (build output) — `pnpm run lint` failed locally with ~1250 "Parsing error ... TSConfig does not include this file" errors after minutes of scanning bundled output.
+- `.tmp/` (scratch scripts written by skills such as `/save-plan` and `/review-pr`) — 3 parsing errors, because those `.mjs` files fall outside `tsconfig.json`'s `include`.
+
+Both are ignored now, so `pnpm run lint` is clean locally (~40 s). CI was never affected — a fresh checkout has neither directory, which is why the failure looked local-only. When adding a gitignored directory that can hold `.js/.ts/.mjs/.vue`, add it to `ignores` in the same commit instead of working around it by linting single files. Note `scripts/*.mjs` are excluded from eslint entirely (they are only type/format checked via prettier).
 
 ### Windows-created Files Are CRLF
 
