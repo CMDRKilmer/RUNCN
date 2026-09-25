@@ -4,12 +4,17 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+---
+
+## [26.9.25.1] - 2026-09-25
 ### 🐞 Fixes
 
 - **`XIT/FTC`**：修复面板「当前油量」恒显示 `0/0`（并连带误报「缺口需先加注」）—— `shipFuelRemainingFor()` 用 `storagesStore.getByAddressableId(ship.idStlFuelStore)` 查飞船油罐，但该 API 的键是**仓库可寻址地址**，与油罐的 **store id** 不同源，永远查不到（全仓库其余 20 处 `getByAddressableId` 调用传的都是正确的可寻址 id，本处是唯一同类错误）。改用 `getById(stlFuelStoreId ?? idStlFuelStore)`（双字段回退，对齐 `QuickRefuelDialog` 的口径）。连带修正：STL 燃料总量 —— 罐余量是转移段燃料口径 `0.49×余量×f` 的**乘性基准**，此前恒为 0 会让燃料总量算错。
 - **`XIT/FTC`**：系内（同一星系）STL 转移段速度**补回质量幂律项** —— `27,512 km/s` 是「质量 = 1,271 t」时的**参考速度**，不是船无关常数。此前按裸常数落地，重船航线时长系统性偏快（用户实测 `VH-192B → VH-192C`：FTC 报 6 小时 15 分，游戏实际 11 小时 25 分；比值 1.81 恰为质量比 2.145 的 0.78 次方）。现按 `v = 27,512 × (1,271 / 质量_t)^0.78`（用户样本误差 **+0.12%**）。
 - **`XIT/FLEET`**：环线预估的系内航段同步该质量项（此前仍用裸常数，重船航段时长偏快约 1.5×）。速度公式收敛为**单一来源** `fuel-model.stlIntraTransitSpeedKmS(massT)`，`computeFuelOption` 与 `transfer-geometry` 共用；`TransferGeometryInputs.massT` 设为必填，漏传即编译期报错（不给默认值，避免退回原缺陷）。
 - **`XIT/FTC`**：`FTC.module.css` 的 `//` 行注释改回 CSS 块注释 —— `//` 不是合法 CSS 注释，会让 release build 的 CSS 解析失败。
+
+---
 
 ---
 
