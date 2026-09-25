@@ -27,7 +27,9 @@ const baseRows = computed<BaseRow[]>(() => {
   const allSites = sitesStore.all.value ?? [];
   const out: BaseRow[] = [];
   for (const site of allSites) {
-    const naturalId = site.address.lines.find(x => x.type === 'PLANET')?.entity.naturalId;
+    // AddressLine 的兜底变体（UnknownAddressLine）上 entity 是可选的，而内联箭头
+    // 谓词没有类型守卫，收窄不掉这个变体，故逐级判空；取不到时由下方跳过该基地。
+    const naturalId = site.address.lines.find(x => x.type === 'PLANET')?.entity?.naturalId;
     if (!naturalId) {
       continue;
     }

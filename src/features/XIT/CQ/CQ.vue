@@ -2,6 +2,7 @@
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { getMaterialNameByTicker } from '@src/core/game-lookups';
 import { fixed0, fixed2, formatCountdown } from '@src/utils/format';
 
