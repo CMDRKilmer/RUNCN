@@ -80,7 +80,13 @@ export default ts.config(
 
   {
     ignores: [
-      'dist/**/*',
+      // ESLint 不读 .gitignore，非源码目录必须在这里逐个列出，否则本地 lint 会去
+      // 扫构建产物和临时脚本：dist-firefox 有数百个 bundle（跑几分钟才结束），
+      // .tmp 的临时脚本不在 tsconfig 的 include 里（直接解析报错）。
+      // CI 是全新 checkout，这些目录都不存在，所以只有本地会中招。
+      '**/dist/**/*',
+      '**/dist-firefox/**/*',
+      '.tmp/**/*',
       'eslint.config.mjs',
       'src/types/unimport.d.ts',
       'scripts/**',
