@@ -596,7 +596,9 @@ check('⑥ 转移段口径已标定 → 不报缺、按罐口径算燃料并写�
   expectExact(f, 'ok', transitOnly.ok, true);
   // ⚠️ 断言变更记录（2026-09-24）：原值 **best.fuel=0.15**（旧拟合式 vSat×(f/0.5)^k 让 f=0.15
   //   与 f=0.05 仍有时长差异，findBalanceOption 取 Pareto 拐点 = 0.15）→ 改为 **best.fuel=0.05**。
-  //   新口径用船无关常数 27,512 km/s，stlHours 对所有 f 都相同 → 时间跨度 = 0 →
+  //   新口径（⚠️ 2026-09-25 修正：**不是**船无关常数 —— 是 `参考速度 27,512 × (1,271/质量_t)^0.78`，
+  //   见 fuel-model.stlIntraTransitSpeedKmS；27,512 曾按「船无关」落地并被用户实测证伪）与 f 无关，
+  //   stlHours 对所有 f 都相同 → 时间跨度 = 0 →
   //   findBalanceOption 退到「最省油端」（f=网格最小 0.05，见 fuel-model.findBalanceOption
   //   「时间无差异同样无法做折衷」分支）。
   expectExact(f, 'best.fuel', transitOnly.best?.fuel, 0.05);

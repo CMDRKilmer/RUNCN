@@ -9,9 +9,9 @@
 //
 // 唯一例外是**环线预估**在系内航线缺前向记录时可用**几何预测**近似（显式标注，
 // 见 predictTransferGeometry）：弧长 = 均值圆弧（r_mid × Δθ，**初版**，待 prun-log.json
-// TRANSIT 段样本到位后用真实椭圆弧长重新标定）+ 时长 = d / (STL_INTRA_TRANSIT_SPEED_KM_S
-// / 状况)。速度常数为 fuel-model.ts 已落地的 BTF 实测（VH-331g → HRT 599M km / 21,780s
-// ≈ 27,512 km/s，船无关）。
+// TRANSIT 段样本到位后用真实椭圆弧长重新标定）+ 时长 = d / (stlIntraTransitSpeedKmS(质量)
+// / 状况)。速度口径 = fuel-model.ts 的 BTF 实测「参考速度 + 质量幂律」
+// （VH-331g → HRT 599M km / 21,780s ≈ 27,512 km/s，船质量 1,271t；重船按 (1271/m)^0.78 减速）。
 // ⚠️ 2026-09-24 之前「A+C」路径中的 C（反方向原生记录近似，见旧版
 // reverseTransitApproximation）已被本公式路线（transfer-geometry.ts）一次性替代 ——
 // 反方向记录相位与本段出发时刻不对齐、依赖同星系表精确键、且补不了罐容量 / STL 段速
@@ -241,6 +241,9 @@ export async function estimateChainFlightTimes(
           toSystemId: resolveSystemId(toOrbitId) ?? '',
           t0Ms: departAtMs,
           cond: conditionFactor(perf.condition),
+          // 转移段速度随质量下降（`v = 27512 × (1271/质量)^0.78`）—— 质量来自
+          // 本函数上面已算好的 perf（shipPerformanceFor），无需新增数据来源。
+          massT: perf.mass,
         });
       }
       // 几何预测只补「整段路程 + 时长」，不补罐容量/余量 —— 仍要过 missingModelInputs。

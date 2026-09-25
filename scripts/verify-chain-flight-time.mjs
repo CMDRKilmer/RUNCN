@@ -3,9 +3,12 @@
 //
 // 背景（2026-09-24 A1 修订）：上一轮「反方向原生记录近似」已被**轨道预测几何**取代
 //（transfer-geometry.ts 的 predictTransferGeometry —— 均值圆弧 r_mid × Δθ +
-// STL_INTRA_TRANSIT_SPEED_KM_S / 状况，初版）。算法层走真实 chain-flight-time.ts
+// stlIntraTransitSpeedKmS(质量) / 状况，初版）。算法层走真实 chain-flight-time.ts
 // 调用真实 transfer-geometry.ts；A1 的几何由两端天体的 systemBodiesStore 观测 /
 // predictPosition 轨道推算得出，**不再**依赖同星系表查表键。
+// ⚠️ 2026-09-25：转移段速度不再是裸常数 27,512，而是 27512 × (1271/质量)^0.78
+//（重船慢）—— 本脚本的夹具质量 2,140t ⇒ 乘数 1.5013751，旧期望值已按此修正（见下方
+// 断言变更记录）。之前 transfer-geometry 漏了质量项（与 computeFuelOption 口径漂移）。
 //
 // 本脚本锁定的契约（全部直接驱动真实模块，见下「依赖替身」）：
 //   ① 输入残缺（missingModelInputs 非空）→ ok=false、error='缺原生 STL 段记录'、
@@ -19,15 +22,17 @@
 //   ⑥ 几何预测路径**不**调 setFtcFuelSlider / setFtcReactorUsage（写入面专属 FTC 面板）；
 //   ⑦ 跨星系（route.legs.length > 0）→ 预测**不**被调（系内守卫）；
 //   ⑧ 均值圆弧公式的数学不变性（r_mid = (r1+r2)/2、arcKm = r_mid × θ、hours =
-//      arcKm / (STL_INTRA_TRANSIT_SPEED_KM_S × 3600) / cond）；
+//      arcKm / (stlIntraTransitSpeedKmS(质量) × 3600) / cond）；
 //   ⑨ 与 BTF 已知 TRANSIT 弧长（HRT → VH-331g 实测 599.22M km）的偏差 < 30%
 //     （hard cap），期望 1-6% 偏差内；
-//   ⑩ 不同 t0Ms → distanceKm **单调稳定** ± 5%（旋转轨道有相位漂移，不要恒定值）。
+//   ⑩ 不同 t0Ms → distanceKm **单调稳定** ± 5%（旋转轨道有相位漂移，不要恒定值）；
+//   ⑪ 转移段速度只有**一份公式**：transfer-geometry 对同一 (d, mass) 的输出 ≡
+//      fuel-model.stlIntraTransitSpeedKmS(mass)（防「两处各自展开」再次漂移）。
 //
 // 依赖替身（scripts/lib/chain-flight-time-loader.mjs）：只有浏览器侧/编排侧依赖走替身
 // （vue / ships / blueprints / storage / buffers / sleep / orbit / routes / stars / stations /
 // flight-plans / ftc-fuel-settings / system-bodies），被测链路全部保留真实实现：
-//   chain-flight-time.ts（被测）→ transfer-geometry.ts（真实：均值圆弧公式 + 常数）
+//   chain-flight-time.ts（被测）→ transfer-geometry.ts（真实：均值圆弧公式 + 速度单一来源）
 //   → fuel-model.ts（纯函数模型）→ route-planner.ts（几何来源与查表键）→ route-model.ts
 //   （resolveSystemId / isSystemId）→ ftc-compute.ts（shipPerformanceFor）→
 //   system-bodies.ts（stlSegmentsStore 的真实记录/查表 + systemBodiesStore 由 stub 覆盖）。
@@ -46,11 +51,15 @@
 //
 // 断言常数来源（docs/contributing.md）：
 //   · 距离/段时长是夹具字面量（BTF 标定：HRT/VH-331g 半径 46.81M / 440.95M km，相对
-//     角度 2.4569 rad；STL_INTRA_TRANSIT_SPEED_KM_S = 27512 km/s 来自 fuel-model.ts）；
-//   · 几何预测时长用字面量弧长算（mean arc + 状况=1 → 与 BTF 实测 599.22M / 21,780s
-//     对应 6.05h 逐位匹配 —— 这是 A1 的口径锚点）；
+//     角度 2.4569 rad；转移段速度基准 27,512 km/s（1,271t 参考质量）与质量指数 0.78
+//     来自 fuel-model.ts 的 BTF 直采标定，夹具 2,140t 的字面量乘数 = 1.5013751）；
+//   · 几何预测时长用字面量弧长算（mean arc + 状况=1），**基准值**与 BTF 实测
+//     599.22M / 21,780s 对应 6.05h 逐位匹配 —— 该基准值只对 1,271t 成立，夹具 2,140t 按
+//     质量乘数放大（这是 A1 的口径锚点 + 2026-09-25 的质量项修正）；
 //   · **不 import 任何生产常数**做期望值：GW_LOCK_HOURS / GW_COST_PER_JUMP / NAT_PC_PER_H
 //     等一律不进断言（并发会话正在改网关口径，且本脚本的夹具不含网关段）。
+//     ⚠️ 唯一非期望值的生产导入是 ⑪ 的 stlIntraTransitSpeedKmS —— 它作为「被对照的另一处
+//     口径」参与比较（比对对象），**不用**来拼期望值。
 //
 // 变异验证（第 1 轮，2026-09-24 本脚本落地时）—— 详见「变异测试」节：把被测判缺分支
 // 改回旧行为 / 把 arcKm 公式×2 → 脚本立刻变红（退出码 1），原文 FAIL 见报告。
@@ -106,6 +115,9 @@ const stub = await import('./lib/chain-flight-time-stub.mjs');
 const fuelModel = await import('./lib/chain-flight-time-fuel-model.mjs');
 const { computeFuelOption, findBalanceOption, missingModelInputs, scanFuelOptions } = fuelModel;
 const { autoFuelGrid } = fuelModel;
+// 转移段速度的**唯一公式来源**（⑪ 用它做「两处口径一致」的对照面，不用来算期望值 ——
+// 期望值一律是字面量，见文件头「断言常数来源」）。
+const { stlIntraTransitSpeedKmS } = fuelModel;
 const api = await import('../src/infrastructure/prun-api/data/api-messages.ts');
 const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/system-bodies.ts');
 const { planRoutes, routeMetrics } = await import('../src/features/XIT/FTC/route-planner.ts');
@@ -179,7 +191,8 @@ const NO_PRICES = { stlPrice: 0, ftlPrice: 0, timeValue: 0 };
 const SYS = 'ZZ-101';
 // BTF 标定（HRT → VH-331g 同星系转移段：半径 / 角度 / arcKm，逐位匹配服务器实测）。
 // 数据见 data/ftc-calibration/btf-scan-2026-09-24.json tag=4：TRANSIT 段 6h 3m / 599.22M km /
-// 178u —— 与 STL_INTRA_TRANSIT_SPEED_KM_S = 27512 算 599.22M / 27512 / 3600 = 6.05h 吻合。
+// 178u —— 与参考速度 27,512 km/s 算 599.22M / 27512 / 3600 = 6.05h 吻合（**该样本质量
+// 1,271t**；本夹具 2,140t 的期望值要乘质量乘数 1.5013751）。
 const HRT_RADIUS_KM = 46_810_000;
 const VH_331G_RADIUS_KM = 440_950_000;
 const BTF_PHASE_REF = 2.4569; // rad，HRT 在 0、VH-331g 在该角 → 均值圆弧 = 599.22M km
@@ -198,6 +211,19 @@ const SHIP = {
   idStlFuelStore: undefined,
   idFtlFuelStore: undefined,
 };
+
+// ⚠️ 断言变更记录（2026-09-25）：系内转移段速度补了**质量幂律项**
+// v = 27,512 × (1,271/mass)^0.78（commit 12530b2c；标定块见 fuel-model.ts
+// STL_INTRA_TRANSIT_SPEED_KM_S 上方）。
+// 本夹具 SHIP.mass = 2,140 t（整备 1,271 t）⇒ 质量乘数 (2140/1271)^0.78 = 1.5013751。
+// 注：任务书里的 1.50159 是算错的，实测比值 1.5013751168551859（= 改动前本脚本 ③⑥ 的
+// 实际 expected/actual 比），下面用实测值。
+// 时长按乘数放大（重船慢）、速度按乘数缩小；乘数只保留 8 位有效数字（可读性优先），
+// 与生产实现逐位差 1 ULP ⇒ 凡带乘数的断言用 expectClose（容差 1e-6 h ≈ 0.0002%，
+// 仍能抓住任何 ≥0.001% 的回归；裸 expectExact 对「字面量乘数」不成立）。
+const TRANSIT_MASS_MULT_2140 = 1.5013751;
+// 2,140 t 时的转移段平均速度（27,512 是 1,271 t 参考质量下的值）。
+const TRANSIT_SPEED_KM_S_2140 = 27512 / TRANSIT_MASS_MULT_2140;
 
 // 标准引擎 / 罐 3500 / G8 / 最小反应堆 0.3 / 充能 135s。tank = 0 用于「罐容量缺失」夹具
 // （blueprintInfoFor 把 0 当缺失 → stlFuelCapacity undefined）。
@@ -402,7 +428,7 @@ await checkAsync(
   async f => {
     prepareEnvironment();
     // h → i：h 在半径 1M / 0°、i 在 1M / 90° ⇒ r_mid = 1M, θ = π/2, arcKm ≈ 1.5708M km,
-    // hours ≈ 1.5708e6 / (27512 × 3600) ≈ 0.01586 h（与 f/距离无关）。
+    // hours 基准 ≈ 1.5708e6 / (27512 × 3600) ≈ 0.01586 h（× 质量乘数 1.5013751；与 f 无关）。
     stubSetBodyObs('ZZ-101h', 1_000_000, 0);
     stubSetBodyObs('ZZ-101i', 1_000_000, Math.PI / 2);
     // 单独驱动一次 predictTransferGeometry，验证 algorithm leg.approximated.distanceKm
@@ -414,6 +440,7 @@ await checkAsync(
       toSystemId: SYS,
       t0Ms: T0,
       cond: 1,
+      massT: SHIP.mass,
     });
     expectCondition(
       f,
@@ -449,7 +476,8 @@ await checkAsync(
     expectExact(f, '段0.hours', leg.hours, predicted.hours);
     expectCondition(f, '段0.hours > 0', leg.hours > 0, '>0', String(leg.hours));
     expectExact(f, '段0.source', predicted.source, 'predicted');
-    expectExact(f, '段0.speedKmS', predicted.speedKmS, 27512);
+    // 2,140 t ⇒ 27,512 / 1.5013751（不是 27,512 —— 速度随质量下降）。
+    expectClose(f, '段0.speedKmS（含质量幂律）', predicted.speedKmS, TRANSIT_SPEED_KM_S_2140, 0.01);
     // predicted 路径不调 bestOptionFor → leg.option 为 undefined（与 FTC 面板路径不同）。
     expectExact(f, '段0.option（预测路径不算 fuel）', leg.option, undefined);
     // 回程段（i → h）走真实几何预测（90° → -90°，theta 也是 π/2，arcKm 相同）。
@@ -519,9 +547,16 @@ await checkAsync('③ 前向记录存在 → approximated 缺席、时长 = 真�
   const leg = est.legs[0];
   expectExact(f, '段0.ok', leg.ok, true);
   expectExact(f, '段0.approximated', leg.approximated, undefined);
-  // 系内转移段速度改用 BTF 直采常数 STL_INTRA_TRANSIT_SPEED_KM_S = 27512（与 f 无关）
-  // ⇒ 40M km 时长 = 40M / (27512 × 3600) ≈ 0.4039h；平衡退化 → 最省油即 f=0.05。
-  expectExact(f, '段0.hours', leg.hours, 40_000_000 / (27512 * 3600));
+  // 时长口径 = BTF 参考速度 + 质量幂律（不是裸常数 27512）：
+  // 40M km 基准 40M / (27512 × 3600) ≈ 0.4039h，× 质量乘数 1.5013751（2,140t）≈ 0.6064h；
+  // 平衡退化 → 最省油即 f=0.05。
+  expectClose(
+    f,
+    '段0.hours（基准 × 质量乘数 1.5013751）',
+    leg.hours,
+    (40_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+    1e-6,
+  );
   expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, 40_000_000);
   expectExact(f, '段0.metrics.transitKm', leg.metrics?.transitKm, 40_000_000);
   expectExact(f, '段0.metrics.routeKm（原生航线级）', leg.metrics?.routeKm, 40_000_000);
@@ -601,8 +636,8 @@ await checkAsync('④+⑦ 跨星系航线 → 不预测 + 缺记录判缺（appr
   expectExact(f, '段1.approximated（有原生记录就不该标预测）', backward.approximated, undefined);
   expectExact(f, '段1.metrics.routeKm', backward.metrics?.routeKm, 77_000_000);
   expectExact(f, '段1.metrics.stlRecorded', backward.metrics?.stlRecorded, true);
-  // 系内段速度改用 BTF 直采常数 27512 ⇒ 77M km 时长 = 77M / (27512 × 3600) ≈ 0.7774h；
-  // FTL 部分不变；总时长由真实模型（computeFuelOption）给出。
+  // 段1时长口径 = 27,512 × (1,271/质量)^0.78（77M km 基准 77M / (27512 × 3600) ≈ 0.7774h，
+  // × 质量乘数）；FTL 部分不变；总时长由真实模型（computeFuelOption）给出。
   expectClose(
     f,
     '段1.hours 与真实 computeFuelOption 复算一致',
@@ -675,10 +710,23 @@ await checkAsync('⑥ 三段链：段1 判缺不推进时刻，totalHours 只累
     expectExact(f, '段0.approximated（原生路径）', est.legs[0].approximated, undefined);
     expectExact(f, '段1.approximated（判缺）', est.legs[1].approximated, undefined);
     expectExact(f, '段2.approximated（原生路径）', est.legs[2].approximated, undefined);
-    // 系内段速度 27512 ⇒ 段0 30M km = 0.3029h、段2 42M km = 0.4241h。
-    expectExact(f, '段0.hours', est.legs[0].hours, 30_000_000 / (27512 * 3600));
+    // 时长口径 = 27,512 × (1,271/2,140)^0.78 ⇒ 段0 30M km = 0.3029h × 1.5013751 = 0.4548h、
+    // 段2 42M km = 0.4241h × 1.5013751 = 0.6367h。
+    expectClose(
+      f,
+      '段0.hours（30M km 基准 × 质量乘数）',
+      est.legs[0].hours,
+      (30_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+      1e-6,
+    );
     expectExact(f, '段1.hours', est.legs[1].hours, 0);
-    expectExact(f, '段2.hours', est.legs[2].hours, 42_000_000 / (27512 * 3600));
+    expectClose(
+      f,
+      '段2.hours（42M km 基准 × 质量乘数）',
+      est.legs[2].hours,
+      (42_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+      1e-6,
+    );
     // 段1 的出发时刻 = 段0 到站时刻；段1 不推进。
     expectExact(f, '段1.departAtMs', est.legs[1].departAtMs, T0 + est.legs[0].hours * 3600000);
     expectExact(f, '段1.arriveAtMs === departAtMs', est.legs[1].arriveAtMs, est.legs[1].departAtMs);
@@ -749,7 +797,7 @@ await checkAsync('⑥-加对照 原生路径同样不调 setFtcFuelSlider / setF
 
 // ---- ⑧ 均值圆弧公式的数学不变性 ----
 // 直接驱动真实 predictTransferGeometry：r_mid = (r1+r2)/2、arcKm = r_mid × θ、
-// hours = arcKm / (27512 × 3600) / cond。t0Ms 用观测恒等的设置（轨道 stub 让两端
+// hours = arcKm / (stlIntraTransitSpeedKmS(质量) × 3600) / cond；t0Ms 用观测恒等的设置（轨道 stub 让两端
 // 位置不随时间漂移，保证 math 干净）。
 await checkAsync('⑧ 均值圆弧公式的数学不变性（r_mid / arcKm / hours 逐位）', async f => {
   prepareEnvironment();
@@ -763,6 +811,7 @@ await checkAsync('⑧ 均值圆弧公式的数学不变性（r_mid / arcKm / hou
     toSystemId: SYS,
     t0Ms: T0,
     cond: 1,
+    massT: SHIP.mass,
   });
   expectCondition(f, 'predictTransferGeometry 返回值', r !== undefined, '结果', 'undefined');
   // r1 = r2 = 1M ⇒ r_mid = 1M。
@@ -770,20 +819,28 @@ await checkAsync('⑧ 均值圆弧公式的数学不变性（r_mid / arcKm / hou
   // θ = π/2 ⇒ arcKm = 1M × π/2 ≈ 1_570_796.327 km。
   const expectedArcKm = 1_000_000 * (Math.PI / 2);
   expectClose(f, 'arcKm === r_mid × θ', r.distanceKm, expectedArcKm, 1e-6);
-  // hours = arcKm / (27512 × 3600) / cond=1。
+  // hours = arcKm / (27,512 / 1.5013751 × 3600) / cond=1（夹具 2,140t：速度含质量幂律）。
   expectClose(
     f,
-    'hours === arcKm / (27512 × 3600) / cond',
+    'hours === arcKm / (27,512 × 质量乘数逆 × 3600) / cond',
     r.hours,
-    expectedArcKm / (27512 * 3600),
-    1e-9,
+    (expectedArcKm / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+    1e-6,
   );
-  expectExact(f, 'speedKmS = STL_INTRA_TRANSIT_SPEED_KM_S / cond', r.speedKmS, 27512);
+  expectClose(
+    f,
+    'speedKmS = stlIntraTransitSpeedKmS(2,140t) / cond',
+    r.speedKmS,
+    TRANSIT_SPEED_KM_S_2140,
+    0.01,
+  );
   expectExact(f, 'source', r.source, 'predicted');
 });
 
 // ---- ⑨ 与 BTF TRANSIT 弧长偏差 < 30%（hard cap） ----
-// BTF tag=4 实测 HRT → VH-331g 同星系转移段：弧长 599.22M km / 21780s ≈ 27512 km/s。
+// BTF tag=4 实测 HRT → VH-331g 同星系转移段：弧长 599.22M km / 21780s ≈ 27512 km/s（该样本
+// 质量 = 整备 1,271t）。
+// ⚠️ 几何（弧长）不受质量影响，但**时长期望值**要带夹具质量 2,140t 的质量乘数。
 // 用圆轨道 stub 设置 HRT/VH-331g 在 t=T0 的相位让均值圆弧公式算出 ≈ 599.22M km。
 // 期望偏差在 1-6%（A1 初版均值圆弧的限制），超过 30% 视为公式不自洽。
 await checkAsync('⑨ 与 BTF TRANSIT 弧长（HRT→VH-331g, 599.22M km）偏差 < 30%', async f => {
@@ -796,6 +853,7 @@ await checkAsync('⑨ 与 BTF TRANSIT 弧长（HRT→VH-331g, 599.22M km）偏�
     toSystemId: 'VH-331',
     t0Ms: T0,
     cond: 1,
+    massT: SHIP.mass,
   });
   expectCondition(f, 'predictTransferGeometry 返回值', r !== undefined, '结果', 'undefined');
   const predictedKm = r.distanceKm;
@@ -820,9 +878,16 @@ await checkAsync('⑨ 与 BTF TRANSIT 弧长（HRT→VH-331g, 599.22M km）偏�
     );
   }
   // 公式的物理量仍然对齐：speedKmS / hours / arcKm。
-  expectExact(f, 'speedKmS', r.speedKmS, 27512);
-  // hours ≈ BTF_TRANSIT_KM / (27512 × 3600) ≈ 6.0500 h；与 BTF tag=4 实测 6h 3m 一致。
-  expectClose(f, 'hours ≈ BTF / (27512 × 3600)', r.hours, BTF_TRANSIT_KM / (27512 * 3600), 0.01);
+  expectClose(f, 'speedKmS（夹具 2,140t ⇒ 含质量乘数）', r.speedKmS, TRANSIT_SPEED_KM_S_2140, 0.01);
+  // hours ≈ BTF_TRANSIT_KM / (27512 × 3600) × 1.5013751 ≈ 9.0835 h；
+  // ⚠️ 夹具质量 2,140t 与 BTF 参考样本 1,271t 不同，故不再是 6.05h（该值只对参考质量成立）。
+  expectClose(
+    f,
+    'hours ≈ BTF / (27512 × 3600) × 质量乘数',
+    r.hours,
+    (BTF_TRANSIT_KM / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+    0.01,
+  );
 });
 
 // ---- ⑩ t0Ms 不同时 distanceKm 不同但接近参考（不要恒定；轨道相位漂移 ± 5%） ----
@@ -841,6 +906,7 @@ await checkAsync('⑩ 不同 t0Ms → distanceKm 单调稳定 ± 5%（旋转轨�
       toSystemId: 'VH-331',
       t0Ms: t,
       cond: 1,
+      massT: SHIP.mass,
     });
     expectCondition(f, `t0Ms=${t} 返回值`, r !== undefined, '结果', 'undefined');
     distances.push(r.distanceKm);
@@ -882,12 +948,63 @@ await checkAsync('⑩ 不同 t0Ms → distanceKm 单调稳定 ± 5%（旋转轨�
   }
 });
 
+// ---- ⑪ 转移段速度的**单一公式来源**：transfer-geometry 输出 ≡ fuel-model.stlIntraTransitSpeedKmS ----
+// 为什么必须锁：2026-09-25 的 bug 就是「同一个公式在两处各自展开、只给一处补了质量项」——
+// 两边各自写公式时，任何一次口径变更都会漏掉一边，而两边都自称「对齐 BTF 实测」。
+// 本断言是唯一能拦住这种漂移的机制：一侧是真实 transfer-geometry 的输出，另一侧是
+// fuel-model 里那个唯一公式。任一边重新展开 / 改指数 / 漏 Math.max(1, ·) → 立刻红。
+// （期望值仍是字面量 27,512 / 质量乘数，不用生产函数拼期望 —— 见文件头「断言常数来源」。）
+await checkAsync('⑪ 单一公式来源：transfer-geometry ≡ stlIntraTransitSpeedKmS(mass)', async f => {
+  prepareEnvironment();
+  stubSetBodyObs('ZZ-101t', 1_000_000, 0);
+  stubSetBodyObs('ZZ-101u', 1_000_000, Math.PI / 2);
+  const call = massT =>
+    predictTransferGeometry({
+      fromId: 'ZZ-101t',
+      toId: 'ZZ-101u',
+      fromSystemId: SYS,
+      toSystemId: SYS,
+      t0Ms: T0,
+      cond: 1,
+      massT,
+    });
+  // 参考质量 1,271t：幂律基点，速度必须回到 BTF 实测的 27,512 km/s（字面量）。
+  const refMass = await call(1271);
+  expectCondition(f, '参考质量调用成功', refMass !== undefined, '结果', 'undefined');
+  expectExact(f, '参考质量 1,271t ⇒ speedKmS = 27,512（幂律基点自洽）', refMass.speedKmS, 27512);
+  // 夹具质量 2,140t：与唯一来源逐位一致（speedKmS 逐位、hours ±1e-9 相对）。
+  const heavy = await call(SHIP.mass);
+  expectCondition(f, '夹具质量调用成功', heavy !== undefined, '结果', 'undefined');
+  expectExact(
+    f,
+    'speedKmS ≡ stlIntraTransitSpeedKmS(mass) 逐位一致',
+    heavy.speedKmS,
+    stlIntraTransitSpeedKmS(SHIP.mass),
+  );
+  expectClose(
+    f,
+    'hours ≡ d / stlIntraTransitSpeedKmS(mass) / 3600',
+    heavy.hours,
+    heavy.distanceKm / stlIntraTransitSpeedKmS(SHIP.mass) / 3600,
+    1e-12,
+  );
+  // 负向：质量项真的生效（不是裸常数）—— 重船必须显著更慢。
+  expectCondition(
+    f,
+    '重船（2,140t）比参考质量（1,271t）慢 ≈ 1.5×',
+    heavy.hours > refMass.hours * 1.4,
+    '>1.4×',
+    `${heavy.hours} vs ${refMass.hours}`,
+  );
+});
+
 // ---- 汇总 ----
 console.log(
   '\n口径摘要（全部来自真实模型，非断言常数）：' +
-    `STL_INTRA_TRANSIT_SPEED_KM_S = 27512 km/s（BTF 直采实测，fuel-model.ts；与 f/距离无关）` +
-    `⇒ A1 均值圆弧公式 (r_mid × θ) / (27512 × 3600) / cond；` +
-    `BTF HRT→VH-331g TRANSIT 段 599.22M km / 21,780s 与公式口径逐位匹配。`,
+    `系内转移段速度 = stlIntraTransitSpeedKmS(质量) = 27512 × (1271/质量)^0.78 km/s` +
+    `（BTF 直采，fuel-model.ts；1,271t 参考质量 → 27,512 km/s，与 f/距离无关）；` +
+    `A1 均值圆弧公式 (r_mid × θ) / stlIntraTransitSpeedKmS(质量) / 3600 / cond（夹具 2,140t ⇒ 乘数 1.5013751）；` +
+    `BTF HRT→VH-331g TRANSIT 段 599.22M km / 21,780s 在参考质量下与公式口径逐位匹配。`,
 );
 console.log(`\nPASS ${summary.pass}/${summary.pass + summary.fail}`);
 process.exit(summary.fail === 0 ? 0 : 1);

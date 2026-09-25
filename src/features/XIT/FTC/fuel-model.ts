@@ -490,15 +490,25 @@ const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重�
 // 用户实测（VH-192B → VH-192C，619,312,100 km / 40,781 s = 15,186 km/s，质量 2,727 t）
 // 与 27512 × (1271/2727)^0.78 = 15,166 km/s 吻合到 0.1%。
 // 来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）。
-// ⚠️ 本常量对外仍是「质量 = 1,271t 时的参考速度」：`transfer-geometry.ts` 直接 `import` 它
-// 并按 `速度 / 状况` 计时（**无质量项**）—— 那里对重船的时长同样偏快，本轮未改（超范围）。
+// ⚠️ 本常量**不是**船无关常数，只有配上质量幂律（下方 stlIntraTransitSpeedKmS）才完整：
+// 单独拿它计时 = 重船偏快（2026-09-25 之前的 transfer-geometry.ts 就是这么错的）。
 export const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
 // 上述参考速度对应的**参考质量**（kg 无关，用吨即可，只参与比值）。
-const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
+export const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
 // 质量幂指数：由「质量比 2.145、速度比 1.812」解出 ≈0.78（与 BTF 标定式里转移段的 0.75 同源，
 // 取实测 0.78 更贴合）。⚠️ 不要用段速度（离港/进近）的 `stlLoadFactor` 指数（`loadExp`
 // 标准引擎 0.6）—— 那是**段速度**口径，与转移段不是同一个指数。
-const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
+export const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
+
+// 系内「转移」（TRANSIT）段速度：参考速度 × (参考质量 / 当前质量)^0.78。
+// 单一来源：fuel-model 与 transfer-geometry 都用它，禁止在调用点各自展开公式。
+export function stlIntraTransitSpeedKmS(massT: number): number {
+  return (
+    STL_INTRA_TRANSIT_SPEED_KM_S *
+    Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / Math.max(1, massT), STL_INTRA_TRANSIT_MASS_EXP)
+  );
+}
+
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
   STL_ENGINE_STANDARD: { vSat: 87036, fExp: 0.84 },
@@ -633,14 +643,9 @@ export function computeFuelOption(
     // 刻意**不用** metrics.transitSeconds：那是记录当时那条计划的 f/质量下的原生时长，按
     // 当前 f 复用会把时长钉死（成本最优解会一路选最低 f）；改用「参考速度 + 质量幂律」保留了
     // 质量这条真实物理依赖，又不绑定单条记录的时刻。
-    // 转移段速度 = 参考速度 × (参考质量 / 当前质量)^0.78（参考质量 = BTF 标定样本的整备质量：
-    // 该样本载重 0 ⇒ 质量 = 整备质量）。
-    const transitSpeed =
-      STL_INTRA_TRANSIT_SPEED_KM_S *
-      Math.pow(
-        STL_INTRA_TRANSIT_SPEED_REF_MASS_T / Math.max(1, ship.mass),
-        STL_INTRA_TRANSIT_MASS_EXP,
-      );
+    // 公式只此一份（stlIntraTransitSpeedKmS）：2026-09-25 的教训就是两处各自展开、
+    // 只补了一处（transfer-geometry 漏质量项，重船时长偏快 1.5×）。
+    const transitSpeed = stlIntraTransitSpeedKmS(ship.mass);
     stlHours =
       (depKm / (vDepart * 3600) + appKm / (vApproach * 3600) + restKm / (transitSpeed * 3600)) /
       cond;
