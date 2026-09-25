@@ -9,7 +9,7 @@
     "url": "https://github.com/refined-prun/refined-prun.git"
   },
   "scripts": {
-    "compile": "tsc --noEmit",
+    "compile": "vue-tsc --noEmit",
     "build": "pnpm run clean && pnpm run compile && vite build && vite build --config vite.content.config.mts && node scripts/fix-innerHTML.mjs && node scripts/build-firefox.mjs",
     "clean": "rimraf dist",
     "dev": "cross-env NODE_ENV=development vite build --config vite.content.config.mts --mode development && vite build -w --mode development",
@@ -61,7 +61,8 @@
     "typescript": "6.0.3",
     "typescript-eslint": "^7.18.0",
     "unimport": "^6.3.0",
-    "vite": "^7.3.6"
+    "vite": "^7.3.6",
+    "vue-tsc": "^3.3.11"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,vue}": [
