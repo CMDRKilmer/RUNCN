@@ -374,7 +374,10 @@ async function computeTimeAlloc() {
         if (neighborIdx < 0 || neighborIdx >= ships.length || stopIdx < 0 || stopIdx >= n) {
           return;
         }
-        if (alloc.ranges[neighborIdx]!.length === 0) {
+        // alloc 是 planTimeBalancedSegments 的原始产物：ranges 是按船对齐的**半开
+        // 下标区间 [start,end)**（空段 = start === end），不是站点 id 数组。此前用
+        // `.length` 判断参与与否恒得 undefined，导致下方诊断整体失效。
+        if (alloc.ranges[neighborIdx]!.start >= alloc.ranges[neighborIdx]!.end) {
           return; // 相邻船本就不参与，无需提示。
         }
         const cap = capacities[neighborIdx]!;
@@ -396,13 +399,13 @@ async function computeTimeAlloc() {
       };
       // 左侧非空段船接手瓶颈首站（= 左段末站）；右侧非空段船接手瓶颈末站（= 右段首站）。
       for (let j = maxIdx - 1; j >= 0; j--) {
-        if (alloc.ranges[j]!.length > 0) {
+        if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
           tryTransfer(j, alloc.ranges[j]!.end);
           break;
         }
       }
       for (let j = maxIdx + 1; j < alloc.ranges.length; j++) {
-        if (alloc.ranges[j]!.length > 0) {
+        if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
           tryTransfer(j, alloc.ranges[j]!.start - 1);
           break;
         }
