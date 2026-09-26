@@ -3,9 +3,9 @@ env:
   KEEP_RELEASES: '10'
   # Edge Add-ons API 密钥到期日（UTC），续期后同步更新 edge-key-expiry.yml
   EDGE_API_KEY_EXPIRY: '2026-11-09'
-  # 不要在这里放非 ASCII 值：workflow 级 env 的中文传到 shell 时会变成空串，
-  # 曾经使 PROJECT_NAME 展开为空、资产名成了 "-26.9.25.1.zip"（26.9.25.1 及之前
-  # 所有 release）。中文一律写成 run 脚本内的字面量（与 --title 同一路径，可靠）。
+  # 发布产物的**文件名必须纯 ASCII**：GitHub 会剥掉 release 附件名里的非 ASCII
+  # 字符（26.9.26 实测：本地文件名确实是 `琉璃小工具-26.9.26.zip`，上传后变成
+  # `-26.9.26.zip`）。release **标题**是另一个字段，可以继续用中文。
 
 name: Release
 on:
@@ -109,9 +109,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ steps.parse.outputs.VERSION }}"
-          # 中文名写成字面量，不要走 env（见文件头注释）。
-          FILENAME_ZIP="琉璃小工具-$VERSION.zip"
-          FILENAME_CRX="琉璃小工具-$VERSION.crx"
+          # ASCII 文件名（原因见文件头注释）；中文只用于 --title。
+          FILENAME_ZIP="RefinedPrun-$VERSION.zip"
+          FILENAME_CRX="RefinedPrun-$VERSION.crx"
           cd "$DIRECTORY"
           zip -r "$FILENAME_ZIP" ./*
           npx crx pack . -o "$FILENAME_CRX"
