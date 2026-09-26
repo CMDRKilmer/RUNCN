@@ -483,7 +483,7 @@ Auto-unmounts when the parent node disconnects from the DOM.
 
 Extract external DOM handling from Vue components into the feature `.ts` file. Vue components handle rendering; feature files handle DOM wiring and game data access. Use callback props to communicate values from Vue to the feature.
 
-**`:key` must track the identity you actually care about.** Handing an object straight to `:key` stringifies it to `"[object Object]"`, so every payload gets the same key and the intended forced remount silently never happens (`FleetActWindow.vue` exists to force `ExecuteActionPackage` to re-create when a new package object is staged — the object key made that a no-op for its whole life, which TypeScript flagged as `TS2322` only once `.vue` got type-checked). When the rule is "remount whenever this object is replaced", keep a counter and bump it from a `watch` on that identity.
+**`:key` is compared by strict equality, and typed as `PropertyKey`.** Vue's `isSameVNodeType` is `n1.type === n2.type && n1.key === n2.key` (`@vue/runtime-core`), and keyed diff stores keys in a `Map` — a key is **never stringified**, so an object key compares by identity and a replaced object *does* force a remount (`FleetActWindow.vue` relies on exactly that to make `ExecuteActionPackage` re-create when a new package object is staged — its behavior was correct all along). What an object key breaks is the **type**: `:key` expects `PropertyKey`, so `vue-tsc` reports `TS2322` — which stayed invisible while `.vue` went unchecked. When the intent is "remount whenever this object is replaced", keep a counter bumped from a `watch` on that identity: same behavior, valid key type.
 
 ---
 
