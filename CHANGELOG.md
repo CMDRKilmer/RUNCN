@@ -4,6 +4,9 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+---
+
+## [26.9.26] - 2026-09-26
 ### 🐞 Fixes
 
 - **`XIT/CQ`**：面板里两处点击此前必然抛 `ReferenceError` —— 「CX 挂单」表格的 `CXOB` 按钮（`openCxob()`）与「LM 广告」表格的 `LMA`/`LM` 按钮（`openLm()`）都调用 `showBuffer(...)`，但该文件**没有 import 它**（`showBuffer` 不在自动导入白名单内）。两个按钮在模板里都挂在 `@click` 上，属必现故障。已补上 import。
@@ -15,6 +18,8 @@
 
 - **`.vue` 文件首次进入 CI 类型检查**：`pnpm run compile` 由 `tsc --noEmit` 改为 `vue-tsc --noEmit`。`tsc` 无法解析 `.vue`，此前所有 `<script setup lang="ts">` 内的类型错误在 `compile` 与 CI 里都是盲区（只在编辑器里可见）—— 上面「瓶颈诊断是死代码」正是这类错误（编辑器报了 3 个 `TS2339` 才被发现）。`lint.yml` 本来就跑 `pnpm compile && pnpm lint`，因此无需改 workflow。切换后全仓库一次性只挖出 4 个错误：`XIT/CQ` 2 个、`XIT/BSN` 1 个（均为真缺陷，见上），以及 `FLEETACT` 窗口 `:key` 传对象的 1 个纯类型错误 —— Vue 的 key 比较是严格相等、不做字符串化，该处强制重挂载的行为本来就正常，已改为「watch 对象身份 + 计数器」以消除类型错误、行为不变。
 - **本地 lint 恢复正常**：`eslint.config.mjs` 的 `ignores` 补上 `dist-firefox/`（构建产物；ESLint 不读 `.gitignore`，此前会让本地 `pnpm run lint` 去扫数百个打包后的 bundle，跑几分钟后报约 1250 个解析错误）与 `.tmp/`（技能写的临时脚本不在 `tsconfig.json` 的 `include` 内，报 3 个解析错误）。现在本地 `pnpm run lint` 约 40 秒通过。CI 一直是干净的：全新 checkout 里这两个目录都不存在，属本地专属故障。
+
+---
 
 ---
 
