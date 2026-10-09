@@ -847,6 +847,8 @@ return formatCurrency(price, format);
 环线规划核心在 `src/features/XIT/FLEET/chain-planner.ts`，UI 在 `ChainView.vue`。
 
 - 单路线由 `planChainRoute` 规划：拓扑排序定航线 → 按目标天数平衡链上运量 → 沿航线模拟舱容。
+- **链上装船按下游优先度逐条装载（不按比例缩放）**：装载到下游站点的链输送（`chainPickup`）走 `pushItemsPrioritised`（`src/features/XIT/FLEET/chain-fit.ts`），按 dest 的 daysLeft 升序逐条装填，可装多少装多少，超载 item 跳过；缺货的下游留待下一航次。**关键**——按比例缩放会让每个下游都被裁到一半、谁都拿不到足额，按下游优先度则保证最急的下游拿满。出发地装载 CX 采购物资（`initialItems`）仍用 `pushItemsProportional`（整批按同一比例缩放，超载则让用户减少天数或换大船）。
+- **卸货后强制校验货舱再开船**：每个站点包在 MTRA 卸载+提取之后、OPEN SFC/DEPART 之前注入 `Verify Ship Cargo` 步骤（`src/features/XIT/ACT/action-steps/VERIFY_SHIP_CARGO.ts`），轮询飞船货舱 `storagesStore.getByAddressableId(ship.id)` 直到卸载 map 中每个 ticker 剩余 ≤ 0（30s 超时 + 失败）。这是因为 MTRA 用 `waitActionFeedback` 等游戏面板反馈但**底层货运跨客户端→服务器全链路完成有窗口**，若不强制等货舱真正清空就 DEPART，会出现「卸载包没卸完船就出发」。归航包同样注入该步骤以校验 `finalUnload` 已落库到出发地仓库。
 - **组内产出的闭环**：BSN 白名单 + output>0 的 ticker 为「组内产出」，一律不进 CX 采购清单；缺口优先由出发地空间站仓库库存以「取货」（`originPickup`）补足，仍不足则警告。
 - **购买时检测空间站库存**：两层检测。
   1. **空间站仓库库存抵扣**：生成采购清单时，出发地空间站仓库（`originStock`）已有的物资（含组内产物与普通补给）优先以「取货」装船（`originPickupByStop`），采购量在 `purchaseBill` 阶段扣除取货部分——仓库已有不重复购买。
