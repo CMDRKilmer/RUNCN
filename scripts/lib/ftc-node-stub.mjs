@@ -150,7 +150,6 @@ export const findNativeFlightPlan = () => undefined;
 export const resolveSystemId = () => undefined;
 
 // './ftc-fuel-settings'（写入即记录，供断言「是否进入写入路径」）。
-// 2026-09-23 起键为**航线级**（`船|起点|终点|gw|nat`，见 ftcRouteKey）：写入方传的是
 // 拼好的键，故这里记录 key（而不是船名）—— 断言据此确认写入落在哪条航线上。
 export const setFtcFuelSlider = (routeKey, value) => {
   sliderWrites.push({ key: routeKey, value });

@@ -1,27 +1,9 @@
-// FTC 参数**航线级键控**（任务 B）回归脚本 —— 带退出码，可自动判定成败。
-//
-// 背景（2026-09-23，两轮修复中的第二项）：
-//   `rprun.ftc.fuel-slider.v3` 的键只有 `ship`。船换了目的地而新航线算不出来时
-//   （无原生几何 → ftc-compute 门控不写参数），同一个键上还留着**上一条航线**的值，
-//   SFC 打开新航线后照样读到它并写进新航线的滑块 —— 值本身合法（甚至可能就是上一条
-//   航线的最优值），只是属于另一条航线。键改成 `船|起点|终点|gw|nat`（ftcRouteKey，
-//   与 computeFtcPlan 写进 lastFtcCompute.key 的键逐位一致）后，不同航线互不可见：
-//   读不到就是 undefined → SFC 不改滑块（与既有的「残缺不写」路径同一行为）。
-//
-// 本脚本锁定的行为契约（4 条验收用例）：
-//   ① 航线 A 算出 0.2 → 按航线键写入 `.v4`，且键与 lastFtcCompute.key 逐位一致；
-//   ② 同船换到航线 B（B 无原生几何）→ 读不到航线 A 的值（undefined）→ 不写滑块
-//      （`.v4` 里不出现 B 的键）；
-//   ③ 航线 B 数据到位（原生 STL 段入库）后重算 → 写入 B 自己的值，A 的值不受影响；
-//   ④ 同船同航线再算一次（同值）→ setFtcFuelSlider 同值短路，不重复写 localStorage。
-//
+// FTC 航线级参数键回归。
+// 契约：不同航线和网关模式互不可见；同航线重复写入短路。
 // 用法：node scripts/verify-ftc-route-key.mjs
-// 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
-// 局限：驱动的是真实编排层 + 真实 ftc-fuel-settings + 真实 route-planner/route-model，
-// 但几何侧 store（stlSegmentsStore/stationsStore/buffers）走替身（`scripts/lib/
-// ftc-geometry-stub.mjs`，与 verify-ftc-geometry-source.mjs 同源）；SFC 磁贴的
-// `tileRoutes` 上下文（DOM 侧接线）在 Node 里不可加载，由
-// scripts/verify-ftc-slider-cache.mjs（键空间）+ 代码审查覆盖。
+// 退出码：0 = 全部通过；1 = 存在失败。
+// 局限：几何 store 和 DOM 接线使用受控替身。
+
 import { register } from 'node:module';
 import { DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 
@@ -149,7 +131,6 @@ await checkAsync('① 航线 A（ZV-307a → ANT）算出 f = 0.15 → 写入航
   expectExact(f, 'ok', out.ok, true);
   expectExact(f, 'inputIncomplete', out.inputIncomplete, undefined);
   expectExact(f, 'best.fuel', out.best?.fuel, 0.15);
-  // 系内燃料 = 0.98×罐 3500×min(0.15,0.5) = 514.5u（2026-09-23 罐口径，与距离无关）。
   expectClose(f, 'STL 燃料（截图实参复算）', out.best?.stlFuel, 514.5, 0.5);
   // 键格式：ftcRouteKey(船, 起点, 终点, 网关) —— 起终点 trim + 大写归一。
   expectExact(f, '读回（航线键）', settings.getFtcFuelSlider(SHIP, FROM, TO_A, false), 0.15);
@@ -184,7 +165,6 @@ await checkAsync('② 同船换航线 B（无几何）→ 读不到航线 A 的�
     '>0 条',
     '0 条',
   );
-  // ★ 本轮的修复目标：按 B 的键读 → undefined（修复前按船读会拿到 A 的 0.2）。
   expectExact(f, '航线 B 读不到值', settings.getFtcFuelSlider(SHIP, FROM, TO_B, false), undefined);
   expectExact(
     f,
@@ -200,7 +180,6 @@ await checkAsync('② 同船换航线 B（无几何）→ 读不到航线 A 的�
 await checkAsync('③ 航线 B 数据到位 → 写入 B 自己的值，A 不受影响', async f => {
   prepareA();
   // 服务器为 B 下发原生 STL 段（同星系键 = 出发天体|目标天体）。
-  // ⚠️ 2026-09-23 口径标定后系内燃料 = 0.98×罐×min(f,0.5)（与距离无关）→ 以前靠「B 比 A
   // 长得多 → 档位不同」区分 A/B 的方式不再成立（同船同罐下两者会算出同一个 f）。
   // 改为用**不同罐容量**区分：B 用小型罐 1500 → 燃料 1470×min(f,0.5)，最优档位与 A 不同，
   // 这样「B 用的是自己的值」在输出里仍然肉眼可辨。

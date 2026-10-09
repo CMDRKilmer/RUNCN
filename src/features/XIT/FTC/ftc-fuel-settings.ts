@@ -3,7 +3,6 @@ import { persistedRef } from '@src/utils/persisted-ref';
 // FTC 最优燃料参数（燃料滑块 / 反应堆使用量）**按航线**键控的持久化 map。
 // 键 = ftcRouteKey(ship, from, to, useGateway)，如 'AVI-06JVV|ZV-307A|ZV-307|nat'。
 //
-// 为什么从「按船」改成「按航线」（2026-09-23）：按船键控时一条船只有一个键 —— 船换了
 // 目的地而新航线算不出来（无原生几何 → 门控不写参数）时，该键上还留着**上一条航线**的
 // 值，SFC 打开新航线后面板照样读到这个值并写进新航线的滑块。值本身是合法的，只是属于
 // 另一条航线 —— 这是与「脏值作废」完全独立的第二个错误写入面。键里带上起终点与网关
@@ -29,7 +28,6 @@ export function ftcRouteKey(ship: string, from: string, to: string, useGateway: 
 // `f = 1` 与 `r = 1` 都是**合法**取值（f = 1 是最快档，findBalanceOption 在极短航线上会
 // 选它；同星系航线 reactorRelevant = false → 反应堆网格只有 r = 1），而 `.v3` 里没有记录
 // 能表明某个值是哪条航线、哪次计算写的；且 persistedRef（src/utils/persisted-ref.ts）只做
-// JSON.parse 恢复，**不支持** rename / 迁移钩子。与上一轮 v2 → v3 同理：一次性作废。
 //
 // 代价（可接受）：所有航线要重算一次（完整输入）才恢复自动写滑块；丢弃期间读取返回
 // undefined → SFC 不改滑块、沿用玩家当前设置（与既有的「残缺不写」路径同一行为），
@@ -42,7 +40,6 @@ export const ftcFuelSliders = fuelSliders;
 export const ftcReactorUsages = reactorUsages;
 
 // 读取某航线的 FTC 最优燃料滑块；未计算过（undefined）返回 undefined（不改滑块）。
-// ⚠️ 航线键是**复合键**：起终点/网关标志必须与写入时一致，否则读不到 —— 这正是本轮的
 // 修复目标（船换到新航线后不得再读到上一条航线的值）。
 export function getFtcFuelSlider(
   ship: string | undefined,

@@ -20,23 +20,19 @@ Sandbox `node_modules` is not persisted: run `pnpm install --frozen-lockfile` be
 
 ## THE MAIN FLOW
 
-Create the following to-do list immediately.
+Before editing:
 
-ALL STEPS ARE MANDATORY. DO NOT SKIP ANY.
-
-- Analyze user request
-- Run `find docs/ -name "*.md" | sort` for available docs
-- Read `docs/README.md`
-- Read docs based on task type:
+- analyze the request;
+- run `find docs/ -name "*.md" | sort`;
+- read `docs/README.md` and `docs/project-rules.md`;
+- read docs based on task type:
   - **New feature / Fix feature**: `docs/feature-patterns.md`, `docs/game/ui-concepts.md`, relevant game docs
   - **Refactor infra**: `docs/architecture.md`
   - **PR review**: `docs/contributing.md`, plus `docs/feature-patterns.md` if PR adds features
   - **Any task**: `docs/contributing.md` for style rules when writing code
-- Analyze examples from docs
-- Revise the plan and present todo items to the user
-- Once the user accepts, create revised todo items
-- Execute, use skills and commands that can help solve the task
-- Once the task is complete, use the distill skill
+- analyze relevant examples and present the plan;
+- after approval, execute and verify;
+- once complete, use the distill skill.
 
 ## MEMORY
 

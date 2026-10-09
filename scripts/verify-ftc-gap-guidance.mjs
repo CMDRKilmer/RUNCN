@@ -1,64 +1,8 @@
-// FTC「结构性拿不到原生 STL 段几何」的成因回归脚本 —— 带退出码，可自动判定成败。
-//
-// 背景（2026-09-23 用户实机日志）：
-//   [sfc-auto-fuel-settings] 推送航线给 FTC：AVI-06JVV ZV-307a → ZV-307（网关）
-//   [sfc-auto-fuel-settings] 输入不完整（缺 起终点轨道距离（ZV-307a / ZV-307））：…
-// 玩家另一条航线 zv-307a → ANT（同一系统）在 FTC 面板上**能**算出几何（起落 68.0562M +
-// 33.6491M km —— 注意：面板标题写明「航线分段（模型估算）」，这两个数是**模型估算行**，
-// 不是服务器原生值，2026-09-23 复核确认）。本脚本锁定「为什么 ZV-307a → ZV-307 永远算不出来」的两条结构性成因，
-// 并锁定它们的可操作提示文案（不能只说「等服务器下发」）：
-//
-//   ① 目的地被游戏规范化成**星系 id**：SFC 目的地框会把空间站目的地规范化成所属星系
-//      （ANT → ZV-307，见 prun-ui/utils/select-address.ts、FLEET/ChainView.vue 的注释），
-//      而服务器下发的原生段记录按**实际天体/空间站 id** 键控（真实导出键 ZV-307A|ANT，
-//      见 scripts/build-stl-data.mjs 的格式说明）→ 星系 id 直接查表命不中。
-//      **2026-09-23 已修**（本轮）：查表前先按 stations.json / 游戏内站点把星系 id 反查为
-//      **唯一**空间站 id（route-model.lookupStationInSystem + route-planner.stlRecordKeyFor，
-//      守卫：候选 ≠1 一律拒绝反查）；本条成因的文案随之从「把目的地改成具体天体/空间站」
-//      变为「已按 ZV-307 → ANT 反查（键已经对了），为该航线生成一次计划等服务器算完」。
-//      反查的完整验收（命中/不命中/守卫/全链路）在 scripts/verify-ftc-station-reverse.mjs。
-//   ② 系内飞行（同一星系）：段结构是「转移（TRANSIT）」（行星起飞/着陆另加起飞/着陆段），
-//      **没有** DEPARTURE/APPROACH 段（2026-09-23 用户 SFC 原生计划实测：ZV-307a →
-//      ZV-307/Antares Station = 单段 101,655,808 km / 43分59秒 / 2655 单位 STL；BTF 侧
-//      HRT → VH-331g 也是「转移 + 着陆」，见 data/ftc-calibration/btf-load-sweep-2026-08-29.md）。
-//      **2026-09-23 本轮变更**：段名/字段已核实（`PrunApi.SegmentType` 含 'TRANSIT'、
-//      字段就是 `FlightSegment.stlDistance` —— 与离港/进近同口径），故 `recordStlSegments`
-//      **现在会记录这一段**（同星系表的 `transit` 字段）→ 系内航线有**原生**几何了。
-//      **同日二次变更（口径标定）**：该段的
-//      燃料/时长口径已用 BTF 受控数据标定（燃料 = 2×0.49×罐×min(f,0.5)，与距离无关；
-//      时长 = d/v_转移，见 fuel-model 的 STL_TRANSIT_F_SAT 上方）→ `missingModelInputs`
-//      **不再因口径判缺**：拿到转移段记录即可算、可写滑块。
-//      ⚠️ 是否勾选「使用跃迁点」与这条事实**无关** —— 勾选不改变系内航线的路程
-//      （判据：`planRoutes` 对同星系两种模式都返回 `natural`；旧注释的「101.7053M km
-//      差 0.05%」比法已作废 —— 那是已删除的自建轨道模型的估算行，不是原生值）。
-//      本脚本锁定：勾选态**不**被归因为网关成因、也不出现无效操作（「取消勾选改走直飞」）；
-//      还没有原生记录时给出**有效**操作（生成一次计划 —— 该段已是消费的几何来源）。
-//
-// 锁定的行为契约：
-//   ① 键空间事实：内置/导出数据里「天体侧」分量（depart 第一分量、approach 第二分量）
-//      从不出现星系 id（只出现行星/空间站 id，另有 '*' 通配）；
-//   ② TRANSIT 结构的计划派发给**真实** system-bodies 后：同星系表 +1（键 出发天体|目标天体），
-//      整段路程记在独立字段 `transit`（**不**伪造离港/进近），跨星系两张表一动未动；
-//   ③ 合成的同星系计划（带 DEPARTURE/APPROACH，**不是**真实观测形状）写出的键是天体侧
-//      （ZV-307A|ANT）；用被规范化后的星系 id 查表命不中；同键两种结构并存（合并不覆盖）；
-//   ④ 真实 planRoutes/routeMetrics：ZV-307a → ZV-307 是**同星系**航线（legs 为空），
-//      「使用跃迁点」在 planner 里不改变选中的路线（同星系无跳 → gateway 候选恒为空）
-//      —— 成因② 是模型外的事实（由游戏实测锁定），不是 planner 的 gateway 分支造成的；
-//      metrics 给出 toIsSystem = true / fromIsSystem = false（成因② 的可判定信号）、
-//      toLookup = 反查后的查表键（无站点数据时等于原值）、stationReverse = 反查诊断。
-//   ⑤ 真实 computeFtcPlan 全链路：两类成因各给出**可操作**文案且都不写滑块；
-//      有原生记录时（d = 101.7053M km）→ best.fuel = 0.15 并正常写入滑块。
-//   ⑥ 同星系表的 `transit`（真实系内结构）→ `routeMetrics` 给出整段原生路程
-//      （stlDistanceKm = transitKm，不伪造离港/进近），且口径已标定 →
-//      真实 computeFtcPlan **算出并写入滑块**（燃料 = 0.98×罐×min(f,0.5)，与 d 无关；
-//      时长 = d/v_转移）。
-//   ⑦ 系内 + 星系 id 目的地：有转移段记录 → 直接可算并写滑块；无记录 → 文案给
-//      「生成一次计划」且**不含**已过时的「口径未标定」。
-//
+// FTC 输入缺失提示与原生 STL 几何来源回归。
+// 契约：天体键反查、TRANSIT 记录、系内/跨系路由和可操作提示保持当前语义。
 // 用法：node scripts/verify-ftc-gap-guidance.mjs
-// 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
-// 局限：DOM 接线（SFC 写滑块）在 Node 里不可加载；服务器真实下行消息的地址形状由
-// 合成计划 + 真实导出键（ZV-307A|ANT）双重锚定，仍属「与实测一致」的推断。
+// 退出码：0 = 全部通过；1 = 存在失败。
+
 import { register } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
@@ -265,7 +209,6 @@ const transitRec = stlSegmentsStore.getSameSystem('zv-307a', 'ANT');
 check(
   '② 系内转移（TRANSIT）计划 → 写入同星系记录（键 出发天体|目标天体，整段路程进 transit）',
   f => {
-    // ⚠️ 断言变更记录（2026-09-23 本轮）：本用例原来断言「一条都不写」（当时 TRANSIT 段不被
     // 记录，系内航线结构性拿不到几何）。段名/字段核实后改为记录该段 → 断言随之反转。
     expectExact(f, '同星系表 +1', counts().sameSystem, beforeGateway.sameSystem + 1);
     expectExact(f, '转移段距离（原生 stlDistance）', transitRec?.transit?.distanceKm, 520267630);
@@ -358,7 +301,6 @@ check('⑤ 成因①+②（勾「使用跃迁点」+ 星系 id 目的地）→ �
   expectCondition(f, '报缺', text.includes('轨道距离') === true, '含「轨道距离」', text);
   expectCondition(f, '点明系内飞行', text.includes('系内飞行') === true, '含「系内飞行」', text);
   expectCondition(f, '点明星系 id', text.includes('星系 id') === true, '含「星系 id」', text);
-  // ⚠️ 断言变更记录（2026-09-23 本轮）：旧断言要求文案含「取消勾选」（建议改走直飞）——
   // 该操作**无效**（系内计划永远是「转移」段，见 guides/how-to-collect-btf-data.md），
   // 文案改为「勾选/取消不改变系内航线的路程，换模式无用」+ 手动设置。
   expectCondition(
@@ -384,7 +326,6 @@ check('⑤ 成因①+②（勾「使用跃迁点」+ 星系 id 目的地）→ �
   );
   expectExact(f, '未写入滑块', stub.sliderWrites.length, 0);
   expectExact(f, '未写入反应堆', stub.reactorWrites.length, 0);
-  // ⚠️ 断言变更记录（2026-09-23）：原来断言文案含「具体天体/空间站」（要求玩家改目的地），
   // 反查上线后这条航线**不再需要**改目的地 —— 文案改为「已按 ZV-307 → ANT 反查 + 生成一次
   // 计划」，故断言同步替换（否则会把更正确的文案判为失败）。
 });
@@ -396,8 +337,6 @@ const natIncomplete = await runCompute('ZV-307a', 'ZV-307', false);
 check('⑤ 成因②（终点是星系 id）→ 只点星系 id，不把成因推给勾选', f => {
   const text = natIncomplete.inputIncomplete?.[0] ?? '';
   expectCondition(f, '点明星系 id', text.includes('星系 id') === true, '含「星系 id」', text);
-  // ⚠️ 断言变更记录（2026-09-23 本轮）：系内成因文案现在会**主动**说明「勾选/取消
-  // 不改变系内航线的路程」（预防用户误解），故旧断言「不含「使用跃迁点」」过严 ——
   // 改为断言不把成因归给网关（不含「该航线走「使用跃迁点」」）。
   expectCondition(
     f,
@@ -413,8 +352,6 @@ check('⑤ 成因②（终点是星系 id）→ 只点星系 id，不把成因�
     '含「已按 ZV-307 → ANT 反查」',
     text,
   );
-  // ⚠️ 断言变更记录（2026-09-23 本轮）：系内航线的原生几何**已入库**（转移段的
-  // stlDistance），拿到它只需生成一次计划 —— 旧断言要求不含「生成一次计划」（当时该操作
   // 无效，因为转移段不被消费）已不成立，改为要求给出这条**有效**操作。
   expectCondition(
     f,
@@ -442,7 +379,6 @@ check('⑤ 系内航线（尚无同星系记录）→ 先报「系内飞行/转�
   expectCondition(f, '报缺', text.includes('轨道距离') === true, '含「轨道距离」', text);
   expectCondition(f, '点明系内飞行', text.includes('系内飞行') === true, '含「系内飞行」', text);
   expectCondition(f, '点明转移段（TRANSIT）', text.includes('转移') === true, '含「转移」', text);
-  // ⚠️ 断言变更记录（2026-09-23 本轮）：「转移」段现在是本模型消费的几何来源，
   // 「生成一次计划」由无效操作变成**唯一**有效操作 → 断言反转（不再要求不含）。
   expectCondition(
     f,
@@ -462,7 +398,6 @@ check('⑤ 系内航线（尚无同星系记录）→ 先报「系内飞行/转�
   // ⚠️ 区分度（防退化成「只看后缀」，也防后人误判为断言过期）：
   //   a) 动作必须由成因句的 ` —— ` 引出、且排在成因**之后**（不是散落在别处的字眼）；
   //   b) 不得出现已被证伪的「取消勾选」建议（换模式不改变系内航线路程）。
-  // ⚠️ 2026-09-23 本轮定位记录：这条用例曾表现为「文案已精简成 `(操作：生成一次计划)` /
   // `(操作：手动设置)`」—— 那两串其实是**断言自身的 label**（expectCondition 把 label 拼在
   // 行尾括号里），不是文案内容。真实实现缺陷：系内动作被嵌在 `systemIds.length > 0` 里，
   // 而起终点都不是星系 id 的系内航线（zv-307a → ANT，最常见形状）命不中该分支 → 只报成因、
@@ -551,7 +486,6 @@ check('⑤ 有原生记录（d = 101.7053M km）→ 不报缺、best.fuel = 0.15
   expectExact(f, 'best.fuel', complete.best?.fuel, 0.15);
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
   expectExact(f, '写入的燃料值', stub.sliderWrites[0]?.value, 0.15);
-  // ⚠️ 断言变更记录（2026-09-23，本轮复核）：键从「按船」改成「按航线」后，替身
   // setFtcFuelSlider(routeKey, value) 记录的字段是 `key`（拼好的航线键）而不再是 `ship`
   // ——原断言 `sliderWrites[0]?.ship === 'STUB-01'` 读的是已不存在的字段（恒 undefined，
   // 必然失败），属**断言过期**，不是实现缺陷。这里改成断言**完整的航线键字面量**：
@@ -572,7 +506,6 @@ check('⑤ 有原生记录（d = 101.7053M km）→ 不报缺、best.fuel = 0.15
 
 // ---- ⑥ 真实系内结构（同星系表只剩 `transit`）----
 // 数值取用户 SFC 原生计划：ZV-307a → ZV-307/Antares Station = 单段「转移」
-// 101,655,808 km / 43分59秒。**2026-09-23 本轮口径已标定**（BTF 受控数据，见 fuel-model
 // 的 STL_TRANSIT_F_SAT 上方）：燃料 = 2×0.49×罐×min(f,0.5)（**与距离无关**）、
 // 时长 = d/v_转移（V_SAT(引擎)×(min(f,0.5)/0.5)^k×(整备/当前质量)^0.75）。
 // 故真实 computeFtcPlan 现在**算出并写入滑块**（旧行为：口径未标定 → 判缺、不写）。
@@ -623,7 +556,6 @@ console.log(
 
 // ---- ⑦ 系内 + 目的地是星系 id（反查命中）----
 // 有转移段记录 → 直接可算（不报缺、写滑块）；无记录 → 成因只给「系内/转移段 + 生成一次
-// 计划」，且**不得**再出现「口径未标定」（该口径已于 2026-09-23 用 BTF 受控数据标定）。
 stub.stubSetSameSystemRecord('zv-307a', 'ANT', {
   transit: { distanceKm: 88870000, seconds: 2600 },
 });
@@ -651,7 +583,6 @@ console.log(
     `燃料=${transitSysId.best?.stlFuel?.toFixed(2)}u 时长=${transitSysId.best?.stlHours?.toFixed(4)}h`,
 );
 
-// 无记录（本轮新锁）：系内 + 星系 id 两条成因都点明，动作是「生成一次计划」；
 // 同时锁死「口径未标定」这类**已过时**文案不得复活（口径已标定，写滑块不再受阻）。
 stub.stubClearStlRecords();
 stub.stubResetWrites();

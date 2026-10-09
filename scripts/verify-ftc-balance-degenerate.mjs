@@ -1,28 +1,8 @@
-// FTC 平衡点（findBalanceOption）选优的退化回归脚本 —— 带退出码，可自动判定成败。
-//
-// 背景（2026-09-23 修复的 bug）：SFC 自动联动把「燃料消耗」滑块写成 1（拉满）。
-// 根因：燃料维度无真实差异时用 Math.max(1e-9, span) 把浮点噪声放大成全量程，且
-// paretoFrontier 退化成只剩最快点 → 两条路径都返回 f=1。
-// ⚠️ 2026-09-23 口径标定后：系内燃料 = 0.98×罐×min(f,0.5)（罐口径，与距离无关）——
-// 即旧背景里「同星系 stlDistanceKm undefined → stlFuel ≡ 0」的退化路径**已不复存在**
-// （燃料不再依赖 d）。契约① 仍由**合成**场景 a/c/d 锁定（那是纯函数层面的退化保护）。
-//
-// 锁定的行为契约（只断言返回的 fuel / reactor / 燃料总量，不碰内部实现细节）：
-//   ① 燃料或时间在全部候选中无差异（跨度 ≤ 1e-9）→ 返回最省油方案
-//      （燃料最小 → 反应堆最小 → 滑块最小），**绝不返回最快方案（f = 1 拉满）**；
-//   ② 非退化航线 → Pareto 拐点，与修复前逐位一致（「基线锁定」场景：fuel/reactor
-//      精确断言 + 燃料总量/总时长 ±1% 数值漂移检测，用于发现退化保护误伤正常选优）；
-//   ③ 任何输入（含 NaN 传播）都不得抛异常。
-//
-// 飞船 = WCB（STL_ENGINE_STANDARD / G8 / 大型 STL 罐 8000）；航线几何取自内置数据：
-//   ZV-307a 半长轴 67,291,581 km（planets-orbit.json）
-//   HRT|* 离港 21,343,591 km、*|ZV-307A 进近 72,034,932 km（stl-segments.json）
-// SFC 自动联动等价于 timeValue=0（未设时间价值）→ findBalanceOption 分支；
-// 同星系无自然跃迁 → 反应堆不参与扫描（reactors = [1]，与 ftc-compute 一致）。
-//
+// FTC 平衡点退化保护回归。
+// 契约：退化输入选最省油方案；正常输入保持 Pareto 选优；任意输入不抛异常。
 // 用法：node scripts/verify-ftc-balance-degenerate.mjs
-// 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败场景（打印 FAIL <场景名> expected=… actual=…）。
-// 直接导入真实模型（Node ≥ 22.18 原生 TS 类型剥离），避免手抄公式引入偏差。
+// 退出码：0 = 全部通过；1 = 存在失败。
+
 import {
   autoFuelGrid,
   autoReactorGrid,
@@ -235,7 +215,6 @@ checkScenario(
 );
 
 // a2/a3/b：真实航线 ZV-307a（行星）→ ZV-307（空间站，同星系）。历史触发条件：d 要求
-// departKm 与 approachKm 同时存在，进近缺失时 stlFuel ≡ 0。**2026-09-23 口径标定后，
 // 系内燃料 = 0.98×罐×min(f,0.5)（与距离无关）** → 这三个场景不再是「燃料无差异」的退化
 // 输入，改为锁「新标定式下仍不返回最快方案（f=1）」，并锁定平衡点与燃料量级。
 const noApproachSameSystem = {
@@ -347,7 +326,6 @@ checkScenario(
 );
 
 // ===== 非退化基线锁定（契约②：退化保护不得误伤正常选优）=====
-// 数值为 2026-09-23 修复前后逐位一致的实测值（±1% 容忍浮点/平台差异）。
 
 // k：空候选集（防御分支）→ 返回 undefined，不得抛异常（调用方用 ?? options[0] 兜底）。
 checkScenario('k 空候选集', [], { undefinedResult: true });
@@ -361,7 +339,6 @@ checkScenario(
 );
 
 // f：同星系、两段都有（stlDistanceKm 有值）→ 燃料 = 0.98×罐8000×min(f,0.5) = 7840×min(f,0.5)
-// （2026-09-23 口径标定：不再用 C_F×f×d，也不再随 d 变）。
 const sameSystemBothSegments = {
   stlDistanceKm: A_SEMI_MAJOR_KM + ZV307A_APPROACH_KM,
   departKm: A_SEMI_MAJOR_KM,

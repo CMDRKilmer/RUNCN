@@ -99,7 +99,6 @@ export function getStationSystem(naturalId: string): string | undefined {
 }
 
 // 反向索引：星系 id → 该星系内的空间站 naturalId（内置 stations.json 的 `s` 字段反查）。
-// 用途（2026-09-23）：SFC 的目的地/起点框会把**空间站规范化成所属星系 id**（ANT → ZV-307），
 // 而服务器下发的原生 STL 段记录按真实天体/空间站 id 键控（真实导出键 ZV-307A|ANT）——
 // 星系 id 查表永远命不中（5930 条记录里天体侧命中星系 id 的 = 0 条）。反查是唯一让
 // 「被规范化的星系 id」也能命中记录的途径（见 route-model.lookupStationInSystem 的
@@ -461,7 +460,6 @@ function trueAnomalyFromEccentric(E: number, e: number) {
 // 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(+inc)·R3(-ra)。
 // 注意：历史 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，
 // 是旧相位标定不准的根源。
-// 2026-08-27 用服务器 transferEllipse 绝对坐标实测（CH-131 系 3 行星 + 各自
 // 出发时刻戳）验证：inclination 需**正向**旋转（R1(+i)），否则 z 分量符号相反
 // （反推恒星位置误差 5~10M km，翻转后 <1.7M）。FIO 与 DATA_DATA 的 inclination
 // 约定一致（可为负），配合 R1(+i) 后与服务器坐标完全对齐。

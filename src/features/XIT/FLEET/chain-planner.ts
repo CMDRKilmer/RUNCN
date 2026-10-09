@@ -840,7 +840,6 @@ export function planChainRoute(input: {
   }
 
   // 环内循环边：反向边（上游在下游之后才到访），被拓扑排序断链。
-  // 这类产物无法在同一次线性航线内回头补送，只能本轮运回仓库、下一轮再从仓库补给，
   // 因此不回流入 flows，仅在归航时标注出「循环下游是否还需补给」。
   const backwardEdges = rawEdges.filter(
     x => position.has(x.to) && position.get(x.from)! > position.get(x.to)!,

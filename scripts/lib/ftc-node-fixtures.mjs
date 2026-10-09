@@ -18,9 +18,7 @@ export const SHIP = {
 };
 
 // 截图航线几何：zv-307a → ANT（同星系）。68.0562M + 33.6491M 来自截图里 FTC 面板的
-// 「航线分段（**模型估算**）」两行（该标题表明它不是服务器原生计划 —— 2026-09-23 复核更正：
 // 真实系内计划只有「转移」（TRANSIT）段，见 system-bodies.recordStlSegments 注释），
-// 总 d = 101.7053M km；修复前模型用 liftOffKmAt 自建轨道几何得到的 d = 101.8808M
 // （面板 best.stlFuel = 580.7205u）。这里仅作**测试几何常量**使用。
 export const DEPART_KM = 68.0562e6;
 export const APPROACH_KM = 33.6491e6;

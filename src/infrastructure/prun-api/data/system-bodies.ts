@@ -155,7 +155,6 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
 //           （2026-09-23 第 5 轮：该键仅作回退 —— 真实混合航线的 APPROACH 段在中间、
 //           其 destination ≠ 最终目标，按首/末跳拼键必然失配；几何首选 routeRecords）
 // - 同星系：计划没有 JUMP 段，键里拼不出首跳/末跳星系，按航线 (出发天体, 目标天体) 记录：
-//           DEPARTURE/APPROACH 段（合成/旧结构）+ **转移（TRANSIT）段**（2026-09-23 起，
 //           真实观测到的系内计划结构）。
 //           段名/字段已核实：`PrunApi.SegmentType` 含有 'TRANSIT'（flights.types.d.ts 第 42 行），
 //           `FlightSegment.stlDistance: number | null` 是段上的同一字段（同文件第 22 行）——
@@ -168,7 +167,6 @@ function recordObservation(id: string, position: PrunApi.Position, timestampMs: 
 //           跨样本比较无效；规则：文案里的数字一律现算。）
 //           故记进同星系表的**独立字段 `transit`**（不塞进 depart/approach：那是「两段拆分」
 //           的语义，塞进去等于伪造出不存在的离港/进近段）。
-// ✅ 转移段的**燃料与时长口径已标定**（2026-09-23，BTF 受控数据）—— 记录即可用：
 //   燃料 = **罐口径** 2×0.49×罐×min(f,0.5) = 0.98×罐×min(f,0.5)：与距离/载重无关、
 //   f ≥ 0.5 饱和（28 点最大误差 3.3%）；旧解读里的 `C_F×f×d` 口径**已被证伪**
 //   （同一航线高 10.0×）。
