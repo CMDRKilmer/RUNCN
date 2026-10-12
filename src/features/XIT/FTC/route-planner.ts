@@ -442,6 +442,7 @@ function segmentDestinationText(dest?: PrunApi.Address): string {
 export function findNativeFlightPlan(
   fromBody: string,
   toBody: string,
+  useGateway?: boolean,
 ): PrunApi.FlightPlan | undefined {
   const plans = flightPlansStore.all.value;
   if (!plans || plans.length === 0) {
@@ -459,6 +460,10 @@ export function findNativeFlightPlan(
     const origin = getEntityNaturalIdFromAddress(segs[0].origin)?.toUpperCase();
     const dest = getEntityNaturalIdFromAddress(segs[segs.length - 1].destination)?.toUpperCase();
     if (origin !== from || dest !== to) {
+      continue;
+    }
+    const hasGateway = segs.some(x => x.type === 'JUMP_GATEWAY');
+    if (useGateway !== undefined && hasGateway !== useGateway) {
       continue;
     }
     const depart = segs[0].departure?.timestamp ?? 0;

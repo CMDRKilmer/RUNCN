@@ -18,10 +18,11 @@
 //   flight-plans / ftc-fuel-settings → chain-flight-time-stub.mjs（用例可控的假数据与空实现）
 //
 // 为什么 system-bodies.ts 走 stub（但保留真实再导出）：A1 路径在系内航线缺前向记录时调
-// predictTransferGeometry，它**优先**读 systemBodiesStore.getPosition 作为两端天体的位置
-// 观测。该 store 的内容来自过去飞行计划 transferEllipse —— 测试不能去触发真实飞行来
-// 填表，于是 stub 提供可注入的 getPosition（同时保留真实 stlSegmentsStore 让本脚本
-// 既有的 SHIP_FLIGHT_MISSION 派发断言不变）。这是「真实 store 子集可注入」的标准做法
+// predictTransferGeometry，它**优先**用离线轨道模型 predictPosition(t0Ms) 取两端天体的
+// 位置，模型无数据时才回退到 systemBodiesStore.getPosition 的静态观测。该观测来自过去
+// 飞行计划 transferEllipse —— 测试不能去触发真实飞行来填表，于是 stub 提供两条可注入面
+// （stubSetOrbit / stubSetBodyObservation），同时保留真实 stlSegmentsStore 让本脚本既有
+// 的 SHIP_FLIGHT_MISSION 派发断言不变。这是「真实 store 子集可注入」的标准做法
 // （见 docs/contributing.md「写路径与查表路径同错则恒绿」的延伸）。
 //
 // 局限：未映射的 '@src/*' 会显式报错（而不是静默走替身），避免新增依赖时替身掩盖问题。
@@ -43,6 +44,8 @@ const REAL = {
     '../../src/infrastructure/prun-api/data/addresses.ts',
   './route-planner': '../../src/features/XIT/FTC/route-planner.ts',
   './route-model': '../../src/features/XIT/FTC/route-model.ts',
+  // ftc-compute.ts 内部用 './transfer-geometry'（FTC 面板回退几何）。
+  './transfer-geometry': '../../src/features/XIT/FTC/transfer-geometry.ts',
   // transfer-geometry.ts 内部用 './route-model' / './fuel-model'，二者各自映射。
   './fuel-model': '../../src/features/XIT/FTC/fuel-model.ts',
 };
@@ -61,9 +64,9 @@ const STUBBED = new Set([
   '@src/infrastructure/fio/orbit',
   '@src/infrastructure/fio/routes',
   // system-bodies 走 stub：stub `export *` 再导出真实的 stlSegmentsStore（保留记录/查表
-  // 链路），同时用本地的 systemBodiesStore 提供可控的 getPosition（让 transfer-geometry.ts
-  // 在没有真实 FIO 观测的情况下也能被驱动）。这是 A1 路径唯一新增的替身面 —— 见 stub
-  // 文件头的解释。
+  // 链路），同时用本地的 systemBodiesStore / predictPosition 提供可控的位置输入（让
+  // transfer-geometry.ts 在没有真实 FIO 观测的情况下也能被驱动）。这是 A1 路径唯一新增的
+  // 替身面 —— 见 stub 文件头的解释。
   '@src/infrastructure/prun-api/data/system-bodies',
   './ftc-fuel-settings',
 ]);

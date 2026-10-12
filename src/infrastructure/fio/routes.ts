@@ -137,6 +137,12 @@ function removeGatewayNeighbors() {
   }
 }
 
+function restoreGatewayNeighbors() {
+  for (const connection of gatewayConnections.values()) {
+    addNeighbor(connection.fromSystem, connection.toSystem);
+  }
+}
+
 // 网关名称配对：DATA_DATA["gateways"] 一次性下发全部网关实体后，
 // 从名称（"本地端 -> 远程端"）配对出连接。成对网关的名称两端互为匹配：
 // 网关 X(本地 A, 远程 B) 与网关 Y(本地 B', 远程 A') 构成连接，当
@@ -333,7 +339,6 @@ onApiMessage({
       return;
     }
     removeGatewayNeighbors();
-    gatewayConnections.clear();
     gateways.clear();
     for (const g of data.body as GatewayRaw[]) {
       const lines = g.address?.lines ?? [];
@@ -356,6 +361,8 @@ onApiMessage({
     }
     // 一次性配对：从全部网关实体的名称提取连接（无需飞行）。
     pairGatewayConnections();
+    // 保留此前由飞行计划确认、但名称无法配对的连接。
+    restoreGatewayNeighbors();
     routesVersion.value++;
   },
   // 地址查询响应中可能含网关实体（SATELLITE 行）：增量补充网关列表并重新配对。

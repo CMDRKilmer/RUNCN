@@ -402,11 +402,12 @@ export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number
 // 系内「转移」（TRANSIT）段平均速度（km/s @ f）：引擎表 × f 曲线 × 质量曲线
 // （标定块见 STL_TRANSIT_F_SAT 上方）。空载（m = 整备质量）时质量因子 = 1；
 // f ≥ 0.5 饱和（与燃料同拐点）。引擎未标定时回退标准引擎参数。
-// ⚠️ 2026-09-25：`computeFuelOption()` **不再走本函数**（改用 BTF 实测参考速度 + 质量幂律，
-// 见 STL_INTRA_TRANSIT_SPEED_KM_S 上方）—— 本函数只在 500M km 量级被证伪（高估 ~2×）而
-// 降级为诊断用：保留它是因为它承载「引擎 f 曲线」这条**尚未被参考速度口径覆盖**的信息
-// （advanced/glass/hyperthrust 的转移段形状未实测），删掉会连带给 STL_TRANSIT_SPEED /
-// DEFAULT_STL_TRANSIT_SPEED / STL_TRANSIT_MASS_EXP 三个常量找新家。
+// ⚠️ 本函数的**绝对**速度在 500M km 量级被证伪（高估 ~2×，见 STL_INTRA_TRANSIT_SPEED_KM_S
+// 上方），故不能直接当速度用；它只承载「引擎 f 曲线」这一形状信息。
+// 现状：`computeFuelOption()` 经 `stlIntraTransitSpeedFor` **以比值形式**使用它
+// （curve(f)/curve(0.05)，锚定 BTF 参考速度，f=0.05 时比值 = 1）→ 只取 f 依赖，不引入被
+// 证伪的绝对量级。保留本函数还因为 STL_TRANSIT_SPEED / DEFAULT_STL_TRANSIT_SPEED /
+// STL_TRANSIT_MASS_EXP 三个常量挂在这里。
 export function stlTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = STL_TRANSIT_SPEED[ship.stlEngineOption ?? ''] ?? DEFAULT_STL_TRANSIT_SPEED;
   const f = Math.min(Math.max(fuel, 0.01), STL_TRANSIT_F_SAT);
@@ -517,7 +518,8 @@ const STL_INTRA_TRANSIT_ENGINE_SCALE: Record<string, number> = {
   STL_ENGINE_FUEL_SAVING: 1.67,
 };
 
-// 系内「转移」（TRANSIT）段速度：参考速度 × (参考质量 / 当前质量)^0.78。
+// 系内「转移」（TRANSIT）段速度：参考速度 × (参考质量 / 当前质量)^0.78。本式是 **f=0.05 锚点**
+// （不带 f 依赖）；带 f 依赖的版本是 stlIntraTransitSpeedFor。
 // 单一来源：fuel-model 与 transfer-geometry 都用它，禁止在调用点各自展开公式。
 export function stlIntraTransitSpeedKmS(massT: number): number {
   return (
@@ -659,8 +661,9 @@ export function computeFuelOption(
   // 星系|目标天体」）⇒ 旧实现只累加 departKm + approachKm，把进近 1h29m 与末尾到站
   // TRANSIT 3h59m 静默丢掉，总时长比服务器短约 4 小时（2026-09-24 用户实测）。
   // d 是**航线级**总路程（Σ 所有 STL 段，见 system-bodies.routeRecords），故按 d 分配余量。
-  // 等价性：系内航线 depart/approach 都缺 → rest = d，与旧「系内」分支逐位相同；
-  // 纯自然跨星系 depart + approach === d → rest = 0，同样逐位不变。
+  // 等价性（指**分配**，不是最终数值）：系内航线 depart/approach 都缺 → rest = d（与旧
+  // 「系内」分支同一分配）；纯自然跨星系 depart + approach === d → rest = 0。最终时长还取决于
+  // 转移段速度，而该速度现在依赖 f（见 stlIntraTransitSpeedFor），故数值不再与旧公式逐位相同。
   // d 缺失（残缺输入，会被 missingModelInputs 拦下、不写滑块）时退回已知段之和，
   // 免得把已知的离港/进近静默记成 0。
   const totalKm = d ?? (departKm ?? 0) + (approachKm ?? 0);
@@ -670,7 +673,8 @@ export function computeFuelOption(
     const appKm = Math.min(Math.max(0, approachKm ?? 0), totalKm - depKm);
     const restKm = Math.max(0, totalKm - depKm - appKm);
     // 「其余」优先用当前原生计划的 TRANSIT 样本校准；没有运行时样本时才用
-    // BTF 实测参考速度 + 质量幂律（见 STL_INTRA_TRANSIT_SPEED_KM_S 上方标定块）。
+    // BTF 实测参考速度 + 质量幂律 × 引擎 f 曲线（见 STL_INTRA_TRANSIT_SPEED_KM_S /
+    // stlIntraTransitSpeedFor 上方）。
     //   transitSpeed = 27512 × (参考质量 1271t / 当前质量)^0.78
     //   t = restKm / (transitSpeed × 3600) / 状况
     // **为什么必须带质量项**：2026-09-24 那版把 27,512 km/s 当「船无关常数」，用户实测立刻

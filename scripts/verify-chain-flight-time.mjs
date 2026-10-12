@@ -37,10 +37,10 @@
 //   （resolveSystemId / isSystemId）→ ftc-compute.ts（shipPerformanceFor）→
 //   system-bodies.ts（stlSegmentsStore 的真实记录/查表 + systemBodiesStore 由 stub 覆盖）。
 //
-// system-bodies 走 stub 的原因（见 loader 文件头）：predictTransferGeometry 读
-// systemBodiesStore.getPosition 作为优先位置来源 —— 真实 store 由过去飞行计划
-// transferEllipse 填充，本脚本不能触发真实飞行来填表。stub 提供可注入的
-// stubSetBodyObservation（静态坐标）与 stubSetOrbit（圆轨道简化，由 t0Ms 算位置），
+// system-bodies 走 stub 的原因（见 loader 文件头）：predictTransferGeometry 优先用
+// predictPosition(t0Ms) 取位置，无轨道数据时回退读 systemBodiesStore.getPosition —— 真实
+// store 由过去飞行计划 transferEllipse 填充，本脚本不能触发真实飞行来填表。stub 提供可注入的
+// stubSetOrbit（圆轨道简化，由 t0Ms 算位置）与 stubSetBodyObservation（静态坐标），
 // 保留真实 stlSegmentsStore 让既有 SHIP_FLIGHT_MISSION 派发断言不变。这是「真实
 // store 子集可注入」的标准做法（docs/contributing.md 「写路径与查表路径同错则恒绿」
 // 的延伸）。
@@ -224,6 +224,14 @@ const SHIP = {
 const TRANSIT_MASS_MULT_2140 = 1.5013751;
 // 2,140 t 时的转移段平均速度（27,512 是 1,271 t 参考质量下的值）。
 const TRANSIT_SPEED_KM_S_2140 = 27512 / TRANSIT_MASS_MULT_2140;
+// ⚠️ 断言变更记录（2026-10-12）：系内 TRANSIT 速度改为**依赖 f**（fuel-model 的
+//   stlIntraTransitSpeedFor = 参考速度 × 引擎 f 曲线比值，锚定 BTF f=0.05 的 27,512 km/s）。
+//   有 f 依赖后时长随 f 变化（时间梯度 ≠ 0）→ findBalanceOption 不再退到最省油端，
+//   改取 Pareto 拐点 f = 0.15（标准引擎 f 曲线指数 0.84 → 速度 × (0.15/0.05)^0.84）。
+//   旧断言（f=0.05、燃料 171.5u、时长按 f=0.05 基准）是 f 无关口径的产物，已过时。
+const TRANSIT_F_KNEE = 0.15;
+const TRANSIT_F_EXP_STANDARD = 0.84;
+const TRANSIT_F_MULT_KNEE = Math.pow(TRANSIT_F_KNEE / 0.05, TRANSIT_F_EXP_STANDARD);
 
 // 标准引擎 / 罐 3500 / G8 / 最小反应堆 0.3 / 充能 135s。tank = 0 用于「罐容量缺失」夹具
 // （blueprintInfoFor 把 0 当缺失 → stlFuelCapacity undefined）。
@@ -292,7 +300,7 @@ function prepareEnvironment({ tank = 3500, graph = {} } = {}) {
   stub.stubResetFtcWrites();
 }
 
-// 给系内场景用的两端天体观测（systemBodiesStore.getPosition 用，A1 路径优先读）。
+// 给系内场景用的两端天体观测（systemBodiesStore.getPosition 用；A1 路径在 predictPosition 无轨道时回退读它）。
 // 默认恒星在原点；行星按角度 θ 放置在半径 r 处。helper 让 ②⑤⑥ 类用例只填 (id, r, θ)。
 function stubSetBodyObs(id, radiusKm, angleRad, starId = SYS) {
   const cx = stub;
@@ -547,14 +555,14 @@ await checkAsync('③ 前向记录存在 → approximated 缺席、时长 = 真�
   const leg = est.legs[0];
   expectExact(f, '段0.ok', leg.ok, true);
   expectExact(f, '段0.approximated', leg.approximated, undefined);
-  // 时长口径 = BTF 参考速度 + 质量幂律（不是裸常数 27512）：
+  // 时长口径 = BTF 参考速度 + 质量幂律 + 引擎 f 曲线（不是裸常数 27512）：
   // 40M km 基准 40M / (27512 × 3600) ≈ 0.4039h，× 质量乘数 1.5013751（2,140t）≈ 0.6064h；
-  // 平衡退化 → 最省油即 f=0.05。
+  // 平衡点从退化的最省油端移到 Pareto 拐点 f=0.15 → 速度 ×(0.15/0.05)^0.84 ≈ 0.24096h。
   expectClose(
     f,
-    '段0.hours（基准 × 质量乘数 1.5013751）',
+    '段0.hours（基准 × 质量乘数 ÷ f 拐点倍率）',
     leg.hours,
-    (40_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+    ((40_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140) / TRANSIT_F_MULT_KNEE,
     1e-6,
   );
   expectExact(f, '段0.metrics.stlDistanceKm', leg.metrics?.stlDistanceKm, 40_000_000);
@@ -571,8 +579,10 @@ await checkAsync('③ 前向记录存在 → approximated 缺席、时长 = 真�
     'FuelOption',
     'undefined',
   );
-  expectExact(f, '段0.option.fuel（平衡退化 → 最省油）', leg.option?.fuel, 0.05);
-  expectExact(f, '段0.option.stlFuel', leg.option?.stlFuel, 171.5);
+  // 有 f 依赖后时间梯度 ≠ 0 → 平衡点是 Pareto 拐点 f=0.15（不再是退化的最省油端 f=0.05）。
+  expectExact(f, '段0.option.fuel（Pareto 拐点）', leg.option?.fuel, 0.15);
+  // 燃料 = 0.98×罐3500×min(f,0.5)：f=0.15 → 514.5u（旧 f=0.05 口径给 171.5u）。
+  expectExact(f, '段0.option.stlFuel', leg.option?.stlFuel, 514.5);
   // 交叉验证：hours 与真实 computeFuelOption 复算一致（生产链）。
   const recomputed = computeFuelOption(
     shipPerformanceFor(SHIP),
@@ -710,21 +720,21 @@ await checkAsync('⑥ 三段链：段1 判缺不推进时刻，totalHours 只累
     expectExact(f, '段0.approximated（原生路径）', est.legs[0].approximated, undefined);
     expectExact(f, '段1.approximated（判缺）', est.legs[1].approximated, undefined);
     expectExact(f, '段2.approximated（原生路径）', est.legs[2].approximated, undefined);
-    // 时长口径 = 27,512 × (1,271/2,140)^0.78 ⇒ 段0 30M km = 0.3029h × 1.5013751 = 0.4548h、
-    // 段2 42M km = 0.4241h × 1.5013751 = 0.6367h。
+    // 时长口径 = 27,512 × (1,271/2,140)^0.78 ÷ f 拐点倍率 ⇒ 段0 30M km = 0.4548h / 2.5164 = 0.1807h、
+    // 段2 42M km = 0.6367h / 2.5164 = 0.2530h（f 依赖 → 平衡点 f=0.15）。
     expectClose(
       f,
-      '段0.hours（30M km 基准 × 质量乘数）',
+      '段0.hours（30M km 基准 × 质量乘数 ÷ f 拐点倍率）',
       est.legs[0].hours,
-      (30_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+      ((30_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140) / TRANSIT_F_MULT_KNEE,
       1e-6,
     );
     expectExact(f, '段1.hours', est.legs[1].hours, 0);
     expectClose(
       f,
-      '段2.hours（42M km 基准 × 质量乘数）',
+      '段2.hours（42M km 基准 × 质量乘数 ÷ f 拐点倍率）',
       est.legs[2].hours,
-      (42_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140,
+      ((42_000_000 / (27512 * 3600)) * TRANSIT_MASS_MULT_2140) / TRANSIT_F_MULT_KNEE,
       1e-6,
     );
     // 段1 的出发时刻 = 段0 到站时刻；段1 不推进。

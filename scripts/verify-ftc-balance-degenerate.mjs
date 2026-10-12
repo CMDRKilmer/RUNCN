@@ -463,19 +463,32 @@ checkScenario(
 //   ⇒ 27,512 是「质量 1,271t 时」的**参考速度**，不是船无关常数（见 fuel-model
 //   STL_INTRA_TRANSIT_SPEED_KM_S 上方）。构造：natPc=0、gwPc=0、d=520,000,000 km、
 //   departKm/approachKm 缺失 → restKm = d（wcb 质量 880t、cond=1）；ftlHours=0 ⇒
-//   totalHours ≡ stlHours。验证**所有候选** stlHours 与公式逐位相同（误差 < 1 秒 =
-//   0.000278 h）——锁定「参考速度 × 质量幂律」。
+//   totalHours ≡ stlHours。验证**锚点 f=0.05** 与公式逐位相同、其余 f 按 f 曲线倍率
+//   fMult(f) 缩放（误差 < 1 秒 = 0.000278 h）——锁定「参考速度 × 质量幂律 × f 曲线」。
 // ⚠️ 断言变更记录（2026-09-25）：期望值分母由 `27512`（无质量项）→
 //   `27512 × (1271 / ship.mass)^0.78`；旧值 5.2522 h → 新值 **3.9413 h**（wcb 质量 880t）。
 //   理由：用户实测证伪了「船无关常数」（2,727t 船实测 15,186 km/s，比参考样本慢 1.81×）。
+// ⚠️ 断言变更记录（2026-10-12）：原断言要求**所有 f** 的 stlHours ≡ 3.9413h（f 无关口径）；
+//   现改为锚点 f=0.05 逐位相同 + 其余 f ÷ fMult(f)（转移段速度改为依赖 f）。
 
-function checkStlSpeedConstant(name, options, expectedStlHours) {
+// ⚠️ 断言变更记录（2026-10-12）：转移段速度改为**依赖 f**（fuel-model.stlIntraTransitSpeedFor
+// = 参考速度 × 引擎 f 曲线比值，锚定 f=0.05）。因此 stlHours 不再对所有 f 恒定，而是
+// stlHours(f) = 锚点(f=0.05) / fMult(f)。标准引擎 f 曲线指数 0.84、f ≥ 0.5 饱和。
+const TRANSIT_F_EXP = 0.84;
+const fMult = fuel =>
+  Math.pow(Math.min(Math.max(fuel, 0.01), 0.5) / 0.5, TRANSIT_F_EXP) /
+  Math.pow(0.05 / 0.5, TRANSIT_F_EXP);
+
+// 系内 + 整段 TRANSIT：stlHours(f) = 锚点小时 / fMult(f)，逐位相同（误差 < 1 秒）。
+// 锚点（f=0.05）= d / (27512 × (1271 / ship.mass)^0.78 × 3600) / cond。
+function checkStlSpeedConstant(name, options, anchorHours) {
   const failures = [];
   const TOL_SEC = 1 / 3600; // 1 秒
-  const expectedStr = expectedStlHours.toFixed(6);
   let checked = 0;
   for (const o of options) {
     checked++;
+    const expectedStlHours = anchorHours / fMult(o.fuel);
+    const expectedStr = expectedStlHours.toFixed(6);
     if (Math.abs(o.stlHours - expectedStlHours) > TOL_SEC) {
       failures.push(
         `f=${o.fuel} stlHours=${o.stlHours.toFixed(6)}h 期望 ${expectedStr}±${TOL_SEC.toFixed(6)}h`,
@@ -493,7 +506,7 @@ function checkStlSpeedConstant(name, options, expectedStlHours) {
   finish(
     name,
     failures,
-    `候选 ${options.length} | stlHours≡${expectedStr}h (±1s=${TOL_SEC.toFixed(6)}h)`,
+    `候选 ${options.length} | 锚点(f=0.05) stlHours=${anchorHours.toFixed(6)}h ÷ fMult(f) (±1s)`,
   );
 }
 
@@ -517,18 +530,23 @@ const metricsIntraTransit = {
   natJumpCount: 0,
 };
 checkStlSpeedConstant(
-  'm 系内整段 TRANSIT 用「参考速度 27512 × (1271/质量)^0.78」（误差 < 1s）',
+  'm 系内整段 TRANSIT = 「参考速度 27512 × (1271/质量)^0.78」× f 曲线（锚点 f=0.05，误差 < 1s）',
   scanRoute(wcb, metricsIntraTransit, NO_REACTOR_SCAN, {}),
   EXPECTED_INTRA_TRANSIT_HOURS,
 );
 
-// m2：**用户实测黄金样本**（2026-09-25）—— 用真实观测反锁「参考速度 + 质量幂律」。
+// m2：**用户实测黄金样本**（2026-09-25）—— 用真实观测反锁「参考速度 + 质量幂律」（锚点 f=0.05）。
 // 数据来源两条独立读数一致：BTF「蓝图试航模拟」直采 + 用户 SFC 截图（VH-192B → VH-192C，
 //   同星系 TRANSIT）：d = 619,312,100 km、t = 40,781 s（面板 11h25m00s）、飞船质量 2,727t
 //   （整备 1,271t + 载重 1,456t）。模型给 27512 × (1271/2727)^0.78 = 15,167.8 km/s → 40,830.8 s
 //   （+0.12%）。容差 ±2%（±816 s）。
 // 反例保护：旧的「无质量项」口径（d / 27512）给 22,510.6 s —— 比实测快 **1.81×**（= 质量比
 //   2.145 的 0.78 次方），必须被排除。
+// ⚠️ 断言变更记录（2026-10-12）：原断言要求**所有 f** 都等于实测 40,781 s（f 无关口径）。
+//   转移段速度改为依赖 f 后，单条实测只锁得住**锚点 f=0.05**（模型 BTF 参考速度的锚点，
+//   实测 40,781 s 对应 f=0.05 的 15,167.8 km/s）；其余 f 更快（f 曲线），不再与实测相等。
+//   故改为：① 锚点 f=0.05 与实测一致（±2%）；② 负向——最高 f 必须**更快**（f 依赖口径；
+//   若实现退回 f 无关，本行会失败）。
 const GOLDEN_D_KM = 619_312_100;
 const GOLDEN_MASS_T = 2727;
 const GOLDEN_EMPTY_MASS_T = 1271;
@@ -544,25 +562,38 @@ const goldenFailures = [];
 if (goldenOptions.length === 0) {
   goldenFailures.push('expected=候选>0 actual=候选=0 (空候选集)');
 }
-for (const o of goldenOptions) {
-  const seconds = o.stlHours * 3600;
+const anchorOption = goldenOptions.find(o => o.fuel === 0.05);
+if (anchorOption === undefined) {
+  goldenFailures.push('expected=含 f=0.05 的候选 actual=无');
+} else {
+  const seconds = anchorOption.stlHours * 3600;
   if (Math.abs(seconds - GOLDEN_SECONDS) > GOLDEN_TOL_SEC) {
     goldenFailures.push(
-      `f=${o.fuel} stlHours×3600=${seconds.toFixed(1)}s 期望 ${GOLDEN_SECONDS}±${GOLDEN_TOL_SEC.toFixed(0)}s`,
+      `f=0.05 stlHours×3600=${seconds.toFixed(1)}s 期望 ${GOLDEN_SECONDS}±${GOLDEN_TOL_SEC.toFixed(0)}s`,
     );
   }
+}
+const fastestOption = goldenOptions.at(-1);
+if (
+  anchorOption !== undefined &&
+  fastestOption !== undefined &&
+  !(fastestOption.stlHours < anchorOption.stlHours)
+) {
+  goldenFailures.push(
+    `expected=最高 f 更快 actual=${fastestOption.stlHours.toFixed(4)}h !< ${anchorOption.stlHours.toFixed(4)}h`,
+  );
 }
 // 反例（旧「无质量项」口径）：d / 27512 = 22,510.6 s，与实测差 81%。
 const noMassSeconds = GOLDEN_D_KM / STL_INTRA_TRANSIT_SPEED_KM_S;
 const goldenSeconds =
-  goldenOptions.at(0)?.stlHours !== undefined ? goldenOptions[0].stlHours * 3600 : Number.NaN;
+  anchorOption?.stlHours !== undefined ? anchorOption.stlHours * 3600 : Number.NaN;
 if (!(Math.abs(goldenSeconds - noMassSeconds) / noMassSeconds > 0.5)) {
   goldenFailures.push(
     `expected=与无质量项口径(=${noMassSeconds.toFixed(1)}s)差 >50% actual=${goldenSeconds.toFixed(1)}s`,
   );
 }
 finish(
-  'm2 用户实测黄金样本（2,727t / 619.3M km → 40,781 s ±2%，反例：无质量项口径快 1.81×）',
+  'm2 用户实测黄金样本（2,727t / 619.3M km → 40,781 s ±2%，锚点 f=0.05；反例：无质量项口径快 1.81×）',
   goldenFailures,
   `候选 ${goldenOptions.length} | 模型 ${goldenSeconds.toFixed(1)}s vs 实测 ${GOLDEN_SECONDS}s ` +
     `| 无质量项口径 ${noMassSeconds.toFixed(1)}s`,

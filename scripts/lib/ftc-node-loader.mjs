@@ -9,7 +9,12 @@ const STUB = new URL('./ftc-node-stub.mjs', import.meta.url).href;
 // 仅替换编排层的直连依赖；'./fuel-model' 刻意不在表内（走真实模型），
 // 但生产代码用的是无扩展名相对导入（打包器解析）且把 interface 与函数混在一起值导入
 // （Node ESM 要求扩展名、类型剥离又不擦除类型名）→ 走一个再导出 shim，见该文件注释。
-const LOCAL_DEPS = new Set(['./route-planner', './route-model', './ftc-fuel-settings']);
+const LOCAL_DEPS = new Set([
+  './route-planner',
+  './route-model',
+  './transfer-geometry',
+  './ftc-fuel-settings',
+]);
 const FUEL_MODEL = new URL('./ftc-node-fuel-model.mjs', import.meta.url).href;
 
 export function resolve(specifier, context, nextResolve) {

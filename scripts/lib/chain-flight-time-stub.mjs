@@ -17,14 +17,15 @@
 //     真实 SHIP_FLIGHT_MISSION 派发写入（写入键与查表键都是生产实现）。
 //
 // 关于 systemBodiesStore / predictPosition（A1 路径新增的可控面）：
-//   transfer-geometry.ts 的真实输入：优先 systemBodiesStore.getPosition（静态观测），无
-//   观测则回退 predictPosition(t0Ms)（按轨道模型算位置）。本替身提供两条独立注入：
-//     stubSetBodyObservation(id, {x,y,z}) → systemBodiesStore.getPosition 返回静态坐标
+//   transfer-geometry.ts 的真实输入：优先 predictPosition(t0Ms)（按轨道模型在出发时刻算
+//   位置），模型无数据时回退 systemBodiesStore.getPosition（静态观测）。本替身提供两条
+//   独立注入：
 //     stubSetOrbit(id, {centerStar, radius, periodMs, phaseAtT0}) → predictPosition 在 t0Ms
 //       时刻算位置 = 恒星 + 半径 × 角度（开普勒**圆轨道简化**，与生产同公式但只用一项）
-//   用例规则：要「t0Ms 影响 distanceKm」（⑩）→ 不登记观测，登记轨道；要「位置固定」
-//   （②⑤⑧）→ 登记观测，轨道留空（predictPosition 走 fallback undefined → predictTransferGeometry
-//   内部仍优先用 getPosition，不会回到 predictPosition）。
+//     stubSetBodyObservation(id, {x,y,z}) → systemBodiesStore.getPosition 返回静态坐标
+//   用例规则：要「t0Ms 影响 distanceKm」（⑩）→ 登记轨道，不登记观测；要「位置固定」
+//   （②⑤⑧）→ 登记观测，轨道留空（predictPosition 无轨道返回 undefined → predictTransferGeometry
+//   内部回退到 getPosition 的静态观测）。
 //   stubForcePredictFail(true) 让两条都返回 undefined → 真实 predictTransferGeometry 返回
 //   undefined → 算法判定近似失败 → 走老「缺原生 STL 段记录」分支（场景 ①）。
 export * from '../../src/infrastructure/prun-api/data/addresses.ts';

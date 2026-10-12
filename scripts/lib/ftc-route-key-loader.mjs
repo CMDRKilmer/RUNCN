@@ -23,6 +23,8 @@ const FUEL_MODEL = new URL('./ftc-node-fuel-model.mjs', import.meta.url).href;
 const REAL = {
   './route-planner': new URL('../../src/features/XIT/FTC/route-planner.ts', import.meta.url).href,
   './route-model': new URL('../../src/features/XIT/FTC/route-model.ts', import.meta.url).href,
+  './transfer-geometry': new URL('../../src/features/XIT/FTC/transfer-geometry.ts', import.meta.url)
+    .href,
 };
 
 export function resolve(specifier, context, nextResolve) {

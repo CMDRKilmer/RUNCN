@@ -92,6 +92,7 @@ export function pushItemsPrioritised(
     const remainingW = state.free.weight - state.weight;
     const remainingV = state.free.volume - state.volume;
     if (remainingW <= 0 || remainingV <= 0) {
+      item.amount = 0;
       clipped = true;
       continue;
     }
@@ -108,6 +109,7 @@ export function pushItemsPrioritised(
       clipped = true;
     }
     if (amount <= 0) {
+      item.amount = 0;
       clipped = true;
       continue;
     }

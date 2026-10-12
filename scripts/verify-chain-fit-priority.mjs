@@ -57,7 +57,7 @@ const fat = (ticker, amount) => ({ weight: amount, volume: amount * 10 });
   );
   assertEq('cap-fits-one/A.amount 保持', 50, items[0].amount);
   assertEq('cap-fits-one/B.amount 保持', 50, items[1].amount);
-  assertEq('cap-fits-one/C.amount 保持 50', 50, items[2].amount);
+  assertEq('cap-fits-one/C.amount 清零（未装入）', 0, items[2].amount);
   assertEq('cap-fits-one/clipped=true（C 被截断）', true, clipped);
 }
 

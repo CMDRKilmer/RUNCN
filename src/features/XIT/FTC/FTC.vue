@@ -478,14 +478,7 @@ const nativeSummary = computed(() => {
   return summarizeNativeFlightPlan(plan);
 });
 
-const hasNativeTime = computed(() => (nativeSummary.value?.totalSeconds ?? 0) > 0);
-
-const displayedBestDurationMs = computed(() => {
-  if (hasNativeTime.value) {
-    return nativeSummary.value!.totalSeconds * 1000;
-  }
-  return (result.value?.best.totalHours ?? 0) * 3600000;
-});
+const displayedBestDurationMs = computed(() => (result.value?.best.totalHours ?? 0) * 3600000);
 
 // 邻档对比的「最省」（按 totalCost 最小）与「最快」（按 totalHours 最小）：
 // out.best 已是「平衡点」，与这两类标记**独立**；同一行最多可同时满足两类（如极端支配点）。

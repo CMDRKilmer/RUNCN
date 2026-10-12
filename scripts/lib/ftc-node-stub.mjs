@@ -132,6 +132,9 @@ export const showBuffer = async () => {};
 // '@src/infrastructure/fio/orbit'
 export const hasSystemData = () => true;
 export const exportStationOrbits = () => [];
+// ftc-compute 用 gameNow() 给 predictTransferGeometry 传出发时刻。本脚本的几何预测被替身成
+// 恒 undefined（见下），时刻值不参与任何断言 → 常量 0 即可。
+export const gameNow = () => 0;
 
 // './route-planner'（几何由测试用例直接给定，绕开真实轨道数据）
 export const planRoutes = (from, to) => {
@@ -145,6 +148,13 @@ export const routeMetrics = route => route.metrics;
 // './route-planner' 的 findNativeFlightPlan：编排层用它回传「服务器当前计划实测总时长」，
 // Node 替身没有 flightPlansStore → 恒 undefined（面板不显示该提示），与浏览器行为一致。
 export const findNativeFlightPlan = () => undefined;
+// 同上的「服务器计划实测总时长」摘要：无 flightPlansStore → 恒 undefined。
+export const summarizeNativeFlightPlan = () => undefined;
+
+// './transfer-geometry'：ftc-compute 在缺前向几何时调它补系内距离。本脚本只覆盖
+// 「残缺输入 → 不写滑块」的门控，不涉及几何预测 → 恒 undefined（与无轨道数据时一致），
+// 保证「缺几何 → missingModelInputs 判缺」的用例语义不变。
+export const predictTransferGeometry = async () => undefined;
 
 // './route-model'
 export const resolveSystemId = () => undefined;

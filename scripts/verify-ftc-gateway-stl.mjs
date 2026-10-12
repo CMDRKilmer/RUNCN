@@ -890,6 +890,16 @@ const PERF = { ...SHIP, minReactorUsage: 0.3, emitterChargeTime: 135 };
 const V_TRANSIT =
   STL_INTRA_TRANSIT_SPEED_KM_S *
   Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / PERF.mass, STL_INTRA_TRANSIT_MASS_EXP);
+// ⚠️ 断言变更记录（2026-10-12）：转移段速度改为**依赖 f**（fuel-model 的
+// stlIntraTransitSpeedFor = 参考速度 × 引擎 f 曲线比值，锚定 f=0.05）。标准引擎 f 曲线指数
+// 0.84 → v(f) = V_TRANSIT × (min(f,0.5)/0.5)^0.84 / (0.05/0.5)^0.84。旧断言把 V_TRANSIT
+// 当 f 无关常数，是 2026-09-25 口径的产物，已过时。比值写法与生产逐位一致（否则 expectExact
+// 会因 1 ULP 的求值顺序差失败）。
+const TRANSIT_F_EXP = 0.84;
+const vTransitFor = fuel =>
+  V_TRANSIT *
+  (Math.pow(Math.min(Math.max(fuel, 0.01), 0.5) / 0.5, TRANSIT_F_EXP) /
+    Math.pow(0.05 / 0.5, TRANSIT_F_EXP));
 const COND = conditionFactor(PERF.condition);
 const MIX_DEPART_KM = MIX_STL_SEGMENTS.find(s => s.type === 'DEPARTURE').km;
 // 16 段混合航线的计算指标（真实形状：末跳是网关段 → 进近段记录查不到）。
@@ -912,7 +922,9 @@ check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线�
   // ⚠️ 断言变更记录（2026-09-25）：常数口径**已证伪**——vTransit 改为
   //   `27512 × (1271 / PERF.mass)^0.78`（PERF.mass = 2,140t → 18,324.5 km/s）。
   //   与 computeFuelOption 现在用的速度**逐位相同**，断言才锁得住「其余按转移段速度计时」。
-  const vTransit = V_TRANSIT;
+  // ⚠️ 断言变更记录（2026-10-12）：该速度现在依赖 f（vTransitFor(fuel)），不再是与 f 无关的
+  //   V_TRANSIT —— 本用例 fuel=0.5 → ×(0.5/0.05)^0.84。
+  const vTransit = vTransitFor(fuel);
   const restKm = MIX_ROUTE_KM - MIX_DEPART_KM;
   const mix = computeFuelOption(PERF, mixMetrics, fuel, 1, NO_PRICES);
   // 期望 = 离港段按离港速度 + 进近段（未记录 → 0）+ 其余按转移段速度，整体除以船体状况。
@@ -928,12 +940,13 @@ check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线�
     NO_PRICES,
   );
   expectExact(f, '对照：只算离港段（逐位）', departOnly.stlHours, MIX_DEPART_KM / (vDep * 3600) / COND);
+  // 其余段确实计入：差值 = restKm / (vTransit(f) × 3600) / COND（旧实现漏段 → 差值恒 0）。
   expectCondition(
     f,
-    '混合航线时长 > 只算离港段 × 1.5（进近 + 转移段已计入）',
-    mix.stlHours > departOnly.stlHours * 1.5,
-    `> ${departOnly.stlHours * 1.5}`,
-    String(mix.stlHours),
+    '其余段贡献 > 0（旧实现漏段 → 恒 0）',
+    mix.stlHours - departOnly.stlHours > 0,
+    '> 0',
+    String(mix.stlHours - departOnly.stlHours),
   );
   console.log(
     `[证据] ⑨ 混合航线 stlHours=${mix.stlHours.toFixed(4)}h（只算离港段 ${departOnly.stlHours.toFixed(4)}h，` +
@@ -948,7 +961,8 @@ check('⑨ 等价性：纯自然（depart + approach === 总路程）与系内�
   // ⚠️ 断言变更记录（2026-09-24）：同上一条，vTransit 由引擎拟合式改为 BTF 实测常数
   //   27,512 km/s。系内分支的「逐位一致」锁定与 computeFuelOption 的新口径相同。
   // ⚠️ 断言变更记录（2026-09-25）：同上，改为带质量项的口径（`V_TRANSIT` = 18,324.5 km/s）。
-  const vTransit = V_TRANSIT;
+  // ⚠️ 断言变更记录（2026-10-12）：同上一条，速度改为依赖 f（vTransitFor(fuel)）。
+  const vTransit = vTransitFor(fuel);
   // 纯自然跨星系：旧公式 = 离港/进近各自计时（rest = 0）。
   const natDep = NAT_DEPART_ZV307A;
   const natApp = NAT_APPROACH_MOR;

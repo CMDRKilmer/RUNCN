@@ -7,3 +7,4 @@
 export * from '../../src/features/XIT/FTC/fuel-model.ts';
 export const FuelOption = undefined;
 export const ShipPerformance = undefined;
+export const ShipComponentModel = undefined;

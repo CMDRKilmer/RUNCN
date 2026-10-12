@@ -21,10 +21,8 @@ import {
   nearbyFuelOptions,
   missingModelInputs,
   conditionFactor,
-  FuelOption,
-  ShipPerformance,
-  ShipComponentModel,
 } from './fuel-model';
+import type { FuelOption, ShipPerformance, ShipComponentModel } from './fuel-model';
 import { ftcRouteKey, setFtcFuelSlider, setFtcReactorUsage } from './ftc-fuel-settings';
 import { predictTransferGeometry } from './transfer-geometry';
 
@@ -469,6 +467,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   const nativePlan = findNativeFlightPlan(
     metrics.fromLookup ?? route.fromBody ?? from,
     metrics.toLookup ?? route.toBody ?? to,
+    input.useGateway === true,
   );
   const nativeSummary =
     nativePlan !== undefined ? summarizeNativeFlightPlan(nativePlan) : undefined;
