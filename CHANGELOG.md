@@ -4,6 +4,30 @@
 
 > 本节内容在下次发布时会被移入版本号段。当前为空时不发布。
 
+### ✨ Features
+
+- **`XIT/FLEET`**：环线链上输送（`chainPickup`）改为**按下游优先度逐条装载** —— 此前所有下游基地的缺口用统一比例缩放，每个下游都拿不到足额供应。现按目的地基地 BURN 中该物资的剩余天数（`daysLeft`）升序排优先级，逐条装满、超载则截断当前条目、装不下的次要下游整条跳过留待下一航次，与 flow 规划阶段的紧迫度口径保持一致。出发地装载 CX 采购物资仍走原有的**比例缩减**（超载时提示用户减少天数 / 换大船，全局缩量比逐条截断更可预期）。装载逻辑提炼为纯函数 `chain-fit.ts`（`pushItemsProportional` / `pushItemsPrioritised`），新增 Node 回归脚本 `scripts/verify-chain-fit-priority.mjs`。
+- **`XIT/ACT`**：新增 **「Verify Ship Cargo」（验证货舱）** 动作 —— 轮询指定飞船的货舱 store，直到约定物资的剩余量降到上限（默认 0）以下才放行，30s 超时则 fail 并列出未清空的 ticker。作为真正的 ACT 动作（`addAction` + `emitStep`）注册进 `ACT.ts`，可在动作面板里单独配置飞船注册号与物资代码（顿号 / 逗号 / 空白分隔）。
+
+### 🐞 Fixes
+
+- **`XIT/FLEET`**：环线动作包在**卸货与开船之间强制插入货舱校验** —— MTRA 步骤用 `waitActionFeedback` 等游戏面板反馈，但底层物流跨客户端→服务器的全链路完成存在窗口，此前可能出现「卸载包还没卸完船就出发」。现于「卸货 → OPEN SFC/DEPART」之间插入 `Verify Ship Cargo`，把 unload map 中每个 ticker 的目标剩余压到 ≤0，只有货舱 store 真清空该 ticker 才继续；归航后同样插入一次「验证归航卸货」，避免后续出发地主包执行时取到已"装好"但实际还在路上的鬼影数量。
+- **`XIT/FTC`**：**原生星图刷新** —— 新增「刷新原生星图」按钮：点击时通过游戏 socket 向 `system-registry` 显式请求恒星数据（`SYSTEM_GET_STARS_DATA`），带 15s 等待与结果提示。`stars.ts` 改用 `onApiMessageForce` 接收，使响应在**非当前游戏上下文**下也能落地（此前 `onApiMessage` 会因上下文不匹配丢弃响应，导致星图数据补不全）。
+- **`XIT/FTC`**：**网关连接刷新不再误删内置连接** —— 此前每次收到网关快照或重连（`CLIENT_CONNECTION_OPENED`）都会清空并重建邻接表，把内置跃迁连接一起冲掉。现单独记录内置边（`bundledEdges`），刷新时只移除网关边、保留内置边；同时跳过 `operational` 为假的网关，且地址查询不把已知停运网关恢复成可用。
+- **`XIT/FTC`**：**系内 TRANSIT 段距离补回缺失路径** —— 部分原生计划只写入航线级记录、没有单独的 `sameSystem.transit`，此前会取不到转移段距离。现从航线总 STL 距离中扣除独立的进近 / 离港段得到，不再把整条航线当成转移段。
+- **`XIT/FTC`**：**飞行时间模型按原生样本校准** —— 有服务器原生计划时，用其 TRANSIT 段的「距离 / 秒数」样本（乘回 `conditionFactor`）反推实际速度，再用引擎 f 曲线做相对缩放，取代固定的 BTF 参考速度 + 质量幂律；无原生数据时才回退到 `stlIntraTransitSpeedFor()`（质量幂律 + 引擎曲线，新增节油引擎 `STL_ENGINE_FUEL_SAVING` 的 1.67× 修正，否则节油船会被低估约 80%）。**着陆段**单独计入 `nativeLandingSeconds`，不再被错误并进 TRANSIT 段。
+- **`XIT/FTC`**：起点与终点解析为同一实体时直接报错提示（`起点和终点不能是同一个实体`），不再产出无意义的零距离方案。
+- **`XIT/FTC`**：`transfer-geometry` 改为**优先取出发时刻 `t0Ms` 的离线轨道模型预测位置** —— 两端取同一时刻的位置、几何自洽；服务器观测（`transferEllipse` 快照）不带时间戳、两端可能来自不同航次，降级为模型数据缺失时的回退，不再作为首选输入。
+
+### 🔧 Improvements
+
+- **轨道数据采集加固**：行星数据请求改走带重试的 `fetchJsonWithRetry`；`setPlanetOrbit` 增加轨道根数合法性校验（半长轴 > 0、偏心率 ∈ [0,1)、各值必须有限），并保留上一轮已知质量；缓存恢复时同样做有效性过滤，避免脏数据回灌。`prefetchAllOrbits` / `exportAllPlanetData` 新增 `prefetchTotal` / `prefetchFailed` 计数，失败行星可见。
+- **轨道模型接入 `SimulationInterval`**：`/global/simulationdata` 新增解析 `SimulationInterval`（默认 86400），世界时间推进公式改为 `GAME_REF + (t_s - GAME_REF) × (SimulationInterval / 86400) × motionFactor`，不再假定固定 1 天推进；该值一并持久化到缓存。
+- **FTC 面板时长口径**：有原生计划时，「总时长」列与最优方案摘要改用**服务器实测时长**（各段 `arrival - departure` 累加），模型估算时间退居括号内参考，并相应调整表头文案（「服务器时长」/「模型时长」）；同星系无原生计划时，明细表补上模型预测的 TRANSIT 行，避免表格空白。
+- **蓝图部件修正可审计**：`blueprintInfoFor` 汇总并保留各部件的 modifier 快照（`componentModifiers` / `components`），且当既有性能字段（FTL 最大航速、STL 罐容量、反应堆最小功率、充能时间、最大 G 力）缺失时回退到同名 modifier，未知部件不再被静默丢弃。
+- **`XIT/FTC`**：新增原生飞行计划的统一汇总口径 `summarizeNativeFlightPlan()`（总 / STL / FTL / TRANSIT / LANDING 段秒数、距离、燃料、段数），FTC 各消费点共用同一份实测数据。
+- **文档与代码清理**：新增 `docs/project-rules.md`（权威文档索引、注释保留 / 删除原则、变更流程）；移除大量过时的注释叙事（历史日期、用户引语、被取代的结论），并同步清理 5 个 FTC 回归脚本中依赖旧口径的断言；4 个 Node loader 补齐 `./transfer-geometry` 映射、`ftc-node-stub` 补 `predictTransferGeometry` / `gameNow` / `summarizeNativeFlightPlan`，否则回归脚本直接 `ERR_MODULE_NOT_FOUND`。
+
 ---
 
 ## [26.9.26] - 2026-09-26
