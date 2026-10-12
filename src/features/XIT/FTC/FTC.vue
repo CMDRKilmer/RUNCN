@@ -80,10 +80,15 @@ async function prefetchOrbits() {
   prefetching.value = true;
   try {
     await prefetchAllOrbits();
+    orbitMessage.value =
+      orbitStore.prefetchFailed > 0
+        ? `轨道预取完成：${orbitStore.prefetchFailed} 个失败，可稍后重试`
+        : `轨道预取完成：新增 ${orbitStore.prefetchTotal} 个请求`;
   } finally {
     prefetching.value = false;
   }
 }
+const orbitMessage = ref<string | undefined>(undefined);
 const exporting = ref(false);
 const exportDone = ref(0);
 const exportTotal = ref(0);
@@ -621,6 +626,7 @@ const nearbyFastest = computed(() => {
         </PrunButton>
       </div>
       <div v-if="starsMessage" :class="$style.hint">{{ starsMessage }}</div>
+      <div v-if="orbitMessage" :class="$style.hint">{{ orbitMessage }}</div>
       <div :class="$style.fieldRow">
         <label :class="$style.field">
           <span>采集探针（全部行星的离港/进近都以它为目标/来源，建议用你自己的行星或站点）</span>

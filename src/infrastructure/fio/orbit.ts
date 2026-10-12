@@ -39,6 +39,7 @@ interface StarInfo {
 }
 
 const DEFAULT_MOTION_FACTOR = 20;
+const DEFAULT_SIMULATION_INTERVAL_S = 86400;
 const CACHE_KEY = 'rprun.fio.orbit.v1';
 // 游戏轨道模型（从游戏 bundle 逆向 + 日志观测验证）：
 // - M0 = 0：所有天体在世界时间 0 时平近点角为 0。
@@ -48,12 +49,12 @@ const CACHE_KEY = 'rprun.fio.orbit.v1';
 //   与服务器 transferEllipse 坐标同一坐标系（日志观测验证误差 <1%）。
 const GAME_G = 6.67384e-11;
 const GAME_REF = 1451690603; // 游戏世界时间参考历元（Unix 秒）
-const GAME_MOTION_FACTOR = 20; // PlanetaryMotionFactor（FIO /global/simulationdata）
 
 const orbitVersion = ref(0);
 const planets = new Map<string, PlanetOrbit>();
 const stars = new Map<string, StarInfo>();
 let motionFactor = DEFAULT_MOTION_FACTOR;
+let simulationIntervalS = DEFAULT_SIMULATION_INTERVAL_S;
 // 天体 → 星系 naturalId 关联（用于中心质量解析）。
 const bodySystem = new Map<string, string>();
 // 内置空间站 → 星系映射（public/json/stations.json；FIO 无空间站数据端点，
@@ -62,6 +63,8 @@ const stationSystem = new Map<string, string>();
 // 本会话已通过星系详情 DATA_DATA 打开过的星系（naturalId 大写）。
 // FTC 自动浏览星系时轮询此值，确认整个星系数据（恒星质量 + 行星/空间站轨道）到达。
 const systemData = new Set<string>();
+const prefetchTotal = ref(0);
+const prefetchFailed = ref(0);
 
 const inflight = new Map<string, Promise<void>>();
 
@@ -90,6 +93,12 @@ export const orbitStore = {
   get bodyCount() {
     void orbitVersion.value;
     return planets.size;
+  },
+  get prefetchTotal() {
+    return prefetchTotal.value;
+  },
+  get prefetchFailed() {
+    return prefetchFailed.value;
   },
 };
 
@@ -128,6 +137,7 @@ export function hasSystemData(systemId: string): boolean {
 function persist() {
   const data = {
     motionFactor,
+    simulationIntervalS,
     planets: Object.fromEntries(planets),
     stars: Object.fromEntries(stars),
   };
@@ -146,17 +156,23 @@ function restore() {
     }
     const data = JSON.parse(raw) as {
       motionFactor?: number;
+      simulationIntervalS?: number;
       planets?: Record<string, PlanetOrbit>;
       stars?: Record<string, StarInfo>;
     };
     if (data.motionFactor !== undefined) {
       motionFactor = data.motionFactor;
     }
+    if (data.simulationIntervalS !== undefined && data.simulationIntervalS > 0) {
+      simulationIntervalS = data.simulationIntervalS;
+    }
     for (const [id, orbit] of Object.entries(data.planets ?? {})) {
-      planets.set(id.toUpperCase(), orbit);
+      setPlanetOrbit(id, orbit, orbit.mass);
     }
     for (const [id, star] of Object.entries(data.stars ?? {})) {
-      stars.set(id.toUpperCase(), star);
+      if (Number.isFinite(star.mass) && star.mass > 0) {
+        stars.set(id.toUpperCase(), { mass: star.mass });
+      }
     }
   } catch {
     // 缓存损坏：忽略，用网络数据重建。
@@ -307,17 +323,31 @@ function setPlanetOrbit(
   mass: number,
   systemId?: string,
 ) {
-  if (orbit.semiMajorAxis === undefined || orbit.semiMajorAxis <= 0) {
+  const values = [
+    orbit.semiMajorAxis,
+    orbit.eccentricity,
+    orbit.inclination,
+    orbit.rightAscension,
+    orbit.periapsis,
+  ];
+  if (
+    orbit.semiMajorAxis === undefined ||
+    orbit.semiMajorAxis <= 0 ||
+    (orbit.eccentricity !== undefined && (orbit.eccentricity < 0 || orbit.eccentricity >= 1)) ||
+    values.some(x => x !== undefined && !Number.isFinite(x))
+  ) {
     return;
   }
   const key = naturalId.toUpperCase();
+  const previous = planets.get(key);
+  const nextMass = Number.isFinite(mass) && mass > 0 ? mass : (previous?.mass ?? 0);
   planets.set(key, {
     semiMajorAxis: orbit.semiMajorAxis,
     eccentricity: orbit.eccentricity ?? 0,
     inclination: orbit.inclination ?? 0,
     rightAscension: orbit.rightAscension ?? 0,
     periapsis: orbit.periapsis ?? 0,
-    mass,
+    mass: nextMass,
   });
   if (systemId) {
     bodySystem.set(key, systemId.toUpperCase());
@@ -325,18 +355,14 @@ function setPlanetOrbit(
   orbitVersion.value++;
 }
 
-async function fetchPlanet(naturalId: string) {
+async function fetchPlanet(naturalId: string): Promise<boolean> {
   const key = naturalId.toUpperCase();
-  const data = await fetchJson<FioPlanet>(
+  const data = await fetchJsonWithRetry<FioPlanet>(
     `https://rest.fnar.net/planet/${encodeURIComponent(key)}`,
+    2,
   );
-  if (
-    data === undefined ||
-    data.OrbitSemiMajorAxis === undefined ||
-    data.OrbitSemiMajorAxis <= 0 ||
-    data.Mass === undefined
-  ) {
-    return;
+  if (data === undefined || data.OrbitSemiMajorAxis === undefined || data.OrbitSemiMajorAxis <= 0) {
+    return false;
   }
   setPlanetOrbit(
     key,
@@ -347,8 +373,9 @@ async function fetchPlanet(naturalId: string) {
       rightAscension: data.OrbitRightAscension,
       periapsis: data.OrbitPeriapsis,
     },
-    data.Mass,
+    data.Mass ?? 0,
   );
+  return true;
 }
 
 async function fetchStar(starNaturalId: string) {
@@ -364,11 +391,17 @@ async function fetchStar(starNaturalId: string) {
 }
 
 async function fetchMotionFactor() {
-  const data = await fetchJson<{ PlanetaryMotionFactor?: number }>(
-    'https://rest.fnar.net/global/simulationdata',
-  );
+  const data = await fetchJsonWithRetry<{
+    PlanetaryMotionFactor?: number;
+    SimulationInterval?: number;
+  }>('https://rest.fnar.net/global/simulationdata', 2);
   if (data?.PlanetaryMotionFactor !== undefined && data.PlanetaryMotionFactor > 0) {
     motionFactor = data.PlanetaryMotionFactor;
+  }
+  if (data?.SimulationInterval !== undefined && data.SimulationInterval > 0) {
+    simulationIntervalS = data.SimulationInterval;
+  }
+  if (data?.PlanetaryMotionFactor !== undefined || data?.SimulationInterval !== undefined) {
     orbitVersion.value++;
   }
 }
@@ -429,7 +462,11 @@ export async function ensureOrbitData(naturalIds: string[]) {
         bodySystem.set(key, parent.id);
       }
       if (!planets.has(key)) {
-        tasks.push(ensureFetched(key, () => fetchPlanet(key)));
+        tasks.push(
+          ensureFetched(key, async () => {
+            await fetchPlanet(key);
+          }),
+        );
       }
       await Promise.all(tasks);
     }),
@@ -494,7 +531,7 @@ function predictWithGameModel(
   timestampMs: number,
 ): PrunApi.Position {
   const t_s = timestampMs / 1000;
-  const worldTime = GAME_REF + (t_s - GAME_REF) * GAME_MOTION_FACTOR;
+  const worldTime = GAME_REF + (t_s - GAME_REF) * (simulationIntervalS / 86400) * motionFactor;
   const n = Math.sqrt((GAME_G * parentMassKg) / Math.pow(orbit.semiMajorAxis, 3));
   const M = n * worldTime;
   const e = orbit.eccentricity;
@@ -631,17 +668,28 @@ let allPrefetch: Promise<void> | undefined;
 export function prefetchAllOrbits() {
   if (allPrefetch === undefined) {
     allPrefetch = (async () => {
-      const response = await fetch(config.url.allplanets);
-      const list = (await response.json()) as { PlanetNaturalId?: string }[];
+      const list = await fetchJsonWithRetry<{ PlanetNaturalId?: string }[]>(
+        config.url.allplanets,
+        2,
+      );
+      if (list === undefined) {
+        prefetchTotal.value = 0;
+        prefetchFailed.value = 0;
+        return;
+      }
       const pending = list
         .map(x => x.PlanetNaturalId)
         .filter((id): id is string => id !== undefined && !planets.has(id.toUpperCase()));
+      prefetchTotal.value = pending.length;
+      prefetchFailed.value = 0;
       const CONCURRENCY = 10;
       let index = 0;
       const worker = async () => {
         while (index < pending.length) {
           const id = pending[index++];
-          await fetchPlanet(id);
+          if (!(await fetchPlanet(id))) {
+            prefetchFailed.value++;
+          }
         }
       };
       await Promise.all(Array.from({ length: CONCURRENCY }, worker));
@@ -766,8 +814,13 @@ export function exportAllPlanetData(
 ): Promise<PlanetExportResult> {
   if (fullExport === undefined) {
     fullExport = (async () => {
-      const response = await fetch(config.url.allplanets);
-      const list = (await response.json()) as { PlanetNaturalId?: string }[];
+      const list = await fetchJsonWithRetry<{ PlanetNaturalId?: string }[]>(
+        config.url.allplanets,
+        2,
+      );
+      if (list === undefined) {
+        throw new Error('无法获取行星列表');
+      }
       const ids = list
         .map(x => x.PlanetNaturalId)
         .filter((id): id is string => id !== undefined && id !== '');
