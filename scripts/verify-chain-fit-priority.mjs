@@ -11,7 +11,10 @@
 // 模块直接 import 生产代码 src/features/XIT/FLEET/chain-fit.ts（无 Vue/DOM 依赖）——
 // Node ≥ 22.18 原生剥离 TS 类型标注，无需 loader 重定向。
 
-import { pushItemsProportional, pushItemsPrioritised } from '../src/features/XIT/FLEET/chain-fit.ts';
+import {
+  pushItemsProportional,
+  pushItemsPrioritised,
+} from '../src/features/XIT/FLEET/chain-fit.ts';
 
 let passes = 0;
 let fails = 0;
@@ -45,9 +48,13 @@ const fat = (ticker, amount) => ({ weight: amount, volume: amount * 10 });
   ];
   const clipped = pushItemsPrioritised(items, state, std, { A: 0, B: 1, C: 2 });
   assertEq('cap-fits-one/cargo 长度 = 2', 2, state.cargo.length);
-  assertEq('cap-fits-one/A 装载 50', 50, state.cargo.find((x) => x.dest === 'A')?.amount);
-  assertEq('cap-fits-one/B 装载 50', 50, state.cargo.find((x) => x.dest === 'B')?.amount);
-  assertEq('cap-fits-one/C 跳过（cargo 中无 C）', 0, state.cargo.filter((x) => x.dest === 'C').length);
+  assertEq('cap-fits-one/A 装载 50', 50, state.cargo.find(x => x.dest === 'A')?.amount);
+  assertEq('cap-fits-one/B 装载 50', 50, state.cargo.find(x => x.dest === 'B')?.amount);
+  assertEq(
+    'cap-fits-one/C 跳过（cargo 中无 C）',
+    0,
+    state.cargo.filter(x => x.dest === 'C').length,
+  );
   assertEq('cap-fits-one/A.amount 保持', 50, items[0].amount);
   assertEq('cap-fits-one/B.amount 保持', 50, items[1].amount);
   assertEq('cap-fits-one/C.amount 保持 50', 50, items[2].amount);
@@ -88,9 +95,9 @@ const fat = (ticker, amount) => ({ weight: amount, volume: amount * 10 });
   ];
   const clipped = pushItemsPrioritised(items, state, std, { A: 0, B: 1, C: 2 });
   assertEq('all-fit/cargo 长度 = 3', 3, state.cargo.length);
-  assertEq('all-fit/A 装载 10', 10, state.cargo.find((x) => x.dest === 'A')?.amount);
-  assertEq('all-fit/B 装载 20', 20, state.cargo.find((x) => x.dest === 'B')?.amount);
-  assertEq('all-fit/C 装载 30', 30, state.cargo.find((x) => x.dest === 'C')?.amount);
+  assertEq('all-fit/A 装载 10', 10, state.cargo.find(x => x.dest === 'A')?.amount);
+  assertEq('all-fit/B 装载 20', 20, state.cargo.find(x => x.dest === 'B')?.amount);
+  assertEq('all-fit/C 装载 30', 30, state.cargo.find(x => x.dest === 'C')?.amount);
   assertEq('all-fit/clipped=false', false, clipped);
 }
 
@@ -146,20 +153,24 @@ const fat = (ticker, amount) => ({ weight: amount, volume: amount * 10 });
   ];
   // 比例：总量 150 → 80/150 = 0.533 → 各 26 (向下取整)
   pushItemsProportional(items, state, std);
-  assertEq('prior-vs-prop/比例装载 A 26', 26, items.find((x) => x.dest === 'A').amount);
-  assertEq('prior-vs-prop/比例装载 B 26', 26, items.find((x) => x.dest === 'B').amount);
-  assertEq('prior-vs-prop/比例装载 C 26', 26, items.find((x) => x.dest === 'C').amount);
+  assertEq('prior-vs-prop/比例装载 A 26', 26, items.find(x => x.dest === 'A').amount);
+  assertEq('prior-vs-prop/比例装载 B 26', 26, items.find(x => x.dest === 'B').amount);
+  assertEq('prior-vs-prop/比例装载 C 26', 26, items.find(x => x.dest === 'C').amount);
   // 重置 state 与 items 以重新装载
   state.cargo = [];
   state.weight = 0;
   state.volume = 0;
-  items.forEach((it) => (it.amount = 50));
+  items.forEach(it => (it.amount = 50));
   // 优先装载：priority A=0, B=1, C=2。
   pushItemsPrioritised(items, state, std, { A: 0, B: 1, C: 2 });
   // 期望：A 满 50 (剩余 30)，B 部分 30，C 跳过
-  assertEq('prior-vs-prop/优先装载 A 满 50', 50, state.cargo.find((x) => x.dest === 'A')?.amount);
-  assertEq('prior-vs-prop/优先装载 B 部分 30', 30, state.cargo.find((x) => x.dest === 'B')?.amount);
-  assertEq('prior-vs-prop/优先装载 C 跳过（cargo 中无 C）', 0, state.cargo.filter((x) => x.dest === 'C').length);
+  assertEq('prior-vs-prop/优先装载 A 满 50', 50, state.cargo.find(x => x.dest === 'A')?.amount);
+  assertEq('prior-vs-prop/优先装载 B 部分 30', 30, state.cargo.find(x => x.dest === 'B')?.amount);
+  assertEq(
+    'prior-vs-prop/优先装载 C 跳过（cargo 中无 C）',
+    0,
+    state.cargo.filter(x => x.dest === 'C').length,
+  );
   assertEq('prior-vs-prop/cargo 长度 = 2', 2, state.cargo.length);
 }
 

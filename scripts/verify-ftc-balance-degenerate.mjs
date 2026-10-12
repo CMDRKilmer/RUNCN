@@ -506,8 +506,7 @@ const transitSpeedFor = massT =>
   Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / massT, STL_INTRA_TRANSIT_MASS_EXP);
 const INTRA_TRANSIT_D_KM = 520_000_000;
 // cond = wcb.condition = 1、wcb.mass = 880（见 wcb 定义）；验证 d / (v(880t) × 3600) / cond 逐位相同。
-const EXPECTED_INTRA_TRANSIT_HOURS =
-  INTRA_TRANSIT_D_KM / (transitSpeedFor(880) * 3600) / 1;
+const EXPECTED_INTRA_TRANSIT_HOURS = INTRA_TRANSIT_D_KM / (transitSpeedFor(880) * 3600) / 1;
 const metricsIntraTransit = {
   stlDistanceKm: INTRA_TRANSIT_D_KM,
   departKm: undefined,
@@ -555,7 +554,8 @@ for (const o of goldenOptions) {
 }
 // 反例（旧「无质量项」口径）：d / 27512 = 22,510.6 s，与实测差 81%。
 const noMassSeconds = GOLDEN_D_KM / STL_INTRA_TRANSIT_SPEED_KM_S;
-const goldenSeconds = goldenOptions.at(0)?.stlHours !== undefined ? goldenOptions[0].stlHours * 3600 : Number.NaN;
+const goldenSeconds =
+  goldenOptions.at(0)?.stlHours !== undefined ? goldenOptions[0].stlHours * 3600 : Number.NaN;
 if (!(Math.abs(goldenSeconds - noMassSeconds) / noMassSeconds > 0.5)) {
   goldenFailures.push(
     `expected=与无质量项口径(=${noMassSeconds.toFixed(1)}s)差 >50% actual=${goldenSeconds.toFixed(1)}s`,
