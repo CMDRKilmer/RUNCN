@@ -46,6 +46,16 @@ export interface ShipPerformance {
   emitterChargeTime?: number;
   // 蓝图最大 G力过载因子（加速度上限 maxGFactor×9.81）。
   maxGFactor?: number;
+  // 蓝图部件修正的可审计快照。数值已经按 modifier.type 汇总；未知 modifier 不参与计算。
+  componentModifiers?: Readonly<Record<string, number>>;
+  components?: readonly ShipComponentModel[];
+}
+
+export interface ShipComponentModel {
+  type: string;
+  option?: string;
+  amount: number;
+  modifiers: Readonly<Record<string, number>>;
 }
 
 // 航线距离指标（从 PlannedRoute 提取）。
@@ -392,11 +402,12 @@ export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number
 // 系内「转移」（TRANSIT）段平均速度（km/s @ f）：引擎表 × f 曲线 × 质量曲线
 // （标定块见 STL_TRANSIT_F_SAT 上方）。空载（m = 整备质量）时质量因子 = 1；
 // f ≥ 0.5 饱和（与燃料同拐点）。引擎未标定时回退标准引擎参数。
-// ⚠️ 2026-09-25：`computeFuelOption()` **不再走本函数**（改用 BTF 实测参考速度 + 质量幂律，
-// 见 STL_INTRA_TRANSIT_SPEED_KM_S 上方）—— 本函数只在 500M km 量级被证伪（高估 ~2×）而
-// 降级为诊断用：保留它是因为它承载「引擎 f 曲线」这条**尚未被参考速度口径覆盖**的信息
-// （advanced/glass/hyperthrust 的转移段形状未实测），删掉会连带给 STL_TRANSIT_SPEED /
-// DEFAULT_STL_TRANSIT_SPEED / STL_TRANSIT_MASS_EXP 三个常量找新家。
+// ⚠️ 本函数的**绝对**速度在 500M km 量级被证伪（高估 ~2×，见 STL_INTRA_TRANSIT_SPEED_KM_S
+// 上方），故不能直接当速度用；它只承载「引擎 f 曲线」这一形状信息。
+// 现状：`computeFuelOption()` 经 `stlIntraTransitSpeedFor` **以比值形式**使用它
+// （curve(f)/curve(0.05)，锚定 BTF 参考速度，f=0.05 时比值 = 1）→ 只取 f 依赖，不引入被
+// 证伪的绝对量级。保留本函数还因为 STL_TRANSIT_SPEED / DEFAULT_STL_TRANSIT_SPEED /
+// STL_TRANSIT_MASS_EXP 三个常量挂在这里。
 export function stlTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = STL_TRANSIT_SPEED[ship.stlEngineOption ?? ''] ?? DEFAULT_STL_TRANSIT_SPEED;
   const f = Math.min(Math.max(fuel, 0.01), STL_TRANSIT_F_SAT);
@@ -500,13 +511,31 @@ export const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
 // 标准引擎 0.6）—— 那是**段速度**口径，与转移段不是同一个指数。
 export const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
 
-// 系内「转移」（TRANSIT）段速度：参考速度 × (参考质量 / 当前质量)^0.78。
+// 独立估算的引擎修正：BTF 基准速度是标准引擎历史样本，节油引擎在同一质量、
+// f=0.05 下实测约为其 1.67 倍（VH-331g 原生样本约 45.8k km/s）。
+// 没有原生计划时也必须区分引擎，否则节油船会被低估约 80%。
+const STL_INTRA_TRANSIT_ENGINE_SCALE: Record<string, number> = {
+  STL_ENGINE_FUEL_SAVING: 1.67,
+};
+
+// 系内「转移」（TRANSIT）段速度：参考速度 × (参考质量 / 当前质量)^0.78。本式是 **f=0.05 锚点**
+// （不带 f 依赖）；带 f 依赖的版本是 stlIntraTransitSpeedFor。
 // 单一来源：fuel-model 与 transfer-geometry 都用它，禁止在调用点各自展开公式。
 export function stlIntraTransitSpeedKmS(massT: number): number {
   return (
     STL_INTRA_TRANSIT_SPEED_KM_S *
     Math.pow(STL_INTRA_TRANSIT_SPEED_REF_MASS_T / Math.max(1, massT), STL_INTRA_TRANSIT_MASS_EXP)
   );
+}
+
+// 无原生飞行计划时的独立 TRANSIT 速度估算：保留质量幂律，并用引擎曲线表达 f 变化。
+export function stlIntraTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
+  const base = stlIntraTransitSpeedKmS(ship.mass);
+  const scale = STL_INTRA_TRANSIT_ENGINE_SCALE[ship.stlEngineOption ?? ''] ?? 1;
+  const refCurve = stlTransitSpeedFor(ship, 0.05);
+  const candidateCurve = stlTransitSpeedFor(ship, fuel);
+  const fuelRatio = refCurve > 0 ? candidateCurve / refCurve : 1;
+  return base * scale * fuelRatio;
 }
 
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
@@ -597,6 +626,14 @@ export interface ModelSettings {
   refFlowRate?: number;
   // 参考质量（时间质量缩放基准）。
   refMass?: number;
+  // 原生飞行计划的 TRANSIT 样本，用于校准当前服务器版本的实际速度。
+  // 距离/耗时包含船况影响；computeFuelOption 会先还原为满状态速度。
+  nativeTransitDistanceKm?: number;
+  nativeTransitSeconds?: number;
+  nativeTransitFuel?: number;
+  nativeStlTank?: number;
+  // 原生 LANDING 段耗时；着陆不是 TRANSIT，不能并入转移速度。
+  nativeLandingSeconds?: number;
 }
 
 // 计算一组 (燃料滑块, 反应堆) 的燃料消耗与时间。
@@ -624,8 +661,9 @@ export function computeFuelOption(
   // 星系|目标天体」）⇒ 旧实现只累加 departKm + approachKm，把进近 1h29m 与末尾到站
   // TRANSIT 3h59m 静默丢掉，总时长比服务器短约 4 小时（2026-09-24 用户实测）。
   // d 是**航线级**总路程（Σ 所有 STL 段，见 system-bodies.routeRecords），故按 d 分配余量。
-  // 等价性：系内航线 depart/approach 都缺 → rest = d，与旧「系内」分支逐位相同；
-  // 纯自然跨星系 depart + approach === d → rest = 0，同样逐位不变。
+  // 等价性（指**分配**，不是最终数值）：系内航线 depart/approach 都缺 → rest = d（与旧
+  // 「系内」分支同一分配）；纯自然跨星系 depart + approach === d → rest = 0。最终时长还取决于
+  // 转移段速度，而该速度现在依赖 f（见 stlIntraTransitSpeedFor），故数值不再与旧公式逐位相同。
   // d 缺失（残缺输入，会被 missingModelInputs 拦下、不写滑块）时退回已知段之和，
   // 免得把已知的离港/进近静默记成 0。
   const totalKm = d ?? (departKm ?? 0) + (approachKm ?? 0);
@@ -634,21 +672,55 @@ export function computeFuelOption(
     const depKm = Math.min(Math.max(0, departKm ?? 0), totalKm);
     const appKm = Math.min(Math.max(0, approachKm ?? 0), totalKm - depKm);
     const restKm = Math.max(0, totalKm - depKm - appKm);
-    // 「其余」用**BTF 实测参考速度 + 质量幂律**（见 STL_INTRA_TRANSIT_SPEED_KM_S 上方标定块）：
+    // 「其余」优先用当前原生计划的 TRANSIT 样本校准；没有运行时样本时才用
+    // BTF 实测参考速度 + 质量幂律 × 引擎 f 曲线（见 STL_INTRA_TRANSIT_SPEED_KM_S /
+    // stlIntraTransitSpeedFor 上方）。
     //   transitSpeed = 27512 × (参考质量 1271t / 当前质量)^0.78
     //   t = restKm / (transitSpeed × 3600) / 状况
     // **为什么必须带质量项**：2026-09-24 那版把 27,512 km/s 当「船无关常数」，用户实测立刻
     // 证伪（2,727t 船 15,186 km/s，慢 1.81× = 质量比 2.145 的 0.78 次方）—— 参考样本是载重 0
     // 的 1,271t 船，重船按幂律减速（与离港/进近段的 stlLoadFactor 同族，但指数不同）。
-    // 刻意**不用** metrics.transitSeconds：那是记录当时那条计划的 f/质量下的原生时长，按
-    // 当前 f 复用会把时长钉死（成本最优解会一路选最低 f）；改用「参考速度 + 质量幂律」保留了
-    // 质量这条真实物理依赖，又不绑定单条记录的时刻。
-    // 公式只此一份（stlIntraTransitSpeedKmS）：2026-09-25 的教训就是两处各自展开、
-    // 只补了一处（transfer-geometry 漏质量项，重船时长偏快 1.5×）。
-    const transitSpeed = stlIntraTransitSpeedKmS(ship.mass);
+    // 原生秒数是当前船况下的时间，所以校准速度时乘回 conditionFactor；之后统一在
+    // 末尾除以 cond。燃料样本反推出观测滑块，再用引擎 f 曲线只做相对缩放，避免把
+    // 某一次计划的 f 固定到所有候选项。
+    const nativeDistance = settings.nativeTransitDistanceKm;
+    const nativeSeconds = settings.nativeTransitSeconds;
+    const nativeTank = settings.nativeStlTank;
+    const nativeFuel = settings.nativeTransitFuel;
+    const nativeSpeed =
+      nativeDistance !== undefined &&
+      nativeDistance > 0 &&
+      nativeSeconds !== undefined &&
+      nativeSeconds > 0
+        ? (nativeDistance / nativeSeconds) * cond
+        : undefined;
+    const nativeFuelSlider =
+      nativeFuel !== undefined && nativeFuel > 0 && nativeTank !== undefined && nativeTank > 0
+        ? Math.min(
+            STL_TRANSIT_F_SAT,
+            Math.max(0.01, nativeFuel / (STL_TRANSIT_FUEL_GROSS * nativeTank)),
+          )
+        : undefined;
+    let transitSpeed = stlIntraTransitSpeedFor(ship, fuel);
+    if (nativeSpeed !== undefined) {
+      const curveAtNative =
+        nativeFuelSlider !== undefined ? stlTransitSpeedFor(ship, nativeFuelSlider) : undefined;
+      const curveAtCandidate =
+        nativeFuelSlider !== undefined ? stlTransitSpeedFor(ship, fuel) : undefined;
+      const curveRatio =
+        curveAtNative !== undefined && curveAtNative > 0 && curveAtCandidate !== undefined
+          ? curveAtCandidate / curveAtNative
+          : 1;
+      transitSpeed = nativeSpeed * curveRatio;
+    }
     stlHours =
       (depKm / (vDepart * 3600) + appKm / (vApproach * 3600) + restKm / (transitSpeed * 3600)) /
       cond;
+  }
+  // 着陆段有独立服务器耗时。原生计划存在时直接作为着陆校准，避免把它错误算进
+  // TRANSIT；没有原生数据时暂不伪造着陆速度，仍由已知离港/进近几何计算主体时间。
+  if (settings.nativeLandingSeconds !== undefined && settings.nativeLandingSeconds > 0) {
+    stlHours += settings.nativeLandingSeconds / 3600;
   }
   // STL 燃料：跨星系（有跃迁）用罐模型。
   // 着陆 = 船体系数 × 0.47 × √(半径_km × P^-0.2)（仅行星目的地，有大气减速）

@@ -62,7 +62,6 @@ function loadBaselines(): BaselineMap {
       const parsed: unknown = JSON.parse(raw);
       if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
         const map = parsed as BaselineMap;
-        // 全局配置不再参与云同步：忽略历史遗留的 '__config__' 基准
         // （旧版本的配置冲突/合并闸，避免重载后恢复成永久「有冲突」）。
         delete map['__config__'];
         return map;
@@ -819,7 +818,6 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
       // 云端各条目服务端行时间（updated_at，CAS 乐观锁基准）。
       const remoteServerUpdatedAt = new Map<string, number>();
       for (const r of remotes) {
-        // 全局配置不再参与云同步：忽略历史遗留的 '__config__' 云端记录。
         if (r.shipId === '__config__') {
           continue;
         }

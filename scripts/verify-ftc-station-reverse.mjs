@@ -1,42 +1,9 @@
-// 「星系 id → 空间站 id 反查」（成因② 修复，任务 A）回归脚本 —— 带退出码，可自动判定成败。
-//
-// 背景（2026-09-23）：ZV-307a → ZV-307 这条航线曾永远拿不到原生 STL 段记录，有两个独立成因：
-//   ① 系内飞行（同一星系）：段结构是「转移（TRANSIT）」（实测用户 SFC 原生计划
-//      ZV-307a → ZV-307/Antares Station = 单段 101,655,808 km），服务器计划**没有**
-//      DEPARTURE/APPROACH 段。**2026-09-23 本轮起 recordStlSegments 会记录 TRANSIT 段**
-//      （段名/字段已核实：`SegmentType` 含 'TRANSIT'、字段就是 `FlightSegment.stlDistance`）
-//      → 系内航线有原生几何了。该段的燃料/时长口径**已标定**（2026-09-23，BTF 受控数据：
-//      燃料 = 0.98×罐×min(f,0.5)、时长 = d/v_转移，见 fuel-model.ts 的「系内转移段标定」块）
-//      → 拿到记录即可算、可写滑块；`missingModelInputs` 对系内只剩「记录未到」与「罐容量缺失」。
-//      ⚠️ 2026-09-23 复核：这与勾选「使用跃迁点」**无关**
-//      （勾选不改变系内航线的路程），旧文案的「取消勾选改走直飞」是错误归因且无效，已删。
-//   ② **SFC 的目的地框把空间站目的地规范化成所属星系 id**（ANT → ZV-307，见
-//      prun-ui/utils/select-address.ts 与 FLEET/ChainView.vue），而服务器写记录的键用的是
-//      **真实天体 id**（真实导出键 ZV-307A|ANT）→ 查表键错配，5930 条记录里天体侧命中
-//      星系 id 的 = **0 条**。本条**已修**（用户本轮拍板只修这一条）。
-//
-// 修复：查表前把「本身就是星系 id」的分量反查成**唯一**空间站 id（数据源 =
-// public/json/stations.json 的 `s` 反向索引 + 游戏内 stationsStore；合并后候选恰好 1 个才反查
-// —— 0/≥2 个一律拒绝，宁可不写也不猜）。反查**只作用于记录查表键**，不改
-// PlannedRoute.fromBody/toBody 的对外语义（fetchPlanetEnv / FTC.vue 的原生计划匹配依赖它）。
-//
-// 本脚本锁定的行为契约：
-//   ① 反查能力：ZV-307 → ANT（唯一）；不是星系 id 的输入不反查；候选 ≥2 时拒绝反查；
-//   ② 命中：合成记录键 ZV-307A|ANT（数值取自面板「模型估算」行 68.0562M + 33.6491M）→
-//      routeMetrics('ZV-307a' → 'ZV-307') 得 stlDistanceKm = 101.7053M，且 toBody 仍是
-//      'ZV-307'（反查只改查表键）；无记录时仍是 undefined（不回退）+ 判缺；
-//   ③ 全链路：computeFtcPlan('ZV-307a' → 'ZV-307'，不勾跃迁点) → best.fuel = 0.2、
-//      stlFuel ≈ 579.72u、写入滑块；无记录 → incomplete + 不写滑块 + 文案写明「已按
-//      ZV-307 → ANT 反查」；反查被拒绝（同星系多站）→ incomplete + 文案写明「无法反查出
-//      唯一空间站」。
-//
+// 星系 id 到唯一空间站 id 的反查回归。
+// 契约：仅唯一候选可反查；反查只改变记录键，不改变路线对外语义。
 // 用法：node scripts/verify-ftc-station-reverse.mjs
-// 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
-// 局限：几何侧 store（stlSegmentsStore/stationsStore/buffers）走替身
-// （scripts/lib/ftc-geometry-stub.mjs），但 route-planner / route-model / ftc-compute 与
-// system-bodies 的记录逻辑都是**真实实现**；SFC 磁贴的 DOM 接线在 Node 里不可加载，
-// 由真实日志 + 代码审查覆盖。stations.json 的 6 站 6 星系一一对应是**数据事实**，不在本脚本
-// 覆盖范围内（内置 JSON 由 scripts/build-station-data.mjs 生成）。
+// 退出码：0 = 全部通过；1 = 存在失败。
+// 局限：几何 store 使用受控替身，DOM 接线由真实日志和代码审查覆盖。
+
 import { register } from 'node:module';
 import { DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 
@@ -292,7 +259,6 @@ await checkAsync(
     expectExact(f, 'message 无警告', out.message, '');
     expectExact(f, 'd', out.metrics?.stlDistanceKm, 101705300);
     expectExact(f, 'best.fuel', out.best?.fuel, 0.15);
-    // 系内燃料 = 0.98×罐 3500×min(0.15,0.5) = 514.5u（2026-09-23 标定：与距离无关）。
     expectClose(f, 'STL 燃料（截图实参复算）', out.best?.stlFuel, 514.5, 0.5);
     expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
     expectExact(f, '写入的燃料值', stub.sliderWrites[0]?.value, 0.15);
@@ -322,8 +288,6 @@ await checkAsync(
       '含「已按 ZV-307 → ANT 反查」',
       text,
     );
-    // ⚠️ 断言变更记录（2026-09-23 本轮）：系内几何现在**已入库**（转移段的 stlDistance），
-    // 拿到它只需生成一次计划 —— 旧断言要求文案不含「生成一次计划」（当时该操作无效，
     // 因为转移段不被消费）已不成立，改为要求给出这条**有效**操作。
     expectCondition(f, '点明系内飞行', text.includes('系内飞行') === true, '含「系内飞行」', text);
     expectCondition(
@@ -369,14 +333,12 @@ await checkAsync(
       text,
     );
     expectCondition(f, '列出候选', text.includes('ZZZ') === true, '含候选 ZZZ', text);
-    // ⚠️ 断言变更记录（2026-09-23 本轮，**意图反转**）：旧断言要求文案**不含**「把目的地改成
     // 具体天体/空间站」（当时把它当成误导）。但本场景恰恰是**反查被拒**（同星系多站 ANT +
     // ZZZ，候选 ≠1，见 ①）—— 此时查表键**根本推不出来**（目标端永远是星系 id），生成计划
     // 也命不中；而玩家把目的地改成**具体天体/空间站**（如 ANT）后，记录键就是原生的
     // ZV-307A|ANT → 几何立刻可用。
     // ⇒ 「改目的地」在这里是**唯一有效**操作（implementation：fuel-model.ts 的
     // `refused.length > 0 → actions.push('把目的地改成具体天体/空间站')`），文案给出它是对的。
-    // 🚫 后人勿改回去：两条分支的关键区别是「反查是否被拒」——
     //   上一个用例（reversed：候选=1，已反查、只是记录没到）必须**不含**本条建议（生成计划
     //   才有用）；本用例（refused：候选≠1）必须**含**本条建议。只留「不要误导改目的地」一句
     //   泛结论会误导实现去删掉这个分支，所以这里连同下一条负向断言一起把两条分支钉开。
@@ -420,11 +382,9 @@ await checkAsync(
     const uncheckedWrites = stub.sliderWrites.length;
     prepareComplete();
     const checked = await runCompute('ZV-307a', 'ZV-307', true);
-    // ⚠️ 断言变更记录（2026-09-23 本轮）：旧断言要求勾选态「点明系内飞行 + 不写滑块」
     // （`usesGatewayTransfer` 对系内一律判缺）—— 那时系内几何根本拿不到。现在系内几何来自
     // 原生「转移」（TRANSIT）段，而勾选不改变系内航线的路程（`planRoutes` 同星系两种模式都
     // 返回 natural；实测 101,655,808 km vs 直飞口径 101.7053M km，差 0.05%）→ 勾选态与
-    // 不勾选态**必须走同一条路、得到同一个结果**（下面逐位比较），旧断言要求的
     // 「勾选态不写滑块」是错误归因的产物，已删除。
     expectExact(f, '不勾选：写滑块一次', uncheckedWrites, 1);
     expectExact(f, '勾选：inputIncomplete', checked.inputIncomplete, undefined);

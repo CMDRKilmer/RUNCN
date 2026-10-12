@@ -403,7 +403,6 @@ async function pushRouteToFtc(tile: PrunTile) {
     // 会落到这里 —— 联动静默不写滑块，而旧行为会写一个 cF×f×d 估值（精度口径问题，
     // 拆独立项处理；当前取舍是「宁可不动，也不写不准的值」）。
     if (result.inputIncomplete !== undefined) {
-      // 分级（2026-09-23 第四轮降噪）：T3（tile ready 首推）时服务器计划还没到 → 必然残缺，
       // 只 debug；表格刷新过（T1，服务器计划已到）仍残缺才是真问题 → warn。
       // 写法用 `console[level]` 而不是两个 if 分支：级别由 incompleteLogLevel 单一处决定
       // （Node 回归脚本直接锁它：false → 'debug'、true → 'warn'）。
@@ -416,7 +415,6 @@ async function pushRouteToFtc(tile: PrunTile) {
       // 服务器计划到达（表格文本变化 → schedulePushRoute）后几何签名变化，门必放行；
       // 数据一直没到就一直在「不写滑块、等下一次信号」的状态 —— 没有放弃上限。
       // ⚠️ 系内航线现在可以拿到**原生**几何（「转移」（TRANSIT）段的 stlDistance 已入库，
-      // 见 system-bodies.recordStlSegments），且该段口径已标定（2026-09-23：燃料 = 罐口径
       // 0.98×罐×min(f,0.5)、时长 = d/v_转移，见 fuel-model.ts 的「系内转移段标定」块）——
       // 落到这里说明判缺的理由只剩「转移段记录未到」或「罐容量/余量缺失」，
       // 等服务器下发该航线的记录即可。另一类结构性拿不到记录的是网关/星系 id 目的地 ——

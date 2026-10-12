@@ -15,6 +15,12 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import {
+  pushItemsPrioritised as pushItemsPrioritisedPure,
+  pushItemsProportional as pushItemsProportionalPure,
+  type CargoItem as CargoItemFit,
+  type CargoState,
+} from '@src/features/XIT/FLEET/chain-fit';
 import { createId } from '@src/store/create-id';
 import { fixed0 } from '@src/utils/format';
 import {
@@ -834,7 +840,6 @@ export function planChainRoute(input: {
   }
 
   // 环内循环边：反向边（上游在下游之后才到访），被拓扑排序断链。
-  // 这类产物无法在同一次线性航线内回头补送，只能本轮运回仓库、下一轮再从仓库补给，
   // 因此不回流入 flows，仅在归航时标注出「循环下游是否还需补给」。
   const backwardEdges = rawEdges.filter(
     x => position.has(x.to) && position.get(x.from)! > position.get(x.to)!,
@@ -856,36 +861,42 @@ export function planChainRoute(input: {
   let cargo: CargoItem[] = [];
   const { freeCapacity } = plan;
 
-  const pushItems = (items: CargoItem[]) => {
-    if (items.length === 0) {
-      return false;
-    }
-    let loadWeight = 0;
-    let loadVolume = 0;
-    for (const item of items) {
-      const { weight, volume } = matWeightVolume(item.ticker, item.amount);
-      loadWeight += weight;
-      loadVolume += volume;
-    }
-    let scale = 1;
-    if (loadWeight > freeCapacity.weight - cargoWeight) {
-      scale = Math.min(scale, (freeCapacity.weight - cargoWeight) / loadWeight);
-    }
-    if (loadVolume > freeCapacity.volume - cargoVolume) {
-      scale = Math.min(scale, (freeCapacity.volume - cargoVolume) / loadVolume);
-    }
-    if (scale <= 0) {
-      return true;
-    }
-    for (const item of items) {
-      item.amount = Math.floor(item.amount * scale);
-    }
-    cargoWeight += loadWeight * scale;
-    cargoVolume += loadVolume * scale;
-    cargo = [...cargo, ...items];
-    return scale < 1;
+  // 把 cargo 装入船舱。两种装载策略：
+  //   - 比例缩减：所有 item 按同一比例缩放（出发地装载 CX 采购物资用，超载则让用户减天数）。
+  //   - 逐 item 优先：按 dest 优先级逐条装满 / 跳过（环线链上输送用，避免按比例切割导致所有
+  //     下游基地都拿不到足额供应，应按下游优先度逐个装载，次要下游留待下一航次）。
+  // 实现见 chain-fit.ts；这里把当前 planChainRoute 的闭包 state 灌入纯函数。
+  // matWeightVolume 接受 (ticker, amount)，需要 clamp amount > 0（仓库用 0 取零除法）。
+  const wv = (ticker: string, amount: number) => matWeightVolume(ticker, amount);
+  const pushItemsProportional = (items: CargoItemFit[]): boolean => {
+    const next: CargoState = {
+      weight: cargoWeight,
+      volume: cargoVolume,
+      free: { weight: freeCapacity.weight, volume: freeCapacity.volume },
+      cargo: cargo,
+    };
+    const clipped = pushItemsProportionalPure(items, next, wv);
+    cargoWeight = next.weight;
+    cargoVolume = next.volume;
+    cargo = next.cargo;
+    return clipped;
   };
-
+  const pushItemsPrioritised = (
+    items: CargoItemFit[],
+    priority: Record<string, number>,
+  ): boolean => {
+    const next: CargoState = {
+      weight: cargoWeight,
+      volume: cargoVolume,
+      free: { weight: freeCapacity.weight, volume: freeCapacity.volume },
+      cargo: cargo,
+    };
+    const clipped = pushItemsPrioritisedPure(items, next, wv, priority);
+    cargoWeight = next.weight;
+    cargoVolume = next.volume;
+    cargo = next.cargo;
+    return clipped;
+  };
   const trackPeak = () => {
     plan.peakLoad.weight = Math.max(plan.peakLoad.weight, cargoWeight);
     plan.peakLoad.volume = Math.max(plan.peakLoad.volume, cargoVolume);
@@ -913,7 +924,7 @@ export function planChainRoute(input: {
       warnings.push('出发地采购物资超出船舱剩余载量，请减少天数或换大船。');
     }
   }
-  pushItems(initialItems);
+  pushItemsProportional(initialItems);
   trackPeak();
   // 出发时载重（装船后、飞首站前）。
   plan.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
@@ -1002,8 +1013,22 @@ export function planChainRoute(input: {
       }
     }
 
-    // 阶段 1:链输送（超载按比例缩减）。
-    const chainClipped = pushItems(chainPickup);
+    // 阶段 1:链输送（按下游优先度逐条装满，不足则裁到剩余舱容）。
+    // 优先度按 ticker 在目的地基地 BURN 中的剩余天数（daysLeft）升序排序——
+    // 与 flow 规划阶段用的口径一致，确保链上输送的紧迫度排序在装载阶段也保持。
+    const chainPickupPriority: Record<string, number> = {};
+    {
+      let rank = 0;
+      for (const item of chainPickup) {
+        if (chainPickupPriority[item.dest] === undefined) {
+          const mat = burns.get(item.dest);
+          chainPickupPriority[item.dest] =
+            mat && mat[item.ticker] !== undefined ? mat[item.ticker]!.daysLeft : rank;
+          rank++;
+        }
+      }
+    }
+    const chainClipped = pushItemsPrioritised(chainPickup, chainPickupPriority);
     for (const item of chainPickup) {
       if (item.amount <= 0) {
         continue;
@@ -1066,7 +1091,9 @@ export function planChainRoute(input: {
 
     stop.clipped = chainClipped || finalClipped;
     if (chainClipped) {
-      warnings.push(`「${stop.planetName}」链上输送超出船舱剩余载量，已按比例缩减。`);
+      warnings.push(
+        `「${stop.planetName}」链上输送超出船舱剩余载量，按下游优先度逐条截断（次要下游留待下航次）。`,
+      );
     }
     if (finalClipped) {
       warnings.push(`「${stop.planetName}」最终产物受舱容限制，部分未装上船。`);
@@ -1781,6 +1808,19 @@ export function buildChainActionPackages(
           origin: baseStore,
           dest: shipCargo,
         },
+        // 卸货→开船之间插入货舱校验：MTRA 步骤本地状态完成后，服务器端仍可能
+        // 在处理中（MTRA 步骤用 waitActionFeedback 等游戏面板反馈，但底层物
+        // 流跨客户端→服务器全链路完成有窗口），若不等就让 DEPART 触发，可能
+        // 出现「卸载包没卸载完船就出发」的情况。这里强制把 unload map 中每个
+        // ticker 的目标剩余压到 ≤0，只有货舱 store 真清空了该 ticker 才允许
+        // OPEN SFC/DEPART 继续；30s 超时则 fail 整个阶段（玩家需要排查 MTRA
+        // 列表里的可转移性 / 目的地仓库容量，跟警报文案对齐）。
+        {
+          type: 'Verify Ship Cargo',
+          name: '验证卸货',
+          registration: ship.ship.registration,
+          verifyRemaining: Object.fromEntries(Object.keys(unload).map(ticker => [ticker, 0])),
+        },
         {
           type: 'OPEN SFC',
           name: next !== undefined ? `飞往 ${next.planetName}` : `飞往 ${plan.originNaturalId}`,
@@ -1810,6 +1850,17 @@ export function buildChainActionPackages(
             group: '卸货',
             origin: shipCargo,
             dest: originWarehouse,
+          },
+          // 归航后立即校验空间站仓库是否收到全部 finalUnload：
+          // 否则后续「出发地主包」执行时出发地取货清单会出现已经"装好"但实际
+          // 还在路上的鬼影数量。
+          {
+            type: 'Verify Ship Cargo',
+            name: '验证归航卸货',
+            registration: ship.ship.registration,
+            verifyRemaining: Object.fromEntries(
+              Object.keys(plan.finalUnload).map(ticker => [ticker, 0]),
+            ),
           },
         ],
       },

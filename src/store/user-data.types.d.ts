@@ -77,7 +77,15 @@ declare namespace UserData {
     includeInputs?: boolean;
   }
 
-  type ActionType = 'CX Buy' | 'MTRA' | 'Refuel' | 'OPEN SFC' | 'DEPART' | 'BRA Repair' | 'CX Sell';
+  type ActionType =
+    | 'CX Buy'
+    | 'MTRA'
+    | 'Refuel'
+    | 'OPEN SFC'
+    | 'DEPART'
+    | 'BRA Repair'
+    | 'CX Sell'
+    | 'Verify Ship Cargo';
 
   interface ActionData {
     type: ActionType;
@@ -114,6 +122,11 @@ declare namespace UserData {
     sellMode?: 'LIMIT' | 'FILL';
     /** 挂单排名（1=卖价第一名，默认 1）：压过第 rank 名卖价一档。 */
     rank?: number;
+
+    // Verify Ship Cargo 专用：要确认已离开船舱的飞船注册号。
+    registration?: string;
+    // Verify Ship Cargo 专用：ticker → 期望剩余 ≤ N（无数量约束时仅校验存在性）。
+    verifyRemaining?: Record<string, number>;
   }
 
   type TriggerMode = 'CONFIRM' | 'AUTO' | 'MANUAL';

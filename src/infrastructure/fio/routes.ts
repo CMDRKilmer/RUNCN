@@ -32,6 +32,8 @@ export interface GatewayInfo {
 const routesVersion = ref(0);
 // 星系 naturalId → 相邻星系 naturalId（无向）。含内置跃迁连接与已观测网关连接。
 const neighbors = new Map<string, Set<string>>();
+// 内置恒星连接单独记录，刷新网关快照时不能误删。
+const bundledEdges = new Set<string>();
 // 星系 naturalId → 网关列表。
 const gateways = new Map<string, GatewayInfo[]>();
 let bundledLoaded = false;
@@ -120,6 +122,27 @@ function addNeighbor(a: string, b: string) {
   setB.add(ka);
 }
 
+function edgeKey(a: string, b: string) {
+  return [a.toUpperCase(), b.toUpperCase()].sort().join('|');
+}
+
+function removeGatewayNeighbors() {
+  for (const connection of gatewayConnections.values()) {
+    const { fromSystem, toSystem } = connection;
+    if (bundledEdges.has(edgeKey(fromSystem, toSystem))) {
+      continue;
+    }
+    neighbors.get(fromSystem)?.delete(toSystem);
+    neighbors.get(toSystem)?.delete(fromSystem);
+  }
+}
+
+function restoreGatewayNeighbors() {
+  for (const connection of gatewayConnections.values()) {
+    addNeighbor(connection.fromSystem, connection.toSystem);
+  }
+}
+
 // 网关名称配对：DATA_DATA["gateways"] 一次性下发全部网关实体后，
 // 从名称（"本地端 -> 远程端"）配对出连接。成对网关的名称两端互为匹配：
 // 网关 X(本地 A, 远程 B) 与网关 Y(本地 B', 远程 A') 构成连接，当
@@ -134,6 +157,9 @@ function pairGatewayConnections() {
   const all: Parsed[] = [];
   for (const list of gateways.values()) {
     for (const g of list) {
+      if (!g.operational) {
+        continue;
+      }
       const m = g.name.match(/^(.*?)\s*(?:-{1,2}>|→)\s*(.*?)$/);
       all.push({
         id: g.naturalId,
@@ -278,6 +304,7 @@ async function loadBundledConnections() {
     const data = (await resp.json()) as Record<string, string[]>;
     for (const [sys, conns] of Object.entries(data)) {
       for (const c of conns) {
+        bundledEdges.add(edgeKey(sys, c));
         addNeighbor(sys, c);
       }
     }
@@ -300,11 +327,18 @@ interface GatewayRaw {
 }
 
 onApiMessage({
+  CLIENT_CONNECTION_OPENED() {
+    removeGatewayNeighbors();
+    gatewayConnections.clear();
+    gateways.clear();
+    routesVersion.value++;
+  },
   DATA_DATA(data: { path?: string[]; body?: unknown }) {
     const path = data.path;
     if (!Array.isArray(path) || path[0] !== 'gateways' || !Array.isArray(data.body)) {
       return;
     }
+    removeGatewayNeighbors();
     gateways.clear();
     for (const g of data.body as GatewayRaw[]) {
       const lines = g.address?.lines ?? [];
@@ -327,6 +361,8 @@ onApiMessage({
     }
     // 一次性配对：从全部网关实体的名称提取连接（无需飞行）。
     pairGatewayConnections();
+    // 保留此前由飞行计划确认、但名称无法配对的连接。
+    restoreGatewayNeighbors();
     routesVersion.value++;
   },
   // 地址查询响应中可能含网关实体（SATELLITE 行）：增量补充网关列表并重新配对。
@@ -359,6 +395,14 @@ onApiMessage({
         });
         gateways.set(key, list);
         added = true;
+      } else {
+        const existing = list.find(g => g.naturalId === gid);
+        // 地址查询没有运营状态，不要把已知停运网关恢复成可用。
+        if (existing) {
+          existing.name = satLine.entity?.name ?? existing.name;
+          existing.planetId =
+            lines.find(l => l.type === 'PLANET')?.entity?.naturalId ?? existing.planetId;
+        }
       }
     }
     if (added) {

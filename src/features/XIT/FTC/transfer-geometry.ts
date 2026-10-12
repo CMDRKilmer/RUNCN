@@ -7,9 +7,8 @@
 // fuel-model.missingModelInputs 严格判缺、宁可不写（2026-09-23 用户拍板）。本函数
 // 只服务环线预估（面板展示 + 多船时间均衡 + 到港库存预测），且必须在 UI 上显式标注。
 //
-// ⚠️ **「均值圆弧」是初版**：基于两端**当前位置**（不是未来时刻，避免定点迭代耦合），
-// 用 (r1+r2)/2 × Δθ 近似弧长；待 prun-log.json TRANSIT 段样本到位后用真实椭圆弧长
-// 重新标定（数据契约见下方「椭圆契约」）。
+// ⚠️ **「均值圆弧」是初版**：基于两端在 t0Ms 时刻的位置，用 (r1+r2)/2 × Δθ 近似弧长；
+// 待 prun-log.json TRANSIT 段样本到位后用真实椭圆弧长重新标定（数据契约见下方「椭圆契约」）。
 //
 // ⚠️ **hours 仅含 TRANSIT 段**：系内航线的真实段结构是单段「转移」（TRANSIT），
 // 没有 DEPARTURE/APPROACH（见 fuel-model.ts 系内转移段标定块与 feature-patterns.md
@@ -62,10 +61,11 @@ export interface TransferGeometryResult {
 // 系内航段的几何预测（均值圆弧初版）。
 //
 // 算法（来自文档「系内「转移」段：距离不是航线常数 + 提示/日志降噪」条目）：
-//   1) p1/p2 = 两端天体在 t0Ms 的位置 —— 优先用最近的服务器观测（systemBodiesStore
-//      缓存的 transferEllipse.startPosition/targetPosition），无观测则回退到
-//      离线游戏轨道模型 predictPosition(t0Ms)。观测与预测坐标系一致（orbit.ts 同款旋转）
-//      ⇒ 两者可平滑替换。系统**不**用任何「未来时刻」的位置 —— 环线面板只知道出发时刻。
+//   1) p1/p2 = 两端天体在 t0Ms 的位置 —— 优先用离线游戏轨道模型 predictPosition(t0Ms)
+//      （两端同一时刻，几何自洽）；模型数据缺失（未打开过星系图）时才回退到无时间戳的
+//      服务器观测（systemBodiesStore 缓存的 transferEllipse.startPosition/targetPosition）。
+//      观测与预测坐标系一致（orbit.ts 同款旋转）⇒ 两者可平滑替换。**不优先观测**：观测
+//      不带时间戳、两端可能来自不同航次，用它当输入会把不自洽的几何当成有效值。
 //   2) starPos = 出发星系恒星位置（getStarPosition(fromSystemId)）。
 //   3) r1/r2 = 两端天体到恒星的距离（distance3d）。
 //   4) theta = 两端相对恒星的角距：cos(θ) = dot(p1-star, p2-star) / (r1·r2)，θ = acos(clamp(...))。
@@ -75,7 +75,7 @@ export interface TransferGeometryResult {
 //
 // 失败条件（任一 → 返回 undefined，不静默）：
 //   - 跨星系调用（fromSystemId !== toSystemId）。
-//   - 任一端位置缺失（getPosition 回退到 predictPosition 也无值）。
+//   - 任一端位置缺失（predictPosition 无值且 getPosition 也无观测）。
 //   - 恒星位置缺失（getStarPosition 返回 undefined）。
 //   - 任一距离 NaN 或 ≤ 0（轨道根数缺失或半长轴为 0）。
 //   - cosTheta 经 clamp 后算 acos 不在 [0, π]（数值退化）。
@@ -104,10 +104,11 @@ export async function predictTransferGeometry(
     return undefined;
   }
 
-  // 两端位置：优先用最近的服务器观测（system-bodies 缓存来自过去飞行计划
-  // transferEllipse.startPosition/targetPosition），无观测则用 predictPosition(t0Ms)。
-  const p1 = systemBodiesStore.getPosition(fromId) ?? predictPosition(fromId, t0Ms);
-  const p2 = systemBodiesStore.getPosition(toId) ?? predictPosition(toId, t0Ms);
+  // 两端位置：优先用离线轨道模型在 t0Ms 时刻的预测 —— 两端同一时刻，几何自洽。
+  // 模型数据缺失时回退到无时间戳的服务器观测（过去飞行计划 transferEllipse 的位置快照）；
+  // 观测两端可能来自不同航次，不能作为首选输入。
+  const p1 = predictPosition(fromId, t0Ms) ?? systemBodiesStore.getPosition(fromId);
+  const p2 = predictPosition(toId, t0Ms) ?? systemBodiesStore.getPosition(toId);
   const starPos = getStarPosition(fromSystemId);
   if (p1 === undefined || p2 === undefined || starPos === undefined) {
     return undefined;

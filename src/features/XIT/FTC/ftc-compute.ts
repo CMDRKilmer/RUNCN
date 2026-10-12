@@ -4,8 +4,13 @@ import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
-import { hasSystemData, exportStationOrbits } from '@src/infrastructure/fio/orbit';
-import { planRoutes, routeMetrics, findNativeFlightPlan } from './route-planner';
+import { hasSystemData, exportStationOrbits, gameNow } from '@src/infrastructure/fio/orbit';
+import {
+  planRoutes,
+  routeMetrics,
+  findNativeFlightPlan,
+  summarizeNativeFlightPlan,
+} from './route-planner';
 import type { PlannedRoute } from './route-planner';
 import { resolveSystemId } from './route-model';
 import {
@@ -15,10 +20,11 @@ import {
   findBalanceOption,
   nearbyFuelOptions,
   missingModelInputs,
-  FuelOption,
-  ShipPerformance,
+  conditionFactor,
 } from './fuel-model';
+import type { FuelOption, ShipPerformance, ShipComponentModel } from './fuel-model';
 import { ftcRouteKey, setFtcFuelSlider, setFtcReactorUsage } from './ftc-fuel-settings';
+import { predictTransferGeometry } from './transfer-geometry';
 
 // 最近一次 FTC 计算完成的航线 key（供等待方轮询：每段飞行前先确保 FTC 最优方案算完）。
 // key 格式 = ftcRouteKey(船|起点|终点|gw|nat)，与 ftc-fuel-settings 的航线键逐位一致
@@ -80,6 +86,8 @@ export interface BlueprintInfo {
   minReactorUsage?: number;
   emitterChargeTime?: number;
   maxGFactor?: number;
+  componentModifiers: Readonly<Record<string, number>>;
+  components: readonly ShipComponentModel[];
 }
 
 // 蓝图性能（FTL 最大航速、STL 引擎、FTL 充能/燃料参数）。
@@ -103,6 +111,8 @@ export function blueprintInfoFor(s: PrunApi.Ship): BlueprintInfo | undefined {
   // 从 selections 中查 STL_ENGINE 选项与反应堆功率（FTL_POWER，燃料系数用）。
   let stlEngine: string | undefined;
   let reactorPower: number | undefined;
+  const componentModifiers: Record<string, number> = {};
+  const components: ShipComponentModel[] = [];
   for (const sel of bp.selections) {
     if (sel.amount <= 0) {
       continue;
@@ -116,15 +126,37 @@ export function blueprintInfoFor(s: PrunApi.Ship): BlueprintInfo | undefined {
         }
       }
     }
+    // 部件 modifier 是性能模型的底层证据。先按类型汇总并保留未知项，
+    // 这样新增部件不会被静默丢弃；具体公式只消费已确认的性能字段。
+    const modifiers: Record<string, number> = {};
+    for (const mod of sel.modifiers) {
+      if (Number.isFinite(mod.value)) {
+        modifiers[mod.type] = (modifiers[mod.type] ?? 0) + mod.value;
+        componentModifiers[mod.type] = (componentModifiers[mod.type] ?? 0) + mod.value * sel.amount;
+      }
+    }
+    components.push({ type: sel.type, option: sel.option, amount: sel.amount, modifiers });
   }
+  const modifierValue = (...names: string[]) =>
+    names.map(name => componentModifiers[name]).find(value => value !== undefined && value > 0);
+  const effectiveFtlMaxSpeed = ftlMaxSpeed ?? modifierValue('FTL_MAX_SPEED', 'FTL_SPEED');
+  const effectiveStlFuelCapacity =
+    stlFuelCapacity ?? modifierValue('STL_FUEL_CAPACITY', 'STL_TANK_CAPACITY');
+  const effectiveMinReactorUsage =
+    minReactorUsage ?? modifierValue('MIN_REACTOR_USAGE', 'FTL_REACTOR_USAGE');
+  const effectiveEmitterChargeTime =
+    emitterChargeTime ?? modifierValue('EMITTER_CHARGE_TIME', 'FTL_EMITTER_TIME');
+  const effectiveMaxGFactor = maxGFactor ?? modifierValue('MAX_G_FACTOR', 'G_FACTOR');
   return {
-    ftlMaxSpeed,
+    ftlMaxSpeed: effectiveFtlMaxSpeed,
     stlEngine,
     reactorPower,
-    stlFuelCapacity,
-    minReactorUsage,
-    emitterChargeTime,
-    maxGFactor,
+    stlFuelCapacity: effectiveStlFuelCapacity,
+    minReactorUsage: effectiveMinReactorUsage,
+    emitterChargeTime: effectiveEmitterChargeTime,
+    maxGFactor: effectiveMaxGFactor,
+    componentModifiers,
+    components,
   };
 }
 
@@ -150,6 +182,8 @@ export function shipPerformanceFor(s: PrunApi.Ship): ShipPerformance {
     emitterChargeTime: info?.emitterChargeTime,
     stlFuelCapacity: info?.stlFuelCapacity,
     stlRemaining: remaining.stlRemaining > 0 ? remaining.stlRemaining : undefined,
+    componentModifiers: info?.componentModifiers,
+    components: info?.components,
   };
 }
 
@@ -377,6 +411,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   if (!from || !to) {
     return { ok: false, message: '请输入起点和终点' };
   }
+  if (from.toUpperCase() === to.toUpperCase()) {
+    return { ok: false, message: '起点和终点不能是同一个实体；请选择实际出发地和目的地' };
+  }
   const s = shipsStore.getByRegistration(input.shipRegistration);
   if (!s) {
     return { ok: false, message: '请选择停靠中的飞船' };
@@ -406,6 +443,34 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     return { ok: false, message: '无法解析起终点或航线不可达（需恒星位置数据，请先打开星图）' };
   }
   const metrics = routeMetrics(route);
+  // 没有服务器原生 TRANSIT 记录时，自动用已缓存/已获取的轨道根数预测系内距离。
+  // 这条路径只补几何，不伪造服务器燃料；这样 FTC 可以脱离先做原生计划运行。
+  if (metrics.stlDistanceKm === undefined && metrics.fromBody && metrics.toBody) {
+    const fromSystem = resolveSystemId(metrics.fromBody);
+    const toSystem = resolveSystemId(metrics.toBody);
+    if (fromSystem !== undefined && fromSystem === toSystem) {
+      const predicted = await predictTransferGeometry({
+        fromId: metrics.fromBody,
+        toId: metrics.toBody,
+        fromSystemId: fromSystem,
+        toSystemId: toSystem,
+        t0Ms: gameNow(),
+        cond: conditionFactor(perf.condition),
+        massT: perf.mass,
+      });
+      if (predicted?.distanceKm !== undefined) {
+        metrics.stlDistanceKm = predicted.distanceKm;
+        metrics.transitKm = predicted.distanceKm;
+      }
+    }
+  }
+  const nativePlan = findNativeFlightPlan(
+    metrics.fromLookup ?? route.fromBody ?? from,
+    metrics.toLookup ?? route.toBody ?? to,
+    input.useGateway === true,
+  );
+  const nativeSummary =
+    nativePlan !== undefined ? summarizeNativeFlightPlan(nativePlan) : undefined;
   // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
   // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -442,6 +507,11 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       landingPressure: landingEnv?.pressure,
       departureRadius: departEnv?.radiusKm,
       departurePressure: departEnv?.pressure,
+      nativeTransitDistanceKm: nativeSummary?.transitDistanceKm,
+      nativeTransitSeconds: nativeSummary?.transitSeconds,
+      nativeTransitFuel: nativeSummary?.transitFuel,
+      nativeStlTank: perf.stlRemaining ?? perf.stlFuelCapacity,
+      nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,
   );
@@ -474,10 +544,6 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 服务器当前对该航线下发的原生 FlightPlan（用于面板并行展示实测总时长）。
   // 用反查后的实体键匹配（SFC 把空间站目的地规范化成所属星系 id，原生计划的目标端是
   // 不可变实体 id，与 metrics.fromLookup/toLookup 一致）；查不到即 undefined，面板不显示。
-  const nativePlan = findNativeFlightPlan(
-    metrics.fromLookup ?? route.fromBody ?? from,
-    metrics.toLookup ?? route.toBody ?? to,
-  );
   return {
     ok: true,
     message:

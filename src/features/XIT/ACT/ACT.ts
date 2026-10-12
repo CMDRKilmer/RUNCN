@@ -5,6 +5,7 @@ import './actions/refuel/refuel';
 import './actions/open-sfc/open-sfc';
 import './actions/depart/depart';
 import './actions/bra-repair/bra-repair';
+import './actions/verify-ship-cargo/verify-ship-cargo';
 
 import './material-groups/repair/repair';
 import './material-groups/resupply/resupply';
