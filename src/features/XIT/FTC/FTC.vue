@@ -30,6 +30,7 @@ import {
   RouteSegmentRow,
   buildNativeSegmentRows,
   buildEstimatedSegmentRows,
+  summarizeNativeFlightPlan,
 } from './route-planner';
 import {
   computeFtcPlan,
@@ -391,7 +392,7 @@ async function planAndCompute() {
     `最优方案（平衡点）：燃料滑块 ${best.fuel}` +
     reactorText +
     (nativePlan
-      ? `，服务器实测 ${formatDuration(totalNativeSeconds.value * 1000)}（模型估算 ${formatDuration(best.totalHours * 3600000)}）`
+      ? `，服务器实测 ${formatDuration(nativeSummary.value!.totalSeconds * 1000)}（模型估算 ${formatDuration(best.totalHours * 3600000)}）`
       : `，预计 ${formatDuration(best.totalHours * 3600000)}`) +
     fuelText +
     `，总成本 ${formatCurrency(best.totalCost)}` +
@@ -469,23 +470,19 @@ const balanceNote = computed(() => {
 
 // 服务器当前对该航线下发的原生计划「实测总时长」（秒）。
 // 有原生计划时，它是当前飞船/燃料/载重组合的权威时间；模型时间只用于燃料档位比较。
-const totalNativeSeconds = computed(() => {
+const nativeSummary = computed(() => {
   const plan = result.value?.nativePlan;
   if (!plan) {
-    return 0;
+    return undefined;
   }
-  let total = 0;
-  for (const sg of plan.segments) {
-    total += ((sg.arrival?.timestamp ?? 0) - (sg.departure?.timestamp ?? 0)) / 1000;
-  }
-  return total;
+  return summarizeNativeFlightPlan(plan);
 });
 
-const hasNativeTime = computed(() => totalNativeSeconds.value > 0);
+const hasNativeTime = computed(() => (nativeSummary.value?.totalSeconds ?? 0) > 0);
 
 const displayedBestDurationMs = computed(() => {
   if (hasNativeTime.value) {
-    return totalNativeSeconds.value * 1000;
+    return nativeSummary.value!.totalSeconds * 1000;
   }
   return (result.value?.best.totalHours ?? 0) * 3600000;
 });
@@ -736,9 +733,10 @@ const nearbyFastest = computed(() => {
            不随 FTC 建议的 f 变化（与最佳方案的 fuel/reactor 独立绑定）；仅在原生 STL 段记录
            已存在（result.metrics.stlRecorded）时展示，避免误导「无原生计划还显示对比」。 -->
       <div v-if="result.nativePlan && result.metrics?.stlRecorded" :class="$style.hint">
-        服务器当前计划实测：{{ formatDuration(totalNativeSeconds * 1000) }}（{{
-          result.nativePlan.segments.length
-        }}段原生，含起飞/着陆）
+        服务器当前计划实测：{{ formatDuration(nativeSummary!.totalSeconds * 1000) }}（{{
+          nativeSummary!.segmentCount
+        }}段原生，STL {{ formatDuration(nativeSummary!.stlSeconds * 1000) }}，FTL
+        {{ formatDuration(nativeSummary!.ftlSeconds * 1000) }}）
       </div>
       <details v-if="result.nearby && result.nearby.length > 1" :class="$style.costDetails" open>
         <summary>邻档对比（燃料 ±5 档，反应堆固定 {{ result.best.reactor }}）</summary>

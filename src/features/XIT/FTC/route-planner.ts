@@ -15,6 +15,7 @@ import {
   ftlFuelCFor,
   stlLandingFactor,
   stlDepartureFSat,
+  stlIntraTransitSpeedFor,
   GW_PC_PER_H,
   GW_LOCK_HOURS,
 } from './fuel-model';
@@ -341,11 +342,17 @@ export function routeMetrics(route: PlannedRoute): {
   // 系内「转移」段（真实结构）：整段路程，直接当 d 用 —— 口径已标定（燃料 0.98×罐×min(f,0.5)、
   // 时长 d/v_转移），能不能写滑块只看记录与罐容量是否齐（见 fuel-model.missingModelInputs）。
   const transitRec = sameSystemRec?.transit;
-  const transitKm = transitRec?.distanceKm;
   // 离港/进近几何 = 服务器原生记录（**唯一**来源，无回退）：取不到即 undefined。
   // 数据没到就保持不写滑块，等下一次信号（新的原生 STL 段入库 → 推送门签名变化 → 放行）。
   const departKm = departRec?.distanceKm;
   const approachKm = approachRec?.distanceKm;
+  // 部分原生计划只写入航线级 routeRecords，没有单独的 sameSystem.transit；
+  // 系内 TRANSIT 必须从总 STL 距离扣除独立的进近/离港段，不能把整条航线当作转移段。
+  const transitKm =
+    transitRec?.distanceKm ??
+    (route.legs.length === 0 && routeRec !== undefined
+      ? Math.max(0, routeRec.distanceKm - (departKm ?? 0) - (approachKm ?? 0))
+      : undefined);
   const twoLegRecorded = departRec !== undefined && approachRec !== undefined;
   const stlRecorded = routeRec !== undefined || twoLegRecorded || transitRec !== undefined;
   // 首选航线级总路程；没有该记录时才退回「离港 + 进近」或系内转移段（回退口径）。
@@ -463,6 +470,83 @@ export function findNativeFlightPlan(
   return best;
 }
 
+export interface NativeFlightSummary {
+  totalSeconds: number;
+  stlSeconds: number;
+  ftlSeconds: number;
+  transitSeconds: number;
+  landingSeconds: number;
+  transitDistanceKm: number;
+  transitFuel: number;
+  stlDistanceKm: number;
+  ftlDistancePc: number;
+  stlFuel: number;
+  ftlFuel: number;
+  segmentCount: number;
+}
+
+// 汇总服务器原生计划，作为 FTC 的单一实测数据口径。
+export function summarizeNativeFlightPlan(plan: PrunApi.FlightPlan): NativeFlightSummary {
+  let totalSeconds = 0;
+  let stlSeconds = 0;
+  let ftlSeconds = 0;
+  let transitSeconds = 0;
+  let landingSeconds = 0;
+  let transitDistanceKm = 0;
+  let transitFuel = 0;
+  let stlDistanceKm = 0;
+  let ftlDistancePc = 0;
+  let stlFuel = 0;
+  let ftlFuel = 0;
+  for (const segment of plan.segments) {
+    const seconds = Math.max(
+      0,
+      ((segment.arrival?.timestamp ?? 0) - (segment.departure?.timestamp ?? 0)) / 1000,
+    );
+    totalSeconds += seconds;
+    if (segment.stlDistance !== null) {
+      stlSeconds += seconds;
+      stlDistanceKm += Math.max(0, segment.stlDistance);
+    }
+    if (segment.type === 'TRANSIT') {
+      transitSeconds += seconds;
+      if (segment.stlDistance !== null) {
+        transitDistanceKm += Math.max(0, segment.stlDistance);
+      }
+      if (segment.stlFuelConsumption !== null) {
+        transitFuel += Math.max(0, segment.stlFuelConsumption);
+      }
+    }
+    if (segment.type === 'LANDING') {
+      landingSeconds += seconds;
+    }
+    if (segment.ftlDistance !== null) {
+      ftlSeconds += seconds;
+      ftlDistancePc += Math.max(0, segment.ftlDistance);
+    }
+    if (segment.stlFuelConsumption !== null) {
+      stlFuel += Math.max(0, segment.stlFuelConsumption);
+    }
+    if (segment.ftlFuelConsumption !== null) {
+      ftlFuel += Math.max(0, segment.ftlFuelConsumption);
+    }
+  }
+  return {
+    totalSeconds,
+    stlSeconds,
+    ftlSeconds,
+    transitSeconds,
+    landingSeconds,
+    transitDistanceKm,
+    transitFuel,
+    stlDistanceKm,
+    ftlDistancePc,
+    stlFuel,
+    ftlFuel,
+    segmentCount: plan.segments.length,
+  };
+}
+
 // 将原生 FlightPlan 的 segments 转为展示行（严格按 SFC 表格）。
 export function buildNativeSegmentRows(plan: PrunApi.FlightPlan): RouteSegmentRow[] {
   return plan.segments.map(seg => ({
@@ -550,6 +634,21 @@ export function buildEstimatedSegmentRows(
   const approachExtra = settings.stlApproachExtra ?? 8;
   const stlApproachFuel =
     isCross && tank !== undefined && tank > 0 ? 0.49 * tank * fuel + approachExtra : undefined;
+
+  // 同星系无原生计划时，展示模型预测的 TRANSIT 段，避免明细表空白。
+  if (!isCross && metrics.transitKm !== undefined && metrics.transitKm > 0) {
+    const speed = stlIntraTransitSpeedFor(ship, fuel);
+    rows.push({
+      type: '转移',
+      typeKey: 'TRANSIT',
+      destination: `${route.toBody ?? ''}（环绕轨道）`,
+      durationMs: (metrics.transitKm / (speed * 3600) / cond) * 3600000,
+      distanceKm: metrics.transitKm,
+      damage: 0,
+      stlFuel: 0.98 * (tank ?? 0) * Math.min(fuel, 0.5),
+      native: false,
+    });
+  }
 
   // 离港段（起点 → 首跳恒星）。与游戏 SFC 表格一致：离港段 FTL 燃料 = 首跳充能
   // （自然航线离港时即为第一跳充电；网关无 FTL 燃料）。时长优先用飞行计划记录的
