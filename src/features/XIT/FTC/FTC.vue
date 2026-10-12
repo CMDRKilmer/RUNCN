@@ -6,6 +6,7 @@ import TextInput from '@src/components/forms/TextInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { requestStars, starsStore, starsVersion } from '@src/infrastructure/prun-api/data/stars';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { exportStlSegments } from '@src/infrastructure/prun-api/data/system-bodies';
@@ -47,6 +48,34 @@ import $style from './FTC.module.css';
 
 // ---- 数据工具（保留）----
 const prefetching = ref(false);
+const requestingStars = ref(false);
+const starsMessage = ref<string | undefined>(undefined);
+async function refreshStars() {
+  if (requestingStars.value) {
+    return;
+  }
+  requestingStars.value = true;
+  starsMessage.value = undefined;
+  const previousVersion = starsVersion.value;
+  try {
+    if (!requestStars()) {
+      starsMessage.value = '游戏 socket 未就绪：请刷新游戏页面后重试';
+      return;
+    }
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (starsVersion.value > previousVersion) {
+        const count = starsStore.all.value?.length ?? 0;
+        starsMessage.value = `已从游戏加载 ${count} 个星系`;
+        return;
+      }
+    }
+    starsMessage.value = '等待星图响应超时；可在游戏星图内重试';
+  } finally {
+    requestingStars.value = false;
+  }
+}
 async function prefetchOrbits() {
   prefetching.value = true;
   try {
@@ -356,7 +385,9 @@ async function planAndCompute() {
   calcMessage.value =
     `最优方案（平衡点）：燃料滑块 ${best.fuel}` +
     reactorText +
-    `，预计 ${formatDuration(best.totalHours * 3600000)}` +
+    (nativePlan
+      ? `，服务器实测 ${formatDuration(totalNativeSeconds.value * 1000)}（模型估算 ${formatDuration(best.totalHours * 3600000)}）`
+      : `，预计 ${formatDuration(best.totalHours * 3600000)}`) +
     fuelText +
     `，总成本 ${formatCurrency(best.totalCost)}` +
     gatewayFeeText +
@@ -431,9 +462,8 @@ const balanceNote = computed(() => {
   return tv > 0 ? '按总成本（燃料费 + 时间价值）最优' : '快与省油的折衷（Pareto 拐点）';
 });
 
-// 服务器当前对该航线下发的原生计划「实测总时长」（秒）：按 (arrival - departure) 累加
-// 各段 ms，除以 1000 转秒。对应 BTF「蓝图试航模拟」的总耗时（与当前飞船 f/载重绑定），
-// 独立于 FTC 建议的 f（≠ 最优方案的总时长，故并行展示而非替代）。
+// 服务器当前对该航线下发的原生计划「实测总时长」（秒）。
+// 有原生计划时，它是当前飞船/燃料/载重组合的权威时间；模型时间只用于燃料档位比较。
 const totalNativeSeconds = computed(() => {
   const plan = result.value?.nativePlan;
   if (!plan) {
@@ -444,6 +474,15 @@ const totalNativeSeconds = computed(() => {
     total += ((sg.arrival?.timestamp ?? 0) - (sg.departure?.timestamp ?? 0)) / 1000;
   }
   return total;
+});
+
+const hasNativeTime = computed(() => totalNativeSeconds.value > 0);
+
+const displayedBestDurationMs = computed(() => {
+  if (hasNativeTime.value) {
+    return totalNativeSeconds.value * 1000;
+  }
+  return (result.value?.best.totalHours ?? 0) * 3600000;
 });
 
 // 邻档对比的「最省」（按 totalCost 最小）与「最快」（按 totalHours 最小）：
@@ -537,6 +576,13 @@ const nearbyFastest = computed(() => {
         <PrunButton primary :disabled="!ship" @click="planAndCompute">计算最优方案</PrunButton>
         <PrunButton
           neutral
+          :disabled="requestingStars"
+          data-tooltip="向游戏服务器请求原生星图（恒星位置与连接），只在点击时请求。用于补全路线规划所需的星系数据。"
+          @click="refreshStars">
+          {{ requestingStars ? '加载星图…' : '刷新原生星图' }}
+        </PrunButton>
+        <PrunButton
+          neutral
           :disabled="prefetching"
           data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进）。配合游戏轨道模型可离线预测任意时刻的天体位置。"
           @click="prefetchOrbits">
@@ -574,6 +620,7 @@ const nearbyFastest = computed(() => {
           导出 STL 段数据
         </PrunButton>
       </div>
+      <div v-if="starsMessage" :class="$style.hint">{{ starsMessage }}</div>
       <div :class="$style.fieldRow">
         <label :class="$style.field">
           <span>采集探针（全部行星的离港/进近都以它为目标/来源，建议用你自己的行星或站点）</span>
@@ -656,7 +703,7 @@ const nearbyFastest = computed(() => {
           <tr>
             <th>燃料滑块</th>
             <th>反应堆</th>
-            <th>总时长</th>
+            <th>{{ result.nativePlan ? '服务器时长' : '模型时长' }}</th>
             <th>STL 燃料</th>
             <th>FTL 燃料</th>
             <th>燃料费</th>
@@ -668,7 +715,7 @@ const nearbyFastest = computed(() => {
           <tr :class="$style.best">
             <td>{{ result.best.fuel }}</td>
             <td>{{ result.reactorRelevant ? result.best.reactor : '--' }}</td>
-            <td>{{ formatDuration(result.best.totalHours * 3600000) }}</td>
+            <td>{{ formatDuration(displayedBestDurationMs) }}</td>
             <td>{{
               result.best.fuelEstimated ? formatFuel(result.best.stlFuel) : '需位置观测'
             }}</td>
