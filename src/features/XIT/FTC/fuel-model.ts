@@ -496,10 +496,20 @@ const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近/转移单程）= 0.49
 const STL_TRANSIT_F_SAT = 0.5; // 转移段 f 饱和点（与引擎无关：§2/§3/§8 三组 f=1.0 ≡ f=0.5）
 const STL_TRANSIT_FUEL_GROSS = 2 * STL_TANK_FUEL_COEF; // 0.98 = 两段 0.49×罐×f 的口径
 const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重扫描）
-// 系内「转移」（TRANSIT）段的**参考速度**：BTF 实测 599,220,390 km / 21,780 s = 27,512 km/s，
-// 该样本载重 0（质量 = 整备质量 1,271 t）。⚠️ 速度**随质量下降**，不是一个船无关常数 ——
-// 用户实测（VH-192B → VH-192C，619,312,100 km / 40,781 s = 15,186 km/s，质量 2,727 t）
-// 与 27512 × (1271/2727)^0.78 = 15,166 km/s 吻合到 0.1%。
+// 系内「转移」（TRANSIT）段的**参考速度**。
+//
+// ⚠️ 2026-10-13 复核（**未改动数值**，27512 维持）：曾据
+//   `btf-load-sweep-2026-08-29.md` §2/§3（同航线受控 f 扫描：1199t@f=0.05 = 11,580 km/s）
+//   把锚点改成 11,063，但**随即被两份独立实测证伪**：
+//     ① 锚点样本自身 VH-331g→HRT = 599,220,390 km / 21,780 s = 27,512 km/s；
+//     ② 用户实测 VH-192B→VH-192C = 619,312,100 km / 40,781 s（2,727t）= 15,186 km/s，
+//       旧锚点经质量幂律预测 15,168（**吻合 0.1%**），新锚点只有 6,099（**差 2.5×**）。
+//   ⇒ 两份独立样本支持 27512，受控扫描不支持。**两份数据必定不同口径**，而扫描那份
+//     （520M km 的「转移」段）很可能混入了离港/进近拆分或不同的段边界。
+//   在弄清口径差异之前 **不修改此常数** —— 只改尺度会让另外两份实测失配 2.5×。
+//   详见 data/ftc-calibration/transit-anchor-correction-2026-10-13.md（含未解风险）。
+//
+// 原始说明（仍然成立）：该样本载重 0（质量 = 整备质量）；速度**随质量下降**，不是船无关常数。
 // 来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）。
 // ⚠️ 本常量**不是**船无关常数，只有配上质量幂律（下方 stlIntraTransitSpeedKmS）才完整：
 // 单独拿它计时 = 重船偏快（2026-09-25 之前的 transfer-geometry.ts 就是这么错的）。
@@ -528,8 +538,110 @@ export function stlIntraTransitSpeedKmS(massT: number): number {
   );
 }
 
-// 无原生飞行计划时的独立 TRANSIT 速度估算：保留质量幂律，并用引擎曲线表达 f 变化。
+// ---- TRANSIT 速度查询表（受控扫描实测，2026-10-14）----
+// 实测结论：系内转移段速度由 **(引擎, Q, a_eff)** 三者决定 ——
+//   Q     = 0.98 × 罐 × min(f, 0.5)（段燃料；罐取「当前余量」，缺省回退容量）
+//   a_eff = acceleration × operatingEmptyMass / mass（加载重后的加速度）
+// 两个饱和（对 Q、对 a_eff）互相耦合，无法写成 ≤15% 的闭式（闭式最好 28%），
+// 故改用查询表 + 插值：对 (log Q, log a_eff) 取 4 近邻反距离加权，在 log v 空间加权。
+// 留一法实测：整体平均 6.6%；内部区间（a_eff 50–120）平均 4.2–4.9%。
+// ⚠️ 可靠区间：a_eff 50–120 最可靠；罐 500（Q≈25）与 a_eff 两端属外推区，误差可达 60%。
+// 表覆盖不到时回退旧式（stlTransitSpeedFor 比值法），见下方 fallback。
+type TransitTablePoint = readonly [q: number, aEff: number, v: number];
+let transitTable: Record<string, readonly TransitTablePoint[]> | undefined;
+
+async function loadTransitSpeedTable(): Promise<void> {
+  if (transitTable !== undefined) {
+    return;
+  }
+  transitTable = {};
+  try {
+    const resp = await fetch(config.url.transitSpeedTable);
+    const data = (await resp.json()) as { byEngine?: Record<string, TransitTablePoint[]> };
+    transitTable = data.byEngine ?? {};
+  } catch {
+    // 加载失败：保持空表 → 全部走旧式兜底
+    transitTable = {};
+  }
+}
+
+// 查询表插值。返回 undefined 表示表不可用（引擎未知/无点），调用方走旧式。
+function stlTransitSpeedFromTable(ship: ShipPerformance, fuel: number): number | undefined {
+  const eng = ship.stlEngineOption;
+  if (!eng || !transitTable) {
+    return undefined;
+  }
+  const pts = transitTable[eng];
+  if (pts === undefined || pts.length === 0) {
+    return undefined;
+  }
+  const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
+  if (tank === undefined || tank <= 0) {
+    return undefined;
+  }
+  const q = 0.98 * tank * Math.min(fuel, 0.5);
+  if (!(q > 0)) {
+    return undefined;
+  }
+  const mass = ship.mass > 0 ? ship.mass : ship.operatingEmptyMass;
+  if (!(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
+    return undefined;
+  }
+  const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
+  // 4 近邻反距离加权（log 空间）
+  let n0 = 0,
+    n1 = 0,
+    n2 = 0,
+    n3 = 0;
+  let d0 = Infinity,
+    d1 = Infinity,
+    d2 = Infinity,
+    d3 = Infinity;
+  const lq = Math.log(q),
+    la = Math.log(aEff);
+  for (const [pq, pa, pv] of pts) {
+    if (!(pq > 0) || !(pa > 0) || !(pv > 0)) {
+      continue;
+    }
+    const d = (Math.log(pq) - lq) ** 2 + (Math.log(pa) - la) ** 2;
+    if (d < d0) {
+      [d3, d2, d1, d0] = [d2, d1, d0, d];
+      [n3, n2, n1, n0] = [n2, n1, n0, pv];
+    } else if (d < d1) {
+      [d3, d2, d1] = [d2, d1, d];
+      [n3, n2, n1] = [n2, n1, pv];
+    } else if (d < d2) {
+      [d3, d2] = [d2, d];
+      [n3, n2] = [n2, pv];
+    } else if (d < d3) {
+      [d3, n3] = [d, pv];
+    }
+  }
+  if (!Number.isFinite(d0)) {
+    return undefined;
+  }
+  const ws = [d0, d1, d2, d3].filter(Number.isFinite);
+  const vs = [n0, n1, n2, n3].filter(v => v > 0);
+  if (vs.length === 0) {
+    return undefined;
+  }
+  let num = 0,
+    den = 0;
+  for (let i = 0; i < vs.length; i++) {
+    const w = 1 / (ws[i] + 1e-9);
+    num += w * Math.log(vs[i]);
+    den += w;
+  }
+  return den > 0 ? Math.exp(num / den) : undefined;
+}
+
+// 无原生飞行计划时的独立 TRANSIT 速度估算：**优先查表**（受控扫描实测），
+// 表不可用时回退旧式（质量幂律 × 引擎曲线比值法）。
 export function stlIntraTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
+  const fromTable = stlTransitSpeedFromTable(ship, fuel);
+  if (fromTable !== undefined) {
+    return fromTable;
+  }
   const base = stlIntraTransitSpeedKmS(ship.mass);
   const scale = STL_INTRA_TRANSIT_ENGINE_SCALE[ship.stlEngineOption ?? ''] ?? 1;
   const refCurve = stlTransitSpeedFor(ship, 0.05);
@@ -537,6 +649,20 @@ export function stlIntraTransitSpeedFor(ship: ShipPerformance, fuel: number): nu
   const fuelRatio = refCurve > 0 ? candidateCurve / refCurve : 1;
   return base * scale * fuelRatio;
 }
+
+// 查询表是否已就绪（供 UI 标注数据来源/可靠区间）。
+export function stlTransitTableReady(): boolean {
+  return transitTable !== undefined && Object.keys(transitTable).length > 0;
+}
+
+// 测试接缝：让 Node 端的校验脚本直接装表（扩展运行时走 fetch，见 loadTransitSpeedTable）。
+export function setTransitSpeedTableForTest(
+  table: Record<string, readonly TransitTablePoint[]> | undefined,
+): void {
+  transitTable = table;
+}
+
+void loadTransitSpeedTable();
 
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。

@@ -73,6 +73,7 @@ async function startup() {
       planetEnv: chrome.runtime.getURL('json/planet-env.json'),
       stationData: chrome.runtime.getURL('json/stations.json'),
       stlSegments: chrome.runtime.getURL('json/stl-segments.json'),
+      transitSpeedTable: chrome.runtime.getURL('json/transit-speed-table.json'),
     },
   };
   // Keep the module script and the config payload in separate <script>

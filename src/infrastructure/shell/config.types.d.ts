@@ -11,5 +11,6 @@ interface RefinedPrunConfig {
     planetEnv: string;
     stationData: string;
     stlSegments: string;
+    transitSpeedTable: string;
   };
 }

@@ -8,6 +8,7 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { requestStars, starsStore, starsVersion } from '@src/infrastructure/prun-api/data/stars';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { exportStlSegments } from '@src/infrastructure/prun-api/data/system-bodies';
 import {
@@ -23,6 +24,16 @@ import {
 } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
 import { downloadFile } from '@src/utils/dom';
+import {
+  scanTransitFuelCurve,
+  scanTransitMatrix,
+  listBlueprintIds,
+} from '@src/infrastructure/prun-api/data/transit-f-scan';
+import {
+  resolveEntity,
+  encodeAddress,
+} from '@src/infrastructure/prun-api/data/flight-test-collector';
+import { stlTransitTableReady } from './fuel-model';
 import ProgressBar from '@src/components/ProgressBar.vue';
 import { formatCurrency, fixed2, fixed4 } from '@src/utils/format';
 import {
@@ -220,6 +231,256 @@ function resetCollectProgress() {
   collectTotal.value = 0;
   collectMessage.value = '已清空采集断点，下次从头开始';
 }
+
+/**
+ * 该蓝图实际的 STL 罐容量（performance.stlFuelCapacity）。
+ * 矩阵扫描用它做 stlFuel，保证「扫描传的罐」=「蓝图真实的罐」。
+ * 取不到返回 0（调用方据此判定该行无效）。
+ */
+// 扫描用的蓝图：显式选择。缺省跟随面板选中的飞船（ship.blueprintNaturalId），
+// 因为部件是在**蓝图**上编辑的 —— 上次数据不可比的次要原因就是扫描走了 blueprints[0]，
+// 而我在编辑器里改的是另一份蓝图。
+const scanBlueprintId = ref('');
+
+// 蓝图下拉选项：直接读 blueprintsStore.all（响应式）。
+// 打开一次蓝图界面后即有数据；空列表时面板显示「跟随选中飞船」。
+const blueprintOptions = computed(() =>
+  (blueprintsStore.all.value ?? []).map(b => ({
+    naturalId: b.naturalId,
+    name: b.name ?? '',
+    stlFuelCapacity: b.performance?.stlFuelCapacity ?? 0,
+  })),
+);
+
+function blueprintIdOfSelection(): string {
+  if (scanBlueprintId.value.trim() !== '') {
+    return scanBlueprintId.value.trim();
+  }
+  return ship.value?.blueprintNaturalId ?? '';
+}
+
+function blueprintStlCapacityOf(blueprintNaturalId: string): number {
+  const bp = blueprintsStore.getByNaturalId(blueprintNaturalId);
+  const cap = bp?.performance?.stlFuelCapacity;
+  return typeof cap === 'number' && cap > 0 ? cap : 0;
+}
+// ---- 配件矩阵扫描（2026-10-14）----
+// 单变量隔离每个可配置部件：每套配件对应**一份蓝图**，各自跑完整 f 档位。
+// ⚠️ 调用方需保证每个变体的 stlFuel 等于该蓝图 performance.stlFuelCapacity
+//    （否则测到的是另一个罐的数据 —— 2026-10-13 踩过）。
+const matrixScanning = ref(false);
+const matrixCancelled = ref(false);
+const matrixMessage = ref('');
+// 每行一个变体：蓝图 naturalId + 罐容量（必须与 blueprint.performance.stlFuelCapacity 一致）。
+const matrixRows = ref<{ blueprintId: string; variant: string; stlFuel: number }[]>([]);
+const matrixProbe = ref('VH-331g');
+const matrixTarget = ref('VH-331e');
+const matrixFactors = ref('0.05,0.1,0.2,0.3,0.4,0.5');
+
+// 从当前公司蓝图自动生成变体行：每份蓝图一行，罐容量直接取 performance.stlFuelCapacity，
+// 杜绝「扫描传的罐」与「蓝图实际罐」不一致（上次数据不可比的主因）。
+function autoFillMatrixRows() {
+  const bps = listBlueprintIds();
+  if (bps.length === 0) {
+    matrixMessage.value = '没有蓝图：请先在游戏里打开一次蓝图界面';
+    return;
+  }
+  matrixRows.value = bps.map(b => ({
+    blueprintId: b.naturalId,
+    variant: b.name !== '' ? b.name : b.naturalId,
+    // 罐容量需要 performance；此处用 blueprintsStore 直接读，避免再导一个 store。
+    stlFuel: blueprintStlCapacityOf(b.naturalId),
+  }));
+  matrixMessage.value = '已按公司蓝图生成 ' + matrixRows.value.length + ' 行';
+}
+
+async function startMatrixScan() {
+  matrixScanning.value = true;
+  matrixCancelled.value = false;
+  matrixMessage.value = '';
+  try {
+    const probe = matrixProbe.value.trim();
+    const target = matrixTarget.value.trim();
+    const probeAddr = await resolveEntity(probe);
+    const targetAddr = await resolveEntity(target);
+    if (!probeAddr || !targetAddr) {
+      matrixMessage.value = '无法解析探针或目标天体';
+      return;
+    }
+    const from = encodeAddress(probeAddr);
+    const to = encodeAddress(targetAddr);
+    if (!from || !to) {
+      matrixMessage.value = '地址缺少实体 id';
+      return;
+    }
+    const factors = matrixFactors.value
+      .split(',')
+      .map(x => Number(x.trim()))
+      .filter(x => Number.isFinite(x) && x > 0 && x <= 1);
+    const rows = matrixRows.value.filter(r => r.blueprintId.trim() !== '');
+    if (rows.length === 0) {
+      matrixMessage.value = '没有变体行：点「按蓝图自动填充」';
+      return;
+    }
+    const bad = rows.filter(r => !(r.stlFuel > 0));
+    if (bad.length > 0) {
+      matrixMessage.value = '这些行的罐容量无效：' + bad.map(b => b.variant).join('、');
+      return;
+    }
+    const result = await scanTransitMatrix({
+      probe: from,
+      target: to,
+      entries: rows,
+      fuelFactors: factors,
+      onVariantStart: info => {
+        matrixMessage.value = '变体 ' + info.index + '/' + info.total + '：' + info.variant;
+      },
+      shouldCancel: () => matrixCancelled.value,
+    });
+    downloadFile(result, 'prun-transit-matrix.json', true);
+    const done = result.variants.filter(v => v.samples.length > 0).length;
+    const pts = result.variants.reduce((a, v) => a + v.samples.length, 0);
+    matrixMessage.value =
+      '矩阵扫描完成：' +
+      done +
+      '/' +
+      result.variants.length +
+      ' 个变体有数据，共 ' +
+      pts +
+      ' 个点。已下载 prun-transit-matrix.json';
+  } catch (e) {
+    matrixMessage.value = '矩阵扫描失败：' + String(e);
+  } finally {
+    matrixScanning.value = false;
+  }
+}
+
+function stopMatrixScan() {
+  matrixCancelled.value = true;
+}
+// ---- 系内转移段 f 曲线扫描（2026-10-13）----
+// 目的：补齐 STL_INTRA_TRANSIT_SPEED_KM_S 缺失的地面真值 —— 该常数来自
+// VH-331g → HRT 的 BTF 样本（599,220,390 km / 21,780 s），而**那个样本没记 f**。
+// 全模型的 f 依赖只有这一点 + 一条假设的曲线形状；本扫描固定船/航线/罐只变 f。
+// ⚠️ 会向服务器发多笔计算请求（每档 1 次），仅用户点按钮时触发。
+const fScanning = ref(false);
+const fScanCancelled = ref(false);
+const fScanMessage = ref('');
+// 探针与目标都默认用**行星**：resolveEntity 的原始匹配逻辑对空间站名/naturalId
+// 曾不兼容（2026-10-13 已修），而行星侧一直可靠。同星系内两点才能测纯 TRANSIT 段。
+const fScanProbe = ref('VH-331g');
+const fScanTarget = ref('VH-331e');
+const fScanFactors = ref('0.05,0.1,0.2,0.3,0.4,0.5');
+// 罐覆写（受控实验入口）：留空 = 用选中蓝图的真实罐容量（默认口径，防错配）。
+// 填值 = 固定蓝图（质量/部件都不变）只改请求里的段可用 STL 燃料，
+// 用来分离「罐」与「质量」两个变量 —— 矩阵扫描做不到这点，它强制用各蓝图自己的罐。
+const fScanStlFuelOverride = ref('');
+// 系内转移段速度模型来源提示（走实测查询表「表已装载」还是回退旧式）。
+// 外推区（罐 500 / a_eff 两端）粗估可达 ±60%，内部区间（a_eff 50–120）实测 ~1%。
+// 面板把这句话摆出来，避免用户把外推区粗估当同精度看。
+const stlSpeedSourceNote = computed(() =>
+  stlTransitTableReady()
+    ? '转移段速度：实测查询表（372 点，整体平均 1.2%；内部区间平均 1.0%）。' +
+      '可靠性区间为 a_eff 50–120，罐 500 与 a_eff 两端属外推区（误差可达 ±60%）。' +
+      '有原生飞行计划时优先用原生数据。'
+    : '转移段速度：实测查询表尚未加载（估算值沿用旧式，轻船/大罐区间已知高估约 2.8×）。',
+);
+// 载重覆写：留空或 0 = 空载。填值 = 受控实验：固定蓝图/引擎/罐，只加质量
+// （游戏把载重计入飞船总质量），用来在**不改动账号里任何蓝图**的前提下扫质量。
+const fScanPayloadOverride = ref('');
+
+async function startFScan() {
+  fScanning.value = true;
+  fScanCancelled.value = false;
+  fScanMessage.value = '';
+  try {
+    const probe = fScanProbe.value.trim();
+    const target = fScanTarget.value.trim();
+    const probeAddr = await resolveEntity(probe);
+    const targetAddr = await resolveEntity(target);
+    if (!probeAddr || !targetAddr) {
+      fScanMessage.value = '无法解析探针或目标天体，请检查名称';
+      return;
+    }
+    // 用采集器同一套地址编码（systemId|KIND,id）—— 不在此处复制一份，避免两处漂移
+    const from = encodeAddress(probeAddr);
+    const to = encodeAddress(targetAddr);
+    if (!from || !to) {
+      fScanMessage.value = '地址缺少实体 id，无法请求';
+      return;
+    }
+    const factors = fScanFactors.value
+      .split(',')
+      .map(x => Number(x.trim()))
+      .filter(x => Number.isFinite(x) && x > 0 && x <= 1);
+    if (factors.length === 0) {
+      fScanMessage.value = '没有有效的 f 档位';
+      return;
+    }
+    // 罐容量必须取自**当前选中的蓝图**，而不是面板手填值 —— 2026-10-13 第一次扫描
+    // 就是手填 8000 而蓝图实际只有 1500，得到的绝对速度/燃料与船不对应，整批数据不可比。
+    // 取不到（蓝图未加载）时退回面板值并明确告知，让使用者知道这批数据可能不可比。
+    const bpCap = blueprintStlCapacityOf(blueprintIdOfSelection());
+    const overrideText = fScanStlFuelOverride.value.trim();
+    const override = overrideText === '' ? undefined : Number(overrideText);
+    if (override !== undefined && (!Number.isFinite(override) || override <= 0)) {
+      fScanMessage.value = '罐覆写必须是正数；留空则用选中蓝图的真实罐容量。';
+      return;
+    }
+    const payloadText = fScanPayloadOverride.value.trim();
+    const payloadOverride = payloadText === '' ? 0 : Number(payloadText);
+    if (!Number.isFinite(payloadOverride) || payloadOverride < 0) {
+      fScanMessage.value = '载重覆写必须是非负数；留空视为 0。';
+      return;
+    }
+    if (override === undefined && bpCap <= 0) {
+      fScanMessage.value =
+        '读不到选中蓝图的 STL 罐容量（performance.stlFuelCapacity）——' +
+        '请先在游戏里打开蓝图界面；或用矩阵扫描（它强制从蓝图取罐）。';
+      return;
+    }
+    const bpId = blueprintIdOfSelection();
+    const result = await scanTransitFuelCurve({
+      probe: from,
+      target: to,
+      blueprintId: bpId,
+      fuelFactors: factors,
+      stlFuel: override ?? bpCap,
+      payload: payloadOverride,
+      onProgress: info => {
+        fScanMessage.value = info.error
+          ? `f=${factors[info.index - 1]} 失败：${info.error}`
+          : `已测 ${info.index}/${info.total}：f=${info.sample?.fuelUsageFactor} 时长 ${info.sample?.totalSeconds}s`;
+      },
+      shouldCancel: () => fScanCancelled.value,
+    });
+    downloadFile(result, 'prun-transit-f-scan.json', true);
+    // 口径自检：请求的罐必须等于蓝图真实罐。不等则这批数据测的是"另一艘船"，
+    // 2026-10-13 就是这样作废了一批（传 8000，蓝图实际 1500）。此处显式报警。
+    const snap = result.blueprint;
+    // 覆写时请求罐本就该 ≠ 蓝图罐（那正是受控点），因此只在**未覆写**时把不相等当错误。
+    const mismatch =
+      override !== undefined
+        ? `（受控覆写：请求罐 ${result.stlFuel}，蓝图罐 ${snap.stlFuelCapacity ?? '?'}；整备 ${snap.operatingEmptyMass ?? '?'}t；载重 ${result.payload}t）`
+        : snap.stlFuelCapacity !== undefined && snap.stlFuelCapacity !== result.stlFuel
+          ? `⚠️ 口径错配：请求罐 ${result.stlFuel} ≠ 蓝图罐 ${snap.stlFuelCapacity}，本批不可用！`
+          : '';
+    fScanMessage.value =
+      `扫描完成：${result.samples.length} 档成功、${result.errors.length} 档失败，已下载 prun-transit-f-scan.json` +
+      `（船 ${result.blueprintId}、引擎 ${snap.stlEngine ?? '?'}、整备 ${snap.operatingEmptyMass ?? '?'}t、` +
+      `罐 ${result.stlFuel}）。请把文件发给我标定。` +
+      mismatch;
+  } catch (e) {
+    fScanMessage.value = '扫描失败：' + String(e);
+  } finally {
+    fScanning.value = false;
+  }
+}
+
+function stopFScan() {
+  fScanCancelled.value = true;
+}
+
 // ---- 燃料性价比计算器 ----
 const registration = ref('');
 const routeFrom = ref('');
@@ -615,6 +876,93 @@ const nearbyFastest = computed(() => {
           导出 STL 段数据
         </PrunButton>
       </div>
+      <div :class="$style.hint">{{ stlSpeedSourceNote }}</div>
+      <div v-if="fScanMessage" :class="$style.hint">
+        {{ fScanMessage }}
+      </div>
+      <div :class="$style.fieldRow">
+        <label :class="$style.field">
+          <span>探针（系内转移段扫描的另一端；起点用此、终点用目标）</span>
+          <TextInput v-model="fScanProbe" placeholder="如：HRT" />
+        </label>
+        <label :class="$style.field">
+          <span>目标天体</span>
+          <TextInput v-model="fScanTarget" placeholder="如：VH-331g" />
+        </label>
+        <label :class="$style.field">
+          <span>f 档位（逗号分隔）</span>
+          <TextInput v-model="fScanFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
+        </label>
+        <label :class="$style.field">
+          <span>罐覆写（留空=蓝图真实罐；填值=受控实验：固定蓝图只改罐）</span>
+          <TextInput v-model="fScanStlFuelOverride" placeholder="留空，或如 3500" />
+        </label>
+        <label :class="$style.field">
+          <span>载重覆写（留空=0；填值=受控实验：固定蓝图只加质量）</span>
+          <TextInput v-model="fScanPayloadOverride" placeholder="留空，或如 3000" />
+        </label>
+        <div :class="$style.actions">
+          <PrunButton
+            primary
+            :disabled="fScanning"
+            data-tooltip="受控扫描：固定船/航线/罐，只变燃料滑块 f，逐档向服务器请求一次测试飞行计划并记录原生时长/距离/燃料。用于标定系内转移段的 f 曲线（该曲线此前只在 f=0.05 验证过）。只发计算请求，不提交飞行。"
+            @click="startFScan">
+            {{ fScanning ? '扫描中…' : '扫描 f 曲线' }}
+          </PrunButton>
+          <PrunButton v-if="fScanning" neutral @click="stopFScan">停止</PrunButton>
+        </div>
+      </div>
+      <div :class="$style.fieldRow">
+        <label :class="$style.field">
+          <span>扫描蓝图（部件编辑在这份上；罐容量自动跟随它）</span>
+          <select v-model="scanBlueprintId" :class="$style.select">
+            <option value="">跟随选中飞船</option>
+            <option v-for="b in blueprintOptions" :key="b.naturalId" :value="b.naturalId">
+              {{ b.name !== '' ? b.name : b.naturalId }}（{{ b.naturalId }}）
+            </option>
+          </select>
+        </label>
+      </div>
+      <div v-if="fScanMessage" :class="$style.hint">{{ fScanMessage }}</div>
+      <div :class="$style.fieldRow">
+        <label :class="$style.field">
+          <span>矩阵探针</span>
+          <TextInput v-model="matrixProbe" placeholder="如：VH-331g" />
+        </label>
+        <label :class="$style.field">
+          <span>矩阵目标</span>
+          <TextInput v-model="matrixTarget" placeholder="如：VH-331e" />
+        </label>
+        <label :class="$style.field">
+          <span>f 档位</span>
+          <TextInput v-model="matrixFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
+        </label>
+        <div :class="$style.actions">
+          <PrunButton
+            neutral
+            data-tooltip="按公司现有蓝图生成变体行，罐容量自动取 blueprint.performance.stlFuelCapacity（避免传错罐）。"
+            @click="autoFillMatrixRows">
+            按蓝图自动填充
+          </PrunButton>
+          <PrunButton
+            primary
+            :disabled="matrixScanning"
+            data-tooltip="跨蓝图矩阵扫描：每个变体（=一套配件）各自跑完整 f 档位。请保证各变体只差一个部件，否则得到的是混合效应。"
+            @click="startMatrixScan">
+            {{ matrixScanning ? '矩阵扫描中…' : '矩阵扫描' }}
+          </PrunButton>
+          <PrunButton v-if="matrixScanning" neutral @click="stopMatrixScan">停止</PrunButton>
+        </div>
+      </div>
+      <div v-if="matrixRows.length > 0" :class="$style.hint">
+        变体行：
+        <span v-for="(r, i) in matrixRows" :key="i">
+          {{ r.variant }}（{{ r.blueprintId }}｜罐 {{ r.stlFuel }}）{{
+            i < matrixRows.length - 1 ? '、' : ''
+          }}
+        </span>
+      </div>
+      <div v-if="matrixMessage" :class="$style.hint">{{ matrixMessage }}</div>
       <div v-if="starsMessage" :class="$style.hint">{{ starsMessage }}</div>
       <div v-if="orbitMessage" :class="$style.hint">{{ orbitMessage }}</div>
       <div :class="$style.fieldRow">
