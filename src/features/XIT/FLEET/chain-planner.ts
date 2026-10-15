@@ -86,10 +86,19 @@ export interface ChainStopPlan {
   loadOnDeparture: { weight: number; volume: number };
 }
 
+export interface ChainFilteredStop {
+  naturalId: string;
+  planetName: string;
+  // 过滤原因（该站没有任何卸货或提取操作）。
+  reason: string;
+}
+
 export interface ChainPlan {
   // 出发地站点 naturalId（如 AI1），用于归航触发器匹配。
   originNaturalId: string;
   stops: ChainStopPlan[];
+  // 被过滤的无操作站点；保留给规划界面解释为何未出现在航线中。
+  filteredStops?: ChainFilteredStop[];
   // 归航时在出发地卸下的最终产物。
   finalUnload: Record<string, number>;
   // 出发地装船总账单（所有站账单合并，含未开启「购买」的基地）。
@@ -353,8 +362,9 @@ function clampTargetDays(base: ChainPlannerBase) {
  * 2. 拓扑排序定航线（上游先到，循环依赖断链并警告）；
  * 3. 按目标天数平衡各链上物资运量（多上游按库存比例分摊）；
  * 4. 沿航线模拟舱容，超载按比例缩减提取量。
- * 所有选中基地均为环线站点（含 CX 采购与卸货），无链关系的基地
- * 按字母序混入航线，其产物视为最终产物运回出发地。
+ * 有实际卸货或提取操作的选中基地为环线站点；本轮无操作的基地会从 stops
+ * 过滤，并通过 ChainPlan.filteredStops 保留 naturalId、星球名与过滤原因。
+ * 无链关系但有补给或提取操作的基地仍按字母序混入航线，其产物视为最终产物运回出发地。
  * 数据未加载时返回 undefined。
  */
 export function planChainRoute(input: {
@@ -1185,12 +1195,36 @@ export function planChainRoute(input: {
     }
   }
 
-  // 跳过完全无操作的基地：链上输送已全部由上游供给、自身又无可装卸产物时，
-  // 到访只会增加航程，从航线中移除。flight 由前后站 OPEN SFC 直连自动衔接。
-  plan.stops = stops.filter(
-    stop =>
-      Object.keys(stop.unloadCx).length > 0 || stop.unloadChain.size > 0 || stop.load.size > 0,
-  );
+  // 过滤本轮没有任何实际操作的基地，避免航线出现空停靠点；保留原因供规划界面说明。
+  // 「操作」只统计三类本站动作：CX 卸货、链上卸货、提取货物。
+  const filteredStops: ChainFilteredStop[] = [];
+  plan.stops = stops.filter(stop => {
+    const hasCxUnload = Object.keys(stop.unloadCx).length > 0;
+    const hasChainUnload = stop.unloadChain.size > 0;
+    const hasLoad = stop.load.size > 0;
+    if (hasCxUnload || hasChainUnload || hasLoad) {
+      return true;
+    }
+    const operations: string[] = [];
+    if (!hasCxUnload) {
+      operations.push('无 CX 卸货');
+    }
+    if (!hasChainUnload) {
+      operations.push('无链上卸货');
+    }
+    if (!hasLoad) {
+      operations.push('无提取货物');
+    }
+    filteredStops.push({
+      naturalId: stop.naturalId,
+      planetName: stop.planetName,
+      reason: `${operations.join('、')}（本站无操作）`,
+    });
+    return false;
+  });
+  if (filteredStops.length > 0) {
+    plan.filteredStops = filteredStops;
+  }
   return plan;
 }
 
