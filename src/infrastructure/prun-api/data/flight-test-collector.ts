@@ -163,8 +163,10 @@ export async function resolveEntity(naturalId: string): Promise<PrunApi.Address 
     const planet = a.lines.find(l => l.type === 'PLANET')?.entity;
     const stationLine = a.lines.find(l => l.type === 'STATION')?.entity;
     return (
-      (planet !== undefined && planet.naturalId.toUpperCase() === up) ||
-      (stationLine !== undefined && stationLine.name.toUpperCase() === up)
+      (planet !== undefined &&
+        (planet.naturalId.toUpperCase() === up || planet.name.toUpperCase() === up)) ||
+      (stationLine !== undefined &&
+        (stationLine.naturalId.toUpperCase() === up || stationLine.name.toUpperCase() === up))
     );
   });
 }

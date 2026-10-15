@@ -21,6 +21,8 @@ import {
   nearbyFuelOptions,
   missingModelInputs,
   conditionFactor,
+  ensureTransitSpeedTable,
+  stlTransitTableReliableFor,
 } from './fuel-model';
 import type { FuelOption, ShipPerformance, ShipComponentModel } from './fuel-model';
 import { ftcRouteKey, setFtcFuelSlider, setFtcReactorUsage } from './ftc-fuel-settings';
@@ -482,6 +484,13 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // （同星系 stlFuel ≡ 0 → 燃料无梯度），此时绝不能把结果写进滑块 —— 宁可不动，
   // 也不要用残缺输入得出的假值覆盖掉面板已经算好的参数。
   const inputIncomplete = missingModelInputs(perf, metrics);
+  await ensureTransitSpeedTable();
+  if (metrics.transitKm !== undefined && metrics.transitKm > 0) {
+    const grid = autoFuelGrid();
+    if (grid.some(f => !stlTransitTableReliableFor(perf, f))) {
+      inputIncomplete.push('转移速度查询表超出可靠范围');
+    }
+  }
   const [landingEnv, departEnv] = await Promise.all([
     isCrossSystem && metrics.toBody !== undefined ? fetchPlanetEnv(metrics.toBody) : undefined,
     isCrossSystem && metrics.fromBody !== undefined ? fetchPlanetEnv(metrics.fromBody) : undefined,

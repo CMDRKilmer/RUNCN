@@ -458,7 +458,7 @@ export function conditionFactor(condition: number): number {
 const STL_TANK_FUEL_COEF = 0.49; // 每段（离港/进近/转移单程）= 0.49×罐×f
 
 // ---- 系内「转移」（TRANSIT）段标定（2026-09-23）----
-// 数据：data/ftc-calibration/btf-load-sweep-2026-08-29.md（BP-OHMI-3472：标准/节油引擎、
+// 数据：btf-load-sweep-2026-08-29 扫描（BP-OHMI-3472：标准/节油引擎、
 // STL 罐满 1500、FTL 2000、状况 100%）：§1 载重扫描 7 点 + §2/§3 f 扫描 12 点 + §8 节油 6 点。
 //
 // 【燃料】F = 2 × 0.49 × 罐 × min(f, 0.5) —— 28 点最大误差 3.3%（§2 逐点 ≤0.7%）：
@@ -507,10 +507,10 @@ const STL_TRANSIT_MASS_EXP = 0.75; // 转移段时长质量指数（§1 载重�
 //   ⇒ 两份独立样本支持 27512，受控扫描不支持。**两份数据必定不同口径**，而扫描那份
 //     （520M km 的「转移」段）很可能混入了离港/进近拆分或不同的段边界。
 //   在弄清口径差异之前 **不修改此常数** —— 只改尺度会让另外两份实测失配 2.5×。
-//   详见 data/ftc-calibration/transit-anchor-correction-2026-10-13.md（含未解风险）。
+//   详见 transit-anchor-correction-2026-10-13 记录（含未解风险）。
 //
 // 原始说明（仍然成立）：该样本载重 0（质量 = 整备质量）；速度**随质量下降**，不是船无关常数。
-// 来源：data/ftc-calibration/btf-scan-2026-09-24.json 组 4（VH-331g → HRT，同星系纯 TRANSIT）。
+// 来源：btf-scan-2026-09-24 落盘数据 组 4（VH-331g → HRT，同星系纯 TRANSIT）。
 // ⚠️ 本常量**不是**船无关常数，只有配上质量幂律（下方 stlIntraTransitSpeedKmS）才完整：
 // 单独拿它计时 = 重船偏快（2026-09-25 之前的 transfer-geometry.ts 就是这么错的）。
 export const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
@@ -549,6 +549,15 @@ export function stlIntraTransitSpeedKmS(massT: number): number {
 // 表覆盖不到时回退旧式（stlTransitSpeedFor 比值法），见下方 fallback。
 type TransitTablePoint = readonly [q: number, aEff: number, v: number];
 let transitTable: Record<string, readonly TransitTablePoint[]> | undefined;
+let transitTableLoading: Promise<void> | undefined;
+
+export function ensureTransitSpeedTable(): Promise<void> {
+  if (transitTableLoading !== undefined) {
+    return transitTableLoading;
+  }
+  transitTableLoading = loadTransitSpeedTable();
+  return transitTableLoading;
+}
 
 async function loadTransitSpeedTable(): Promise<void> {
   if (transitTable !== undefined) {
@@ -583,11 +592,20 @@ function stlTransitSpeedFromTable(ship: ShipPerformance, fuel: number): number |
   if (!(q > 0)) {
     return undefined;
   }
+  const validPoints = pts.filter(([pq, pa, pv]) => pq > 0 && pa > 0 && pv > 0);
+  const qMin = Math.min(...validPoints.map(x => x[0]));
+  const qMax = Math.max(...validPoints.map(x => x[0]));
   const mass = ship.mass > 0 ? ship.mass : ship.operatingEmptyMass;
   if (!(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
     return undefined;
   }
   const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
+  const aMin = Math.min(...validPoints.map(x => x[1]));
+  const aMax = Math.max(...validPoints.map(x => x[1]));
+  // 不对训练域外数据做静默外推；调用方可据此禁用自动写入。
+  if (q < qMin || q > qMax || aEff < aMin || aEff > aMax) {
+    return undefined;
+  }
   // 4 近邻反距离加权（log 空间）
   let n0 = 0,
     n1 = 0,
@@ -655,6 +673,28 @@ export function stlTransitTableReady(): boolean {
   return transitTable !== undefined && Object.keys(transitTable).length > 0;
 }
 
+export function stlTransitTableReliableFor(ship: ShipPerformance, fuel: number): boolean {
+  const eng = ship.stlEngineOption;
+  const pts = eng !== undefined ? transitTable?.[eng] : undefined;
+  if (pts === undefined || pts.length === 0) {
+    return true;
+  }
+  const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
+  const mass = ship.mass > 0 ? ship.mass : ship.operatingEmptyMass;
+  if (!(tank > 0) || !(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
+    return false;
+  }
+  const valid = pts.filter(([q, a, v]) => q > 0 && a > 0 && v > 0);
+  const q = 0.98 * tank * Math.min(fuel, 0.5);
+  const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
+  return (
+    q >= Math.min(...valid.map(x => x[0])) &&
+    q <= Math.max(...valid.map(x => x[0])) &&
+    aEff >= Math.min(...valid.map(x => x[1])) &&
+    aEff <= Math.max(...valid.map(x => x[1]))
+  );
+}
+
 // 测试接缝：让 Node 端的校验脚本直接装表（扩展运行时走 fetch，见 loadTransitSpeedTable）。
 export function setTransitSpeedTableForTest(
   table: Record<string, readonly TransitTablePoint[]> | undefined,
@@ -662,7 +702,7 @@ export function setTransitSpeedTableForTest(
   transitTable = table;
 }
 
-void loadTransitSpeedTable();
+void ensureTransitSpeedTable();
 
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
   // 标准引擎（§1~§4 最全）：载重 0 / 整备 1199t / f≥0.5 的实测平均速度（km/s）。
@@ -830,9 +870,11 @@ export function computeFuelOption(
     let transitSpeed = stlIntraTransitSpeedFor(ship, fuel);
     if (nativeSpeed !== undefined) {
       const curveAtNative =
-        nativeFuelSlider !== undefined ? stlTransitSpeedFor(ship, nativeFuelSlider) : undefined;
+        nativeFuelSlider !== undefined
+          ? stlIntraTransitSpeedFor(ship, nativeFuelSlider)
+          : undefined;
       const curveAtCandidate =
-        nativeFuelSlider !== undefined ? stlTransitSpeedFor(ship, fuel) : undefined;
+        nativeFuelSlider !== undefined ? stlIntraTransitSpeedFor(ship, fuel) : undefined;
       const curveRatio =
         curveAtNative !== undefined && curveAtNative > 0 && curveAtCandidate !== undefined
           ? curveAtCandidate / curveAtNative
@@ -1191,7 +1233,7 @@ export function scanFuelOptions(
 //      上方）→ 拿到记录即可算、可写滑块。还没有记录时 → 生成一次计划即可。
 //      ⚠️ **该段距离不是航线常数**（2026-09-23 第四轮复核）：同一航线不同计划的原生
 //      stlDistance 会不同（`recordStlSegments` 每份计划都覆盖该键）。证据：BTF 同航线同船
-//      同 f 的点间漂移（`data/ftc-calibration/btf-load-sweep-2026-08-29.md` 开头写明
+//      同 f 的点间漂移（`btf-load-sweep-2026-08-29 扫描` 开头写明
 //      「转移/离港/进近距离随轨道运动缓慢漂移」；HRT→VH-331g 报 520,267,630 → 522,220,425）；
 //      且该值**大于两体轨道半径之和**（46.81M + 440.95M = 487.8M km）⇒ 是转移路径的弧长、
 //      不是两点直线距离，故随计划时刻（相位）变化。文案因此**只打印本次读到的值**，禁止与

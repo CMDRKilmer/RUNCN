@@ -190,7 +190,7 @@ const NO_PRICES = { stlPrice: 0, ftlPrice: 0, timeValue: 0 };
 // XX-201 / YY-301 是跨星系用例的两个恒星系；VH-331 是 HRT/VH-331g 的所属星系（⑧⑨⑩）。
 const SYS = 'ZZ-101';
 // BTF 标定（HRT → VH-331g 同星系转移段：半径 / 角度 / arcKm，逐位匹配服务器实测）。
-// 数据见 data/ftc-calibration/btf-scan-2026-09-24.json tag=4：TRANSIT 段 6h 3m / 599.22M km /
+// 数据见 btf-scan-2026-09-24 落盘数据 tag=4：TRANSIT 段 6h 3m / 599.22M km /
 // 178u —— 与参考速度 27,512 km/s 算 599.22M / 27512 / 3600 = 6.05h 吻合（**该样本质量
 // 1,271t**；本夹具 2,140t 的期望值要乘质量乘数 1.5013751）。
 const HRT_RADIUS_KM = 46_810_000;

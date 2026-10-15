@@ -34,7 +34,10 @@ export function encodeTestAddress(systemId: string, kind: 'PLA' | 'STA', bodyId:
 export interface TransitSample {
   fuelUsageFactor: number;
   // 原生段（全部 STL 段之和，含 TRANSIT）
+  // 全部计划耗时（含 FTL/充能）；用于展示原生计划总时长。
   totalSeconds: number;
+  // 仅 STL 段耗时；用于 STL 平均速度，避免混入 FTL/充能时间。
+  stlSeconds: number;
   totalStlKm: number;
   stlFuel: number;
   // 「转移」（TRANSIT）段单独统计（系内航线的真实结构）
@@ -52,6 +55,7 @@ export function summarizeStl(plan: PrunApi.FlightPlan, fuelUsageFactor: number):
   const secs = (a?: PrunApi.DateTime, b?: PrunApi.DateTime) =>
     Math.max(0, ((a?.timestamp ?? 0) - (b?.timestamp ?? 0)) / 1000);
   let totalSeconds = 0;
+  let stlSeconds = 0;
   let totalStlKm = 0;
   let stlFuel = 0;
   let transitSeconds = 0;
@@ -61,6 +65,7 @@ export function summarizeStl(plan: PrunApi.FlightPlan, fuelUsageFactor: number):
     const s = secs(seg.arrival, seg.departure);
     totalSeconds += s;
     if (seg.stlDistance !== null && seg.stlDistance > 0) {
+      stlSeconds += s;
       totalStlKm += seg.stlDistance;
     }
     if (seg.stlFuelConsumption !== null && seg.stlFuelConsumption > 0) {
@@ -79,12 +84,13 @@ export function summarizeStl(plan: PrunApi.FlightPlan, fuelUsageFactor: number):
   return {
     fuelUsageFactor,
     totalSeconds,
+    stlSeconds,
     totalStlKm,
     stlFuel,
     transitSeconds,
     transitKm,
     transitFuel,
-    totalAvgKmS: totalSeconds > 0 ? totalStlKm / totalSeconds : 0,
+    totalAvgKmS: stlSeconds > 0 ? totalStlKm / stlSeconds : 0,
     transitAvgKmS: transitSeconds > 0 ? transitKm / transitSeconds : 0,
     segmentTypes: plan.segments.map(x => x.type),
   };

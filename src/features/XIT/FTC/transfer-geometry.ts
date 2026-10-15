@@ -89,7 +89,7 @@ export interface TransferGeometryResult {
 //   recordFromFlightPlan 扩字段后，本函数可一键切换到精确版本：
 //   speedKmS / hours / source 字段不变（仍 'predicted'），只改 distanceKm 的计算路径。
 //
-// 📌 **偏差量级（用户实测 BTF 数据，data/ftc-calibration/btf-scan-2026-09-24.json）**：
+// 📌 **偏差量级（用户实测 BTF 数据，btf-scan-2026-09-24 落盘数据）**：
 //   - 同航线同船同 f 的点间距离漂移 ≤ 0.4%（HRT→VH-331g 报 520,267,630 → 522,220,425 km）；
 //   - 时长口径与 computeFuelOption 同源（同一个 stlIntraTransitSpeedKmS）：
 //     BTF 样本质量 1,271t → 27,512 km/s，用户重船样本 2,727t → 15,168 km/s（实测 15,186，+0.12%）；

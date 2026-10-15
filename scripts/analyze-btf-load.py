@@ -1,5 +1,5 @@
 """BTF 数据拟合分析：着陆/起飞燃料载重项 + STL 段速度-载重关系。
-数据来源 data/ftc-calibration/btf-load-sweep-2026-08-29.md
+数据来源 btf-load-sweep-2026-08-29 扫描（原始数据已于 26.10.15 清理出仓库）
 """
 import math
 
