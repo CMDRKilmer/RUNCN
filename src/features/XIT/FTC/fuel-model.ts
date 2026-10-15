@@ -681,7 +681,13 @@ export function stlTransitTableReliableFor(ship: ShipPerformance, fuel: number):
   }
   const tank = ship.stlRemaining ?? ship.stlFuelCapacity;
   const mass = ship.mass > 0 ? ship.mass : ship.operatingEmptyMass;
-  if (!(tank > 0) || !(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
+  if (
+    tank === undefined ||
+    !(tank > 0) ||
+    !(mass > 0) ||
+    !(ship.operatingEmptyMass > 0) ||
+    !(ship.acceleration > 0)
+  ) {
     return false;
   }
   const valid = pts.filter(([q, a, v]) => q > 0 && a > 0 && v > 0);
