@@ -89,11 +89,22 @@ function queryAddresses(query: string, timeoutMs = 12000): Promise<PrunApi.Addre
 }
 
 // 请求一次测试飞行计划（BTF 等价），返回响应或超时 undefined。
-function calculateTestFlight(
+// `overrides` 用于受控实验：按请求覆盖 payload 里的飞行参数（燃料系数、罐容量、
+// 载重、状况、反应堆用量）。缺省字段保留原有默认值，因此不带 overrides 的调用
+// 行为与之前完全一致。
+export function calculateTestFlight(
   origin: string,
   destination: string,
   blueprintId: string,
   timeoutMs = 15000,
+  overrides?: {
+    fuelUsageFactor?: number;
+    stlFuel?: number;
+    payload?: number;
+    condition?: number;
+    reactorUsageFactor?: number;
+    landing?: boolean;
+  },
 ): Promise<PrunApi.FlightPlan | undefined> {
   const missionId = crypto.randomUUID();
   return new Promise(resolve => {
@@ -121,13 +132,14 @@ function calculateTestFlight(
         stlFuel: 1500,
         ftlFuel: 300,
         preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+        ...overrides,
       },
     });
   });
 }
 
 // 把地址编码为飞行计划请求的 origin/destination："{systemId}|PLA|STA,{bodyId}"。
-function encodeAddress(address: PrunApi.Address): string | undefined {
+export function encodeAddress(address: PrunApi.Address): string | undefined {
   const system = address.lines.find(l => l.type === 'SYSTEM')?.entity;
   const body = address.lines.find(l => l.type === 'PLANET' || l.type === 'STATION')?.entity;
   if (!system?.id || !body?.id) {
@@ -139,7 +151,7 @@ function encodeAddress(address: PrunApi.Address): string | undefined {
 
 // 解析探针天体（行星或空间站）的地址。空间站名与 naturalId 不一致
 // （搜索框建议显示 "Hortus Station (Hortus)"），先从 stationsStore 转名称再查询。
-async function resolveEntity(naturalId: string): Promise<PrunApi.Address | undefined> {
+export async function resolveEntity(naturalId: string): Promise<PrunApi.Address | undefined> {
   const station = stationsStore.getByNaturalId(naturalId);
   const query = station?.name ?? naturalId;
   const addresses = await queryAddresses(query);
