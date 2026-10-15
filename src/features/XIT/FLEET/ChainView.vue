@@ -517,6 +517,9 @@ const loading = computed(
 );
 const hasStops = computed(() => (plan.value?.stops.length ?? 0) > 0);
 
+// 过滤提示必须读取主规划：过滤站点不会进入按船拆分后的子规划。
+const filteredStopNotices = computed(() => plan.value?.filteredStops ?? []);
+
 // 主多船分配结果（用于展示与执行）。
 // 传到达时刻产出映射，使分段子计划的取货量也按到港时预计库存计算。
 const shipPlans = computed(() => {
@@ -2352,7 +2355,9 @@ function flightTotalText(shipId: string): string {
     <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
     <!-- 规划中 / 运行中 分页：有运行中环线时仍可规划其他环线，两页独立查看。 -->
-    <div v-if="activeRuns.length > 0 || shipPlans.length > 0" :class="$style.content">
+    <div
+      v-if="activeRuns.length > 0 || shipPlans.length > 0 || filteredStopNotices.length > 0"
+      :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
           <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
@@ -2379,6 +2384,13 @@ function flightTotalText(shipId: string): string {
         v-if="chainTab === 'plan' && allocBanner"
         :class="allocBanner.kind === 'ok' ? $style.allocOk : $style.notice">
         {{ allocBanner.text }}
+      </div>
+      <div v-if="chainTab === 'plan' && filteredStopNotices.length > 0" :class="$style.notice">
+        <div v-for="stop in filteredStopNotices" :key="stop.naturalId">
+          已过滤基地 {{ stop.naturalId }}<BaseAlias :natural-id="stop.naturalId" />：{{
+            stop.reason
+          }}
+        </div>
       </div>
       <div
         v-if="chainTab === 'plan' && timeAlloc?.notes && timeAlloc.notes.length > 0"
