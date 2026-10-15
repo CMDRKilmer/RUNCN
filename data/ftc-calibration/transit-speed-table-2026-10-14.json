@@ -1,0 +1,1673 @@
+{
+ "_doc": "系内转移段速度查询表：(引擎, Q, a_eff) -> v (km/s)。Q=0.98*罐*min(f,0.5)；a_eff=acc*空重/(空重+载重)。插值建议：对 (log Q, log a_eff) 做 4 近邻反距离加权、在 log v 空间加权。",
+ "points": [
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 24.5,
+   "v": 7840.418
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 34.3,
+   "v": 10653.92
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 49,
+   "v": 15012.872
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 73.5,
+   "v": 22108.186
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 98,
+   "v": 29090.248
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 147,
+   "v": 42584.16
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 196,
+   "v": 55254.706
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 245,
+   "v": 66914.489
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 102.9,
+   "v": 32081.821
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 220.5,
+   "v": 64223.806
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 294,
+   "v": 80796.414
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 441,
+   "v": 104707.27
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 588,
+   "v": 117386.617
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 735,
+   "v": 121978.865
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 171.5,
+   "v": 52311.046
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 240.1,
+   "v": 69768.657
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 343,
+   "v": 90903.753
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 514.5,
+   "v": 112982.355
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 686,
+   "v": 121415.557
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 1029,
+   "v": 122214.901
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 1372,
+   "v": 122214.177
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 1715,
+   "v": 122212.155
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 392,
+   "v": 96577.499
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 548.8,
+   "v": 113084.533
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 784,
+   "v": 120044.826
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 1176,
+   "v": 120046.923
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 1568,
+   "v": 120048.286
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 2352,
+   "v": 120046.757
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 3136,
+   "v": 120045.7
+  },
+  {
+   "eng": "STL_ENGINE_FUEL_SAVING",
+   "aEff": 121.0947,
+   "Q": 3920,
+   "v": 120046.326
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 24.5,
+   "v": 3923.041
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 34.3,
+   "v": 5177.519
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 49,
+   "v": 7214.303
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 73.5,
+   "v": 10497.783
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 98,
+   "v": 13769.986
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 147,
+   "v": 20266.929
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 196,
+   "v": 26676.492
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 245,
+   "v": 33123.147
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 102.9,
+   "v": 16098.389
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 220.5,
+   "v": 33418.842
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 294,
+   "v": 43721.732
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 441,
+   "v": 62731.821
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 588,
+   "v": 79237.138
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 735,
+   "v": 92720.798
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 171.5,
+   "v": 26979.402
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 240.1,
+   "v": 37243.446
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 343,
+   "v": 51769.276
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 514.5,
+   "v": 73115.524
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 686,
+   "v": 90382.595
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 1029,
+   "v": 112537.938
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 1372,
+   "v": 121263.536
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 1715,
+   "v": 122231.437
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 392,
+   "v": 58916.681
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 548.8,
+   "v": 77644.242
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 784,
+   "v": 99092.807
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 1176,
+   "v": 117987.121
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 1568,
+   "v": 122234.69
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 2352,
+   "v": 122231.363
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 3136,
+   "v": 122234.604
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 150.9844,
+   "Q": 3920,
+   "v": 122234.673
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 24.5,
+   "v": 5826.242
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 34.3,
+   "v": 8208.456
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 49,
+   "v": 11382.503
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 73.5,
+   "v": 16928.323
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 98,
+   "v": 22459.09
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 147,
+   "v": 33453.933
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 196,
+   "v": 44325.886
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 245,
+   "v": 54534.208
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 102.9,
+   "v": 26659.058
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 220.5,
+   "v": 55799.107
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 294,
+   "v": 73420.122
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 441,
+   "v": 106371.65
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 588,
+   "v": 135468.934
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 735,
+   "v": 160163.424
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 171.5,
+   "v": 45098.61
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 240.1,
+   "v": 62574.8
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 343,
+   "v": 87526.346
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 514.5,
+   "v": 124683.179
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 686,
+   "v": 155975.42
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 1029,
+   "v": 198843.875
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 1372,
+   "v": 219397.22
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 1715,
+   "v": 224377.886
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 392,
+   "v": 99698.423
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 548.8,
+   "v": 132973.495
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 784,
+   "v": 172326.885
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 1176,
+   "v": 211012.378
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 1568,
+   "v": 223848.846
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 2352,
+   "v": 224381.886
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 3136,
+   "v": 224378.041
+  },
+  {
+   "eng": "STL_ENGINE_HYPERTHRUST",
+   "aEff": 413.717,
+   "Q": 3920,
+   "v": 224379.718
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 171.5,
+   "v": 27130.523
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 240.1,
+   "v": 37244.641
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 343,
+   "v": 51769.285
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 514.5,
+   "v": 73118.553
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 686,
+   "v": 90378.875
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1029,
+   "v": 112486.203
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1372,
+   "v": 121244.135
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1715,
+   "v": 122229.457
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 171.5,
+   "v": 25576.761
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 240.1,
+   "v": 35328.403
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 343,
+   "v": 49037.884
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 514.5,
+   "v": 69527.929
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 686,
+   "v": 86370.19
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 1029,
+   "v": 108314.208
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 1372,
+   "v": 117590.739
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 85.8399,
+   "Q": 1715,
+   "v": 118964.661
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 171.5,
+   "v": 23836.82
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 240.1,
+   "v": 32949.918
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 343,
+   "v": 45805.672
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 514.5,
+   "v": 65167.643
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 686,
+   "v": 81224.153
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 1029,
+   "v": 102901.676
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 1372,
+   "v": 112774.051
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 79.0939,
+   "Q": 1715,
+   "v": 114823.339
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 171.5,
+   "v": 20990.679
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 240.1,
+   "v": 28936.661
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 343,
+   "v": 40487.354
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 514.5,
+   "v": 57835
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 686,
+   "v": 72648.673
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 1029,
+   "v": 93563.373
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 1372,
+   "v": 104267.456
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 68.3845,
+   "Q": 1715,
+   "v": 107666.723
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 171.5,
+   "v": 10804.533
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 240.1,
+   "v": 14851.541
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 343,
+   "v": 20886.917
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 514.5,
+   "v": 30366.592
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 686,
+   "v": 39196.655
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 1029,
+   "v": 53850.174
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 1372,
+   "v": 64561.68
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 32.655,
+   "Q": 1715,
+   "v": 71429.972
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 171.5,
+   "v": 7369.169
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 240.1,
+   "v": 10097.118
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 343,
+   "v": 14113.317
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 514.5,
+   "v": 20612.206
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 686,
+   "v": 26799.883
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 1029,
+   "v": 37745.721
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 1372,
+   "v": 46612.088
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 21.4485,
+   "Q": 1715,
+   "v": 53247.635
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 171.5,
+   "v": 5042.22
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 240.1,
+   "v": 6847.543
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 343,
+   "v": 9530.563
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 514.5,
+   "v": 13935.912
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 686,
+   "v": 18158.614
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 1029,
+   "v": 25976.668
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 1372,
+   "v": 32786.604
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 14.1597,
+   "Q": 1715,
+   "v": 38468.383
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 171.5,
+   "v": 16199.386
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 240.1,
+   "v": 22430.458
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 343,
+   "v": 31269.339
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 514.5,
+   "v": 45192.176
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 686,
+   "v": 57321.247
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 1029,
+   "v": 76118.577
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 1372,
+   "v": 87477.671
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 50.8916,
+   "Q": 1715,
+   "v": 92965.92
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 171.5,
+   "v": 9413.4
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 240.1,
+   "v": 12926.887
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 343,
+   "v": 18129.519
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 514.5,
+   "v": 26437.114
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 686,
+   "v": 34216.122
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 1029,
+   "v": 47547.019
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 1372,
+   "v": 57588.259
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 28.0508,
+   "Q": 1715,
+   "v": 64580.919
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 171.5,
+   "v": 6678.383
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 240.1,
+   "v": 9153.341
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 343,
+   "v": 12801.583
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 514.5,
+   "v": 18723.143
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 686,
+   "v": 24325.201
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 1029,
+   "v": 34497.817
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 1372,
+   "v": 42856.624
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.3612,
+   "Q": 1715,
+   "v": 49277.071
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 171.5,
+   "v": 17392.248
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 240.1,
+   "v": 23974.932
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 343,
+   "v": 33520.937
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 514.5,
+   "v": 48245.552
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 686,
+   "v": 61113.999
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1029,
+   "v": 80549.135
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1372,
+   "v": 91864.61
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1715,
+   "v": 96899.554
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 171.5,
+   "v": 9799.692
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 240.1,
+   "v": 13455.127
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 343,
+   "v": 18864.089
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 514.5,
+   "v": 27486.917
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 686,
+   "v": 35492.139
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1029,
+   "v": 49217.162
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1372,
+   "v": 59491.453
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1715,
+   "v": 66477.167
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 171.5,
+   "v": 6868.268
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 240.1,
+   "v": 9412.877
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 343,
+   "v": 13199.682
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 514.5,
+   "v": 19243.619
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 686,
+   "v": 25021.931
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1029,
+   "v": 35390.039
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1372,
+   "v": 43869.03
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1715,
+   "v": 50422.559
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 24.5,
+   "v": 3923.037
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 49,
+   "v": 7214.298
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 98,
+   "v": 13614.561
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 245,
+   "v": 32975.332
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 196,
+   "v": 29090.99
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 490,
+   "v": 67044.378
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 73.5,
+   "v": 11745.882
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 147,
+   "v": 22720.868
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 294,
+   "v": 43724.718
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 735,
+   "v": 92748.033
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 122.5,
+   "v": 19497.766
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 857.5,
+   "v": 102935.818
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1225,
+   "v": 118642.073
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1200.5,
+   "v": 118315.486
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 980,
+   "v": 110666.026
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 2450,
+   "v": 122362.122
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 392,
+   "v": 53353.767
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 784,
+   "v": 91196.268
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 1568,
+   "v": 116170.583
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 2744,
+   "v": 116225.431
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 98.3555,
+   "Q": 3920,
+   "v": 116225.436
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 24.5,
+   "v": 2698.253
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 49,
+   "v": 4855.132
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 98,
+   "v": 9265.258
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 245,
+   "v": 22186.946
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 196,
+   "v": 19532.902
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 490,
+   "v": 46126.74
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 73.5,
+   "v": 7880.277
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 147,
+   "v": 15171.933
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 294,
+   "v": 29340.454
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 735,
+   "v": 65554.436
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 122.5,
+   "v": 12777.147
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 857.5,
+   "v": 72789.25
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1225,
+   "v": 89042.783
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1200.5,
+   "v": 87135.266
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 980,
+   "v": 76476.693
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 2450,
+   "v": 96096.465
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 392,
+   "v": 34848.054
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 784,
+   "v": 62537.15
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 1568,
+   "v": 89870.574
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 2744,
+   "v": 92923.965
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 55.0443,
+   "Q": 3920,
+   "v": 92924.56
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 24.5,
+   "v": 1563.789
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 49,
+   "v": 2663.702
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 98,
+   "v": 4745.329
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 245,
+   "v": 11062.303
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 196,
+   "v": 10419.97
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 490,
+   "v": 24710.444
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 73.5,
+   "v": 4395.413
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 147,
+   "v": 8259.455
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 294,
+   "v": 15926.646
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 735,
+   "v": 36867.478
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 122.5,
+   "v": 7141.601
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 857.5,
+   "v": 42781.955
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1225,
+   "v": 55609.381
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1200.5,
+   "v": 54811.414
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 980,
+   "v": 47090.377
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 2450,
+   "v": 71983.906
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 392,
+   "v": 20687.319
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 784,
+   "v": 38437.974
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 1568,
+   "v": 61829.049
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 2744,
+   "v": 70853.438
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 29.2678,
+   "Q": 3920,
+   "v": 70854.942
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 24.5,
+   "v": 1108.201
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 49,
+   "v": 1820.369
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 98,
+   "v": 3125.037
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 245,
+   "v": 7180.939
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 196,
+   "v": 7069.115
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 490,
+   "v": 16742.767
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 73.5,
+   "v": 3095.644
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 147,
+   "v": 5752.082
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 294,
+   "v": 10933.063
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 735,
+   "v": 25642.284
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 122.5,
+   "v": 5041.702
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 857.5,
+   "v": 30248.197
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1225,
+   "v": 40267.238
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1200.5,
+   "v": 39839.806
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 980,
+   "v": 33989.214
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 2450,
+   "v": 58221.91
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 392,
+   "v": 14702.525
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 784,
+   "v": 27735.479
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 1568,
+   "v": 47060.541
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 2744,
+   "v": 58792.324
+  },
+  {
+   "eng": "STL_ENGINE_STANDARD",
+   "aEff": 19.9333,
+   "Q": 3920,
+   "v": 59508.379
+  }
+ ]
+}
