@@ -426,10 +426,7 @@ const barAlarmReason = computed(() =>
       <PrunButton dark inline :disabled="!canFit" @click="emit('fit')">适配</PrunButton>
     </td>
     <td :class="$style.advToggleCell">
-      <span
-        data-tooltip="开启时本站账单整单在 CX 下单；关闭时只从出发地仓库装船。仅对基地派遣生效，环线一律仓库优先取货、缺口转采购。">
-        <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
-      </span>
+      <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
     </td>
     <td :class="$style.statusCell">
       <div :class="[$style.statusContent, fillBgClass]">
