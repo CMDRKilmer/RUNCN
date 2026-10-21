@@ -70,7 +70,7 @@ export interface ChainStopPlan {
   naturalId: string;
   planetName: string;
   days: number;
-  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
+  // 主界面「购买」开关：true 时全额采购；false 时仅采购出发地仓库装不上的缺口。
   cxBuy: boolean;
   // 卸货（船→基地）：CX 采购的非链物资。
   unloadCx: Record<string, number>;
@@ -738,7 +738,8 @@ export function planChainRoute(input: {
   const remainingOriginStock = new Map(Object.entries(input.originStock ?? {}));
   // 出发地「取货」明细：naturalId → ticker → 数量（装载后随行到站卸货）。
   const originPickupByStop = new Map<string, Record<string, number>>();
-  // 组内产出的缺口（需求超出上游可提取量且空间站库存不足）按 ticker 汇总，用于警告。
+  // 组内产出的缺口（需求超出上游可提取量且空间站库存不足）按 ticker 汇总，
+  // 用于警告；同时进装船账单，使其在规划界面「取货」行可见（永不采购）。
   const producedGap = new Map<string, number>();
   for (const id of order) {
     const base = byNaturalId.get(id)!;
@@ -1125,21 +1126,33 @@ export function planChainRoute(input: {
     }
   }
 
-  // 汇总装船总账单（全部站）与 CX 采购账单（仅开启「购买」的站，
-  // 扣除出发地「取货」补足的部分——取货不产生采购）。
+  // 汇总装船总账单（全部站）与 CX 采购账单（扣除出发地「取货」补足的部分——
+  // 取货不产生采购）。
+  // 采购量口径：
+  //   组内产出：永不采购（缺口已在前面计入 producedGap 并警告），只从仓库取货。
+  //   开启「购买」的普通物资：全额采购（仓库是否已有都不影响，照原语义）。
+  //   未开启的普通物资：仅采购出发地仓库装不上的缺口（库存不足转采购），
+  //   否则该部分会被静默丢弃——账单要求卸货但装船装不满。
   for (const stop of stops) {
     for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
-      if (amount > 0) {
-        plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
-        if (stop.cxBuy) {
-          const pickup = originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0;
-          const buy = amount - pickup;
-          if (buy > 0) {
-            plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + buy;
-          }
-        }
+      if (amount <= 0) {
+        continue;
+      }
+      plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
+      if (groupProducedTickers.has(ticker)) {
+        continue;
+      }
+      const pickup = originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0;
+      const buy = stop.cxBuy ? amount : amount - pickup;
+      if (buy > 0) {
+        plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + buy;
       }
     }
+  }
+  // 组内产出缺口进装船账单使其在「取货」行可见：仓库无货时装不满，但缺口必须
+  // 显式呈现而非静默消失。组内产出不进采购（上面的 continue 已保证）。
+  for (const [ticker, gap] of producedGap) {
+    plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + gap;
   }
 
   // 购买时检测出发地空间站（CX 交易所）订单簿库存：供应不足的物资缩减采购量
