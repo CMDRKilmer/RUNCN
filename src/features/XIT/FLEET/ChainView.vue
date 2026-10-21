@@ -1385,7 +1385,6 @@ function chainPlanFromRun(run: UserData.ChainRun): ChainPlan | undefined {
       naturalId: s.naturalId,
       planetName: s.planetName,
       days: 0,
-      cxBuy: false,
       unloadCx: unloadAt,
       unloadChain: new Map(),
       load: new Map(

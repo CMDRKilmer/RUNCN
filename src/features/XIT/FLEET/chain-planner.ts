@@ -21,6 +21,7 @@ import {
   type CargoItem as CargoItemFit,
   type CargoState,
 } from '@src/features/XIT/FLEET/chain-fit';
+import { splitOriginPickup, stopPurchase } from '@src/features/XIT/FLEET/chain-pickup';
 import { createId } from '@src/store/create-id';
 import { fixed0 } from '@src/utils/format';
 import {
@@ -70,8 +71,6 @@ export interface ChainStopPlan {
   naturalId: string;
   planetName: string;
   days: number;
-  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
-  cxBuy: boolean;
   // 卸货（船→基地）：CX 采购的非链物资。
   unloadCx: Record<string, number>;
   // 卸货（船→基地）：上游基地输送来的链上物资。ticker → { 数量, 来源星球名 }。
@@ -734,12 +733,8 @@ export function planChainRoute(input: {
     incoming.set(flow.to, byTicker);
   }
   const cxResupply = new Map<string, Record<string, number>>();
-  // 出发地仓库剩余库存（取货会扣减，避免重复分配）。
-  const remainingOriginStock = new Map(Object.entries(input.originStock ?? {}));
-  // 出发地「取货」明细：naturalId → ticker → 数量（装载后随行到站卸货）。
-  const originPickupByStop = new Map<string, Record<string, number>>();
-  // 组内产出的缺口（需求超出上游可提取量且空间站库存不足）按 ticker 汇总，用于警告。
-  const producedGap = new Map<string, number>();
+  // 各站账单需求（扣除链上输送后）：供出发地装货拆分使用。
+  const billsByStop = new Map<string, Record<string, number>>();
   for (const id of order) {
     const base = byNaturalId.get(id)!;
     const bill = combinedBaseBill(id, base.config, base.site) ?? {};
@@ -754,55 +749,23 @@ export function planChainRoute(input: {
         }
       }
     }
-    // 组内产出的物资不纳入 CX 采购：缺口优先由空间站仓库库存以「取货」补足，剩余缺口警告。
-    for (const ticker of Object.keys(bill)) {
-      if (!groupProducedTickers.has(ticker)) {
-        continue;
-      }
-      const gap = bill[ticker]!;
-      const stock = remainingOriginStock.get(ticker) ?? 0;
-      const pickup = Math.min(gap, stock);
-      if (pickup > 0) {
-        const byTicker = originPickupByStop.get(id) ?? {};
-        byTicker[ticker] = pickup;
-        originPickupByStop.set(id, byTicker);
-        remainingOriginStock.set(ticker, stock - pickup);
-        bill[ticker] = pickup;
-      } else {
-        delete bill[ticker];
-      }
-      const remaining = gap - pickup;
-      if (remaining > 0) {
-        producedGap.set(ticker, (producedGap.get(ticker) ?? 0) + remaining);
-      }
-    }
-    // 空间站仓库已有库存的普通物资（非组内产出）：优先从仓库「取货」装船，
-    // 不足部分才进入 CX 采购（purchaseBill 阶段按取货量扣除），避免重复购买。
-    for (const ticker of Object.keys(bill)) {
-      if (groupProducedTickers.has(ticker)) {
-        continue;
-      }
-      const stock = remainingOriginStock.get(ticker) ?? 0;
-      if (stock <= 0) {
-        continue;
-      }
-      const need = bill[ticker]!;
-      const pickup = Math.min(need, stock);
-      if (pickup <= 0) {
-        continue;
-      }
-      const byTicker = originPickupByStop.get(id) ?? {};
-      byTicker[ticker] = (byTicker[ticker] ?? 0) + pickup;
-      originPickupByStop.set(id, byTicker);
-      remainingOriginStock.set(ticker, stock - pickup);
-    }
+    billsByStop.set(id, bill);
     cxResupply.set(id, bill);
   }
-  // 出发地「取货」汇总（用于展示）。
-  for (const byTicker of originPickupByStop.values()) {
-    for (const [ticker, amount] of Object.entries(byTicker)) {
-      plan.originPickup[ticker] = (plan.originPickup[ticker] ?? 0) + amount;
-    }
+  // 出发地装货拆分（环线统一，不受「购买」开关影响）：仓库优先取货，装不上的缺口转
+  // CX 采购；组内产出的缺口只警告。见 chain-pickup.ts 的契约说明。
+  const {
+    pickupByStop: originPickupByStop,
+    pickupTotals,
+    producedGap,
+  } = splitOriginPickup({
+    order,
+    bills: billsByStop,
+    originStock: input.originStock ?? {},
+    groupProduced: groupProducedTickers,
+  });
+  for (const [ticker, amount] of Object.entries(pickupTotals)) {
+    plan.originPickup[ticker] = amount;
   }
   for (const [ticker, gap] of producedGap) {
     warnings.push(`「${ticker}」为组内产出，缺口 ${gap} 未能由空间站库存补足，不再从 CX 采购。`);
@@ -946,7 +909,6 @@ export function planChainRoute(input: {
       naturalId: id,
       planetName: base.planetName || id,
       days: targetDays.get(id)!,
-      cxBuy: base.config.cxBuy,
       unloadCx: {},
       unloadChain: new Map(),
       load: new Map(),
@@ -1125,20 +1087,23 @@ export function planChainRoute(input: {
     }
   }
 
-  // 汇总装船总账单（全部站）与 CX 采购账单（仅开启「购买」的站，
-  // 扣除出发地「取货」补足的部分——取货不产生采购）。
+  // 汇总装船总账单（全部站）与 CX 采购账单（扣除出发地「取货」补足的部分——
+  // 取货不产生采购）。
+  // 环线不读「购买」开关：开关只控制基地派遣模式是否整单下单，环线一律「仓库优先
+  // 取货、装不上的缺口转采购」，否则关闭开关会静默丢货。组内产出永不采购。
   for (const stop of stops) {
     for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
       if (amount > 0) {
         plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
-        if (stop.cxBuy) {
-          const pickup = originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0;
-          const buy = amount - pickup;
-          if (buy > 0) {
-            plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + buy;
-          }
-        }
       }
+    }
+    const purchase = stopPurchase(
+      stop.unloadCx,
+      originPickupByStop.get(stop.naturalId),
+      groupProducedTickers,
+    );
+    for (const [ticker, buy] of Object.entries(purchase)) {
+      plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + buy;
     }
   }
 
