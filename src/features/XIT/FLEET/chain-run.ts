@@ -396,3 +396,69 @@ export function normalizeChainRun(run: UserData.ChainRun) {
     run.stops[i].state = progress.stops[i].state;
   }
 }
+
+export function getActiveChainRuns() {
+  const result: { shipId: string; run: UserData.ChainRun; progress: RunProgress }[] = [];
+  // 主：执行中的环线记录。不限于「可分配船只」——船 DEPART 后离开空间站，
+  // 已不在 ships props / eligibleShips 中，只要船仍存在就持续显示进度。
+  for (const run of Object.values(userData.chainRuns)) {
+    if (shipsStore.getById(run.shipId) === undefined) {
+      continue;
+    }
+    result.push({ shipId: run.shipId, run, progress: runProgress(run) });
+  }
+  // 兜底：从触发器推导环线（旧版本执行 / chainRuns 记录丢失时）。
+  // 遍历全部船而非仅选中船——执行中的船已不在 CX，selectedShips 为空。
+  for (const ship of shipsStore.all.value ?? []) {
+    if (result.some(x => x.shipId === ship.id)) {
+      continue;
+    }
+    const run = deriveChainRun(ship.id);
+    if (run === undefined) {
+      continue;
+    }
+    const progress = runProgress(run);
+    // 全部站点与归航包都完成后视为已结束，不再显示（避免占用进度区）。
+    if (progress.done >= progress.total) {
+      const finalDone =
+        run.finalPkgName === undefined ||
+        !userData.actionPackages.some(p => p.global.name === run.finalPkgName);
+      if (finalDone) {
+        continue;
+      }
+    }
+    result.push({ shipId: ship.id, run, progress });
+  }
+  return result;
+}
+
+export function pruneOrphanChainRuns() {
+  for (const [shipId, run] of Object.entries(userData.chainRuns)) {
+    const progress = runProgress(run);
+    const hasAnyScript =
+      (run.mainPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.mainPkgName) ||
+          userData.triggers.some(t => t.packageName === run.mainPkgName))) ||
+      run.stops.some(
+        s =>
+          userData.actionPackages.some(p => p.global.name === s.pkgName) ||
+          userData.triggers.some(t => t.packageName === s.pkgName),
+      ) ||
+      (run.finalPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.finalPkgName) ||
+          userData.triggers.some(t => t.packageName === run.finalPkgName)));
+    if (!hasAnyScript) {
+      // 正常完成的运行保留展示（状态列表显示「完成」）；孤立的预留列表立即移除。
+      const completedNewRun =
+        run.mainPkgName !== undefined &&
+        run.originState === 'done' &&
+        run.finalState === 'done' &&
+        progress.done >= progress.total;
+      if (completedNewRun) {
+        continue;
+      }
+      delete userData.chainRuns[shipId];
+      continue;
+    }
+  }
+}

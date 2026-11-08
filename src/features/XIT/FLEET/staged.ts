@@ -1,3 +1,5 @@
+import { ref } from 'vue';
+
 export interface StagedDispatch {
   pkg?: UserData.ActionPackageData;
   // 多船并行分段：一次性暂存所有船的主包，FLEETACT 窗口全部渲染，

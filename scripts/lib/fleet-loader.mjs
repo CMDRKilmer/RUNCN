@@ -1,5 +1,6 @@
 // Resolve real FLEET modules in Node; replace only game stores, transport and UI adapters.
 // Unknown aliases fail so new production dependencies cannot silently become mocks.
+import { readFile } from 'node:fs/promises';
 const stub = new URL('./fleet-stub.mjs', import.meta.url).href;
 const adapters = new Set([
   '@src/core/burn',
@@ -25,8 +26,17 @@ const adapters = new Set([
   '@src/infrastructure/org-api/chain-sync',
   '@src/infrastructure/org-api/client',
   '@src/infrastructure/org-api/session',
+  '@src/infrastructure/prun-ui/buffers',
+  '@src/infrastructure/prun-api/data/api-messages',
+  '@src/utils/on-node-disconnected',
 ]);
 export function resolve(specifier, context, nextResolve) {
+  if (specifier === './chain-flight-time' && context.parentURL.endsWith('use-chain-planning.ts')) {
+    return { url: stub, shortCircuit: true };
+  }
+  if (specifier === '@src/utils/watch') {
+    return { url: new URL('../../src/utils/watch.ts', import.meta.url).href, shortCircuit: true };
+  }
   if (adapters.has(specifier)) {
     return { url: stub, shortCircuit: true };
   }
@@ -42,7 +52,13 @@ export function resolve(specifier, context, nextResolve) {
       shortCircuit: true,
     };
   }
-  if (specifier.startsWith('./chain-') && !specifier.endsWith('.ts')) {
+  if (
+    (specifier.startsWith('./chain-') || specifier === './staged') &&
+    !specifier.endsWith('.ts')
+  ) {
+    return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
+  }
+  if (specifier.startsWith('./use-chain-') && !specifier.endsWith('.ts')) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
   }
   if (specifier === './utils' && context.parentURL.endsWith('chain-types.ts')) {
@@ -52,4 +68,16 @@ export function resolve(specifier, context, nextResolve) {
     throw new Error(`Unmapped FLEET adapter: ${specifier}`);
   }
   return nextResolve(specifier, context);
+}
+
+export async function load(url, context, nextLoad) {
+  if (url.endsWith('/src/utils/watch.ts')) {
+    // Vite erases type imports and injects Vue auto-imports in production.
+    const source = (await readFile(new URL(url), 'utf8')).replace(
+      "import { WatchEffect, WatchOptionsBase, WatchStopHandle } from 'vue';",
+      "import type { WatchEffect, WatchOptionsBase, WatchStopHandle } from 'vue';\nimport { watch } from 'vue';",
+    );
+    return { format: 'module-typescript', source, shortCircuit: true };
+  }
+  return nextLoad(url, context);
 }

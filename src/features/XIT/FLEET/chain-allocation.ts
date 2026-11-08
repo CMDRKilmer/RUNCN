@@ -1,6 +1,7 @@
 import type { DispatchShip } from './utils';
 import type { ChainCapacity, ChainPlan, ChainStopPlan, ChainPlannerBase } from './chain-types';
-import { planChainRoute, effectiveBurn, matWeightVolume } from './chain-planner';
+import { planChainRoute } from './chain-planner';
+import { effectiveBurn, matWeightVolume } from './chain-data';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { getBaseProducts } from '@src/core/base-products';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';

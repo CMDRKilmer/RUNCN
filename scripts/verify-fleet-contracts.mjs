@@ -1,11 +1,18 @@
 // Real FLEET planning, package generation, completion, recovery and sync regressions.
 // Usage: node scripts/verify-fleet-contracts.mjs. Exit 0 = PASS; assertions fail with exit 1.
-// Stores and HTTP are fixtures; this does not execute browser actions or contact a server.
+// Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
+// This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
-import { effectScope, nextTick } from 'vue';
+import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
-const { fixture, userData, sitesStore, transport } = await import('./lib/fleet-stub.mjs');
+const { fixture, userData, sitesStore, shipsStore, transport, windows, estimation } =
+  await import('./lib/fleet-stub.mjs');
+const { collectChainPlanningSnapshot } = await import('../src/features/XIT/FLEET/chain-data.ts');
+const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-core.ts');
+const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-planning.ts');
+const { executeChainPlans, clearShipChainPlan } =
+  await import('../src/features/XIT/FLEET/chain-commands.ts');
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
 const { splitChainPlanAcrossShips } = await import('../src/features/XIT/FLEET/chain-allocation.ts');
 const { buildChainActionPackages } = await import('../src/features/XIT/FLEET/chain-actions.ts');
@@ -24,9 +31,22 @@ async function check(name, fn) {
   userData.chainRuns = {};
   userData.actionPackages = [];
   userData.triggers = [];
-  Object.assign(fixture, { bills: {}, burns: {}, products: {}, supply: {}, ships: {}, stores: {} });
-  Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null });
+  Object.assign(fixture, {
+    bills: {},
+    burns: {},
+    products: {},
+    supply: {},
+    ships: {},
+    stores: {},
+    production: {},
+    analyses: {},
+  });
+  Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
+  windows.length = 0;
+  estimation.calls = [];
+  estimation.pending = null;
+  shipsStore.fetched.value = true;
   sitesStore.all.value = [];
   await fn();
   passes++;
@@ -261,6 +281,213 @@ await check('conflicts stay gated until an explicit force upload', async () => {
   assert.equal(transport.pushes[1].base, 2000);
   assert.equal(controller.state.conflict, false);
 });
+await check('a captured plan remains reproducible after live data changes', () => {
+  const bs = bases();
+  const snapshot = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    originStock: { RAT: 5 },
+  });
+  const before = structuredClone(snapshot);
+  const first = computeChainPlan(snapshot, String);
+  fixture.bills.A.RAT = 999;
+  fixture.burns.A.burn.RAT.inventory = 999;
+  fixture.supply['RAT.AI1'] = 0;
+  bs[0].config.days = 999;
+  assert.deepEqual(computeChainPlan(snapshot, String), first);
+  assert.deepEqual(snapshot, before);
+  assert.equal(first.cxBill.RAT, 20);
+  assert.equal(first.originPickup.RAT, 5);
+});
+await check('snapshot projection includes started production and arrival consumption', () => {
+  const bs = bases().slice(0, 1);
+  bs[0].config.days = 0;
+  fixture.bills.A = {};
+  fixture.products.A = ['RAW'];
+  fixture.burns.A = {
+    burn: { RAW: { input: 1, output: 2, workforce: 0, inventory: 3, daysLeft: Infinity } },
+  };
+  fixture.production.A = [
+    {
+      capacity: 1,
+      orders: [
+        {
+          started: { timestamp: 1_000_000 },
+          completion: { timestamp: 4_600_000 },
+          duration: { millis: 3_600_000 },
+          halted: false,
+          recurring: false,
+          inputs: [],
+          outputs: [{ material: { ticker: 'RAW' }, amount: 10 }],
+        },
+      ],
+    },
+  ];
+  const snapshot = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    arrivalHoursByNaturalId: new Map([['A', 1]]),
+  });
+  assert.equal(snapshot.bases[0].projectedStock.RAW, 13 - 1 / 24);
+  assert.equal(computeChainPlan(snapshot, String).finalUnload.RAW, 12);
+  assert.equal(fixture.burns.A.burn.RAW.output, 2);
+});
+await check(
+  'chain allocation prioritizes the most urgent downstream without mutating input',
+  () => {
+    const mat = (input, output, inventory, daysLeft) => ({
+      input,
+      output,
+      workforce: 0,
+      inventory,
+      daysLeft,
+    });
+    const base = (naturalId, burn, products, bill, projectedStock) => ({
+      naturalId,
+      planetName: naturalId,
+      days: 15,
+      cxBuy: true,
+      burn,
+      products,
+      bill,
+      projectedStock,
+      daysUntilFull: 5,
+    });
+    const snapshot = {
+      originNaturalId: 'CX',
+      capacity,
+      originStock: {},
+      purchaseStock: {},
+      planetRanks: { A: 0, B: 1, C: 2 },
+      materials: { RAW: { weight: 1, volume: 1 } },
+      consumers: new Map([['RAW', ['B', 'C']]]),
+      bases: [
+        base('A', { RAW: mat(0, 10, 20, Infinity) }, ['RAW'], {}, { RAW: 20 }),
+        base('B', { RAW: mat(1, 0, 0, 5) }, [], { RAW: 15 }, { RAW: 0 }),
+        base('C', { RAW: mat(1, 0, 0, 1) }, [], { RAW: 15 }, { RAW: 0 }),
+      ],
+    };
+    const before = structuredClone(snapshot);
+    const plan = computeChainPlan(snapshot, String);
+    assert.equal(plan.stops.find(x => x.naturalId === 'C').unloadChain.get('RAW').amount, 15);
+    assert.equal(plan.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 5);
+    assert.deepEqual(plan.purchaseBill, {});
+    assert.deepEqual(snapshot, before);
+  },
+);
+await check('equal planet ranks keep stable frontier ordering', () => {
+  const raw = { input: 0, output: 1, workforce: 0, inventory: 20, daysLeft: Infinity };
+  const need = { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 };
+  const base = (id, burn, products, bill) => ({
+    naturalId: id,
+    planetName: id,
+    days: 1,
+    cxBuy: true,
+    burn,
+    products,
+    bill,
+    projectedStock: Object.fromEntries(
+      Object.entries(burn).map(([ticker, mat]) => [ticker, mat.inventory]),
+    ),
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity,
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0, B: 0, C: 0 },
+    materials: { RAW: { weight: 1, volume: 1 }, RAT: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['B']]]),
+    bases: [
+      base('B', { RAW: need }, [], { RAW: 1 }),
+      base('A', { RAW: raw }, ['RAW'], {}),
+      base('C', { RAT: need }, [], { RAT: 1 }),
+    ],
+  };
+  assert.deepEqual(
+    computeChainPlan(snapshot, String).stops.map(x => x.naturalId),
+    ['A', 'C', 'B'],
+  );
+});
+await check('combined planning retains stops for ships at another exchange', async () => {
+  const bs = bases();
+  const ships = [ship('S1'), ship('S2')];
+  ships[0].cargoStore.weightCapacity = ships[0].cargoStore.volumeCapacity = 10;
+  ships[1].cargoStore.weightCapacity = ships[1].cargoStore.volumeCapacity = 10;
+  ships[1].exchangeCode = 'NC1';
+  fixture.supply['RAT.AI1'] = 0;
+  fixture.supply['RAT.NC1'] = 10;
+  const scope = effectScope();
+  const planning = scope.run(() =>
+    useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+  );
+  assert.equal(planning.basePlan.value.stops.length, 2);
+  assert.equal(planning.shipPlans.value.find(x => x.ship.ship.id === 'S2').plan.cxBill.RAT, 10);
+  scope.stop();
+  await nextTick();
+});
+await check('clearing selection invalidates pending allocation and flight estimates', async () => {
+  const bs = bases();
+  const selected = ref([ship('S1'), ship('S2')]);
+  let release;
+  estimation.pending = new Promise(resolve => {
+    release = resolve;
+  });
+  const scope = effectScope();
+  const planning = scope.run(() =>
+    useChainPlanning({ ships: () => selected.value, bases: () => bs, runs: () => [] }),
+  );
+  assert.equal(planning.allocStatus.value, 'computing');
+  selected.value = [];
+  await nextTick();
+  release({ ok: false, legs: [], totalHours: 100, approximatedLegs: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(planning.allocStatus.value, 'idle');
+  assert.equal(planning.flightEstimates.value.size, 0);
+  assert.equal(planning.shipPlans.value.length, 0);
+  scope.stop();
+});
+await check('a disposed planning scope cannot publish its pending result', async () => {
+  const bs = bases();
+  let release;
+  estimation.pending = new Promise(resolve => {
+    release = resolve;
+  });
+  const scope = effectScope();
+  const planning = scope.run(() =>
+    useChainPlanning({ ships: () => [ship('S1')], bases: () => bs, runs: () => [] }),
+  );
+  scope.stop();
+  release({ ok: false, legs: [], totalHours: 100, approximatedLegs: 0 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(planning.flightEstimates.value.size, 0);
+});
+await check('execution command persists scripts and rejects duplicate runs', () => {
+  const bs = bases();
+  const vessel = ship('S');
+  fixture.ships.S = vessel.ship;
+  const plan = planChainRoute({ originNaturalId: 'CX', capacity, bases: bs });
+  const result = executeChainPlans([{ ship: vessel, plan }], {
+    autoLaunch: false,
+    autoTrigger: false,
+  });
+  assert.equal(result.plans.length, 1);
+  assert.equal(userData.chainRuns.S.plan.originLoadOnDeparture.weight, 20);
+  assert.equal(userData.actionPackages.length, 3);
+  assert.equal(userData.triggers.length, 2);
+  assert.equal(windows.length, 1);
+  const original = JSON.stringify(userData.chainRuns.S);
+  const repeat = executeChainPlans([{ ship: vessel, plan }], {
+    autoLaunch: true,
+    autoTrigger: true,
+  });
+  assert.equal(repeat.plans.length, 0);
+  assert.equal(JSON.stringify(userData.chainRuns.S), original);
+  assert.equal(windows.length, 1);
+});
 await check('shared runtime survives the component scope that first opened it', async () => {
   syncRun();
   const { getFleetRuntime } = await import('../src/features/XIT/FLEET/chain-runtime.ts');
@@ -272,8 +499,35 @@ await check('shared runtime survives the component scope that first opened it', 
   userData.chainRuns.S.originState = 'done';
   await nextTick();
   await runtime.chainSync.pushNow();
-  runtime.chainSync.stop();
   assert.equal(transport.pushes.length, 1);
   assert.equal(transport.pushes[0].doc.chainRuns.S.originState, 'done');
+  userData.chainRuns.orphan = {
+    shipId: 'orphan',
+    originNaturalId: 'CX',
+    stops: [],
+    mainPkgName: 'missing',
+    originState: 'pending',
+    finalState: 'pending',
+  };
+  userData.chainRuns.completed = {
+    shipId: 'completed',
+    originNaturalId: 'CX',
+    stops: [],
+    mainPkgName: 'completed',
+    originState: 'done',
+    finalState: 'done',
+  };
+  await nextTick();
+  assert.equal(userData.chainRuns.orphan, undefined);
+  assert.equal(userData.chainRuns.completed.finalState, 'done');
+  const fp = userData.chainRuns.S.fp;
+  clearShipChainPlan('S', 'S');
+  await nextTick();
+  assert.equal(userData.chainRuns.S, undefined);
+  assert.equal(userData.chainRuns.completed.finalState, 'done');
+  assert.equal(userData.actionPackages.length, 0);
+  await runtime.chainSync.pushNow();
+  assert.equal(transport.pushes.filter(x => x.key === 'S').at(-1).doc.clearedFp, fp);
+  runtime.chainSync.stop();
 });
 console.log(`PASS ${passes}/${passes}`);

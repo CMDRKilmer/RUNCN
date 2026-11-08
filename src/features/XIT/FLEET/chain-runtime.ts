@@ -3,7 +3,13 @@ import { userData } from '@src/store/user-data';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { sanitizeActName, isChainPackageName, isChainTrigger } from './chain-identity';
 import { createChainSyncController } from './chain-sync';
-import { runProgress, normalizeChainRun, deriveChainRun, buildPlanFromPackages } from './chain-run';
+import {
+  runProgress,
+  normalizeChainRun,
+  deriveChainRun,
+  buildPlanFromPackages,
+  pruneOrphanChainRuns,
+} from './chain-run';
 
 function createFleetRuntime() {
   const syncNotice = ref<string>();
@@ -89,6 +95,7 @@ function createFleetRuntime() {
         }
       }
     });
+    watchEffect(() => pruneOrphanChainRuns());
   });
   return { chainSync, syncNotice };
 }
