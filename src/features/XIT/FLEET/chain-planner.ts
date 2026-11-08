@@ -14,114 +14,27 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
-import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
 import {
   pushItemsPrioritised as pushItemsPrioritisedPure,
   pushItemsProportional as pushItemsProportionalPure,
   type CargoItem as CargoItemFit,
   type CargoState,
 } from '@src/features/XIT/FLEET/chain-fit';
-import { createId } from '@src/store/create-id';
 import { fixed0 } from '@src/utils/format';
+import { combinedBaseBill } from '@src/features/XIT/FLEET/utils';
+
 import {
-  combinedBaseBill,
-  type DispatchBaseConfig,
-  type DispatchShip,
-} from '@src/features/XIT/FLEET/utils';
+  ORIGIN_DEST,
+  type ChainPlannerBase,
+  type ChainCapacity,
+  type ChainPlan,
+  type ChainStopPlan,
+  type CargoItem,
+  type ChainFlow,
+  type ChainFilteredStop,
+} from './chain-types';
 
-// 出发地标记（最终产物运回出发地 CX）。
-export const ORIGIN_DEST = '__ORIGIN__';
-
-export interface ChainPlannerBase {
-  siteId: string;
-  naturalId: string;
-  planetName: string;
-  site: PrunApi.Site;
-  config: DispatchBaseConfig;
-}
-
-// 环线舱容（重量/体积）。
-export interface ChainCapacity {
-  weight: number;
-  volume: number;
-  freeWeight: number;
-  freeVolume: number;
-}
-
-// 产业链输送：上游基地 → 下游基地（按 ticker）。
-export interface ChainFlow {
-  ticker: string;
-  from: string;
-  to: string;
-  amount: number;
-}
-
-// 舱内一件货物：装船于某站，目的地为下游站点或出发地。
-interface CargoItem {
-  ticker: string;
-  amount: number;
-  // 装船站点（undefined = 出发地 CX 采购）。
-  from?: string;
-  // 目的站点（ORIGIN_DEST = 回出发地）。
-  dest: string;
-}
-
-export interface ChainStopPlan {
-  naturalId: string;
-  planetName: string;
-  days: number;
-  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
-  cxBuy: boolean;
-  // 卸货（船→基地）：CX 采购的非链物资。
-  unloadCx: Record<string, number>;
-  // 卸货（船→基地）：上游基地输送来的链上物资。ticker → { 数量, 来源星球名 }。
-  unloadChain: Map<string, { amount: number; from: string }>;
-  // 提取（基地→船）：本站产物。ticker → { 数量, 去向标签 }。
-  load: Map<string, { amount: number; to: string }>;
-  // 提取被舱容缩减过。
-  clipped: boolean;
-  // 到站卸货后、提取前的舱载。
-  loadOnArrival: { weight: number; volume: number };
-  // 到站卸货+提取后的舱载（离开本站时）。
-  loadOnDeparture: { weight: number; volume: number };
-}
-
-export interface ChainFilteredStop {
-  naturalId: string;
-  planetName: string;
-  // 过滤原因（该站没有任何卸货或提取操作）。
-  reason: string;
-}
-
-export interface ChainPlan {
-  // 出发地站点 naturalId（如 AI1），用于归航触发器匹配。
-  originNaturalId: string;
-  stops: ChainStopPlan[];
-  // 被过滤的无操作站点；保留给规划界面解释为何未出现在航线中。
-  filteredStops?: ChainFilteredStop[];
-  // 归航时在出发地卸下的最终产物。
-  finalUnload: Record<string, number>;
-  // 出发地装船总账单（所有站账单合并，含未开启「购买」的基地）。
-  cxBill: Record<string, number>;
-  // 出发地在 CX 实际下单的账单（仅开启「购买」的基地）。
-  purchaseBill: Record<string, number>;
-  // 出发地「取货」清单：组内产出的缺口由空间站仓库库存补足（不采购，装船随行）。
-  originPickup: Record<string, number>;
-  warnings: string[];
-  peakLoad: { weight: number; volume: number };
-  freeCapacity: { weight: number; volume: number };
-  // 飞船总舱容（不是剩余）。
-  capacity: { weight: number; volume: number };
-  // 出发时舱载（装船后、飞首站前）。
-  loadOnDeparture: { weight: number; volume: number };
-  // 归航前舱载（最后站离开后、卸最终产物前）。
-  loadOnReturn: { weight: number; volume: number };
-  overCapacity: boolean;
-  // 运回空间站产物的标注：ticker → 原因（无下游 / 循环下游需补给 / 循环下游已充足）。
-  finalUnloadNotes?: Record<string, string>;
-}
-
-function matWeightVolume(ticker: string, amount: number) {
+export function matWeightVolume(ticker: string, amount: number) {
   const mat = materialsStore.getByTicker(ticker);
   return {
     weight: mat ? mat.weight * amount : 0,
@@ -301,7 +214,7 @@ function projectedProductionByArrival(
 // burn 只记录「已出现在生产/劳动力」的 ticker，纯 started 产线的物料
 // （如正在运行的 PCB 线的 BCO/BGO）不在 burn 中，其库存也从存储补读，
 // 否则上游可提取量 / 下游缺口都会按 0 计。
-function effectiveBurn(siteId: string): BurnValues | undefined {
+export function effectiveBurn(siteId: string): BurnValues | undefined {
   const burn = getPlanetBurn(siteId);
   if (!burn) {
     return undefined;
@@ -377,6 +290,7 @@ export function planChainRoute(input: {
   groupProducedTickers?: Set<string>;
   // 出发地交易所代码（CX Buy 下单处），用于购买时检测空间站订单簿库存。
   exchangeCode?: string;
+  purchaseStock?: Record<string, number>;
   // 各站预计到达时刻（相对规划时刻的小时数）：飞行期间基地继续生产/消耗，
   // 取货量按到达时预计库存计算，否则到港时取货包装不完飞行期间的新增产出。
   arrivalHoursByNaturalId?: Map<string, number>;
@@ -798,12 +712,40 @@ export function planChainRoute(input: {
     }
     cxResupply.set(id, bill);
   }
-  // 出发地「取货」汇总（用于展示）。
-  for (const byTicker of originPickupByStop.values()) {
-    for (const [ticker, amount] of Object.entries(byTicker)) {
-      plan.originPickup[ticker] = (plan.originPickup[ticker] ?? 0) + amount;
+  // 可购数量先按航线分配，再模拟实际货舱与分站卸货。
+  const remainingSupply = new Map<string, number>();
+  for (const id of order) {
+    const bill = cxResupply.get(id)!;
+    if (!byNaturalId.get(id)!.config.cxBuy) {
+      continue;
+    }
+    for (const [ticker, amount] of Object.entries(bill)) {
+      const supply =
+        input.purchaseStock?.[ticker] ??
+        (input.exchangeCode === undefined
+          ? undefined
+          : cxobStore.getByTicker(`${ticker}.${input.exchangeCode}`)?.supply);
+      if (supply === undefined) {
+        continue;
+      }
+      const available = remainingSupply.get(ticker) ?? Math.max(0, Math.floor(supply));
+      const pickup = originPickupByStop.get(id)?.[ticker] ?? 0;
+      const wanted = Math.max(0, amount - pickup);
+      const buy = Math.min(wanted, available);
+      remainingSupply.set(ticker, available - buy);
+      if (buy < wanted) {
+        warnings.push(
+          `「${ticker}」订单簿供应不足（可购 ${fixed0(buy)} / 需 ${fixed0(wanted)}），已缩减本站配送量。`,
+        );
+        if (pickup + buy > 0) {
+          bill[ticker] = pickup + buy;
+        } else {
+          delete bill[ticker];
+        }
+      }
     }
   }
+
   for (const [ticker, gap] of producedGap) {
     warnings.push(`「${ticker}」为组内产出，缺口 ${gap} 未能由空间站库存补足，不再从 CX 采购。`);
   }
@@ -1131,51 +1073,15 @@ export function planChainRoute(input: {
     for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
       if (amount > 0) {
         plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
+        const pickup = Math.min(amount, originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0);
+        if (pickup > 0) {
+          plan.originPickup[ticker] = (plan.originPickup[ticker] ?? 0) + pickup;
+        }
         if (stop.cxBuy) {
-          const pickup = originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0;
           const buy = amount - pickup;
           if (buy > 0) {
             plan.purchaseBill[ticker] = (plan.purchaseBill[ticker] ?? 0) + buy;
           }
-        }
-      }
-    }
-  }
-
-  // 购买时检测出发地空间站（CX 交易所）订单簿库存：供应不足的物资缩减采购量
-  // （cxBill 装船量同步缩减，避免装船缺货），并警告——防止执行时 CX Buy 因
-  // 库存不足而整体失败。订单簿数据未加载（未打开过 CXOB）时跳过检测，不误报。
-  if (input.exchangeCode !== undefined) {
-    for (const [ticker, amount] of Object.entries(plan.purchaseBill)) {
-      const broker = cxobStore.getByTicker(`${ticker}.${input.exchangeCode}`);
-      if (broker === undefined) {
-        continue;
-      }
-      const supply = broker.supply;
-      if (supply >= amount) {
-        continue;
-      }
-      const available = Math.max(0, Math.floor(supply));
-      const shrink = amount - available;
-      if (available > 0) {
-        plan.purchaseBill[ticker] = available;
-        warnings.push(
-          `「${ticker}」空间站库存不足（供应 ${fixed0(available)} / 需 ${fixed0(
-            amount,
-          )}），采购量已缩减至 ${fixed0(available)}。`,
-        );
-      } else {
-        delete plan.purchaseBill[ticker];
-        warnings.push(`「${ticker}」空间站无库存，已从采购清单移除。`);
-      }
-      // 装船量同步缩减（买不到的装不上船）。
-      const cxAmount = plan.cxBill[ticker] ?? 0;
-      if (cxAmount > 0) {
-        const nextCx = Math.max(0, cxAmount - shrink);
-        if (nextCx > 0) {
-          plan.cxBill[ticker] = nextCx;
-        } else {
-          delete plan.cxBill[ticker];
         }
       }
     }
@@ -1226,685 +1132,4 @@ export function planChainRoute(input: {
     plan.filteredStops = filteredStops;
   }
   return plan;
-}
-
-// ── 多船分配 ─────────────────────────────────────────────────
-// 环线支持多船（不限数量）：合并多船舱容后，把货物按方案分配到各船，
-// 每船生成独立的一套操作包 + 触发器。
-// 分段策略：
-// - 默认（无飞行预估）：按舱容贪心切连续段——只在「装不下」时换下一艘；
-//   结果以容量为准，不保证时间均衡，且单船装得下时其余船会闲置。
-// - 时间均衡（推荐，多船并行出动）：先给每艘船预估整条合并环线的飞行时长，
-//   再用 planTimeBalancedSegments 求 makespan 最小的连续分段（总耗时 =
-//   最慢那艘船的闭环时长），让多船真正并行提速，快船可多跑、慢船少跑。
-
-/** 单船舱容（含总量与剩余）。 */
-export function shipChainCapacity(ship: DispatchShip): ChainCapacity | undefined {
-  const c = ship.cargoStore;
-  if (!c) {
-    return undefined;
-  }
-  return {
-    weight: c.weightCapacity,
-    volume: c.volumeCapacity,
-    freeWeight: c.weightCapacity - c.weightLoad,
-    freeVolume: c.volumeCapacity - c.volumeLoad,
-  };
-}
-
-/** 船只出发地 naturalId（优先当前位置，退化到所在 CX 代码）。 */
-export function shipOriginNaturalId(ship: DispatchShip): string {
-  return getEntityNaturalIdFromAddress(ship.ship.address ?? undefined) ?? ship.exchangeCode;
-}
-
-/** 船只所在空间站仓库库存（ticker → 数量），用于出发地「取货」补足组内产出缺口。 */
-export function shipWarehouseStock(ship: DispatchShip): Record<string, number> | undefined {
-  const store = ship.warehouseStore;
-  if (!store) {
-    return undefined;
-  }
-  const stock: Record<string, number> = {};
-  for (const item of store.items) {
-    if (item.quantity) {
-      const ticker = item.quantity.material.ticker;
-      stock[ticker] = (stock[ticker] ?? 0) + item.quantity.amount;
-    }
-  }
-  return stock;
-}
-
-/** 合并多船舱容。全部无货舱时返回 undefined。 */
-export function buildCombinedCapacity(ships: DispatchShip[]): ChainCapacity | undefined {
-  let weight = 0;
-  let volume = 0;
-  let freeWeight = 0;
-  let freeVolume = 0;
-  let any = false;
-  for (const ship of ships) {
-    const c = shipChainCapacity(ship);
-    if (!c) {
-      continue;
-    }
-    any = true;
-    weight += c.weight;
-    volume += c.volume;
-    freeWeight += c.freeWeight;
-    freeVolume += c.freeVolume;
-  }
-  return any ? { weight, volume, freeWeight, freeVolume } : undefined;
-}
-
-export interface ShipChainPlan {
-  ship: DispatchShip;
-  plan: ChainPlan;
-}
-
-// 站点货物总重量/体积（卸货 + 提取）——用于按容量分配站点。
-function stopShipmentSize(stop: ChainStopPlan) {
-  let weight = 0;
-  let volume = 0;
-  const add = (ticker: string, amount: number) => {
-    if (amount <= 0) {
-      return;
-    }
-    const wv = matWeightVolume(ticker, amount);
-    weight += wv.weight;
-    volume += wv.volume;
-  };
-  for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
-    add(ticker, amount);
-  }
-  for (const [ticker, entry] of stop.unloadChain) {
-    add(ticker, entry.amount);
-  }
-  for (const [ticker, entry] of stop.load) {
-    add(ticker, entry.amount);
-  }
-  return { weight, volume };
-}
-
-/** 每站货物总重量/体积（卸货 + 提取）——供时间均衡分段做容量约束。 */
-export function chainStopShipmentSizes(plan: ChainPlan): { weight: number; volume: number }[] {
-  return plan.stops.map(stop => stopShipmentSize(stop));
-}
-
-/**
- * 时间均衡分段（makespan 最小化）：
- * 多船并行出动时，整条环线完成一轮补给的总耗时 = 最慢那艘船的闭环时长
- * （瓶颈船）。本函数把一条合并环线的有序站点切成连续段（每船负责一段、
- * 同时出动），使「各船闭环时长最大值」最小，即让多船真正并行提速。
- *
- * 段代价模型（每船给「沿整条合并环线完整闭环」的逐段实测小时 legs[0..n]，
- * legs[0]=出发地→站0、legs[k]=站_{k-1}→站_k、legs[n]=站_{n-1}→出发地）：
- * 段 [a,b)（服务站点 a..b-1）闭环 = 出发地→段首站 + 段内相邻站（实测 legs 前缀和）
- * + 段尾站→出发地。出发地↔内层端点的直飞腿不在整环 legs 里（整环里该位置是
- * 「段尾站→下一站」），用该船两个实测端点腿的平均值作代理（不偏不倚的近似，
- * 只影响切点选取，不影响最终展示——展示用分配后各段的精确实测）。
- * 船速差异自然体现：快船可承担更长的段。允许空段（该船不参与）——段切得越碎，
- * 每段越要额外飞「出发地↔段端点」长途往返，不一定更快，DP 自动在「并行提速」
- * 与「端点 overhead」间取最优，不盲目用尽全部船。
- *
- * 容量为硬约束（段内货物 ≤ 该船剩余舱容），保证子规划不会因超载而裁剪货物；
- * 若全部船严格限容无解（如某站货物超所有船），回退到最后那艘船兜底
- * （不做容量约束，与舱容贪心一致，宁可超载也必须有船接）。
- *
- * @returns { ranges: 与 loopLegHours 对齐的每艘船段区间 [start,end)（可为空段）,
- *            hours: 对齐的每船段预计闭环小时（与 DP 同口径）}；输入非法返回 undefined。
- */
-export function planTimeBalancedSegments(input: {
-  // 每艘船沿合并环线完整闭环的逐段飞行小时，长度 = stopSizes.length + 1。
-  loopLegHours: number[][];
-  // 每艘船剩余舱容（与 loopLegHours 对齐）。
-  capacities: { freeWeight: number; freeVolume: number }[];
-  // 每站货物尺寸（重量/体积，与站点顺序对齐）。
-  stopSizes: { weight: number; volume: number }[];
-}): { ranges: { start: number; end: number }[]; hours: number[] } | undefined {
-  const n = input.stopSizes.length;
-  const m = input.loopLegHours.length;
-  if (m === 0 || n === 0) {
-    return { ranges: [], hours: [] };
-  }
-  if (input.capacities.length !== m) {
-    return undefined;
-  }
-  // 段内相邻站前缀和：p[k] = Σ_{t=1..k} legs[t]（不含首尾两段）。
-  const interiorPrefix = input.loopLegHours.map(legs => {
-    const p: number[] = [0];
-    for (let k = 1; k < legs.length; k++) {
-      p.push(p[p.length - 1]! + legs[k]!);
-    }
-    return p;
-  });
-  // 货物累计 W/V[i] = Σ_{t<i} 重量/体积。
-  const W: number[] = [0];
-  const V: number[] = [0];
-  for (const s of input.stopSizes) {
-    W.push(W[W.length - 1]! + s.weight);
-    V.push(V[V.length - 1]! + s.volume);
-  }
-  // 段 [a,b) 闭环小时：首尾直飞腿（端点代理）+ 段内相邻站实测。
-  const segCost = (j: number, a: number, b: number) => {
-    if (a >= b) {
-      return 0;
-    }
-    const legs = input.loopLegHours[j]!;
-    const avgEndpoint = (legs[0]! + legs[n]!) / 2;
-    const out = a === 0 ? legs[0]! : avgEndpoint;
-    const ret = b === n ? legs[n]! : avgEndpoint;
-    const interior = interiorPrefix[j]![b - 1]! - interiorPrefix[j]![a]!;
-    return out + interior + ret;
-  };
-  // dp[j][i]：前 j 艘船覆盖前 i 站的最小 makespan；choice[j][i] = 第 j 艘船段起点。
-  const solve = (relaxLast: boolean): { start: number; end: number }[] | undefined => {
-    const fits = (j: number, a: number, b: number) => {
-      if (a >= b) {
-        return true;
-      }
-      // 兜底模式：最后一艘船不做容量约束。
-      if (relaxLast && j === m - 1) {
-        return true;
-      }
-      const cap = input.capacities[j]!;
-      return W[b]! - W[a]! <= cap.freeWeight && V[b]! - V[a]! <= cap.freeVolume;
-    };
-    const INF = Number.POSITIVE_INFINITY;
-    const dp: number[][] = [];
-    const choice: number[][] = [];
-    for (let j = 0; j <= m; j++) {
-      dp.push(new Array<number>(n + 1).fill(INF));
-      choice.push(new Array<number>(n + 1).fill(-1));
-    }
-    dp[0]![0] = 0;
-    for (let j = 1; j <= m; j++) {
-      for (let i = 0; i <= n; i++) {
-        let best = INF;
-        let bestA = -1;
-        for (let a = 0; a <= i; a++) {
-          if (dp[j - 1]![a]! >= INF || !fits(j - 1, a, i)) {
-            continue;
-          }
-          const val = Math.max(dp[j - 1]![a]!, segCost(j - 1, a, i));
-          // 相同 makespan 时优先把站段留给更靠前的船（当前船段起点 a 尽量大），
-          // 避免「整环单船最优」这类场景把整条环线落到最后一艘、前面船闲置。
-          if (val < best || (val === best && a > bestA)) {
-            best = val;
-            bestA = a;
-          }
-        }
-        if (bestA >= 0) {
-          dp[j]![i] = best;
-          choice[j]![i] = bestA;
-        }
-      }
-    }
-    if (dp[m]![n]! >= INF) {
-      return undefined;
-    }
-    const ranges: { start: number; end: number }[] = [];
-    let i = n;
-    for (let j = m; j >= 1; j--) {
-      const a = choice[j]![i]!;
-      ranges.push({ start: a, end: i });
-      i = a;
-    }
-    return ranges.reverse();
-  };
-  // 优先严格限容（不超载任何船）；无解时回退到「最后一艘兜底」。
-  const ranges = solve(false) ?? solve(true);
-  if (!ranges) {
-    return undefined;
-  }
-  return {
-    ranges,
-    hours: ranges.map((r, j) => segCost(j, r.start, r.end)),
-  };
-}
-
-// 按飞船剩余舱容把有序站点切成连续段：逐站装箱，当前船装不下
-// （重量或体积任一超出该船剩余容量）才换下一艘，最后一艘兜底。
-// 产物密度（大重量小体积 / 大体积小重量）自然决定段边界：
-// 大重量货物集中的段会落到 weight 容量充裕的船，低密度货物则看 volume。
-function chunkBasesByCapacity(
-  ordered: ChainPlannerBase[],
-  plan: ChainPlan,
-  usable: DispatchShip[],
-): ChainPlannerBase[][] {
-  const byId = new Map(ordered.map(b => [b.naturalId, b] as const));
-  const caps = usable.map(s => shipChainCapacity(s)!);
-  const sizes = plan.stops.map(stop => {
-    const base = byId.get(stop.naturalId);
-    if (!base) {
-      return { weight: 0, volume: 0 };
-    }
-    return stopShipmentSize(stop);
-  });
-
-  const chunks: ChainPlannerBase[][] = [];
-  let current: ChainPlannerBase[] = [];
-  let accW = 0;
-  let accV = 0;
-  const flush = () => {
-    if (current.length > 0) {
-      chunks.push(current);
-      current = [];
-      accW = 0;
-      accV = 0;
-    }
-  };
-  for (let i = 0; i < plan.stops.length; i++) {
-    const stop = plan.stops[i]!;
-    const base = byId.get(stop.naturalId);
-    if (!base) {
-      continue;
-    }
-    const size = sizes[i]!;
-    const j = chunks.length;
-    const cap = caps[j]!;
-    const hasNext = j + 1 < usable.length;
-    if (
-      hasNext &&
-      current.length > 0 &&
-      (accW + size.weight > cap.freeWeight || accV + size.volume > cap.freeVolume)
-    ) {
-      flush();
-    }
-    current.push(base);
-    accW += size.weight;
-    accV += size.volume;
-  }
-  flush();
-  return chunks;
-}
-
-/**
- * 并行分段：把合并容量的单一环线计划切成连续段（按飞船容量贪心，
- * 或调用方给的时间均衡分段），每艘船独立规划其段的子环线并同时出动。
- * 跨段产物经出发地仓库（取货）接力。
- * 无货舱（或剩余舱容为 0）的船不参与分段。
- */
-export function splitChainPlanAcrossShips(
-  plan: ChainPlan,
-  ships: DispatchShip[],
-  bases: ChainPlannerBase[],
-  // 各站预计到达小时数：传给分段子规划，取货量按到港时预计库存计算
-  //（基础规划不传，仅主规划传，避免影响飞行预估用的站点顺序）。
-  arrivalHoursByNaturalId?: Map<string, number>,
-  // 时间均衡分段结果（可选，与 usable 对齐：每艘船分配的连续站点 naturalId），
-  // 由 planTimeBalancedSegments 求解，使各船闭环时长均衡（更快完成补给）。
-  // 未提供 / 长度与 usable 不匹配时退回按舱容贪心切段（旧行为）。
-  allocByNaturalId?: string[][],
-): ShipChainPlan[] {
-  const byId = new Map(bases.map(b => [b.naturalId, b] as const));
-  const ordered = plan.stops
-    .map(s => byId.get(s.naturalId))
-    .filter((b): b is ChainPlannerBase => b !== undefined);
-  // 参与船：有货舱且剩余舱容 > 0。
-  const usable = ships.filter(s => {
-    const c = shipChainCapacity(s);
-    return c !== undefined && (c.freeWeight > 0 || c.freeVolume > 0);
-  });
-  if (usable.length === 0 || ordered.length === 0) {
-    return [];
-  }
-  // 分段：优先用时间均衡分配（与 usable 一一对齐，空段 = 该船不参与）；
-  // 否则按飞船剩余舱容贪心切连续段（大船多装、小船少装）。
-  let chunks: ChainPlannerBase[][];
-  if (allocByNaturalId !== undefined && allocByNaturalId.length === usable.length) {
-    chunks = allocByNaturalId.map(ids =>
-      ids.map(id => byId.get(id)).filter((b): b is ChainPlannerBase => b !== undefined),
-    );
-  } else {
-    chunks = chunkBasesByCapacity(ordered, plan, usable);
-  }
-
-  // 全局组内产出集合（BSN 白名单 + output>0）：跨段产物在任何段都不纳入采购，
-  // 保证封闭环内自产自销不因分段边界而被误采。
-  const groupProducedTickers = new Set<string>();
-  for (const base of bases) {
-    const configured = getBaseProducts(base.siteId);
-    if (configured === undefined) {
-      continue;
-    }
-    const burn = effectiveBurn(base.siteId);
-    if (!burn) {
-      continue;
-    }
-    for (const ticker of configured) {
-      const mat = burn[ticker];
-      if (mat !== undefined && mat.output > 0) {
-        groupProducedTickers.add(ticker);
-      }
-    }
-  }
-
-  const result: ShipChainPlan[] = [];
-  for (let i = 0; i < chunks.length && i < usable.length; i++) {
-    const ship = usable[i]!;
-    const chunk = chunks[i]!;
-    if (chunk.length === 0) {
-      continue;
-    }
-    const cap = shipChainCapacity(ship);
-    if (!cap) {
-      continue;
-    }
-    const sub = planChainRoute({
-      originNaturalId: shipOriginNaturalId(ship),
-      capacity: cap,
-      bases: chunk,
-      originStock: shipWarehouseStock(ship),
-      groupProducedTickers,
-      exchangeCode: ship.exchangeCode,
-      ...(arrivalHoursByNaturalId !== undefined ? { arrivalHoursByNaturalId } : {}),
-    });
-    if (sub) {
-      result.push({ ship, plan: sub });
-    }
-  }
-
-  // 跨船补给：各船归航时最终产物卸到出发地仓库，沿执行顺序累积，
-  // 后出发的船优先从仓库装载，抵扣各自的 CX 采购，避免把跨段输送的
-  // 产物重复在 CX 采购。环线循环往复，多跑几轮后仓库库存即稳定。
-  const warehouse = new Map<string, number>();
-  for (const { plan: p } of result) {
-    for (const [ticker, amount] of Object.entries(p.finalUnload)) {
-      if (amount > 0) {
-        warehouse.set(ticker, (warehouse.get(ticker) ?? 0) + amount);
-      }
-    }
-  }
-  for (const { plan: p } of result) {
-    for (const ticker of Object.keys(p.purchaseBill)) {
-      const stock = warehouse.get(ticker) ?? 0;
-      if (stock <= 0) {
-        continue;
-      }
-      const need = p.purchaseBill[ticker] ?? 0;
-      const offset = Math.min(stock, need);
-      const remaining = need - offset;
-      if (remaining > 0) {
-        p.purchaseBill[ticker] = remaining;
-      } else {
-        delete p.purchaseBill[ticker];
-      }
-      warehouse.set(ticker, Math.max(0, stock - offset));
-    }
-  }
-  return result;
-}
-
-// 触发器 + 对应操作包：到港执行本站「卸货→提取→飞往下一站」。
-export interface ChainStopPackage {
-  pkg: UserData.ActionPackageData;
-  trigger: UserData.TriggerData;
-}
-
-export interface ChainActionPlan {
-  // 出发地主包（暂存至 XIT FLEETACT 执行）。
-  mainPkg: UserData.ActionPackageData;
-  // 各基地站点包 + 触发器（写入 userData，由 FLIGHT_ENDED 触发）。
-  stopPkgs: ChainStopPackage[];
-  // 归航包 + 触发器（最终产物卸至出发地仓库，可能为空）。
-  finalPkg: ChainStopPackage | undefined;
-}
-
-/**
- * 把环线计划转成 ACT 操作包与 TRIGGER 触发器数据：
- * - 主包：加油 + 按基地材料组 + CX 采购（仅开启「购买」的基地）+ 装船 +
- *   飞往第一站，结构与基地规划派遣包一致；
- * - 每站包：卸货（船→基地）+ 提取（基地→船）+ 飞往下一站（末站飞回出发地）；
- * - 归航包：最终产物卸至出发地仓库。
- * 卸货/提取 MTRA 始终成对存在（即使某侧为空），保证 OPEN SFC 能从「提取」
- * 动作解析出飞船。空的 MTRA 组会立即完成，无副作用。
- */
-// XIT 命令参数仅接受 ASCII（与 BPC/CART 生成 ACT 同款约束）：包名会拼进
-// `XIT ACT_${name}` 命令，含中文 / `()'"&` 等符号时 PrUn 端解析失败（提示无效指令）。
-// 仅保留 ASCII 字母 / 数字 / hyphen，其余符号与空白折叠为单个空格。
-export function sanitizeActName(name: string): string {
-  return name
-    .replace(/[^\x20-\x7E]/g, '')
-    .replace(/[^A-Za-z0-9-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// ── 环线代际指纹 ──────────────────────────────────────────────
-// 每次 execute() 生成环线时铸入一枚 10 位 hex 指纹，追加在各 ACT 包/触发器名
-// 末尾（` <fp>`）。它是该环线 run 的「代际身份」：船改名、船名互为后缀都不再
-// 影响归属；云端同步用它判定「同一代已被他端清除」以防止旧数据复活。
-export function mintChainFp(): string {
-  return createId().slice(0, 10);
-}
-// 名称末尾指纹后缀（含前导空格，ASCII 安全、可过 sanitizeActName）。
-export function chainFpSuffix(fp: string): string {
-  return ` ${fp}`;
-}
-// 环线 ACT 包名长度上限（含空格与 fp 后缀）：保守值。XIT/PrUn 侧命令/包名
-// 过长会解析失败，超长船名/星球名 + fp 是最可能的来源；超限时压缩可变段。
-export const MAX_CHAIN_PKG_NAME = 80;
-// 超限时压缩包名：保留数字前缀/类型关键字所在的前段与末尾 fp 后缀（fp 必须
-// 原样保留——它是归属/代际匹配锚点），裁剪中间的可变段。无 fp 后缀时兜底截断。
-export function fitChainPkgName(name: string): string {
-  if (name.length <= MAX_CHAIN_PKG_NAME) {
-    return name;
-  }
-  const fpMatch = /^(.*?)\s+([0-9a-f]{10})$/.exec(name);
-  if (fpMatch === null) {
-    return name.slice(0, MAX_CHAIN_PKG_NAME).trim();
-  }
-  const body = fpMatch[1]!;
-  const fp = fpMatch[2]!;
-  const bodyBudget = MAX_CHAIN_PKG_NAME - 1 - fp.length;
-  return `${body.slice(0, bodyBudget).trimEnd()} ${fp}`;
-}
-
-export function buildChainActionPackages(
-  ship: DispatchShip,
-  plan: ChainPlan,
-  options: {
-    autoLaunch?: boolean;
-    triggerMode?: UserData.TriggerMode;
-    // 环线代际指纹：非空时追加到所有包名/触发器名末尾（` <fp>`）。
-    fp?: string;
-  } = {},
-): ChainActionPlan | undefined {
-  if (!ship.warehouseStore || !ship.cargoStore) {
-    return undefined;
-  }
-  // 船名净化后仍为空（如中文船名）时回退到注册号，保证包名非空。
-  const shipName =
-    sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
-  const fpSuffix = options.fp === undefined ? '' : chainFpSuffix(options.fp);
-  const loadGroupName = `装载 ${shipName}`;
-  const originWarehouse = serializeStorage(ship.warehouseStore);
-  const shipCargo = serializeStorage(ship.cargoStore);
-
-  const actions: UserData.ActionData[] = [];
-  const groups: UserData.MaterialGroupData[] = [];
-
-  // 每个有账单的基地一个材料组（与基地规划派遣包一致，便于在 ACT 中查看调整）。
-  for (const stop of plan.stops) {
-    if (Object.keys(stop.unloadCx).length > 0) {
-      groups.push({
-        type: 'Manual',
-        name: stop.planetName || stop.naturalId,
-        planet: stop.naturalId,
-        materials: stop.unloadCx,
-      });
-    }
-  }
-  // 注：环线模式不再生成加油动作。用户需要加油请在基地规划模式（Plan）操作，
-  // 或手动在 ACT 中调整生成的包。
-
-  // 采购：仅合并开启「购买」的基地账单；未开启的基地账单仍会装船（来自仓库库存）。
-  if (Object.keys(plan.purchaseBill).length > 0) {
-    const buyGroupName = `购买 ${ship.exchangeCode}`;
-    groups.push({ type: 'Manual', name: buyGroupName, materials: plan.purchaseBill });
-    actions.push({
-      type: 'CX Buy',
-      name: buyGroupName,
-      group: buyGroupName,
-      exchange: ship.exchangeCode,
-      useCXInv: true,
-    });
-  }
-
-  groups.push({ type: 'Manual', name: loadGroupName, materials: plan.cxBill });
-
-  actions.push({
-    type: 'MTRA',
-    name: loadGroupName,
-    group: loadGroupName,
-    origin: originWarehouse,
-    dest: shipCargo,
-  });
-
-  const firstStop = plan.stops[0];
-  if (firstStop !== undefined) {
-    actions.push({
-      type: 'OPEN SFC',
-      name: `飞往 ${firstStop.planetName}`,
-      destination: firstStop.naturalId,
-      shipSourceAction: loadGroupName,
-    });
-    if (options.autoLaunch) {
-      actions.push({
-        type: 'DEPART',
-        name: `出发 ${firstStop.planetName}`,
-        registration: ship.ship.registration,
-      });
-    }
-  }
-
-  const mainPkg: UserData.ActionPackageData = {
-    global: { name: fitChainPkgName(`0 Chain ${shipName}${fpSuffix}`) },
-    // 环线脚本不随执行自动删除：保留完整脚本供状态列表/云端同步/手动清理。
-    groups,
-    actions,
-  };
-
-  const makeTrigger = (name: string, pkgName: string, planet: string): UserData.TriggerData => ({
-    id: createId(),
-    name,
-    enabled: true,
-    event: { type: 'FLIGHT_ENDED', ship: ship.ship.registration, planet },
-    packageName: pkgName,
-    mode: options.triggerMode ?? 'CONFIRM',
-    cooldownMin: 60,
-    createdAt: Date.now(),
-    autoDelete: true,
-  });
-
-  const stopPkgs: ChainStopPackage[] = [];
-  for (let i = 0; i < plan.stops.length; i++) {
-    const stop = plan.stops[i]!;
-    // 星球名净化后为空（如中文/含符号名）时回退到 naturalId，保证包名可被 ACT 命令解析。
-    const stopLabel = sanitizeActName(stop.planetName || stop.naturalId) || stop.naturalId;
-    // 阶段号与进度表「序」列一致：1..N 为各站点。
-    const pkgName = fitChainPkgName(`${i + 1} ${stopLabel} Loop ${shipName}${fpSuffix}`);
-    const baseStore = `${stop.planetName} Base`;
-
-    const unload: Record<string, number> = { ...stop.unloadCx };
-    for (const [ticker, entry] of stop.unloadChain) {
-      unload[ticker] = (unload[ticker] ?? 0) + entry.amount;
-    }
-    const load: Record<string, number> = {};
-    for (const [ticker, entry] of stop.load) {
-      load[ticker] = entry.amount;
-    }
-
-    const next = plan.stops[i + 1];
-    const departAction: UserData.ActionData | undefined = options.autoLaunch
-      ? {
-          type: 'DEPART',
-          name: next !== undefined ? `出发 ${next.planetName}` : `出发 ${plan.originNaturalId}`,
-          registration: ship.ship.registration,
-        }
-      : undefined;
-    const pkg: UserData.ActionPackageData = {
-      global: { name: pkgName },
-      groups: [
-        { type: 'Manual', name: '卸货', materials: unload },
-        { type: 'Manual', name: '提取', materials: load },
-      ],
-      actions: [
-        {
-          type: 'MTRA',
-          name: '卸货',
-          group: '卸货',
-          origin: shipCargo,
-          dest: baseStore,
-        },
-        {
-          type: 'MTRA',
-          name: '提取',
-          group: '提取',
-          origin: baseStore,
-          dest: shipCargo,
-        },
-        // 卸货→开船之间插入货舱校验：MTRA 步骤本地状态完成后，服务器端仍可能
-        // 在处理中（MTRA 步骤用 waitActionFeedback 等游戏面板反馈，但底层物
-        // 流跨客户端→服务器全链路完成有窗口），若不等就让 DEPART 触发，可能
-        // 出现「卸载包没卸载完船就出发」的情况。这里强制把 unload map 中每个
-        // ticker 的目标剩余压到 ≤0，只有货舱 store 真清空了该 ticker 才允许
-        // OPEN SFC/DEPART 继续；30s 超时则 fail 整个阶段（玩家需要排查 MTRA
-        // 列表里的可转移性 / 目的地仓库容量，跟警报文案对齐）。
-        {
-          type: 'Verify Ship Cargo',
-          name: '验证卸货',
-          registration: ship.ship.registration,
-          verifyRemaining: Object.fromEntries(Object.keys(unload).map(ticker => [ticker, 0])),
-        },
-        {
-          type: 'OPEN SFC',
-          name: next !== undefined ? `飞往 ${next.planetName}` : `飞往 ${plan.originNaturalId}`,
-          destination: next !== undefined ? next.naturalId : plan.originNaturalId,
-          shipSourceAction: '提取',
-        },
-        ...(departAction !== undefined ? [departAction] : []),
-      ],
-    };
-    stopPkgs.push({
-      pkg,
-      trigger: makeTrigger(`${i + 1} ${stop.planetName} 环线站`, pkgName, stop.naturalId),
-    });
-  }
-
-  let finalPkg: ChainStopPackage | undefined;
-  if (Object.keys(plan.finalUnload).length > 0) {
-    const pkgName = fitChainPkgName(`${plan.stops.length + 1} Chain Return ${shipName}${fpSuffix}`);
-    finalPkg = {
-      pkg: {
-        global: { name: pkgName },
-        groups: [{ type: 'Manual', name: '卸货', materials: plan.finalUnload }],
-        actions: [
-          {
-            type: 'MTRA',
-            name: '卸货',
-            group: '卸货',
-            origin: shipCargo,
-            dest: originWarehouse,
-          },
-          // 归航后立即校验空间站仓库是否收到全部 finalUnload：
-          // 否则后续「出发地主包」执行时出发地取货清单会出现已经"装好"但实际
-          // 还在路上的鬼影数量。
-          {
-            type: 'Verify Ship Cargo',
-            name: '验证归航卸货',
-            registration: ship.ship.registration,
-            verifyRemaining: Object.fromEntries(
-              Object.keys(plan.finalUnload).map(ticker => [ticker, 0]),
-            ),
-          },
-        ],
-      },
-      trigger: makeTrigger(
-        `${plan.stops.length + 1} ${plan.originNaturalId} 归航卸货`,
-        pkgName,
-        plan.originNaturalId,
-      ),
-    };
-  }
-
-  return { mainPkg, stopPkgs, finalPkg };
 }

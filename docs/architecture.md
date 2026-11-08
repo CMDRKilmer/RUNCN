@@ -161,7 +161,7 @@ Event-driven ACT execution. Two event source kinds (`event-sources.ts`):
 
 Execution modes per trigger: `CONFIRM` (desktop notification; click executes) and `AUTO` (execute immediately, gated by the global `userData.settings.triggers.autoEnabled`, default off, with a ToS warning in the panel — see the "user click" hard rule in `docs/contributing.md`).
 
-**One-shot triggers (`TriggerData.autoDelete`)**: a trigger marked `autoDelete` is removed automatically once its action package executes successfully — `ExecuteActionPackage.vue` deletes it in the same `onEnd` success branch that honors the package's own `autoDelete`. Used by FLEET's 到港卸货 feature: clicking 执行 in `XIT FLEET` upserts one `FLIGHT_ENDED` trigger per dispatched base (`ship` + `planet` filter, `packageName` = the base's `<星球> Unload` package, mode `CONFIRM`, togglable via the FLEET toolbar's 到港卸货 switch) so the ship is unloaded automatically when it arrives at that base.
+**One-shot triggers (`TriggerData.autoDelete`)**: a trigger marked `autoDelete` is removed automatically once its action package executes successfully — `ExecuteActionPackage.vue` deletes it on success independently of the package's own `autoDelete`. Used by FLEET's 到港卸货 feature: clicking 执行 in `XIT FLEET` upserts one `FLIGHT_ENDED` trigger per dispatched base (`ship` + `planet` filter, `packageName` = the base's `<星球> Unload` package, mode `CONFIRM`, togglable via the FLEET toolbar's 到港卸货 switch) so the ship is unloaded automatically when it arrives at that base.
 
 ### Built-in automation stays out of the trigger engine
 
@@ -186,3 +186,15 @@ Two structural rules for generated packages:
 - Match the FLEET 派遣包 shape: one `Manual` group per base (`name` = planet name, `planet` = naturalId, `materials` = that base's bill), a merged `购买 <CX>` group containing only bases with `cxBuy` on (CX Buy action references it), and a merged `装载 <ship>` group for the warehouse→ship MTRA.
 
 `ActionStepExecuteContext` has **no** `globalOptions` — generateSteps-time global flags (like `skipMissingMaterials`) must be baked into the step data at emit time (`CXPO_BUY`/`CXPO_SELL` carry a `skipMissing` field).
+
+
+## FLEET module boundaries
+
+- `chain-types.ts` defines transport plans. `chain-planner.ts` computes a single route; `chain-allocation.ts` partitions routes and reserves shared warehouse stock and CX supply across ships. Future return cargo never offsets current departure purchases.
+- `chain-actions.ts` and `dispatch-actions.ts` build ACT packages without writing user data or opening buffers. Ship cargo verification permits planned cargo for later stops and cargo loaded at the current stop.
+- `chain-run.ts` reconstructs snapshots and derives progress. `chain-recovery.ts` normalizes progress before selecting a pending stage. `chain-execution.ts` hands packages to the existing ACT queue, using per-package completion signals for single and multiple ships.
+- `chain-runtime.ts` owns one detached Vue scope per page, initialized after user data. Closing or opening tiles does not stop progress persistence or create duplicate sync controllers. Automatic execution preferences remain with the tile; the runtime persists state and coordinates sync.
+- `chain-identity.ts` owns generation fingerprints and script ownership. `chain-snapshot.ts` collects/applies wire documents, preserving local trigger IDs while replacing remote settings. `chain-sync.ts` owns batching, conflict decisions and persisted pending changes; `infrastructure/org-api/chain-sync.ts` remains the HTTP adapter. Upload acknowledgements clear only the submitted revision.
+- Sync still has no startup pull or polling. Pending uploads survive page reloads; changes push after the existing debounce. Downloading a document does not itself execute packages.
+
+Targeted verification: `node scripts/verify-fleet-contracts.mjs`, `node scripts/verify-chain-fit-priority.mjs` and `node scripts/verify-chain-flight-time.mjs`. Store/HTTP fixtures do not replace browser acceptance checks.

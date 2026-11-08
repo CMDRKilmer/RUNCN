@@ -5,7 +5,7 @@ import {
   getMaterialCategoryCssClass,
   translateCategory,
 } from '@src/infrastructure/prun-ui/item-tracker';
-import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
+import { getInventorySummary } from '@src/core/inventory-summary';
 import Tooltip from '@src/components/Tooltip.vue';
 import { fixed02 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -66,7 +66,7 @@ const cargoBar = computed<CargoBarData>(() => {
   };
 
   const segments = [] as Segment[];
-  const summary = getInventorySummary(inv);
+  const summary = getInventorySummary([inv]);
 
   const categories = [...summary.categories.keys()].sort((a, b) => a.name.localeCompare(b.name));
   for (const category of categories) {
@@ -134,48 +134,6 @@ function enhanceSegmentVisibility(segments: Segment[], loadRatio: number) {
     last.borderClasses ??= [];
     last.borderClasses.push($style.borderRight);
   }
-}
-
-interface CategorySummary {
-  weight: number;
-  volume: number;
-}
-
-function getInventorySummary(store: PrunApi.Store) {
-  const shipments: CategorySummary = {
-    weight: 0,
-    volume: 0,
-  };
-  const categories = new Map<PrunApi.MaterialCategory, CategorySummary>();
-
-  for (const item of store.items) {
-    if (item.type === 'SHIPMENT') {
-      shipments.weight += item.weight;
-      shipments.volume += item.volume;
-      continue;
-    }
-
-    const material = item.quantity?.material;
-    if (!material) {
-      continue;
-    }
-
-    const category = materialCategoriesStore.getById(material.category);
-    if (!category) {
-      continue;
-    }
-
-    let categorySummary = categories.get(category);
-    if (!categorySummary) {
-      categorySummary = { weight: 0, volume: 0 };
-      categories.set(category, categorySummary);
-    }
-
-    categorySummary.weight += item.weight;
-    categorySummary.volume += item.volume;
-  }
-
-  return { shipments, categories };
 }
 
 const miniBarClass = computed(() => ({

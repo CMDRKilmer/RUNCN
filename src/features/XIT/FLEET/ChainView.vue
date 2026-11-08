@@ -26,17 +26,29 @@ onApiMessage({
 </script>
 
 <script setup lang="ts">
+import {
+  deriveChainRun,
+  deriveStopOps,
+  deriveFinalOps,
+  chainPlanFromRun,
+  derivePurchaseBill,
+  runProgress,
+  isRunFinished,
+  normalizeChainRun,
+  type RunProgress,
+} from './chain-run';
+import { runStagedPkgs, stageMainPackage, runChainStepSilently } from './chain-execution';
+import { collectPendingChainSteps, verifyAllChainRuns } from './chain-recovery';
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
+import { planChainRoute } from './chain-planner';
+import { buildChainActionPackages } from './chain-actions';
+import { mintChainFp, sanitizeActName } from './chain-identity';
 import {
-  planChainRoute,
-  buildChainActionPackages,
-  mintChainFp,
-  sanitizeActName,
   splitChainPlanAcrossShips,
   shipOriginNaturalId,
   shipWarehouseStock,
@@ -44,11 +56,9 @@ import {
   shipChainCapacity,
   chainStopShipmentSizes,
   planTimeBalancedSegments,
-  type ChainPlannerBase,
-  type ChainPlan,
-  type ChainStopPlan,
   type ShipChainPlan,
-} from '@src/features/XIT/FLEET/chain-planner';
+} from './chain-allocation';
+import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
 import {
   estimateChainFlightTimes,
   type ChainFlightEstimate,
@@ -58,45 +68,29 @@ import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { getBaseGroups } from '@src/core/base-groups';
 import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
-import { stagedDispatch, dispatchFinished } from '@src/features/XIT/FLEET/staged';
+import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import {
-  queueTriggerRun,
-  getPackageFinished,
-  hasPendingTriggerRun,
-} from '@src/features/XIT/ACT/trigger-queue';
-import { watchUntil } from '@src/utils/watch';
-import { createId } from '@src/store/create-id';
+
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
-import {
-  createChainSyncController,
-  isChainPackageName,
-  isChainTrigger,
-  shipChainScriptScope,
-  type ChainSyncState,
-} from '@src/features/XIT/FLEET/chain-sync';
+import { shipChainScriptScope } from './chain-identity';
+import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
-import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import {
-  getEntityNameFromAddress,
   getEntityNaturalIdFromAddress,
   getSystemLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
-import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 
-const props = defineProps<{
+const { ships, bases } = defineProps<{
   ships: DispatchShip[];
   bases: ChainPlannerBase[];
 }>();
-
-const { ships, bases } = props;
 
 // ── 状态 ─────────────────────────────────────────────────────
 // 选中的产业链分组（BSN「供应链分组」列录入的自由文本名）。
@@ -271,6 +265,7 @@ const usableChainShips = computed(() =>
 interface TimeAlloc {
   // 与 usableChainShips 对齐：每艘船分配的连续站点 naturalId（空数组 = 不参与）。
   ranges: string[][];
+  shipIds: string[];
   // 与 usableChainShips 对齐：每艘船预计闭环时长（小时，前缀和近似，用于瓶颈展示）。
   loopHours: number[];
   // 分配对应的合并环线站点序列（校验当前 plan 是否仍适用）。
@@ -289,6 +284,7 @@ const allocShipKey = computed(() => usableChainShips.value.map(s => s.ship.id).j
 
 let allocToken = 0;
 async function computeTimeAlloc() {
+  const token = ++allocToken;
   const p = basePlan.value;
   const ships = usableChainShips.value;
   if (!p || p.stops.length < 2 || ships.length < 2 || !shipsStore.fetched.value) {
@@ -296,7 +292,6 @@ async function computeTimeAlloc() {
     allocStatus.value = 'idle';
     return;
   }
-  const token = ++allocToken;
   allocStatus.value = 'computing';
   // 清掉旧分配：配置/船集变化后的重算期间不再套用旧切法（旧 ranges 可能
   // 与新船集/站点不匹配），退回舱容贪心做中间态，就绪后自动切到时间均衡。
@@ -415,6 +410,7 @@ async function computeTimeAlloc() {
       ranges: alloc.ranges.map(r => stopIds.slice(r.start, r.end)),
       loopHours: alloc.hours,
       stopIds,
+      shipIds: ships.map(x => x.ship.id),
       notes,
     };
     allocStatus.value = 'ready';
@@ -438,7 +434,12 @@ watch(
 // 当前 plan 对应的时间均衡分段（站点序列匹配才有效；否则退回舱容贪心）。
 function allocFor(plan: ChainPlan | undefined): string[][] | undefined {
   const ta = timeAlloc.value;
-  if (!ta || !plan || plan.stops.length !== ta.stopIds.length) {
+  if (
+    !ta ||
+    !plan ||
+    plan.stops.length !== ta.stopIds.length ||
+    ta.shipIds.join() !== usableChainShips.value.map(x => x.ship.id).join()
+  ) {
     return undefined;
   }
   for (let i = 0; i < plan.stops.length; i++) {
@@ -613,11 +614,12 @@ function registerFlightTimeWatch() {
   watch(
     [baseShipPlans, activeRuns, () => shipsStore.fetched.value],
     async ([plans, runs, shipsFetched]) => {
+      const token = ++flightTimeToken;
       // 船数据未就绪时跳过（估算需读取飞船实时质量/加速度与蓝图）。
       if (!shipsFetched) {
+        flightTimesLoading.value = false;
         return;
       }
-      const token = ++flightTimeToken;
       // 统一为 shipId → {ship, origin, stops}：规划取实时计划，执行中取链快照/持久化链记录。
       const entries = new Map<
         string,
@@ -658,6 +660,7 @@ function registerFlightTimeWatch() {
         });
       }
       if (entries.size === 0) {
+        flightTimesLoading.value = false;
         return;
       }
       flightTimesLoading.value = true;
@@ -747,25 +750,6 @@ const statusCheckNotice = ref<string | undefined>(undefined);
 // 快照同时持久化到 chainRuns.plan，页面刷新后仍可显示阶段载重。
 const planSnapshot = ref<ShipChainPlan[]>([]);
 
-// 完成清理定时器（历史遗留）：完成态环线保留在状态列表不再自动清理；
-// 仅重执行/清理计划时用于取消旧定时器。
-const finishedCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function clearFinishedCleanup(shipId: string) {
-  const timer = finishedCleanupTimers.get(shipId);
-  if (timer !== undefined) {
-    clearTimeout(timer);
-    finishedCleanupTimers.delete(shipId);
-  }
-}
-
-onBeforeUnmount(() => {
-  for (const timer of finishedCleanupTimers.values()) {
-    clearTimeout(timer);
-  }
-  finishedCleanupTimers.clear();
-});
-
 // 按船清理计划（含已完成）：确认后删除该船环线运行记录 + 相关 ACT 操作包与触发器。
 function onClearShipPlanClick(
   e: Event,
@@ -784,7 +768,6 @@ function onClearShipPlanClick(
         chainSync.markShipCleared(sp.shipId, clearedFp);
       }
       removeShipChainScripts(sp.shipId, shipName);
-      clearFinishedCleanup(sp.shipId);
       delete userData.chainRuns[sp.shipId];
       planSnapshot.value = planSnapshot.value.filter(p => p.ship.ship.id !== sp.shipId);
       statusCheckNotice.value = `已清理 ${label} 的环线计划及 ACT 脚本/触发器。`;
@@ -831,9 +814,7 @@ function execute() {
     if (!actionPlan) {
       continue;
     }
-    // 重新执行时清掉旧完成清理定时器，避免误删新记录；
-    // 先清掉该船旧版/已完成的环线脚本，防止 ACT 列表残留过期包。
-    clearFinishedCleanup(ship.ship.id);
+    // 先清掉该船旧版/已完成的环线脚本。
     const shipName =
       sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
     removeShipChainScripts(ship.ship.id, shipName);
@@ -889,7 +870,7 @@ function execute() {
     };
 
     // 阶段脚本按序写入 ACT 列表：0 主包 → 1..N 站点包 → N+1 归航包；
-    // 各包执行成功后自动删除（主包改由 autoDelete 处理）。
+    // 操作包保留，成功时仅清理一次性触发器。
     upsertPackage(actionPlan.mainPkg);
     for (const { pkg, trigger } of actionPlan.stopPkgs) {
       upsertPackage(pkg);
@@ -914,7 +895,7 @@ function execute() {
   ];
 
   if (mainPkgs.length === 1) {
-    stageMainPackage(mainPkgs[0]!);
+    stageMainPackage(mainPkgs[0]!, chainAutoTrigger.value);
   } else {
     // 多船并行分段：全部主包一次性暂存到 FLEETACT（所有船可见可执行），
     // 自动模式下按顺序自动执行；DEPART 后各船独立飞行，飞行阶段并行。
@@ -932,158 +913,10 @@ function execute() {
   }
 }
 
-// 多船自动执行：按顺序触发各主包（FLEETACT 窗口内多个执行实例），
-// 前一艘执行完成后再触发下一艘，避免多个 ActionRunner 并发抢占游戏窗口；
-// 所有包执行完后自动关闭 FLEETACT 窗口。
-async function runStagedPkgs(pkgs: UserData.ActionPackageData[]) {
-  dispatchFinished.value = false;
-  // getPackageFinished 复用已存在的 ref：上次执行留下的 true 会让
-  // watchUntil 立即 resolve（并发触发）并让 closeWhen 初始为 true（窗口早关）。
-  // 与 trigger-engine 一致，入队前重置为 false。
-  for (const pkg of pkgs) {
-    getPackageFinished(pkg.global.name).value = false;
-  }
-  void showBuffer('XIT FLEETACT', {
-    force: true,
-    autoClose: true,
-    closeWhen: computed(() => pkgs.every(p => getPackageFinished(p.global.name).value)),
-  });
-  for (const pkg of pkgs) {
-    queueTriggerRun({ triggerId: createId(), packageName: pkg.global.name });
-    await watchUntil(getPackageFinished(pkg.global.name));
-  }
-}
-
-function stageMainPackage(pkg: UserData.ActionPackageData) {
-  stagedDispatch.value = { pkg: JSON.parse(JSON.stringify(pkg)) };
-  if (chainAutoTrigger.value) {
-    dispatchFinished.value = false;
-    queueTriggerRun({ triggerId: createId(), packageName: pkg.global.name });
-    void showBuffer('XIT FLEETACT', {
-      force: true,
-      autoClose: true,
-      closeWhen: computed(() => dispatchFinished.value),
-    });
-  } else {
-    showBuffer('XIT FLEETACT');
-  }
-}
-
 // ── 状态检查（断线恢复） ─────────────────────────────────────
 // 环线运行中若网页关闭，到港触发器（FLIGHT_ENDED 告警事件）错过触发，
 // 重新打开页面后环线会卡在当前阶段。状态检查依据船当前停靠位置与
 // 持久化阶段状态，判断当前阶段并自动执行下一步操作包。
-interface PendingChainStep {
-  pkgName: string;
-  label: string;
-}
-
-// 刷新后脚本一致性校验：chainRuns 中「持久化为未完成」的阶段，其操作包应仍存在。
-// 执行过的阶段包会被 autoDelete 删除（属正常）；旧记录无持久化状态则跳过校验
-// （回退到「包消失 = 完成」的推导）。
-function verifyChainRunScript(run: UserData.ChainRun): { ok: boolean; missing: string[] } {
-  const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
-  const missing: string[] = [];
-  if (
-    run.originState === 'pending' &&
-    run.mainPkgName !== undefined &&
-    !pkgExists(run.mainPkgName)
-  ) {
-    missing.push(run.mainPkgName);
-  }
-  for (const stop of run.stops) {
-    if (stop.state === 'pending' && stop.pkgName && !pkgExists(stop.pkgName)) {
-      missing.push(stop.pkgName);
-    }
-  }
-  if (
-    run.finalState === 'pending' &&
-    run.finalPkgName !== undefined &&
-    !pkgExists(run.finalPkgName)
-  ) {
-    missing.push(run.finalPkgName);
-  }
-  return { ok: missing.length === 0, missing };
-}
-
-function verifyAllChainRuns(): { ok: boolean; diffs: string[] } {
-  const diffs: string[] = [];
-  for (const run of Object.values(userData.chainRuns)) {
-    const { ok, missing } = verifyChainRunScript(run);
-    if (!ok) {
-      diffs.push(`${run.shipName}：缺失 ${missing.join('、')}`);
-    }
-  }
-  return { ok: diffs.length === 0, diffs };
-}
-
-// 扫描全部运行中的环线，找出「船已就位但操作包未执行」的下一阶段。
-// includeOrigin=false：刷新自动恢复时不自动执行第 0 步（出发），
-// 仅刷新状态显示为「未开始」，出发由用户手动触发。
-function collectPendingChainSteps(includeOrigin = true): PendingChainStep[] {
-  const steps: PendingChainStep[] = [];
-  for (const run of Object.values(userData.chainRuns)) {
-    const ship = shipsStore.getById(run.shipId);
-    if (ship === undefined) {
-      continue;
-    }
-    const dockedAt = ship.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
-    const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
-    // 出发阶段：船仍在出发地、主包未执行（包未被 autoDelete 删除）时执行主包。
-    if (
-      includeOrigin &&
-      run.mainPkgName !== undefined &&
-      run.originState !== 'done' &&
-      dockedAt === run.originNaturalId &&
-      pkgExists(run.mainPkgName) &&
-      !hasPendingTriggerRun(run.mainPkgName)
-    ) {
-      steps.push({ pkgName: run.mainPkgName, label: `${run.shipName} 出发` });
-      continue;
-    }
-    // 站点阶段：取第一个未完成站，若船正停靠该站则执行该站包。
-    let allStopsDone = true;
-    for (const stop of run.stops) {
-      if (stop.state === 'done') {
-        continue;
-      }
-      allStopsDone = false;
-      if (
-        dockedAt === stop.naturalId &&
-        pkgExists(stop.pkgName) &&
-        !hasPendingTriggerRun(stop.pkgName)
-      ) {
-        steps.push({ pkgName: stop.pkgName, label: `${run.shipName} ${stop.planetName}` });
-      }
-      break;
-    }
-    // 归航阶段：全部站点完成、船已回出发地且归航包未执行时执行归航包。
-    if (
-      allStopsDone &&
-      run.finalPkgName !== undefined &&
-      run.finalState !== 'done' &&
-      dockedAt === run.originNaturalId &&
-      pkgExists(run.finalPkgName) &&
-      !hasPendingTriggerRun(run.finalPkgName)
-    ) {
-      steps.push({ pkgName: run.finalPkgName, label: `${run.shipName} 归航卸货` });
-    }
-  }
-  return steps;
-}
-
-// 静默执行环线操作包：与触发器引擎同通道（入队 + 隐藏窗口自动执行、结束自动关窗）。
-function runChainStepSilently(pkgName: string) {
-  const finished = getPackageFinished(pkgName);
-  finished.value = false;
-  queueTriggerRun({ triggerId: createId(), packageName: pkgName });
-  showBuffer(`XIT ACT_${pkgName.replace(' ', '_')}`, {
-    force: true,
-    autoClose: true,
-    closeWhen: computed(() => finished.value),
-  });
-}
-
 // 状态检查：自动判断当前阶段并自动处理下一步。
 function onStatusCheckClick() {
   const steps = collectPendingChainSteps();
@@ -1132,6 +965,9 @@ watch(
     }
     // 刷新后脚本一致性校验：未完成阶段的脚本应仍存在；缺失则提示差异，
     // 且不自动恢复（避免执行到错误/被另一端改动的脚本）。
+    for (const run of Object.values(userData.chainRuns)) {
+      normalizeChainRun(run);
+    }
     const { ok, diffs } = verifyAllChainRuns();
     if (!ok) {
       statusCheckNotice.value = `环线脚本差异：${diffs.join('；')}。请检查 ACT/TRIGGER 列表或执行云端同步。`;
@@ -1163,71 +999,11 @@ watch(
   { immediate: true },
 );
 
-// ── 环线多端同步（org-api 服务器，跨浏览器/设备） ─────────────
-// 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，互不覆盖。
-// 环线面板的全局配置（分组/基地/船勾选/自动开关）仅本地保存，不参与云同步。
-// 无自动轮询——仅在本地环线状态改变时防抖推送；覆盖仅由「云端同步」对话框手动选择。
-const chainSyncState = ref<ChainSyncState>({
-  syncing: false,
-  lastSyncAt: null,
-  dirty: false,
-  conflict: false,
-  mergeKeys: [],
-  error: null,
-});
-const syncNotice = ref<string | undefined>(undefined);
-// 同步提示横幅计时器：仅提示当前最新事件，数秒后自动消失，避免常驻遮挡。
-let syncNoticeTimer: ReturnType<typeof setTimeout> | null = null;
-
-const chainSync = createChainSyncController({
-  // shipId → 该船净化后的名字（环线包名后缀），用于按船收集/匹配脚本。
-  resolveShipName: shipId => {
-    const ship = shipsStore.getById(shipId);
-    if (!ship) {
-      return undefined;
-    }
-    return sanitizeActName(ship.name ?? ship.registration) || ship.registration;
-  },
-  onState: s => {
-    chainSyncState.value = s;
-  },
-  onNotice: msg => {
-    syncNotice.value = msg;
-    if (syncNoticeTimer) {
-      clearTimeout(syncNoticeTimer);
-    }
-    syncNoticeTimer = setTimeout(() => {
-      syncNotice.value = undefined;
-      syncNoticeTimer = null;
-    }, 8000);
-  },
-});
-
-// 环线数据变化 → 按船标记脏 → 防抖推送（每船只推自己的数据）。
-// 远端应用引发的变化由 controller 抑制，避免「应用远端 → 重推 → 远端更新」循环。
-watch(
-  () => [
-    userData.chainRuns,
-    userData.actionPackages.filter(p => isChainPackageName(p.global.name)),
-    userData.triggers.filter(isChainTrigger),
-  ],
-  () => {
-    for (const shipId of Object.keys(userData.chainRuns)) {
-      chainSync.markDirtyShip(shipId);
-    }
-  },
-  { deep: true },
-);
-
-onMounted(() => {
-  chainSync.start();
-});
+const { chainSync, syncNotice } = getFleetRuntime();
+const chainSyncState = computed(() => chainSync.state);
 onUnmounted(() => {
-  chainSync.stop();
-  if (syncNoticeTimer) {
-    clearTimeout(syncNoticeTimer);
-    syncNoticeTimer = null;
-  }
+  allocToken++;
+  flightTimeToken++;
 });
 
 // 冲突条目的展示名：状态条/悬浮提示指明具体冲突对象（船名）。
@@ -1305,276 +1081,6 @@ async function onChainSyncClick(e: Event) {
 }
 
 // ── 环线执行进度（多船简化列表） ─────────────────────────────
-function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
-  const ship = shipsStore.getById(shipId);
-  if (!ship) {
-    return undefined;
-  }
-  const shipName = sanitizeActName(ship.name ?? ship.registration) || ship.registration;
-  const stopTriggers = userData.triggers
-    .filter(
-      t =>
-        t.event.type === 'FLIGHT_ENDED' &&
-        (t.packageName.endsWith(` Loop ${shipName}`) ||
-          t.packageName.endsWith(` 环线 ${shipName}`)),
-    )
-    .sort((a, b) => a.createdAt - b.createdAt);
-  if (stopTriggers.length === 0) {
-    return undefined;
-  }
-  const stops = stopTriggers.map(t => {
-    const naturalId = t.event.type === 'FLIGHT_ENDED' ? t.event.planet : undefined;
-    const site = naturalId ? sitesStore.getByPlanetNaturalId(naturalId) : undefined;
-    return {
-      naturalId: naturalId ?? '',
-      planetName: site
-        ? (getEntityNameFromAddress(site.address) ?? naturalId ?? t.packageName)
-        : (naturalId ?? t.packageName),
-      pkgName: t.packageName,
-    };
-  });
-  const finalTrigger = userData.triggers.find(
-    t =>
-      t.event.type === 'FLIGHT_ENDED' &&
-      (t.packageName.endsWith(`Chain Return ${shipName}`) ||
-        t.packageName === `环线归航 ${shipName}`),
-  );
-  return {
-    shipId: ship.id,
-    shipName: ship.name ?? ship.registration,
-    startedAt: stopTriggers[0]!.createdAt,
-    // 归航触发器以出发地为 planet，取它作为出发地标记。
-    originNaturalId:
-      finalTrigger && finalTrigger.event.type === 'FLIGHT_ENDED'
-        ? (finalTrigger.event.planet ?? '')
-        : '',
-    stops,
-    finalPkgName: finalTrigger?.packageName,
-  };
-}
-
-// 逆推：从操作包还原站点操作清单（无快照时——页面刷新 / 旧版本环线）。
-// 已完成站的包已被 autoDelete 删除，无法还原（对应进度「完成」）。
-function deriveStopOps(pkgName: string): {
-  unload: Record<string, number>;
-  load: Record<string, number>;
-} {
-  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
-  return {
-    unload: pkg?.groups.find(g => g.name === '卸货')?.materials ?? {},
-    load: pkg?.groups.find(g => g.name === '提取')?.materials ?? {},
-  };
-}
-
-// 归航卸货：从归航包（Chain Return 船名）的「卸货」组还原。
-function deriveFinalOps(pkgName: string): Record<string, number> {
-  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
-  return pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
-}
-
-// 持久化快照 → 计划对象：页面刷新后仍按规划样式显示阶段操作与载重。
-function chainPlanFromRun(run: UserData.ChainRun): ChainPlan | undefined {
-  const snap = run.plan;
-  if (snap === undefined) {
-    return undefined;
-  }
-  const stops: ChainStopPlan[] = run.stops.map(s => {
-    const unloadAt = s.plan?.unloadAt ?? {};
-    const loadAt = s.plan?.loadAt ?? {};
-    return {
-      naturalId: s.naturalId,
-      planetName: s.planetName,
-      days: 0,
-      cxBuy: false,
-      unloadCx: unloadAt,
-      unloadChain: new Map(),
-      load: new Map(
-        Object.entries(loadAt).map(([ticker, amount]) => [
-          ticker,
-          { amount, to: s.plan?.loadTo?.[ticker] ?? '' },
-        ]),
-      ),
-      clipped: s.plan?.clipped ?? false,
-      loadOnArrival: s.plan?.loadOnArrival ?? { weight: 0, volume: 0 },
-      loadOnDeparture: s.plan?.loadOnDeparture ?? { weight: 0, volume: 0 },
-    };
-  });
-  const cxBill: Record<string, number> = { ...snap.purchaseBill };
-  for (const [ticker, amount] of Object.entries(snap.originPickup)) {
-    cxBill[ticker] = (cxBill[ticker] ?? 0) + amount;
-  }
-  const loads = [snap.originLoadOnDeparture, ...stops.map(s => s.loadOnDeparture)];
-  const peak = loads.reduce(
-    (acc, l) => ({
-      weight: Math.max(acc.weight, l.weight),
-      volume: Math.max(acc.volume, l.volume),
-    }),
-    { weight: 0, volume: 0 },
-  );
-  return {
-    originNaturalId: run.originNaturalId,
-    stops,
-    finalUnload: snap.finalUnload,
-    cxBill,
-    purchaseBill: snap.purchaseBill,
-    originPickup: snap.originPickup,
-    warnings: [],
-    peakLoad: peak,
-    freeCapacity: {
-      weight: Math.max(0, snap.capacity.weight - peak.weight),
-      volume: Math.max(0, snap.capacity.volume - peak.volume),
-    },
-    capacity: snap.capacity,
-    loadOnDeparture: snap.originLoadOnDeparture,
-    loadOnReturn: snap.loadOnReturn,
-    overCapacity: false,
-    finalUnloadNotes: snap.finalUnloadNotes,
-  };
-}
-
-// 计算一批材料的重量/体积（用于从旧 ACT 包还原阶段载重）。
-function materialsLoad(record: Record<string, number>) {
-  let weight = 0;
-  let volume = 0;
-  for (const [ticker, amount] of Object.entries(record)) {
-    const mat = materialsStore.getByTicker(ticker);
-    if (mat) {
-      weight += mat.weight * amount;
-      volume += mat.volume * amount;
-    }
-  }
-  return { weight, volume };
-}
-
-// ── 主包解析（取代按船名切片反推）──────────────────────────
-// 旧版/无 plan 快照的 run 需从 ACT 包反推采购/装载。主包定位优先级：
-// 1) run.mainPkgName 精确匹配（execute 固化、改名无关）；
-// 2) run 带代际指纹时按 `0 Chain … <fp>` 定位（改名后仍准确）；
-// 3) 古早记录（两者皆无）才回退「Loop <船名>」切船名后缀匹配。
-function findRunMainPkg(run: UserData.ChainRun): UserData.ActionPackageData | undefined {
-  if (run.mainPkgName !== undefined) {
-    const pkg = userData.actionPackages.find(p => p.global.name === run.mainPkgName);
-    if (pkg) {
-      return pkg;
-    }
-  }
-  if (run.fp !== undefined) {
-    const suffix = ` ${run.fp}`;
-    const pkg = userData.actionPackages.find(
-      p =>
-        isChainPackageName(p.global.name) &&
-        p.global.name.startsWith('0 Chain') &&
-        p.global.name.endsWith(suffix),
-    );
-    if (pkg) {
-      return pkg;
-    }
-  }
-  const firstPkgName = run.stops[0]?.pkgName ?? '';
-  const idx = firstPkgName.lastIndexOf(' Loop ');
-  if (idx < 0) {
-    return undefined;
-  }
-  const shipName = firstPkgName.slice(idx + ' Loop '.length);
-  return userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
-}
-
-// 旧版/导入的环线记录没有 plan 快照时，从现有 ACT 包（主包/站点包/归航包）
-// 反推一份计划载重快照，让「载重」列显示阶段载重而非实时舱载。
-function buildPlanFromPackages(
-  run: UserData.ChainRun,
-): { plan: UserData.ChainRunPlan; stops: UserData.ChainRunStop[] } | undefined {
-  const mainPkg = findRunMainPkg(run);
-  const buyGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '));
-  const loadGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('装载 '));
-  const purchaseBill = buyGroup?.materials ?? {};
-  const cxBill = loadGroup?.materials ?? {};
-  const originPickup: Record<string, number> = {};
-  for (const [ticker, amount] of Object.entries(cxBill)) {
-    const pickup = amount - (purchaseBill[ticker] ?? 0);
-    if (pickup > 0) {
-      originPickup[ticker] = pickup;
-    }
-  }
-  const finalPkg = run.finalPkgName
-    ? userData.actionPackages.find(p => p.global.name === run.finalPkgName)
-    : undefined;
-  const finalUnload = finalPkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
-  // 旧版单船主包未写入 ACT 列表：用站点包「卸货」之和近似原始装载量。
-  const fallbackBill: Record<string, number> = {};
-  if (Object.keys(cxBill).length === 0) {
-    for (const stop of run.stops) {
-      const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
-      const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
-      for (const [ticker, amount] of Object.entries(unload)) {
-        fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
-      }
-    }
-    for (const [ticker, amount] of Object.entries(finalUnload)) {
-      fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
-    }
-  }
-  const originBill = Object.keys(cxBill).length > 0 ? cxBill : fallbackBill;
-  const ship = shipsStore.getById(run.shipId);
-  const cargo = ship ? storagesStore.getById(ship.idShipStore) : undefined;
-  const capacity = cargo
-    ? { weight: cargo.weightCapacity, volume: cargo.volumeCapacity }
-    : { weight: 0, volume: 0 };
-  let current = materialsLoad(originBill);
-  const stops: UserData.ChainRunStop[] = run.stops.map((stop, i) => {
-    if (stop.plan !== undefined) {
-      return stop;
-    }
-    const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
-    const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
-    const load = pkg?.groups.find(g => g.name === '提取')?.materials ?? {};
-    const unloadLoad = materialsLoad(unload);
-    const loadLoad = materialsLoad(load);
-    const next = run.stops[i + 1]?.planetName ?? run.originNaturalId;
-    const loadOnArrival = {
-      weight: Math.max(0, current.weight - unloadLoad.weight),
-      volume: Math.max(0, current.volume - unloadLoad.volume),
-    };
-    current = {
-      weight: loadOnArrival.weight + loadLoad.weight,
-      volume: loadOnArrival.volume + loadLoad.volume,
-    };
-    const loadTo: Record<string, string> = {};
-    for (const ticker of Object.keys(load)) {
-      loadTo[ticker] = next;
-    }
-    return {
-      ...stop,
-      plan: {
-        unloadAt: unload,
-        loadAt: load,
-        loadTo,
-        loadOnArrival,
-        loadOnDeparture: current,
-        clipped: false,
-      },
-    };
-  });
-  return {
-    plan: {
-      capacity,
-      originLoadOnDeparture: materialsLoad(originBill),
-      loadOnReturn: current,
-      purchaseBill,
-      originPickup,
-      finalUnload,
-    },
-    stops,
-  };
-}
-
-// 出发行采购：从主包（Chain 船名）的「购买」组还原。
-// 主包定位走 findRunMainPkg（mainPkgName / 代际指纹优先），不再切船名。
-function derivePurchaseBill(run: UserData.ChainRun): Record<string, number> {
-  const mainPkg = findRunMainPkg(run);
-  return mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '))?.materials ?? {};
-}
-
 type StopState = UserData.ChainRunStopState;
 
 function stopMarker(state: StopState) {
@@ -1603,111 +1109,8 @@ function markClassKey(state: StopState): string {
   }
 }
 
-interface RunProgress {
-  originNaturalId: string;
-  stops: { naturalId: string; planetName: string; state: StopState }[];
-  done: number;
-  total: number;
-  originState: StopState;
-  finalState: StopState;
-}
-
-// 单船各站状态：与执行前一致，沿「origin → 各站 → origin」给出每站进度。
-// 新版本将状态持久化到 chainRuns：删除 ACT/触发器后列表仍能展示站点与操作；
-// 旧记录（无持久化状态）回退到「包消失 = 完成」的推导。
-// 是否已完成（全部站点 + 归航完成）：状态列表据此显示「已完成」标记。
-function isRunFinished(sp: { progress?: RunProgress }): boolean {
-  return (
-    sp.progress !== undefined &&
-    sp.progress.finalState === 'done' &&
-    sp.progress.done >= sp.progress.total
-  );
-}
-
 // 空间站 naturalId → 所属系统 naturalId（空间站地址被 AddressSelector 规范化为系统，
 // 归航/飞往空间站的航段比较需先解析到系统）。
-function stationSystemOf(naturalId: string): string | undefined {
-  const station = stationsStore.getByNaturalId(naturalId);
-  if (!station) {
-    return undefined;
-  }
-  return getSystemLineFromAddress(station.address)?.entity.naturalId;
-}
-
-function runProgress(run: UserData.ChainRun): RunProgress {
-  const ship = shipsStore.getById(run.shipId);
-  const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
-  const flightDest = flight ? getEntityNaturalIdFromAddress(flight.destination) : undefined;
-  const dockedAt = ship?.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
-  // 环线按序执行：船已通过（停靠或飞行途中的目标站）之前的所有站必然已执行完成。
-  // 中断恢复后船可能已在途（正飞往后续站），上一站状态可能未持久化为 done——
-  // 按停靠位置（dockedAt）或飞行目的站（flightDest）前推为完成。
-  const stopIndexAt = (id: string | undefined) =>
-    id === undefined ? -1 : run.stops.findIndex(s => s.naturalId === id);
-  const dockedStopIndex = stopIndexAt(dockedAt);
-  // 归航在途：飞行目的地是出发地（空间站地址可能被规范化为系统，按归属系统比较）。
-  const homeward =
-    flightDest !== undefined &&
-    (flightDest.toUpperCase() === run.originNaturalId.toUpperCase() ||
-      (stationSystemOf(run.originNaturalId) ?? '').toUpperCase() === flightDest.toUpperCase());
-  // 已通过前缀终点（不含该站本身）：停靠站 > 在途目的站 > 归航（全部站）。
-  const passedUpTo =
-    dockedStopIndex >= 0 ? dockedStopIndex : homeward ? run.stops.length : stopIndexAt(flightDest);
-  const stops = run.stops.map((stop, i) => {
-    const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
-    const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
-    let state: StopState;
-    if (stop.state === 'done' || (passedUpTo >= 0 && i < passedUpTo)) {
-      state = 'done';
-    } else if (dockedAt === stop.naturalId || (pkgExists && fired)) {
-      state = 'arrived';
-    } else if (flightDest === stop.naturalId) {
-      state = 'transit';
-    } else if (stop.state !== undefined) {
-      // 持久化状态优先：删除 ACT/触发器不会把未完成站误判为「完成」。
-      state = stop.state;
-    } else if (!pkgExists) {
-      state = 'done';
-    } else {
-      state = 'pending';
-    }
-    return { naturalId: stop.naturalId, planetName: stop.planetName, state };
-  });
-  const done = stops.filter(s => s.state === 'done').length;
-  const allStopsDone = stops.every(s => s.state === 'done');
-  const originState: StopState =
-    run.originState === 'done' || (stops.length > 0 && stops[0]!.state !== 'pending')
-      ? 'done'
-      : 'pending';
-  const finalPkgExists =
-    run.finalPkgName !== undefined &&
-    userData.actionPackages.some(p => p.global.name === run.finalPkgName);
-  let finalState: StopState;
-  if (run.finalState === 'done') {
-    finalState = 'done';
-  } else if (allStopsDone) {
-    if (dockedAt === run.originNaturalId) {
-      // 新记录保留持久化状态（避免删除归航包被误判完成）；旧记录按原逻辑处理。
-      finalState = run.finalState === undefined ? (finalPkgExists ? 'arrived' : 'done') : 'arrived';
-    } else if (homeward) {
-      // 归航在途：目的地为出发地（空间站地址可能被规范化为系统）。
-      finalState = 'transit';
-    } else {
-      finalState = run.finalState ?? 'pending';
-    }
-  } else {
-    finalState = run.finalState ?? 'pending';
-  }
-  return {
-    originNaturalId: run.originNaturalId,
-    stops,
-    done,
-    total: stops.length,
-    originState,
-    finalState,
-  };
-}
-
 const activeRuns = computed(() => {
   const result: { shipId: string; run: UserData.ChainRun; progress: RunProgress }[] = [];
   // 主：执行中的环线记录。不限于「可分配船只」——船 DEPART 后离开空间站，
@@ -1754,70 +1157,6 @@ const progressByShip = computed(() => {
 
 // 飞行时间 watch（依赖 activeRuns，需在 activeRuns 之后注册）。
 registerFlightTimeWatch();
-
-// 把推导出的进度状态持久化到 chainRuns：列表全局状态与 ACT/触发器解耦，
-// 删除 ACT 脚本或触发器后，站点与操作内容仍能完整展示。
-watchEffect(() => {
-  for (const run of Object.values(userData.chainRuns)) {
-    const progress = runProgress(run);
-    if (run.originState !== progress.originState) {
-      run.originState = progress.originState;
-    }
-    if (run.finalState !== progress.finalState) {
-      run.finalState = progress.finalState;
-    }
-    for (let i = 0; i < run.stops.length; i++) {
-      const stop = run.stops[i]!;
-      const state = progress.stops[i]!.state;
-      if (stop.state !== state) {
-        stop.state = state;
-      }
-    }
-  }
-});
-
-// 兜底：逆推出的旧版环线记录直接持久化，删除触发器后站点列表不再丢失。
-watchEffect(() => {
-  for (const ship of shipsStore.all.value ?? []) {
-    if (userData.chainRuns[ship.id] !== undefined) {
-      continue;
-    }
-    const derived = deriveChainRun(ship.id);
-    if (derived === undefined) {
-      continue;
-    }
-    const progress = runProgress(derived);
-    const finished = progress.finalState === 'done' && progress.done >= progress.total;
-    if (!finished) {
-      userData.chainRuns[ship.id] = derived;
-    }
-  }
-});
-
-// 旧版/导入记录无 plan 快照时，从现有 ACT 包反推并持久化计划载重，
-// 使「载重」列显示阶段载重而不是实时舱载。
-watchEffect(() => {
-  for (const run of Object.values(userData.chainRuns)) {
-    if (run.plan !== undefined) {
-      continue;
-    }
-    const built = buildPlanFromPackages(run);
-    if (built === undefined) {
-      continue;
-    }
-    // 舱容数据未加载前不落盘，等数据就绪后再重建（避免 0 容量占位）。
-    if (built.plan.capacity.weight <= 0 && built.plan.capacity.volume <= 0) {
-      continue;
-    }
-    run.plan = built.plan;
-    for (let i = 0; i < run.stops.length; i++) {
-      const stopPlan = built.stops[i]?.plan;
-      if (stopPlan !== undefined) {
-        run.stops[i]!.plan = stopPlan;
-      }
-    }
-  }
-});
 
 type ChainTableRow = {
   shipId: string;
@@ -1945,14 +1284,12 @@ watchEffect(() => {
         continue;
       }
       delete userData.chainRuns[shipId];
-      clearFinishedCleanup(shipId);
       continue;
     }
     if (finished) {
       // 完成：保留在状态列表，显示「完成」。
       continue;
     }
-    clearFinishedCleanup(shipId);
   }
   // 没有运行记录时清空计划快照，避免残留旧数据影响下次规划。
   if (Object.keys(userData.chainRuns).length === 0) {

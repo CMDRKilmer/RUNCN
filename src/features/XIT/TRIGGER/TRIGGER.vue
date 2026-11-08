@@ -12,7 +12,7 @@ import { lowFuelShips } from '@src/features/basic/auto-refuel';
 import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
-import { isChainTrigger } from '@src/features/XIT/FLEET/chain-sync';
+import { isChainTrigger } from '@src/features/XIT/FLEET/chain-identity';
 
 const eventLabels: Record<UserData.TriggerEventType, string> = {
   FLIGHT_ENDED: '飞船到港',

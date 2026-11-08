@@ -47,7 +47,7 @@ export interface TransferGeometryInputs {
 export interface TransferGeometryResult {
   // 弧长（km）；undefined = 几何预测失败（轨道数据缺失 / 位置无法解析）。
   distanceKm: number | undefined;
-  // 整段平均速度（km/s）：stlIntraTransitSpeedKmS(质量) / cond。
+  // 整段平均速度（km/s）：stlIntraTransitSpeedKmS(质量) × cond。
   // 质量幂律的单一来源是 fuel-model.stlIntraTransitSpeedKmS（禁止在本文件展开公式）。
   speedKmS: number;
   // 时长（小时）；distanceKm === undefined 时为 undefined。
@@ -70,7 +70,7 @@ export interface TransferGeometryResult {
 //   3) r1/r2 = 两端天体到恒星的距离（distance3d）。
 //   4) theta = 两端相对恒星的角距：cos(θ) = dot(p1-star, p2-star) / (r1·r2)，θ = acos(clamp(...))。
 //   5) rMid = (r1 + r2) / 2；arcKm = rMid × θ（**均值圆弧**）。
-//   6) speedKmS = stlIntraTransitSpeedKmS(质量) / cond；
+//   6) speedKmS = stlIntraTransitSpeedKmS(质量) × cond；
 //      hours = arcKm / (speedKmS × 3600)。
 //
 // 失败条件（任一 → 返回 undefined，不静默）：
@@ -148,10 +148,10 @@ export async function predictTransferGeometry(
     return undefined;
   }
 
-  // 整段平均速度（km/s）：stlIntraTransitSpeedKmS(质量) / cond
+  // 整段平均速度（km/s）：stlIntraTransitSpeedKmS(质量) × cond
   // —— 公式只在 fuel-model 里写一次（2026-09-25 之前本文件用裸常数 27,512 计时，
   // 漏了质量幂律项，与 computeFuelOption 的口径漂移，重船时长偏快）。
-  const speedKmS = stlIntraTransitSpeedKmS(massT) / cond;
+  const speedKmS = stlIntraTransitSpeedKmS(massT) * cond;
 
   // 时长（小时）：d / (v × 3600)。
   const hours = arcKm / (speedKmS * 3600);
