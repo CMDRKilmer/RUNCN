@@ -151,48 +151,14 @@ watch(
   { deep: true },
 );
 
+// 货物条轨道改为纯色：原先的斜条纹 + inline 深灰变量在浅色主题下会变成
+// 黑白相间的斜纹方框（样式表色被改写、inline 变量不会）。主题下由
+// theme.ts 的 .rp-cargo-track 接管成皮肤的中浅纯色。
 onUnmounted(() => {
   if (animationTimeout !== null) {
     clearTimeout(animationTimeout);
   }
 });
-
-const totalLoadRatio = computed(() => {
-  const primary = storagesStore.getById(props.storeId);
-  if (!primary) {
-    return 0;
-  }
-  const all = [primary, ...inboundStores.value];
-  const wLoad = sumBy(all, s => s.weightLoad);
-  const vLoad = sumBy(all, s => s.volumeLoad);
-  return Math.max(wLoad / primary.weightCapacity, vLoad / primary.volumeCapacity);
-});
-
-const stripeAlertColor = computed(() => {
-  const ratio = totalLoadRatio.value;
-  const start = { r: 50, g: 50, b: 50 };
-  const target = { r: 100, g: 100, b: 100 };
-  if (ratio < 0.7) {
-    return `rgb(${start.r}, ${start.g}, ${start.b})`;
-  }
-  const normalized = (ratio - 0.7) / 0.3;
-  const r = Math.round(start.r + (target.r - start.r) * normalized);
-  const g = Math.round(start.g + (target.g - start.g) * normalized);
-  const b = Math.round(start.b + (target.b - start.b) * normalized);
-  return `rgb(${r}, ${g}, ${b})`;
-});
-
-const stripeWidth = computed(() => {
-  const ratio = totalLoadRatio.value;
-  const startWidth = 10;
-  const smallWidth = 2;
-  if (ratio < 0.7) {
-    return `${startWidth}px`;
-  }
-  const normalized = (ratio - 0.7) / 0.3;
-  return `${startWidth - (startWidth - smallWidth) * normalized}px`;
-});
-
 const alarmClass = computed(() => ({
   [$style.isAlarmRed]: props.alarmLevel === 'red',
 }));
@@ -200,8 +166,12 @@ const alarmClass = computed(() => ({
 
 <template>
   <div
-    :class="[C.ProgressBar.progress, $style.container, { [$style.isUpdating]: isAnimating }]"
-    :style="{ '--stripe-color': stripeAlertColor, '--stripe-width': stripeWidth }"
+    :class="[
+      C.ProgressBar.progress,
+      'rp-cargo-track',
+      $style.container,
+      { [$style.isUpdating]: isAnimating },
+    ]"
     @click="showBuffer(onClickCmd)">
     <Tooltip
       v-if="alarmReason"
@@ -236,30 +206,22 @@ const alarmClass = computed(() => ({
   height: 13px;
   align-items: flex-end;
   justify-content: flex-start;
+  /* 纯色轨道，见 FleetCargoBar.vue 同名说明。 */
   background-color: #2a2a2a;
-  --stripe-width: 10px;
-  --hypotenuse: calc(var(--stripe-width) * sqrt(2));
-
-  background-image: repeating-linear-gradient(
-    45deg,
-    #2a2a2a,
-    #2a2a2a calc(var(--stripe-width) / 2),
-    var(--stripe-color) calc(var(--stripe-width) / 2),
-    var(--stripe-color) var(--stripe-width)
-  );
-  background-size: var(--hypotenuse) var(--hypotenuse);
 }
 
+/* 数据刷新时用极轻的透明度脉冲代替原来的斜纹滚动，保持纯色观感。 */
 .isUpdating {
-  animation: move-stripes 0.5s linear infinite;
+  animation: inv-pulse 0.5s linear infinite;
 }
 
-@keyframes move-stripes {
-  from {
-    background-position: 0 0;
+@keyframes inv-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-  to {
-    background-position: var(--hypotenuse) 0;
+  50% {
+    opacity: 0.78;
   }
 }
 

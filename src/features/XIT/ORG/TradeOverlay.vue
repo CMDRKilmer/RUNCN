@@ -312,8 +312,8 @@ function onClose() {
   outline: none;
 }
 .qtyInput :global(input:focus) {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 .qtyButtons {
@@ -334,11 +334,11 @@ function onClose() {
   transition: border-color 0.1s ease;
 }
 .qtyBtn:hover {
-  border-color: rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
 }
 .qtyBtnMax {
   background: rgb(48, 38, 16);
-  border-color: rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
   color: rgb(255, 200, 64);
   font-weight: 600;
 }

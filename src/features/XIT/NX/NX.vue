@@ -143,28 +143,41 @@ async function buyAll() {
   box-sizing: border-box;
 }
 
+/* 表格配色全部走三套自定义主题都定义了的 --rp-skin-* token。
+   原来用 rgba(255,255,255,0.06) 做行线、opacity:0.7 压表头，在浅色主题下
+   几乎看不见；空间站列更严重：--rp-color-accent-primary 在 light 主题下被
+   主题引擎重映射成 #e7eef4（近白），压在浅灰格子上对比度约 1.1:1。
+   --rp-skin-* 规则不含会被扫描的颜色字面量，不会被二次重映射；
+   var() 里的回退只在原样深色主题（无 skin 变量）时生效。 */
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.92em;
+  font-size: 1em;
+  color: var(--rp-skin-ink, #ccc);
 }
 
 .table th,
 .table td {
   padding: 4px 8px;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--rp-skin-border, #2b485a);
 }
 
 .table th {
-  opacity: 0.7;
-  font-weight: normal;
+  color: var(--rp-skin-muted, #999);
+  background-color: var(--rp-skin-panel-strong, #1a2632);
+  border-bottom-color: var(--rp-skin-border-strong, #2b485a);
+  font-weight: 600;
   white-space: nowrap;
+}
+
+.table tbody tr:hover {
+  background-color: var(--rp-skin-hover, transparent);
 }
 
 .station {
   font-weight: bold;
-  color: var(--rp-color-accent-primary, #ffc856);
+  color: var(--rp-skin-selection, #ffc856);
   white-space: nowrap;
 }
 
@@ -175,21 +188,27 @@ async function buyAll() {
 
 .input {
   width: 90px;
-  background: #1a2632;
-  color: #ccc;
-  border: 1px solid #2b485a;
+  background: var(--rp-skin-input-bg, #1a2632);
+  color: var(--rp-skin-ink, #ccc);
+  border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 0.92em;
+  font-size: 1em;
 }
 
 .input:focus {
-  border-color: #3d6a8a;
+  border-color: var(--rp-skin-selection, #3d6a8a);
   outline: none;
 }
 
+.input:disabled {
+  color: var(--rp-skin-muted, #888);
+  background: var(--rp-skin-disabled-bg, transparent);
+}
+
 .result {
-  font-size: 0.85em;
+  font-size: 1em;
   white-space: nowrap;
+  color: var(--rp-skin-ink, #ccc);
 }
 
 .footer {
@@ -200,7 +219,7 @@ async function buyAll() {
 }
 
 .status {
-  opacity: 0.8;
-  font-size: 0.9em;
+  color: var(--rp-skin-muted, #ccc);
+  font-size: 1em;
 }
 </style>

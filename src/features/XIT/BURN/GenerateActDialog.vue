@@ -609,8 +609,8 @@ function onGenerateClick() {
 }
 
 .shipSelect:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 

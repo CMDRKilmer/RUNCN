@@ -6,6 +6,83 @@ html {
   --rp-color-red: #d9534f;
   --rp-color-orange: #f0ad4e;
   --rp-color-accent-primary: #ffc856;
+  /* 插件强调色统一入口。浅色主题下由 theme.ts 覆盖成低饱和石板蓝。 */
+  --rp-accent-rgb: 255, 176, 0;
+  /* INV BRN 分类名的半透明底色。四类（投入 / 产出 / 消耗 / 其他）在同一个主题里
+     各有一个底色，四个颜色都取自该主题自己的调色板（主色 / 绿 / 红 / 中性灰）：
+     浅色明亮是冷调四色、暖米纸是暖调四色，不再四类统一成一个蓝。
+     三套分类头规则（紧凑竖徽标 / 独立 INV 横排 / FB 面板横排）仍只引用
+     --rp-inv-cat-bg-rgb；下面按 data-label 在分类头元素上把它覆盖成对应类别的值。
+     值存成纯 RGB 三元组：主题引擎只扫描 # / rgb() 之类的颜色字面量，纯数字
+     不会被二次重映射。html{} 是「原样 / 未启用主题」的兜底值。
+     用户要求色条深浅再减半：0.26 → 0.13、0.5 → 0.25。 */
+  --rp-inv-cat-bg-rgb: 51, 86, 111;
+  --rp-inv-cat-inputs-rgb: 51, 86, 111;
+  --rp-inv-cat-outputs-rgb: 47, 107, 72;
+  --rp-inv-cat-consumables-rgb: 156, 59, 59;
+  --rp-inv-cat-other-rgb: 74, 88, 99;
+  --rp-inv-cat-bg-alpha: 0.13;
+  --rp-inv-cat-line-alpha: 0.25;
+  /* 自定义主题下浮动缓存窗口的深蓝描边。同样用纯 RGB 三元组避开主题引擎重映射，
+     换色只改下面这一行（#193C69）。 */
+  --rp-window-border-rgb: 25, 60, 105;
+}
+
+/* ── INV BRN 分类头底色：每个主题按自己的主色调给四类分别配色 ──────────
+   四类取值都来自该主题在 theme.ts 里已声明的调色板，保持低饱和与相近明度，
+   所以四类能互相区分、又不破坏「深字压浅底」的可读性：
+     · 投入 = 本主题主色     · 产出 = 本主题绿
+     · 消耗 = 本主题红       · 其他 = 本主题中性灰
+     浅色明亮 light（冷调）：#33566f / #2f6b48 / #9c3b3b / #4a5863
+     暖米纸   paper（暖调）：#9b6b2f / #4a7048 / #9b4741 / #756b5d
+   陶瓷白多彩本来就用 --rp-cc-cat-* 给四类各配一色，且组件映射骨架的
+   5 级属性选择器会直接覆盖 background-color，这里不必也不应再改它。
+   变量值是纯 RGB 三元组而非 # / rgb() 颜色字面量；选择器精确写成
+   html[data-rp-theme='…']，恰好命中主题引擎的 TOKEN_RULE_RE 而被跳过扫描，
+   因此不会被重新映射成中性灰。深浅仍沿用上面全局的 0.13 / 0.25。 */
+html[data-rp-theme='light'] {
+  --rp-inv-cat-inputs-rgb: 51, 86, 111;
+  --rp-inv-cat-outputs-rgb: 47, 107, 72;
+  --rp-inv-cat-consumables-rgb: 156, 59, 59;
+  --rp-inv-cat-other-rgb: 74, 88, 99;
+}
+
+html[data-rp-theme='paper'] {
+  --rp-inv-cat-inputs-rgb: 155, 107, 47;
+  --rp-inv-cat-outputs-rgb: 74, 112, 72;
+  --rp-inv-cat-consumables-rgb: 155, 71, 65;
+  --rp-inv-cat-other-rgb: 117, 107, 93;
+}
+
+/* 把「某一类 → 某一个底色」挂到分类头元素本身。三套分类头规则
+   （html[data-rp-inv-compact='on'] 竖徽标 / 独立 INV 横排 / FB 面板横排）
+   都用 rgba(var(--rp-inv-cat-bg-rgb), …) 读它，所以一次定义即同时覆盖
+   「紧凑 + 非紧凑」「独立窗口 + FB 面板」全部组合，不必动任何组件规则。
+   自定义属性在元素上定义，优先于从 html 继承下来的兜底值；
+   :is 只限定 INV / SHPI 的分类头，不碰其它命令窗口的同名容器。 */
+:is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Inputs'] {
+  --rp-inv-cat-bg-rgb: var(--rp-inv-cat-inputs-rgb);
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Outputs'] {
+  --rp-inv-cat-bg-rgb: var(--rp-inv-cat-outputs-rgb);
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Consumables'] {
+  --rp-inv-cat-bg-rgb: var(--rp-inv-cat-consumables-rgb);
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) :is(
+    [class*='SectionHeader__container'][data-label='其他'],
+    [class*='SectionHeader__container'][data-label='Other']
+  ) {
+  --rp-inv-cat-bg-rgb: var(--rp-inv-cat-other-rgb);
+}
+
+/* 所有 XIT 面板里的选项按钮（RadioItem）文字统一放大 1 号：10px → 11px。
+   游戏原生 typeSmall 是 10px，主题引擎只改颜色不改字号，这里用 !important 压过。 */
+[class*='RadioItem__value'] {
+  font-size: 11px !important;
 }
 
 @font-face {
@@ -22,4 +99,800 @@ html {
   font-weight: 400;
   font-display: block;
   src: url('~/fonts/fa-regular-400.woff2') format('woff2');
+}
+
+/* ── INV 紧凑布局（可选，默认关闭；全局 INV / SHPI 生效） ──────────────
+   所有规则都带 html[data-rp-inv-compact='on'] 前缀：默认（含刷新后未开启时）
+   完全没有覆盖，游戏原生 INV / SHPI 保持原版排列与图标大小。只有点击窗体内部
+   站点名行右端的双状态排列按钮切到「紧凑排列」后，inv-compact-layout.tsx 才会把该
+   属性置为 on；切回「常规排列」时由下面的 off 组规则恢复 BRN 分行中文分类头。
+   按用户要求已同步到全局：原先紧凑布局与按钮是「XIT FB 面板」专属，
+   现在独立打开的 INV / SHPI 窗口也共用同一个开关，所以下面这组 on 规则
+   不再带 [data-rp-fb-panel] 前缀。off 组里 FB 面板专用那条（含 12px 右边距）
+   仍保留前缀，独立窗口的常规分类头仍由 :not([data-rp-fb-panel] *) 那组负责。
+   原生排布是分组头独占一整行 + space-around，会在组末留大片空白；改成竖排
+   中文窄标签后物料跨组连续流动，图标、拖拽、排序控件全部保留。
+   图标档位只改 --rp-inv-icon-size（当前 34px，按需 ±2px 微调即可）。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) {
+  --rp-inv-icon-size: 34px;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='InventoryView__grid'] {
+  justify-content: flex-start !important;
+  align-content: flex-start !important;
+  margin-bottom: 0 !important;
+}
+
+/* 分组头做成「竖排书脊徽标」：原先只有 14px 宽、0.15 透明底、一条淡色左边框
+   和 10px 竖排字，夹在物料图标里几乎认不出是分类。现在换成与独立 INV / FB 普通
+   排版共用的半透明底（--rp-inv-cat-bg-rgb，按主题 × 类别分别取值）+ 主题深字粗体竖排中文；四类各有底色，靠颜色与文字双重区分。底色存成纯 RGB 三元组的 var()，主题引擎只扫描 # / rgb() 颜色字面量，不会把这层底色二次重映射。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'] {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch !important;
+  width: auto !important;
+  min-width: 20px;
+  height: auto !important;
+  min-height: 0;
+  margin: 0 4px 0 0 !important;
+  padding: 4px 2px !important;
+  border: 1px solid rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-line-alpha)) !important;
+  border-radius: 3px;
+  background-color: rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-bg-alpha)) !important;
+  background-image: none !important;
+  box-sizing: border-box;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container']::after {
+  content: attr(data-label);
+  color: var(--rp-skin-ink, #26333d) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+  letter-spacing: 2px;
+  line-height: 1;
+  text-shadow: none !important;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Consumables']::after {
+  content: '消耗';
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Inputs']::after {
+  content: '投入';
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Outputs']::after {
+  content: '产出';
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='其他']::after,
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Other']::after {
+  content: '其他';
+}
+
+/* Tile 外边距的清零统一交给 FB.vue 的槽级规则（.slot.mainInvSlot /
+   .slot.fltSlot）：`rp-command-INV` 类加在 TileFrame__frame 上，而 Tile__tile
+   是它的父元素，这里写「命令类的后代 Tile__tile」永远匹配不到，故不再重复。
+   下面只处理 ScrollView__view 的 -15px 负边距留下的固定空白。 */
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view'] {
+  margin-right: 0 !important;
+  margin-bottom: 0 !important;
+  padding-right: 0 !important;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__container'] {
+  width: calc(var(--rp-inv-icon-size) + 10px) !important;
+  margin: 2px !important;
+  padding: 1px !important;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__image'] {
+  width: var(--rp-inv-icon-size) !important;
+  height: var(--rp-inv-icon-size) !important;
+  margin: 1px auto !important;
+}
+
+/* 图标尺寸由游戏写在 style 属性里，必须 !important 才能覆盖。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__container'],
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__container'] {
+  width: var(--rp-inv-icon-size) !important;
+  height: var(--rp-inv-icon-size) !important;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__container'] {
+  font-size: calc(var(--rp-inv-icon-size) * 0.33) !important;
+}
+
+/* 只排版名字，不碰 display：显隐完全交还原插件的 hide-item-names 功能。
+   该功能的规则是 .refined-prun .GridItemView__name { display:none }（无
+   !important），而下面这条带 html[attr] + :is() 的选择器特异性高得多；
+   以前这里写 display:block 会把它压掉，导致紧凑模式下
+   关掉名字无效（非紧凑模式没有覆盖所以正常）。去掉后两种排版都受同一开关控制，
+   未开启时由 prun-bugs 的 .gridItemName 保持 display:block。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__name'] {
+  font-size: 9px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}
+
+/* 紧凑小图标里，缩写字母原本居中铺满整个图标，数量角标又绝对定位在右下
+   且带不透明底，正好把字母右半边盖住。让字母整体上移、角标收紧成
+   小角标，分成「上部字母 / 右下数量」两区，互不遮挡。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__labelContainer'] {
+  padding-bottom: 11px !important;
+  box-sizing: border-box;
+}
+
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__indicator']:not([class*='Container']) {
+  padding: 1px 2px !important;
+  font-size: 9px !important;
+  line-height: 1 !important;
+  border-radius: 2px;
+}
+
+/* 数量角标只留数字，不要外框：物料图标自身已有一圈边框，角标再描一圈会
+   形成「内外框」。主题层已在 html[data-rp-theme] 统一去掉描边（theme.ts），
+   这里在紧凑作用域内再加一道保险，防止游戏原生规则把边框带回来。 */
+html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__indicator'] {
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ── INV / SHPI「紧凑排列」固定文字 + 选中态按钮（全局） ───────────────
+   按钮挂在 TileFrame__body 内（anchor 的父节点），绝对定位落在站点名行
+   （「Animus a (VH-874a)（制造）」那一行）的最右端；body 是 position:relative，
+   因此按钮随窗口内容整体移动，不受标题栏 / 上下文命令行显隐影响。
+   上下文命令行（WAR / UPCK 等）不再为按钮预留右侧空间，恢复原版排布。
+   按用户要求同步到全局 INV / SHPI：显隐规则不带 [data-rp-fb-panel] 前缀，
+   FB 面板与独立窗口都显示。FB 的异步 appendChild 搬移不影响挂载点。
+   注意 XIT FLT 的「产出装船」按钮仍是 FB 面板专属，不要一起放开。 */
+[data-rp-ui='inv-compact-toggle'] {
+  display: inline-flex !important;
+  align-items: center;
+}
+
+/* ── XIT FB 面板内 XIT FLT 标题栏右侧的「产出装船」选中态按钮 ──────────
+   与紧凑排列按钮同一套作用域策略：注入发生在磁贴被 FB 搬进面板之前，
+   因此按钮是否可见完全交给 [data-rp-fb-panel] 祖先判断。独立打开的
+   XIT FLT 窗口不显示按钮，也不占标题栏留白。按钮外观在
+   flt-autoload-toggle.module.css，绝对定位落在标题栏右侧。 */
+[data-rp-ui='flt-autoload-toggle'] {
+  display: none !important;
+}
+
+[data-rp-fb-panel] [data-rp-ui='flt-autoload-toggle'] {
+  display: inline-flex !important;
+  align-items: center;
+}
+
+/* ── 固定文字 + 选中态：全插件共用，只有一条下划线 ───────────────────
+   适用范围：BLU 右上「隐藏」、XIT FLT「产出装船」、全局 INV/SHPI
+   「紧凑排列」、屏幕列表「锁定」与「隐藏」。文字恒定，状态靠
+   aria-pressed 与 data-rp-selected='on' 表达，不再写「开 / 关」或切换文案。
+   用户明确要求：选中时**不加底色、不改文字颜色、不改字重**，只留下划线，
+   所以这里一条颜色声明都没有，旧版「反色实底 + color-mix 压深」已删除。
+   新按钮统一带 data-rp-ui + data-rp-selected；BLU / FLT 两个是早期实现，
+   保留了各自的 data-rp-autoload / data-rp-blu-hidden-active 供验收脚本使用，
+   所以下面把两套属性都列上，声明共用一份。
+   三档特异性仍是必要的：这些按钮大多带游戏原生 Button__btn，三套自定义
+   主题会用 !important 覆盖 text-decoration 以外的样式，下划线本身也要加
+   !important 才能在 hover / active / primary 状态下稳定存在。 */
+html:not([data-rp-theme]) [data-rp-ui='flt-autoload-toggle'][data-rp-autoload='on'],
+html:not([data-rp-theme]) [data-rp-ui='blu-show-hidden-toggle'][data-rp-blu-hidden-active='on'],
+html:not([data-rp-theme]) [data-rp-ui][data-rp-selected='on'],
+html[data-rp-theme][data-rp-theme][data-rp-theme] [data-rp-ui='flt-autoload-toggle'][data-rp-autoload='on'],
+html[data-rp-theme][data-rp-theme][data-rp-theme] [data-rp-ui='blu-show-hidden-toggle'][data-rp-blu-hidden-active='on'],
+html[data-rp-theme][data-rp-theme][data-rp-theme] [data-rp-ui][data-rp-selected='on'] {
+  text-decoration: underline !important;
+  text-decoration-thickness: 2px !important;
+  text-underline-offset: 2px !important;
+}
+
+/* ── SHPI：窗体内部的文字「卸货」按钮搬到标题栏图标按钮 ─────────────────
+   shpi-header-actions 挂在 TileFrame.header 右侧：FB 面板会把内嵌磁贴的
+   TileFrame.controls 整体隐藏，挂在那里按钮完全不可见；header 在独立窗口和
+   FB 内嵌磁贴里都始终可见，所以两种窗口统一隐藏原文字按钮，不再留例外。
+   原按钮只是 display:none，节点保留，图标按钮仍通过 click() 走游戏原生流程。 */
+.rp-command-SHPI [class*='StoreView__centered'] > button {
+  display: none !important;
+}
+
+/* ── SHPI：卸货 / 起飞图标靠到标题栏最右、原生窗口按键左边 ────────────
+   TileFrame.header 是 display:block，按钮组是 inline-flex，margin-left:auto
+   对块级流里的行内元素无效，所以原先图标紧跟在命令文字后面（离右端约
+   150px）。改成相对 header 绝对定位：独立窗口右端是游戏原生
+   TileControls（约 70.6px 宽），让出 76px 后图标正好贴在它左侧。
+   FB 面板内嵌磁贴的 TileControls 被隐藏，改回贴右边缘 4px。 */
+.rp-command-SHPI [class*='TileFrame__header'] {
+  position: relative;
+}
+
+.rp-command-SHPI [data-rp-ui='shpi-header-actions'] {
+  position: absolute !important;
+  right: 76px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: 0 !important;
+  z-index: 2;
+}
+
+[data-rp-fb-panel] .rp-command-SHPI [data-rp-ui='shpi-header-actions'] {
+  right: 4px;
+}
+
+/* ── 可读性：同类界面的行分隔 ───────────────────────────────────────
+   游戏原生给数据行设了 border-bottom 颜色却把宽度置 0，于是
+   SFC 顶部飞船信息 / HQ 总部信息这类「表头多行信息」、HQ 库存分配表、
+   XIT REPD 左侧基地栏全都连成一片。统一补一条 1px 细线：颜色走主题
+   边框变量（浅色 / 暖色各自协调），原样主题回退中性灰蓝；只加深边界，
+   不铺深色底、不改文字。 */
+
+/* 1) SFC / HQ 等窗口顶部的表头多行信息（FormComponent 表单行） */
+[class*='FormComponent__container'] {
+  border-bottom: 1px solid var(--rp-skin-border, rgba(169, 190, 205, 0.45)) !important;
+}
+
+/* 2) 表格数据行：HQ 库存分配、REPD 左侧基地栏、CBUY 等共用同一套原生表 */
+table td {
+  border-bottom: 1px solid var(--rp-skin-border, rgba(169, 190, 205, 0.45)) !important;
+}
+
+/* 3) 上下文菜单命令：原生 item 只有底色、零边框，一串命令像连续文字。
+   只补一圈边框 + 小圆角，不额外加底色（保留主题已有浅底）。 */
+[class*='ContextControls__item'] {
+  border: 1px solid var(--rp-skin-border-strong, rgba(169, 190, 205, 0.65)) !important;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+/* 4) NOTS 通知列表：每条通知是 AlertListItem__container，原生 border 宽度是 0、
+   只靠 1px margin 和 5% 灰底区分，在浅色 / 暖色 / 陶瓷白主题下几乎看不出边界。
+   补一条 1px 底线，颜色用主题强调边框（与上下文命令按钮同一档），
+   只加深边界、不铺底色，避免重新引入用户明确不要的斑马纹。 */
+.rp-command-NOTS [class*='AlertListItem__container'] {
+  border-bottom: 1px solid var(--rp-skin-border-strong, rgba(169, 190, 205, 0.65)) !important;
+  box-sizing: border-box;
+}
+
+/* 5) 悬浮说明的指示三角形：全局去掉。
+   游戏原生 [data-tooltip] 用 ::before 画说明文字框、::after 画 6px 指示三角；
+   prun-bugs.module.css 的 .tooltipBottom / .tooltipRight 还会给同一个 ::after
+   同时设 border-top-color 与 border-bottom-color（一个被主题刷成描边灰、一个
+   保留橙色），hover 时看起来就是上下对着的两个三角。ⓘ 带圈说明图标、BURN
+   的「比价」「生产」「劳动力」都是同一套机制，所以不再逐处打补丁，统一在
+   这里隐藏三角；::before 说明文字框、定位与触发时机完全不变。
+   !important 用来压过 [data-tooltip]:hover::after { display:block } 以及
+   CSS Modules 里 .tooltipBottom::after / .tooltipRight::after 的方向规则。 */
+[data-tooltip]::after {
+  display: none !important;
+}
+
+/* ── 6) XIT 自研面板 + 原生 FIN 类财务窗口的可读性兜底（仅自定义主题） ───
+   筛查结论：三套自定义主题下，XIT 面板里最普遍的低可读性来自两类根因——
+   (a) refined-prun.css 顶部 html{} 定义的 --rp-color-accent-primary 会被
+       主题引擎的 CSSOM 扫描重映射成近白色（light 下实测 #e7eef4），
+       凡拿它当文字色（NX 空间站列、PLAN 高亮等）就是浅字压浅底；
+   (b) 组件里 rgba(255,255,255,0.0x) 的极淡行线、th / 辅助文字的
+       opacity:0.5~0.8，在浅底上都会被冲淡到看不见。
+   rp-command-XIT 是所有 XIT 命令窗口 TileFrame 的共同类名；原生 FIN /
+   FINBS / FINIS / FINLA / CORPFIN 则是 rp-command-FIN* / -CORPFIN。
+   两类界面复用同一批游戏原生财务 CSS 类（FinanceOverviewPanel /
+   IncomeStatementPanel / LiquidAssetsPanel / ColoredValue），只给 XIT 兜底
+   会让原生 FIN 与 XIT FINxx 的格式分裂（2026-11 真机基线，light：原生表头
+   透明 + 400 字重 + rgb(169,190,205) 线，XIT 表头 rgb(219,231,240) + 600
+   + rgb(127,156,178)；原生 --rp-color-green=#e8f2eb 近白、
+   --rp-color-text=rgb(175,175,175)，XIT 分别是 #2f6b48 / #26333d）。
+   所以用 :is() 把两类窗口合并进同一组规则，一处改动两边生效。
+   重复 html[data-rp-theme] 把特异性抬到 (0,5,x)，压过主题引擎运行时插入的
+   !important 重映射规则和 CSS Modules 局部规则。只补文字色 / 边界 / 不透明度，
+   不加斑马纹、不改字号、不动按钮；原样主题（无 data-rp-theme）完全不生效。
+
+   2026-11 全库筛查补充：主题引擎会把自己注入的 --rp-color-* 变量
+   也二次重映射成近白色 —— light 真机实测 --rp-color-green=#e8f2eb、
+   --rp-color-orange=#e7eef4、--rp-color-accent-primary=#e7eef4、
+   --rp-color-text=rgb(175,175,175)。组件把这些变量当「文字色」用时就是
+   浅字压浅底（CONTS「贷款发放/供应」1.01:1、PROD 订单状态、ORG 发布提示、
+   conts-shared 的 deadlineCell 等）。--rp-skin-* 系列不受扫描影响，仍是深字。
+   所以在面板内把被污染的变量局部重定义一遍：一处覆盖所有引用它们的
+   组件（包括 PLAN/CQ/PROFIT/BSN/ORG/CONTS/PROD 以及 10+ 个复制粘贴深色面板
+   样式的 SFC），不必逐文件改；原样主题与其它游戏原生界面不受影响。
+   ProgressBar* 把同名变量当进度条填充色用，原先被污染成近白同样看不见，
+   重定义成深色语义色后反而恢复可见，不是副作用。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) {
+  /* 局部重定义：只在上面两类窗口内生效，其它游戏原生界面不受影响。 */
+  --rp-color-accent-primary: var(--rp-skin-selection, currentColor);
+  --rp-color-text: var(--rp-skin-ink, currentColor);
+  --rp-color-text-component: var(--rp-skin-ink, currentColor);
+  --rp-color-green: var(--rp-skin-action-flight, currentColor);
+  --rp-color-orange: var(--rp-skin-action-unload, currentColor);
+  --rp-color-red: var(--rp-skin-action-fuel, currentColor);
+}
+
+/* 组件里 opacity:0.3~0.85 压淡辅助文字，深底时代无害，浅底上直接掉到
+   3~4:1（CQ 空态 3.02:1、hint 3.41:1、PROFIT 搜索标签 4.44:1、FTC 21 处、
+   PLAN 8 处、CONTS/conts-shared 6 处）。统一拉回 1，层次感改由下面的
+   --rp-skin-muted 之类深色语义色表达。
+   精确排除三类「故意低透明度」：拖拽把手（grip，opacity:0 本就该隐藏）、
+   禁用控件、以及 CONTS 的 dimmed 项（配 grayscale 表示条件未满足）。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  :is(span, div, td, th, p, label, small, b, strong, em, a, li, h1, h2, h3, h4, h5, h6, button, summary, details):not(
+    [class*='grip']
+  ):not([class*='Grip']):not([class*='dimmed']):not([disabled]):not([class*='disabled']) {
+  opacity: 1 !important;
+}
+
+/* ⓘ 说明图标是插件自研组件（Tooltip.vue），不在游戏原生界面里。
+   原来的 color:#999 被主题引擎重映射成近白，实测 1.03:1 几乎看不见。
+   注意：不能硬设深色 —— 真机上 ⓘ 常嵌在深蓝底 LABEL 里
+   （FormComponent 的 label 被重映射成 rgb(51,86,111) + 白字），
+   深字压深底反而只有 1.06:1。用 inherit 继承所在容器的文字色：
+   深底上自动是白字、浅底上自动是深字，两套都达标。
+   这条覆盖全部三套自定义主题（含陶瓷白自身的 --rp-cc-text-muted，
+   inherit 比任何固定色都更鲁棒）；陶瓷白在 theme-ceramic.ts 里的
+   background/border 规则不受影响，那里管的是「不要黑底」。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] .rp-tooltip-icon {
+  color: inherit !important;
+}
+
+/* 输入框 placeholder：BSN 等用 rgba(255,255,255,0.35)，浅底上等于隐形。
+   placeholder 不是文本节点，静态遍历发现不了，这里单独兜底。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  :is(input, textarea)::placeholder {
+  color: var(--rp-skin-muted, currentColor) !important;
+  opacity: 1 !important;
+}
+
+html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table th {
+  color: var(--rp-skin-ink, inherit) !important;
+  opacity: 1 !important;
+  background-color: var(--rp-skin-panel-strong, transparent) !important;
+  border-bottom: 1px solid var(--rp-skin-border-strong, currentColor) !important;
+  font-weight: 600 !important;
+}
+
+html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table td {
+  border-bottom: 1px solid var(--rp-skin-border, currentColor) !important;
+}
+
+/* 非表格卡片 / 面板：白半透明描边 rgba(255,255,255,0.05~0.18) 在浅底上
+   完全消失，卡片边界分不出。用 [class*='card'|'panel'] 命中 CSS Modules
+   哈希类名里保留的语义片段，只改 border-color，不动背景与盒模型。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  :is([class*='card'], [class*='Card'], [class*='panel'], [class*='Panel'], [class*='section'], [class*='Section']) {
+  border-color: var(--rp-skin-border, currentColor) !important;
+}
+
+/* 禁用控件：上面的 opacity 规则特意放过了 [disabled]，但组件常用
+   opacity:0.4~0.5 表达禁用（CONTGEN 删除「×」2.31:1、CXOS 复选框），
+   浅底上连写什么都读不出。这里统一改成「浅底 + 主题次要深字 + 浅边框」，
+   禁用感由底色/边框表达，文字保持 4.5:1 以上。沿用 CXOS 已验证的范式。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  :is(button, input, select, textarea):disabled {
+  opacity: 1 !important;
+  color: var(--rp-skin-muted, currentColor) !important;
+  background-color: var(--rp-skin-disabled-bg, transparent) !important;
+  border-color: var(--rp-skin-disabled-border, currentColor) !important;
+}
+
+/* 空态 / 提示单元格常用内联 opacity 冲淡文字，只把 opacity 拉回 1，
+   文字色仍由原规则或上面的 token 决定，不强行改语义色。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) :is(td, th)[style*='opacity'] {
+  opacity: 1 !important;
+}
+
+/* ── 7) INV / SHPI 窗口滚动条：只留一条按需显示的窄条 ─────────────────
+   游戏原生 ScrollView 会同时画两套滚动条：① 自绘的 6px 轨道
+   （ScrollView__track-* / thumb-*）；② ScrollView__view 上
+   overflow:scroll 触发的浏览器滚动条。非紧凑模式靠 -15px 负 margin
+   把②推出可视区，紧凑模式把负 margin 清零后②重新出现，两套叠加在右侧。
+   overflow:scroll 即使内容没溢出也强制画轨道（真机 clientH === scrollH
+   时仍有 4px 条），这就是「物料已全显却出现滚动条」。
+   修法：view 改 auto 按需显示；隐藏自绘 track / thumb，只保留
+   ::-webkit-scrollbar 的 4px 无箭头细条；并把主题引擎注入的
+   html[data-rp-theme] * { scrollbar-color: ... } 在本作用域清回 auto
+   （非 auto 的标准属性会让 Chromium 忽略 ::-webkit-scrollbar，
+   改画 ≈10px 带箭头的标准条）。
+   作用域用 rp-command-INV / rp-command-SHPI：全局独立窗口与 FB 面板
+   内嵌磁贴的 frame 都带这个类，一处改动两边生效。不带主题前缀，
+   因为原样主题同样有双轨叠加，且这里只改滚动条、不动任何配色。 */
+:is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view'] {
+  overflow: auto !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: auto !important;
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) :is([class*='ScrollView__track'], [class*='ScrollView__thumb']) {
+  display: none !important;
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view']::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+  background: transparent;
+}
+
+/* 上下箭头按钮一律不渲染：用户要的是「窄的、上下不带箭头」的细条。 */
+:is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view']::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0;
+  height: 0;
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view']::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view']::-webkit-scrollbar-thumb {
+  background-color: var(--rp-skin-scroll-thumb, currentColor);
+  border: 0 !important;
+  border-radius: 3px;
+}
+
+/* ── 8) 原生命令执行状态斜纹遮罩（仅自定义主题） ───────────────────────
+   COGCPEX / MTRA / PROD 等原生命令点执行按钮后，窗口会盖一层
+   ActionFeedback__overlay：运行中 progress 是橙色斜纹滚动、完成
+   success 是绿色静止斜纹。游戏原生把颜色写死在 repeating-linear-gradient
+   的字面量里（rgba(240,173,78,.5) / rgba(92,184,92,.5)），主题引擎
+   collect() 把 background-image 判为 gradient 角色，按色相换成
+   palette.*.gradient 的近白色并带 !important 注入，三套自定义主题下
+   两态全糊成白底白纹。
+   注意这不是 --rp-color-* 被污染那条路径：遮罩不引用任何变量，
+   所以第 6) 组的变量重定义覆盖不到；且 COGCPEX 是 rp-command-COGCPEX，
+   不在 XIT / FIN 作用域内。
+   修法：按类名直接覆盖 background-color / background-image，颜色走
+   --rp-skin-action-unload（运行中）/ -flight（完成）/ -fuel（失败），
+   三套主题都定义了这三个深色语义色；整条值用 color-mix + var()，
+   不含颜色字面量，不会被 collect() 二次重映射。只改颜色，不动
+   animation / background-position，保留「运行中滚动、完成静止」。
+   重复 html[data-rp-theme] 抬到 (0,4,x)，压过引擎 (0,1,0) 的 !important。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='ActionFeedback__progress'] {
+  background-color: color-mix(in srgb, var(--rp-skin-action-unload, currentColor) 30%, transparent) !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 25%,
+    color-mix(in srgb, var(--rp-skin-action-unload, currentColor) 50%, transparent) 25%,
+    color-mix(in srgb, var(--rp-skin-action-unload, currentColor) 50%, transparent) 50%
+  ) !important;
+}
+
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='ActionFeedback__success'] {
+  background-color: color-mix(in srgb, var(--rp-skin-action-flight, currentColor) 30%, transparent) !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 25%,
+    color-mix(in srgb, var(--rp-skin-action-flight, currentColor) 50%, transparent) 25%,
+    color-mix(in srgb, var(--rp-skin-action-flight, currentColor) 50%, transparent) 50%
+  ) !important;
+}
+
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='ActionFeedback__error'] {
+  background-color: color-mix(in srgb, var(--rp-skin-action-fuel, currentColor) 30%, transparent) !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 25%,
+    color-mix(in srgb, var(--rp-skin-action-fuel, currentColor) 50%, transparent) 25%,
+    color-mix(in srgb, var(--rp-skin-action-fuel, currentColor) 50%, transparent) 50%
+  ) !important;
+}
+
+/* ── 原版 INV 命令窗口：BRN 排序的分组名换成 FB 同款分类名外观 ──────────
+   BRN 排序由 inv-custom-item-sorting 用 CategoryHeader.vue 渲染成
+   SectionHeader__container[data-label]（Outputs / Inputs / Consumables / 其他）。
+   游戏原生只给 0.15 透明底 + 12px 深字，横排独占一行时几乎认不出是分类标题。
+   这里只改「类型名称文字的式样」：换成按主题 × 类别配置的半透明底 + 细描边圆角 +
+   主题深字粗体中文（投入 / 产出 / 消耗 / 其他），用 font-size:0 隐去英文原文、::after
+   显示中文。容器仍保持 width:100% 横排独占一行，writing-mode、margin、图标尺寸、
+   网格 space-around、排序控件一律不动（用 inset box-shadow 描边，不占盒模型尺寸）。
+   :not([data-rp-fb-panel] *) 排除 XIT FB 面板内的 INV 磁贴——那里由紧凑 / 普通两套
+   规则负责，不叠加。底色用共用 --rp-inv-cat-bg-rgb 纯 RGB var()，不会被主题引擎
+   二次重映射；文字色走 --rp-skin-ink，浅色 / 暖色 / 原样主题自动跟随。 */
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label] {
+  background-color: rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-bg-alpha)) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-line-alpha)) !important;
+  border-radius: 3px;
+  justify-content: center;
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label]::after {
+  content: attr(data-label);
+  color: var(--rp-skin-ink, #26333d) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+  letter-spacing: 2px;
+  line-height: 1;
+  text-shadow: none !important;
+}
+
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label='Consumables']::after {
+  content: '消耗';
+}
+
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label='Inputs']::after {
+  content: '投入';
+}
+
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label='Outputs']::after {
+  content: '产出';
+}
+
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label='其他']::after,
+.rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label='Other']::after {
+  content: '其他';
+}
+
+/* ── XIT FB 面板内的 INV/SHPI：普通排版的 BRN 分类名 ──────────────────
+   上面 267 行那组带 :not([data-rp-fb-panel] *) 只覆盖独立窗口，紧凑模式另有
+   竖徽标规则，中间的「FB 面板 + 普通排版」一直还是游戏原生淡底英文。这里补上
+   与独立 INV 完全一致的中文横排式样（font-size:0 + ::after），容器保持横排
+   独占一行、图标尺寸与网格排布一律不动；底色同样用共用的主题主色半透明底。
+   三套分类名（独立 / FB 普通 / FB 紧凑）因此共享同一份主题 × 类别配色，文字仍各按排版走。
+   FB 面板把内嵌滚动条收窄到 4px，网格比独立窗口宽约 11px，色条右端会伸到
+   z-index:2 的 ScrollView__track-vertical 底下被盖住（独立窗口网格天然短 10px，
+   没有此问题）。这里给色条让出 12px 右边距，右端停在轨道左侧约 3px，
+   与独立 INV 的观感一致；紧凑模式的 20px 竖徽标不走这条规则。 */
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label] {
+  margin-right: 12px !important;
+  background-color: rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-bg-alpha)) !important;
+  background-image: none !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-line-alpha)) !important;
+  border-radius: 3px;
+  justify-content: center;
+  font-size: 0 !important;
+  line-height: 1 !important;
+}
+
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label]::after {
+  content: attr(data-label);
+  color: var(--rp-skin-ink, #26333d) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+  letter-spacing: 2px;
+  line-height: 1;
+  text-shadow: none !important;
+}
+
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Consumables']::after {
+  content: '消耗';
+}
+
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Inputs']::after {
+  content: '投入';
+}
+
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Outputs']::after {
+  content: '产出';
+}
+
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='其他']::after,
+html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Other']::after {
+  content: '其他';
+}
+
+/* ── 自定义主题（浅色明亮 / 暖米纸）下的浮动缓存窗口边界 ──────────────
+   theme.ts 会把游戏原生窗口边框的颜色重映射成接近浅底的浅色，新建的缓存窗口
+   和点按钮弹出的窗口因此容易和背景融为一体。default「原样」主题会 delete
+   dataset.rpTheme，所以下面规则只在自定义主题下生效。
+   用 box-shadow 而不是 border：窗口宽高由游戏 inline style 精确控制，border
+   会占盒模型尺寸、可能把内容挤出滚动条。颜色只写 var() 且不带 # 回退，
+   避免被主题引擎的 COLOR_RE 扫描二次改写。
+   用户反馈原先的主题石板蓝描边仍不突出，先改成橙色、后又定为深蓝
+   （--rp-window-border-rgb）；内圈 2px / 外圈 5px 的结构保持不变。
+   颜色是纯 RGB 三元组变量，主题引擎只会跳过无法解析的 var()，
+   三套主题下都是同一个深蓝。
+   只匹配浮动窗口外壳 Window__window；底栏 Dock 项与 FB 面板内嵌磁贴
+   （TileFrame__frame）都不带这个类名，不会被误伤。 */
+html[data-rp-theme] [class*='Window__window'] {
+  box-shadow:
+    0 0 0 2px rgb(var(--rp-window-border-rgb)),
+    0 0 0 5px var(--rp-skin-panel) !important;
+}
+
+html[data-rp-theme] [class*='Window__header'] {
+  box-shadow: inset 0 -2px 0 0 rgb(var(--rp-window-border-rgb)) !important;
+}
+
+/* ── XIT FB 面板内嵌磁贴的标题栏 ─────────────────────────────────────
+   只作用于带 data-rp-fb-panel 的面板里、被搬进 data-fb-slot 的原生磁贴；
+   用户单独开的 BS / INV / BURN / FLT / SHPI 窗口完全不受影响。
+
+   1) 隐藏标题栏末尾的命令文本（BS XG-751b / INV 02f2118f / XIT BURN ... /
+      XIT FLT / SHPI ...）。必须用 display 隐藏，不能 remove() 或清空文本：
+      FB.vue 的 collectTiles() 靠 TileFrame__cmd 的 textContent 认领磁贴，
+      清空会让面板认不出自己的子磁贴并反复开窗；display:none 下文本仍可读。
+   2) 标题文字加大 2 号（游戏原生 11px → 13px）。用 calc(1em + 2px) 跟随
+      父级 header 的基准字号，主题/缩放变化时仍是「比原来大 2」，不写死
+      绝对值。SHPI 的状态徽标 ::before 与标题栏按钮组各有自己的字号，
+      保持原样不跟着放大。 */
+[data-rp-fb-panel] [data-fb-slot] [class*='TileFrame__cmd'] {
+  display: none !important;
+}
+
+[data-rp-fb-panel] [data-fb-slot] [class*='TileFrame__title'] {
+  font-size: calc(1em + 2px) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   陶瓷白多彩主题（ceramic-colorful）—— 语义 token 层
+   ──────────────────────────────────────────────────────────────────────
+   这是本主题唯一的颜色字面量来源：组件规则一律 var(--rp-cc-*) 引用，
+   theme.ts 的 skin.vars 也用 var() 别名指回这里，颜色不复制第二份。
+   规则块写在全局样式入口（startup 注入的 refined-prun.css）里，配合
+   refined-prun-startup.ts 提前设置 data-rp-theme，首屏就是陶瓷白，不会
+   先闪一帧游戏原生深色。theme.ts 的 collect() 会跳过精确的
+   html[data-rp-theme=...] token 定义块，避免这些颜色被当作「游戏原生色」
+   重映射掉。
+
+   层级：canvas 暖陶瓷白 → surface 近白卡片 → surface-alt 表头/次级面。
+   文字统一深墨（不用纯黑），彩色只出现在分类/图表/状态/装饰上；按钮、
+   表单、表格按「组件类型」共享同一套 token，不按页面或卡片变色。
+   对比度由 prun-cdp/verify-ceramic-contrast.mjs 逐项校验（WCAG 2.1）。
+   ══════════════════════════════════════════════════════════════════════ */
+html[data-rp-theme='ceramic-colorful'] {
+  color-scheme: light;
+
+  /* 背景 */
+  --rp-cc-canvas: #f6f1e7;
+  --rp-cc-surface: #fffdf8;
+  --rp-cc-surface-alt: #efe9dd;
+  --rp-cc-overlay: rgba(38, 40, 36, 0.55);
+  --rp-cc-shadow-card: 0 1px 2px rgba(60, 54, 40, 0.1), 0 4px 12px rgba(60, 54, 40, 0.08);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(60, 54, 40, 0.22);
+
+  /* 文字 */
+  --rp-cc-text-primary: #262b28;
+  --rp-cc-text-secondary: #414a44;
+  --rp-cc-text-muted: #5c655e;
+  --rp-cc-text-inverse: #fffdf8;
+  --rp-cc-text-link: #1f5a7a;
+  --rp-cc-text-disabled: #737a72;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #e4dccb;
+  --rp-cc-border-default: #9c927e;
+  --rp-cc-border-strong: #7d7058;
+  --rp-cc-border-focus: #1f5a7a;
+  --rp-cc-ring: #1f5a7a;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 2px;
+  --rp-cc-ring-halo: rgba(31, 90, 122, 0.18);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #2f6b62;
+  --rp-cc-btn-primary-text: #fffdf8;
+  --rp-cc-btn-primary-border: #24564e;
+  --rp-cc-btn-primary-hover: #245a53;
+  --rp-cc-btn-primary-active: #1b4842;
+  --rp-cc-btn-secondary-bg: #fffdf8;
+  --rp-cc-btn-secondary-text: #262b28;
+  --rp-cc-btn-secondary-border: #9c927e;
+  --rp-cc-btn-secondary-hover: #efe9dd;
+  --rp-cc-btn-secondary-active: #e4dccb;
+  --rp-cc-btn-danger-bg: #9c3b36;
+  --rp-cc-btn-danger-text: #fffdf8;
+  --rp-cc-btn-danger-border: #7e2e2a;
+  --rp-cc-btn-danger-hover: #84302c;
+  --rp-cc-btn-danger-active: #6f2824;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #2f5f56;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: #eaf1ed;
+  --rp-cc-btn-ghost-active: #dce8e2;
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #1f5a7a;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: #e2eef5;
+  --rp-cc-btn-link-active: #cfe2ee;
+  --rp-cc-btn-disabled-bg: #e7e2d6;
+  --rp-cc-btn-disabled-text: #737a72;
+  --rp-cc-btn-disabled-border: #d2c9b7;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #fffdf8;
+  --rp-cc-control-alt-bg: #efe9dd;
+  --rp-cc-control-text: #262b28;
+  --rp-cc-control-placeholder: #69716a;
+  --rp-cc-control-border: #9c927e;
+  --rp-cc-control-border-strong: #7d7058;
+  --rp-cc-control-focus: #1f5a7a;
+  --rp-cc-control-checked: #2f6b62;
+  --rp-cc-control-track: #e4dccb;
+  --rp-cc-control-thumb: #2f6b62;
+  --rp-cc-control-disabled-bg: #efe9dd;
+  --rp-cc-control-disabled-text: #737a72;
+  --rp-cc-tooltip-bg: #2f3733;
+  --rp-cc-tooltip-text: #fffdf8;
+  --rp-cc-tooltip-border: #4a514c;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #efe9dd;
+  --rp-cc-table-head-text: #3b423c;
+  --rp-cc-table-row: #fffdf8;
+  --rp-cc-table-row-alt: #faf6ed;
+  --rp-cc-table-row-hover: #f1f5ef;
+  --rp-cc-table-row-selected: #deede6;
+  --rp-cc-table-border: #e4dccb;
+  --rp-cc-table-text: #262b28;
+
+  /* 状态：底色 + 深字 + 边框；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: #e4f0e5;
+  --rp-cc-status-success-text: #2b5b3a;
+  --rp-cc-status-success-border: #8fb79a;
+  --rp-cc-status-warning-bg: #faefcf;
+  --rp-cc-status-warning-text: #6a4b08;
+  --rp-cc-status-warning-border: #d9b45a;
+  --rp-cc-status-danger-bg: #f8e3df;
+  --rp-cc-status-danger-text: #8a322c;
+  --rp-cc-status-danger-border: #d39a91;
+  --rp-cc-status-info-bg: #e2eef5;
+  --rp-cc-status-info-text: #1f4f6b;
+  --rp-cc-status-info-border: #94b8ce;
+
+  /* 分类 1..8 / 图表同序号同色：浅底深字 + 中等饱和图形色 */
+  --rp-cc-cat-1-bg: #e3eff5;
+  --rp-cc-cat-1-text: #20536d;
+  --rp-cc-cat-1-border: #93bed2;
+  --rp-cc-cat-1-chart: #3e86a8;
+  --rp-cc-cat-2-bg: #e2f0ec;
+  --rp-cc-cat-2-text: #235148;
+  --rp-cc-cat-2-border: #8fbfb5;
+  --rp-cc-cat-2-chart: #3f887d;
+  --rp-cc-cat-3-bg: #eff0da;
+  --rp-cc-cat-3-text: #505024;
+  --rp-cc-cat-3-border: #bfc185;
+  --rp-cc-cat-3-chart: #8a8b3b;
+  --rp-cc-cat-4-bg: #f7ebd6;
+  --rp-cc-cat-4-text: #6b4515;
+  --rp-cc-cat-4-border: #d8b77f;
+  --rp-cc-cat-4-chart: #b17a2b;
+  --rp-cc-cat-5-bg: #f7e5df;
+  --rp-cc-cat-5-text: #773a2e;
+  --rp-cc-cat-5-border: #d6a397;
+  --rp-cc-cat-5-chart: #b25d4a;
+  --rp-cc-cat-6-bg: #ede6f4;
+  --rp-cc-cat-6-text: #503b67;
+  --rp-cc-cat-6-border: #bca8d0;
+  --rp-cc-cat-6-chart: #8164a0;
+  --rp-cc-cat-7-bg: #e5eaf3;
+  --rp-cc-cat-7-text: #324462;
+  --rp-cc-cat-7-border: #a3b3ce;
+  --rp-cc-cat-7-chart: #56729e;
+  --rp-cc-cat-8-bg: #f5e6ec;
+  --rp-cc-cat-8-text: #6a384c;
+  --rp-cc-cat-8-border: #d3a6b8;
+  --rp-cc-cat-8-chart: #a2607b;
+  --rp-cc-chart-grid: #dcd3c2;
+  --rp-cc-chart-axis: #5c655e;
+  --rp-cc-chart-label: #414a44;
+  --rp-cc-accent-line: #3e86a8;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='ceramic-colorful'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
 }

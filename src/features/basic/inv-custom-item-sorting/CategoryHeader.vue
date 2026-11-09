@@ -5,5 +5,5 @@ defineProps<{ label: string }>();
 </script>
 
 <template>
-  <SectionHeader :style="{ width: '100%' }">{{ label }}</SectionHeader>
+  <SectionHeader :style="{ width: '100%' }" :data-label="label">{{ label }}</SectionHeader>
 </template>

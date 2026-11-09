@@ -1,0 +1,70 @@
+/* BLU「指令」列 / 「新建」按钮旁的文字按钮。
+   按用户要求全部改成文字、不再有任何鼠标浮窗：源码里既不写 title 也不写
+   data-tooltip，游戏原生 [data-tooltip] 伪元素因此不会被触发；这里也不再需要
+   任何 hover 抬升 z-index 的规则。无障碍名称由 aria-label 提供（不会弹窗）。
+   颜色一律走 var() 且回退值不含颜色字面量：主题引擎只扫描 # / rgb() 之类的
+   颜色字面量，这样三套主题下按钮都自动跟随，也不会被二次重映射。 */
+.textButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 5px;
+  margin: 0 3px 0 0;
+  vertical-align: middle;
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background-color: var(--rp-skin-panel, transparent);
+  color: var(--rp-skin-ink, inherit);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  text-shadow: none;
+}
+
+.textButton:hover {
+  filter: brightness(0.92);
+}
+
+/* 右上角总开关：与游戏原生「新建」按钮同一行，高度贴近原生按钮。
+   文字固定「隐藏」两字，再定宽，选中态字重变化时按钮长度也不跳动；
+   flex 0 0 防止外层 ActionBar 把它压缩或拉伸。选中态的反色实底在
+   refined-prun.css（要压过主题对 Button__btn 的 !important 覆盖）。 */
+.toggle {
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+  flex: 0 0 42px;
+  height: 19px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+/* 表体行按钮：文字恒为「隐藏」两字，选中态只改样式不改文字。
+   定宽避免选中后加粗让同一列按钮宽度参差。
+   类名刻意不叫 rowToggle：CSS Modules 会生成 xxx__rowToggle___hash，其中
+   "Toggle__" 子串会被主题里 [class*="Toggle__"] 的 !important 规则误命中，
+   把选中态的 color / border-color 强制刷回常态。 */
+.rowBtn {
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+}
+
+/* 选中模式：按用户要求只留下划线，不加底色、不改文字颜色、不改字重。
+   以前那套「强调色实底 + 反色文字」在三套主题下都要算对比度，切换时
+   整块按钮变色太抢眼，已全部移除；状态只由这一条下划线表达。 */
+.selected {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+
+/* 右上角总开关选中态：与表体一致，同样只有下划线。 */
+.isOn {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}

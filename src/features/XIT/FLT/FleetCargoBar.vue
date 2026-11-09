@@ -165,51 +165,9 @@ onUnmounted(() => {
   }
 });
 
-const totalLoadRatio = computed(() => {
-  const ship = shipsStore.getById(props.shipId);
-  const inv = storagesStore.getById(ship?.idShipStore);
-  if (!inv) {
-    return 0;
-  }
-  return Math.max(inv.weightLoad / inv.weightCapacity, inv.volumeLoad / inv.volumeCapacity);
-});
-
-const stripeAlertColor = computed(() => {
-  const ratio = totalLoadRatio.value;
-
-  const start = { r: 50, g: 50, b: 50 };
-  const target = { r: 100, g: 100, b: 100 };
-
-  if (ratio < 0.7) {
-    return `rgb(${start.r}, ${start.g}, ${start.b})`;
-  }
-
-  const normalized = (ratio - 0.7) / 0.3;
-
-  const r = Math.round(start.r + (target.r - start.r) * normalized);
-  const g = Math.round(start.g + (target.g - start.g) * normalized);
-  const b = Math.round(start.b + (target.b - start.b) * normalized);
-
-  return `rgb(${r}, ${g}, ${b})`;
-});
-
-const stripeWidth = computed(() => {
-  const ratio = totalLoadRatio.value;
-
-  const startWidth = 10;
-  const smallWidth = 2;
-
-  if (ratio < 0.7) {
-    return `${startWidth}px`;
-  }
-
-  const normalized = (ratio - 0.7) / 0.3;
-
-  const width = startWidth - (startWidth - smallWidth) * normalized;
-
-  return `${width}px`;
-});
-
+// 货物条轨道原先是 repeating-linear-gradient 斜条纹 + 运行时 inline 的深灰
+// --stripe-color：浅色主题只能改写样式表里的颜色，inline 变量仍是深灰，于是
+// 变成黑白相间的斜纹方框。改为纯色轨道（原版深灰、主题下由皮肤变量接管）。
 function onClick() {
   const ship = shipsStore.getById(props.shipId);
   if (ship) {
@@ -222,10 +180,10 @@ function onClick() {
   <div
     :class="[
       C.ProgressBar.progress,
+      'rp-cargo-track',
       $style.container,
       { [$style.isUpdating]: isAnimating, [$style.tall]: tall },
     ]"
-    :style="{ '--stripe-color': stripeAlertColor, '--stripe-width': stripeWidth }"
     @click="onClick">
     <div :class="[$style.bar, miniBarClass]">
       <Tooltip
@@ -255,18 +213,9 @@ function onClick() {
   height: 13px;
   align-items: flex-end;
   justify-content: flex-start;
+  /* 纯色轨道：原版深灰；浅色 / 暖米纸主题下由 theme.ts 的 .rp-cargo-track
+     覆盖成皮肤的中浅纯色 + 细边框。不要再引入斜条纹或 inline 颜色变量。 */
   background-color: #2a2a2a;
-  --stripe-width: 10px;
-  --hypotenuse: calc(var(--stripe-width) * sqrt(2));
-
-  background-image: repeating-linear-gradient(
-    45deg,
-    #2a2a2a,
-    #2a2a2a calc(var(--stripe-width) / 2),
-    var(--stripe-color) calc(var(--stripe-width) / 2),
-    var(--stripe-color) var(--stripe-width)
-  );
-  background-size: var(--hypotenuse) var(--hypotenuse);
 }
 
 .tall {
@@ -274,16 +223,18 @@ function onClick() {
   height: 18px;
 }
 
+/* 数据刷新时用极轻的透明度脉冲代替原来的斜纹滚动，保持纯色观感。 */
 .isUpdating {
-  animation: move-stripes 0.5s linear infinite;
+  animation: cargo-pulse 0.5s linear infinite;
 }
 
-@keyframes move-stripes {
-  from {
-    background-position: 0 0;
+@keyframes cargo-pulse {
+  0%,
+  100% {
+    opacity: 1;
   }
-  to {
-    background-position: var(--hypotenuse) 0;
+  50% {
+    opacity: 0.78;
   }
 }
 
@@ -319,7 +270,7 @@ function onClick() {
 
 .full {
   width: 100%;
-  font-size: 8px;
+  font-size: 10px;
   display: flex;
   align-items: center;
   justify-content: center;

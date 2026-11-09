@@ -1,7 +1,6 @@
 import css from '@src/utils/css-utils.module.css';
 import $style from './inv-custom-item-sorting.module.css';
 import { BurnValues, getPlanetBurn } from '@src/core/burn';
-import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import CategoryHeader from './CategoryHeader.vue';
 import InventorySortControls from './InventorySortControls.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
@@ -75,7 +74,9 @@ async function applyCustomSorting(tile: PrunTile, container: HTMLElement) {
     option.style.display = 'none';
   }
 
-  const burn = computed(() => getPlanetBurn(storagesStore.getById(parameter)?.addressableId));
+  // 参数可能是仓库 id 前缀、星球编码或飞船注册号，
+  // 统一用 getInvStore 解析出仓库，否则按自然编号传参会拿不到 burn 数据、BRN 不出现。
+  const burn = computed(() => getPlanetBurn(getInvStore(parameter)?.addressableId));
 
   const modes = computed(() => {
     const modes = sortingData.modes.slice();

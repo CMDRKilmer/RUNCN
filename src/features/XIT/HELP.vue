@@ -161,12 +161,12 @@ const grouped = computed(() => {
         <tr v-for="c in commands" :key="c.cmd">
           <td>
             <PrunLink :command="'XIT ' + c.cmd">{{ c.cmd }}</PrunLink>
-            <span v-if="c.aliases.length" style="color: #888; font-size: 0.9em">
+            <span v-if="c.aliases.length" style="color: #888; font-size: 1em">
               ({{ c.aliases.join(', ') }})
             </span>
           </td>
           <td>{{ c.name }}</td>
-          <td style="font-size: 0.9em; color: #aaa">{{ c.description }}</td>
+          <td style="font-size: 1em; color: #aaa">{{ c.description }}</td>
         </tr>
       </tbody>
     </table>

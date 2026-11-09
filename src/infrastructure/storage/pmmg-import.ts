@@ -214,7 +214,8 @@ function mapPmmgFeature(feature: string) {
     case 'Sidebar':
       return ['custom-left-sidebar'];
     case 'TopRightButtons':
-      return ['header-calculator-button', 'header-duplicate-button'];
+      // 计算器（打开 XIT CALC）按钮已按用户要求移除，只剩磁贴复制按钮。
+      return ['header-duplicate-button'];
     default:
       return undefined;
   }

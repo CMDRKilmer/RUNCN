@@ -609,8 +609,8 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   outline: none;
 }
 .searchInput:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 .searchInput::placeholder {
@@ -629,8 +629,8 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   cursor: pointer;
 }
 .categorySelect:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 .info {
@@ -728,7 +728,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   min-width: 14px;
   padding: 0 4px;
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 14px;
   text-align: center;
   font-weight: bold;
@@ -784,7 +784,7 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 8px;
-  background: rgba(255, 176, 0, 0.18);
+  background: rgba(var(--rp-accent-rgb), 0.18);
   color: rgb(255, 200, 64);
   font-size: 11px;
   font-weight: 600;
@@ -794,9 +794,9 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   display: inline-block;
   padding: 0 6px;
   border-radius: 6px;
-  background: rgba(255, 176, 0, 0.12);
+  background: rgba(var(--rp-accent-rgb), 0.12);
   color: rgb(255, 200, 64);
-  font-size: 10px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .actionBar {

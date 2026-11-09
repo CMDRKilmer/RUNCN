@@ -125,7 +125,7 @@ const tooltipText = computed(() => tooltipLines.value.join('\n'));
 }
 
 .collapseText {
-  font-size: 10px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 

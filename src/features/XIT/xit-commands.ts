@@ -47,6 +47,12 @@ function onTileReady(tile: PrunTile) {
   }
 
   subscribe($$(tile.anchor, C.ScrollView.view), scrollView => {
+    // 别的功能可能把整块磁贴嵌进自己的面板里（例如 FB 把 BS/INV/PROD 搬进同一块磁贴）。
+    // 这种嵌套磁贴的滚动区不属于当前磁贴，跳过，否则会在每个嵌套磁贴里再挂一份本命令。
+    const owner = scrollView.closest(`.${C.Tile.tile}`);
+    if (owner && owner !== tile.frame.parentElement) {
+      return;
+    }
     // XIT 命令生成一个包含全尺寸绿色屏幕的磁贴。
     // 自定义 XIT 磁贴就是挂载在这个绿色屏幕内部的。
     const container = scrollView.children[0] as HTMLDivElement;

@@ -4,6 +4,7 @@ import { watchEffectWhileNodeAlive } from '@src/utils/watch';
 import css from '@src/utils/css-utils.module.css';
 import { getTileState as getBaseTileState } from '@src/store/user-data-tiles';
 import fa from '@src/utils/font-awesome.module.css';
+import { hasMountedUi, mountOnce } from '@src/utils/mount-ui-once';
 
 interface TileState extends UserData.TileState {
   minimizeContextControls: boolean;
@@ -22,26 +23,34 @@ async function onTileReady(tile: PrunTile) {
   });
 
   const tileControls = await $(tile.frame, C.TileFrame.controls);
-  createFragmentApp(() =>
-    isMinimized.value ? (
-      <TileControlsButton
-        icon={'\uf0c9'}
-        marginTop={4}
-        onClick={() => (isMinimized.value = false)}
-      />
-    ) : null,
-  ).prependTo(tileControls);
+  // 上下文命令行上的隐藏眼睛图标、标题栏上的恢复按钮，都只注入一次。
+  // 切标签回来 / 扩展热重载时会重复触发 observer，否则这里会出现多个眼睛图标。
+  mountOnce(tileControls, 'hide-controls-restore', () => {
+    createFragmentApp(() =>
+      isMinimized.value ? (
+        <TileControlsButton
+          icon={'\uf0c9'}
+          marginTop={4}
+          onClick={() => (isMinimized.value = false)}
+        />
+      ) : null,
+    ).prependTo(tileControls);
+  });
 
+  if (hasMountedUi(tileContextControls, 'hide-controls')) {
+    return;
+  }
   createFragmentApp(() => (
     <>
       <div
+        data-rp-ui="hide-controls"
         class={[C.ContextControls.item, C.fonts.fontRegular, C.type.typeSmall]}
         onClick={() => {
           isMinimized.value = true;
         }}>
         <i class={[fa.solid]}>{'\uf070'}</i>
       </div>
-      <div style={{ flexGrow: '1' }} />
+      <div data-rp-ui="hide-controls-spacer" style={{ flexGrow: '1' }} />
     </>
   )).prependTo(tileContextControls);
 }

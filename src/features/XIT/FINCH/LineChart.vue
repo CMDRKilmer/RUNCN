@@ -15,6 +15,10 @@ import {
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { fixed0, fixed01, hhmm, ddmm, ddmmyyyy, formatCurrency } from '@src/utils/format';
+import { chartColors } from '@src/utils/chart-theme';
+
+// 图表颜色统一走主题 token 层；其余主题返回原色板，外观不变。
+const colors = computed(() => chartColors());
 
 Chart.register(
   LineController,
@@ -99,16 +103,16 @@ const chartData = computed<ChartData<'line', number[], number | string | Date>>(
     {
       label: yLabel,
       data: ydata,
-      borderColor: '#f7a600',
+      borderColor: colors.value.line,
       fill: false,
       pointRadius: 0.25,
-      pointBackgroundColor: '#f7a600',
+      pointBackgroundColor: colors.value.line,
       showLine: false,
     },
     {
       label: undefined,
       data: calculateMovingAverage(ydata, averageFactor),
-      borderColor: '#f7a600',
+      borderColor: colors.value.line,
       fill: false,
       pointRadius: 0,
       pointHitRadius: 0,
@@ -124,16 +128,16 @@ const chartOptions = computed<ChartOptions<'line'>>(() => ({
       title: {
         display: true,
         text: '日期',
-        color: '#eeeeee',
+        color: colors.value.label,
         font: {
           family: '"Droid Sans", sans-serif',
         },
       },
       grid: {
-        color: '#505050',
+        color: colors.value.grid,
       },
       ticks: {
-        color: '#999',
+        color: colors.value.tick,
         callback(value: string | number) {
           return ddmm(Number(value));
         },
@@ -144,16 +148,16 @@ const chartOptions = computed<ChartOptions<'line'>>(() => ({
       title: {
         display: true,
         text: yLabel,
-        color: '#eeeeee',
+        color: colors.value.label,
         font: {
           family: '"Droid Sans", sans-serif',
         },
       },
       grid: {
-        color: '#505050',
+        color: colors.value.grid,
       },
       ticks: {
-        color: '#999',
+        color: colors.value.tick,
         callback(value: string | number) {
           if (typeof value === 'number') {
             if (value >= 1_000_000_000) {

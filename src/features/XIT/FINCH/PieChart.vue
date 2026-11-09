@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
+import { chartColors } from '@src/utils/chart-theme';
 import { sumBy } from '@src/utils/sum-by';
 import { percent2 } from '@src/utils/format';
 
@@ -21,22 +22,15 @@ const { labelData, numericalData } = defineProps<{
   numericalData: number[];
 }>();
 
-const DefaultColors = [
-  '#004564',
-  '#005b76',
-  '#007079',
-  '#00846c',
-  '#009552',
-  '#67a22e',
-  '#ada900',
-  '#f7a600',
-];
-
+// 颜色来源统一交给主题 token 层：其它主题仍用原 8 色，陶瓷白主题按
+// --rp-cc-cat-1..8-chart 取色。同一序号的扇区颜色全站一致，并由
+// datalabels 显示分类名、tooltip 显示占比，不单靠颜色区分。
 const colorScheme = computed(() => {
-  let colorScheme = [...DefaultColors];
+  const base = chartColors().series;
+  let colorScheme = [...base];
 
   for (let i = 0; i < labelData.length / 8; i++) {
-    colorScheme = colorScheme.concat(DefaultColors);
+    colorScheme = colorScheme.concat(base);
   }
 
   return colorScheme;
@@ -83,7 +77,7 @@ const chartOptions = computed<ChartOptions<'pie'>>(() => ({
       },
     },
     datalabels: {
-      color: '#cccccc',
+      color: chartColors().datalabel,
       display: 'auto',
       formatter(value, context) {
         return context.chart.data.labels![context.dataIndex];

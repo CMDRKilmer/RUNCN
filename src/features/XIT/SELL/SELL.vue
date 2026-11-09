@@ -401,7 +401,7 @@ function generate() {
 }
 
 .tickerFieldDragOver {
-  outline: 2px dashed rgb(255, 176, 0);
+  outline: 2px dashed rgb(var(--rp-accent-rgb));
   outline-offset: 2px;
 }
 
@@ -416,8 +416,8 @@ function generate() {
 }
 
 .surfaceInput:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
 }
 
 .jsonInput {

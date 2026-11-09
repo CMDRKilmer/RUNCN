@@ -13,6 +13,7 @@ import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { setBaseAlias, clearBaseAlias, getBaseAlias } from '@src/core/base-aliases';
 import EditAliasOverlay from './EditAliasOverlay.vue';
 import PrunButton from '@src/components/PrunButton.vue';
+import { hasMountedUi } from '@src/utils/mount-ui-once';
 
 function findSiteByTileParameter(parameter: string | undefined) {
   if (!parameter) {
@@ -50,8 +51,12 @@ function onTileReady(tile: PrunTile) {
 
   // ActionBar：添加「别名」按钮。
   subscribe($$(tile.anchor, C.ActionBar.container), container => {
+    // 与 WAREHOUSE 按钮同理：同一 ActionBar 只注入一次，避免切换标签后出现重复行。
+    if (hasMountedUi(container, 'bs-alias')) {
+      return;
+    }
     createFragmentApp(() => (
-      <div class={C.ActionBar.element}>
+      <div class={C.ActionBar.element} data-rp-ui="bs-alias">
         <PrunButton
           primary
           onClick={() => onEditClick(tile, siteId, targetLabel, getBaseAlias(siteId) ?? '')}>

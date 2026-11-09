@@ -15,6 +15,9 @@ import { persistedRef } from '@src/utils/persisted-ref';
 
 const { planetNaturalId } = defineProps<{ planetNaturalId?: string }>();
 
+// 浮层里能返回上一页（撤销覆盖），否则只能生成或退出整个磁贴。
+const emit = defineEmits<{ close: [] }>();
+
 const site = computed(() => sitesStore.getByPlanetNaturalId(planetNaturalId));
 
 const exchangeStationMap: Record<string, string> = {
@@ -152,6 +155,9 @@ function onGenerateClick() {
   <div v-if="!site" :class="C.DraftConditionEditor.form">
     <SectionHeader>生成维修 ACT 包</SectionHeader>
     <div :class="$style.notice">未找到星球基地数据。</div>
+    <Commands>
+      <PrunButton dark @click="emit('close')">返回</PrunButton>
+    </Commands>
   </div>
   <div v-else :class="C.DraftConditionEditor.form">
     <SectionHeader>生成维修 ACT 包</SectionHeader>
@@ -188,6 +194,7 @@ function onGenerateClick() {
       </Active>
       <Commands>
         <PrunButton primary @click="onGenerateClick">生成</PrunButton>
+        <PrunButton dark @click="emit('close')">返回</PrunButton>
       </Commands>
     </form>
   </div>

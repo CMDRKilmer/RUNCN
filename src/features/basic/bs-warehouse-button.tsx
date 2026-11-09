@@ -3,6 +3,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { increaseDefaultBufferSize } from '@src/infrastructure/prun-ui/buffer-sizes';
+import { hasMountedUi } from '@src/utils/mount-ui-once';
 
 function onTileReady(tile: PrunTile) {
   // Only process BS tiles with parameter
@@ -17,8 +18,12 @@ function onTileReady(tile: PrunTile) {
   };
 
   subscribe($$(tile.anchor, C.ActionBar.container), container => {
+    // 切换标签回来 / 扩展热重载会让同一 ActionBar 被注入多次，导致按钮重复成第二行。
+    if (hasMountedUi(container, 'bs-warehouse')) {
+      return;
+    }
     createFragmentApp(() => (
-      <div class={C.ActionBar.element}>
+      <div class={C.ActionBar.element} data-rp-ui="bs-warehouse">
         <PrunButton primary onClick={onClick}>
           WAREHOUSE
         </PrunButton>

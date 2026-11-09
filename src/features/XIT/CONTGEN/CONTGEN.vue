@@ -603,7 +603,7 @@ function applyTotalPrice() {
   border: 1px solid #555;
   color: inherit;
   padding: 1px 8px;
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -612,9 +612,13 @@ function applyTotalPrice() {
 }
 
 .previewTabActive {
-  background: rgba(255, 176, 0, 0.18);
-  border-color: #f0ad4e;
-  color: #f0ad4e;
+  /* 原先是硬编码 #f0ad4e + rgba(var(--rp-accent-rgb), 0.18)：
+     主题引擎把文字重映射成暖米纸的石板棕 rgb(138,90,28)，压在 0.18 的
+     暖棕半透明底上只有 4.33:1。文字/描边改走主题选中色（三套主题都定义，
+     原样主题回退橙色），底色 alpha 降到 0.10 让底更浅，对比度过 4.5:1。 */
+  background: rgba(var(--rp-accent-rgb), 0.1);
+  border-color: var(--rp-skin-selection, #f0ad4e);
+  color: var(--rp-skin-selection, #f0ad4e);
 }
 
 .previewContent {
@@ -677,7 +681,7 @@ function applyTotalPrice() {
   gap: 4px;
   align-items: center;
   padding: 0 2px 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: #888;
 }
 

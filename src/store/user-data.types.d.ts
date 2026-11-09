@@ -247,13 +247,9 @@ declare namespace UserData {
     showOriginal: boolean;
   }
 
-  interface DarkModeSettings {
-    enabled: boolean;
-    brightness: number;
-    contrast: number;
-    sepia: number;
-    grayscale: number;
-  }
+  // 界面主题：id / 说明的唯一事实源是 src/features/basic/theme-registry.ts。
+  // 新增主题只需改注册表，这里自动跟随；不要在别处再手写一份 id 联合。
+  type ThemeId = import('@src/features/basic/theme-registry').ThemeId;
 
   // 基地别名：siteId → 别名字符串。
   // 玩家在 SFC 目的地输入框键入别名时，会被替换为该基地的行星 naturalId，

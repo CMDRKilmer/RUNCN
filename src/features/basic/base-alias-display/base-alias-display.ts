@@ -70,6 +70,16 @@ function findSiteByXitParameters(parameters: string[]) {
 
 function decorateTitleWithAlias(title: HTMLElement, alias: string) {
   let span = title.querySelector(':scope > span[data-base-alias]') as HTMLElement | null;
+  // XIT FB 面板里的磁贴标题由 FB.vue 精简成「只保留原先的中文文字」，
+  // 不再显示别名，这里必须跳过标题装饰（包括清掉先前挂上的 span）。
+  // 判断放在 effect 内部而不是 onTileReady：磁贴可能在被搬进 FB 槽位之前
+  // 就已经挂上了 watcher，那时 closest() 还找不到面板。
+  if (title.closest('[data-rp-fb-panel]')) {
+    if (span && span.textContent !== '') {
+      span.textContent = '';
+    }
+    return;
+  }
   if (!span) {
     span = document.createElement('span');
     title.appendChild(span);
