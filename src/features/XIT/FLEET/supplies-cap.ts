@@ -1,7 +1,7 @@
 // 补给天数容量上限（suppliesCapDays）的读取与钳制工具。
 // 汇总四处重复逻辑：
 //   - PlanetRow.vue 输入框 watch / inputDaysCap / daysTooltip
-//   - chain-planner.ts clampTargetDays
+//   - chain-data.ts 输入快照的目标天数
 //   - utils.ts computeResupplyBill / fitDaysForShip
 // 语义统一：cap 未定义或非有限数 → Infinity（不限制）；天数钳制为
 //   max(0, min(days, cap))。UI 输入框额外做两位小数向下截断（与适配精度对齐）。

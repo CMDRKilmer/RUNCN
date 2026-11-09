@@ -9,14 +9,12 @@ import LogWindow from '@src/features/XIT/ACT/LogWindow.vue';
 import ConfigWindow from '@src/features/XIT/ACT/ConfigureWindow.vue';
 import { ActionPackageConfig } from '@src/features/XIT/ACT/shared-types';
 import { act } from '@src/features/XIT/ACT/act-registry';
-import { userData } from '@src/store/user-data';
 import {
   consumeTriggerRun,
   getPackageFinished,
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
-import { dispatchFinished } from '@src/features/XIT/FLEET/staged';
-import { markChainStageDone } from '@src/features/XIT/FLEET/chain-state';
+import { completeActionPackage } from '@src/features/XIT/FLEET/action-completion';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -107,28 +105,10 @@ const runner = new ActionRunner({
     isRunning.value = false;
     status.value = undefined;
     autoAct.value = false;
-    dispatchFinished.value = true;
     // 触发器引擎静默打开的 ACT 窗口据此自动关窗（成功/失败/取消均关闭）。
     getPackageFinished(pkg.global.name).value = true;
-    // 环线阶段完成：执行成功即写回持久化 chainRuns（不依赖 autoDelete）。
-    // 环线脚本自 2026-08-27 起不再 autoDelete，原先仅在 autoDelete 分支调用
-    // 导致站点/归航状态永远停在 arrived，状态检查与自动恢复无法推进下一阶段。
     if (success) {
-      markChainStageDone(pkg.global.name);
-    }
-    // 一次性操作包（BURNGEN 生成）执行成功后自动删除。
-    if (success && pkg.autoDelete) {
-      const idx = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
-      if (idx >= 0) {
-        userData.actionPackages.splice(idx, 1);
-      }
-      // 同步删除指向该操作包的一次性触发器（FLEET 到港卸货）。
-      for (let i = userData.triggers.length - 1; i >= 0; i--) {
-        const trigger = userData.triggers[i];
-        if (trigger.autoDelete && trigger.packageName === pkg.global.name) {
-          userData.triggers.splice(i, 1);
-        }
-      }
+      completeActionPackage(pkg);
     }
   },
   onStatusChanged: (title, keepReady) => {
