@@ -62,10 +62,11 @@ export function pushItemsProportional(
   for (const item of items) {
     item.amount = Math.floor(item.amount * scale);
   }
-  const scaledWeight = loadWeight * scale;
-  const scaledVolume = loadVolume * scale;
-  state.weight += scaledWeight;
-  state.volume += scaledVolume;
+  for (const item of items) {
+    const { weight, volume } = getWV(item.ticker, item.amount);
+    state.weight += weight;
+    state.volume += volume;
+  }
   state.cargo = [...state.cargo, ...items];
   return scale < 1;
 }

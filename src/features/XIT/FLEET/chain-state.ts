@@ -1,4 +1,4 @@
-// 环线阶段完成标记：由 ExecuteActionPackage 在执行成功并删除 autoDelete 包时调用，
+// 环线阶段完成标记：操作包执行成功时调用，与包是否自动删除无关，
 // 把完成状态写回持久化的 chainRuns，使执行列表不再依赖 ACT 包/触发器是否仍存在。
 import { userData } from '@src/store/user-data';
 
