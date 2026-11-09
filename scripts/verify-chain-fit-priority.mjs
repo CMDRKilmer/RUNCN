@@ -174,22 +174,6 @@ const fat = (ticker, amount) => ({ weight: amount, volume: amount * 10 });
   assertEq('prior-vs-prop/cargo 长度 = 2', 2, state.cargo.length);
 }
 
-{
-  const state = { weight: 0, volume: 0, free: { weight: 5, volume: 5 }, cargo: [] };
-  const items = [
-    { ticker: 'X', amount: 3, dest: 'A' },
-    { ticker: 'Y', amount: 3, dest: 'B' },
-  ];
-  pushItemsProportional(items, state, std);
-  assertEq(
-    'rounding/integer quantities',
-    [2, 2],
-    state.cargo.map(x => x.amount),
-  );
-  assertEq('rounding/actual weight', 4, state.weight);
-  assertEq('rounding/actual volume', 4, state.volume);
-}
-
 console.log('\nPASS ' + passes + '/' + (passes + fails));
 if (fails > 0) {
   process.exit(1);

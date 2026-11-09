@@ -5,7 +5,7 @@
 import PrunButton from '@src/components/PrunButton.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
-import { type SyncComparison } from '@src/features/XIT/FLEET/chain-snapshot';
+import { type SyncComparison } from '@src/features/XIT/FLEET/chain-sync';
 import type { ChainSyncDoc } from '@src/infrastructure/org-api/chain-sync';
 
 const props = defineProps<{

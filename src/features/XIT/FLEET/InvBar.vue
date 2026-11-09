@@ -4,7 +4,7 @@ import {
   getMaterialCategoryCssClass,
   translateCategory,
 } from '@src/infrastructure/prun-ui/item-tracker';
-import { getInventorySummary } from '@src/core/inventory-summary';
+import { materialCategoriesStore } from '@src/infrastructure/prun-api/data/material-categories';
 import Tooltip from '@src/components/Tooltip.vue';
 import { fixed02 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -130,6 +130,47 @@ function enhanceSegmentVisibility(segments: Segment[], loadRatio: number) {
   }
 }
 
+interface CategorySummary {
+  weight: number;
+  volume: number;
+}
+
+function getInventorySummary(stores: PrunApi.Store[]) {
+  const shipments: CategorySummary = { weight: 0, volume: 0 };
+  const categories = new Map<PrunApi.MaterialCategory, CategorySummary>();
+
+  for (const store of stores) {
+    for (const item of store.items) {
+      if (item.type === 'SHIPMENT') {
+        shipments.weight += item.weight;
+        shipments.volume += item.volume;
+        continue;
+      }
+
+      const material = item.quantity?.material;
+      if (!material) {
+        continue;
+      }
+
+      const category = materialCategoriesStore.getById(material.category);
+      if (!category) {
+        continue;
+      }
+
+      let categorySummary = categories.get(category);
+      if (!categorySummary) {
+        categorySummary = { weight: 0, volume: 0 };
+        categories.set(category, categorySummary);
+      }
+
+      categorySummary.weight += item.weight;
+      categorySummary.volume += item.volume;
+    }
+  }
+
+  return { shipments, categories };
+}
+
 const miniBarClass = computed(() => ({
   [$style.miniBar]: invBar.value.miniMode,
 }));
@@ -150,12 +191,6 @@ watch(
   },
   { deep: true },
 );
-
-onUnmounted(() => {
-  if (animationTimeout !== null) {
-    clearTimeout(animationTimeout);
-  }
-});
 
 const totalLoadRatio = computed(() => {
   const primary = storagesStore.getById(props.storeId);

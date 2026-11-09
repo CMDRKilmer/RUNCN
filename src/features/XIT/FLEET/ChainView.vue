@@ -1,51 +1,102 @@
+<script lang="ts">
+import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
+
+// 模块级状态：跨组件实例共享（ChainView 在切换页签时会卸载/重挂载，
+// 组件内 let 每实例一份，无法跨实例共享）。
+// 自动恢复每个「数据就绪周期」至多执行一次；服务器重连时重置以便再次恢复。
+let chainAutoRecovered = false;
+// 区分首次连接与重连：首次连接在扩展加载早期触发，先于本面板挂载。
+let chainFirstConnect = true;
+// 重连提示：由模块级连接监听置位，组件数据就绪时消费并展示。
+let chainReconnectNotice = false;
+
+// 服务器重连检测：断联后游戏通常原地重连而非整页刷新，各数据 store 会重置后
+// 重新推送。重置自动恢复标志，数据重载完成后自动重新检测环线断线阶段
+//（断联期间到港告警可能错过，页面未刷新导致原先的自动恢复不会再次触发）。
+onApiMessage({
+  CLIENT_CONNECTION_OPENED() {
+    if (chainFirstConnect) {
+      chainFirstConnect = false;
+      return;
+    }
+    chainAutoRecovered = false;
+    chainReconnectNotice = true;
+  },
+});
+</script>
+
 <script setup lang="ts">
-import {
-  deriveStopOps,
-  deriveFinalOps,
-  chainPlanFromRun,
-  derivePurchaseBill,
-  isRunFinished,
-  getActiveChainRuns,
-  type RunProgress,
-} from './chain-run';
-import { executeChainPlans, clearShipChainPlan } from './chain-commands';
-import { useChainRecovery } from './use-chain-recovery';
 import PrunButton from '@src/components/PrunButton.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
-import { useChainPlanning } from './use-chain-planning';
-import { shipLabel, formatFlightDuration } from './chain-format';
-import { sanitizeActName } from './chain-identity';
-import type { ShipChainPlan } from './chain-allocation';
-import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
-import type { ChainFlightLeg } from './chain-flight-time';
+import {
+  planChainRoute,
+  buildChainActionPackages,
+  mintChainFp,
+  sanitizeActName,
+  splitChainPlanAcrossShips,
+  shipOriginNaturalId,
+  shipWarehouseStock,
+  buildCombinedCapacity,
+  shipChainCapacity,
+  chainStopShipmentSizes,
+  planTimeBalancedSegments,
+  type ChainPlannerBase,
+  type ChainPlan,
+  type ChainStopPlan,
+  type ShipChainPlan,
+} from '@src/features/XIT/FLEET/chain-planner';
+import {
+  estimateChainFlightTimes,
+  type ChainFlightEstimate,
+  type ChainFlightLeg,
+} from '@src/features/XIT/FLEET/chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { getBaseGroups } from '@src/core/base-groups';
 import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
-
+import { stagedDispatch, dispatchFinished } from '@src/features/XIT/FLEET/staged';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import {
+  queueTriggerRun,
+  getPackageFinished,
+  hasPendingTriggerRun,
+} from '@src/features/XIT/ACT/trigger-queue';
+import { watchUntil } from '@src/utils/watch';
+import { createId } from '@src/store/create-id';
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
-import { getFleetRuntime } from './chain-runtime';
+import {
+  createChainSyncController,
+  isChainPackageName,
+  isChainTrigger,
+  shipChainScriptScope,
+  type ChainSyncState,
+} from '@src/features/XIT/FLEET/chain-sync';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import {
+  getEntityNameFromAddress,
   getEntityNaturalIdFromAddress,
   getSystemLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 
-const { ships, bases } = defineProps<{
+const props = defineProps<{
   ships: DispatchShip[];
   bases: ChainPlannerBase[];
 }>();
+
+const { ships, bases } = props;
 
 // ── 状态 ─────────────────────────────────────────────────────
 // 选中的产业链分组（BSN「供应链分组」列录入的自由文本名）。
@@ -134,6 +185,10 @@ const groupOptions = computed(() => [
 ]);
 
 // ── 船只 ─────────────────────────────────────────────────────
+function shipLabel(entry: DispatchShip) {
+  return entry.ship.name ?? entry.ship.registration;
+}
+
 const eligibleShips = computed(() =>
   ships
     .filter(x => x.warehouseStore && x.cargoStore)
@@ -161,25 +216,475 @@ function clearAllShips() {
   chainShipIds.value = [];
 }
 
-const activeRuns = computed(() => getActiveChainRuns());
+// ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
+// 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
+// 显示在「飞行」列与汇总「飞行时长」行；下游基地用未来预计位置计算。
+// 声明在本节顶部：环线规划（plan）读取预估推导各站到达时刻产出。
+const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
+const flightTimesLoading = ref(false);
 
-const {
-  flightEstimates,
-  flightTimesLoading,
-  usableChainShips,
-  allocStatus,
-  timeAlloc,
-  shipPlans,
-  loading,
-  hasStops,
-  unusedShipCount,
-  allocBanner,
-  filteredStopNotices,
-} = useChainPlanning({
-  ships: () => selectedShips.value,
-  bases: () => selectedBases.value,
-  runs: () => activeRuns.value,
+// ── 环线计划（合并容量，单一路线） ───────────────────────────
+const planOrigin = computed(() =>
+  selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
+);
+
+// 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
+// 飞行期间基地继续生产，到港时实际可提取量 = 当前库存 + 日均净变化 × 到达前小时数。
+function runPlanChainRoute(arrivalHours?: Map<string, number>) {
+  if (selectedBases.value.length === 0 || selectedShips.value.length === 0) {
+    return undefined;
+  }
+  const capacity = buildCombinedCapacity(selectedShips.value);
+  if (!capacity) {
+    return undefined;
+  }
+  return planChainRoute({
+    originNaturalId: planOrigin.value,
+    capacity,
+    bases: selectedBases.value,
+    // 出发地空间站仓库库存：组内产出的缺口由仓库以「取货」补足。
+    originStock: shipWarehouseStock(selectedShips.value[0]!),
+    // 出发地交易所：CX 采购下单处，用于检测空间站订单簿库存。
+    exchangeCode: selectedShips.value[0]!.exchangeCode,
+    ...(arrivalHours !== undefined ? { arrivalHoursByNaturalId: arrivalHours } : {}),
+  });
+}
+
+// 基础规划（未含到达时刻产出）：决定站点顺序，供飞行预估与「站→船」映射。
+const basePlan = computed(() => runPlanChainRoute());
+
+// ── 多船时间均衡分段（优先按速度分配） ───────────────────────
+// 并行出动时整条环线完成一轮补给的总耗时 = 最慢那艘船的闭环时长（瓶颈船）。
+// 给每艘可用船沿「整条合并环线」预估一次飞行（异步），用前缀和把任意连续段
+// 代价 O(1) 求出，再经 DP 求 makespan 最小的连续分段——多船真正并行提速、
+// 快船多跑慢船少跑；空段（不参与）由 DP 自动决定，避免切得太碎徒增往返。
+// 预估/求解就绪前退回按舱容贪心（旧行为），就绪后自动切换。
+// 注意：分配只决定「哪艘船跑哪些站」，不改站点顺序——顺序由 basePlan（拓扑序）
+// 决定，分配与飞行预估之间无循环依赖。
+const usableChainShips = computed(() =>
+  selectedShips.value.filter(s => {
+    const c = shipChainCapacity(s);
+    return c !== undefined && (c.freeWeight > 0 || c.freeVolume > 0);
+  }),
+);
+
+interface TimeAlloc {
+  // 与 usableChainShips 对齐：每艘船分配的连续站点 naturalId（空数组 = 不参与）。
+  ranges: string[][];
+  // 与 usableChainShips 对齐：每艘船预计闭环时长（小时，前缀和近似，用于瓶颈展示）。
+  loopHours: number[];
+  // 分配对应的合并环线站点序列（校验当前 plan 是否仍适用）。
+  stopIds: string[];
+  // 容量诊断：瓶颈站无法转给相邻非空段船的提示（真实吨位/体积）。
+  notes?: string[];
+}
+const timeAlloc = ref<TimeAlloc | undefined>(undefined);
+const allocStatus = ref<'idle' | 'computing' | 'ready'>('idle');
+
+// 触发键：站点序列 / 参与船集合 / 船数据就绪度变化才重算；量变（仓库、生产
+// 等频繁刷新）不触发，避免反复做异步飞行预估。与 basePlan 对象分离，
+// 也避免 basePlan 因量化变化重算时无谓重跑预估。
+const allocStopKey = computed(() => (basePlan.value?.stops ?? []).map(s => s.naturalId).join('>'));
+const allocShipKey = computed(() => usableChainShips.value.map(s => s.ship.id).join(','));
+
+let allocToken = 0;
+async function computeTimeAlloc() {
+  const p = basePlan.value;
+  const ships = usableChainShips.value;
+  if (!p || p.stops.length < 2 || ships.length < 2 || !shipsStore.fetched.value) {
+    timeAlloc.value = undefined;
+    allocStatus.value = 'idle';
+    return;
+  }
+  const token = ++allocToken;
+  allocStatus.value = 'computing';
+  // 清掉旧分配：配置/船集变化后的重算期间不再套用旧切法（旧 ranges 可能
+  // 与新船集/站点不匹配），退回舱容贪心做中间态，就绪后自动切到时间均衡。
+  timeAlloc.value = undefined;
+  const stopIds = p.stops.map(s => s.naturalId);
+  const stops = p.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName }));
+  try {
+    const capacities = ships.map(s => {
+      const c = shipChainCapacity(s)!;
+      return { freeWeight: c.freeWeight, freeVolume: c.freeVolume };
+    });
+    const loopLegHours: number[][] = [];
+    let complete = true;
+    for (const ship of ships) {
+      const est = await estimateChainFlightTimes({
+        ship: ship.ship,
+        origin: shipOriginNaturalId(ship),
+        stops,
+      });
+      if (token !== allocToken) {
+        return; // 计划/配置已变化，丢弃过期结果。
+      }
+      // 判缺段 ⇒ est.ok = false（chain-flight-time：ok = legs.every(l => l.ok)，判缺段
+      // 不再把 0 小时伪装成 ok）⇒ complete = false ⇒ alloc = undefined ⇒ allocFor 返回
+      // undefined ⇒ splitChainPlanAcrossShips 退回舱容贪心（旧行为）。判缺段的 0 小时
+      // 因此永远到不了 planTimeBalancedSegments，故此门不放宽。
+      if (!est.ok || est.legs.length !== stopIds.length + 1) {
+        complete = false;
+        break;
+      }
+      loopLegHours.push(est.legs.map(l => l.hours));
+    }
+    if (token !== allocToken) {
+      return;
+    }
+    const alloc = complete
+      ? planTimeBalancedSegments({
+          loopLegHours,
+          capacities,
+          stopSizes: chainStopShipmentSizes(p),
+        })
+      : undefined;
+    if (token !== allocToken) {
+      return;
+    }
+    if (!alloc) {
+      timeAlloc.value = undefined;
+      allocStatus.value = 'idle';
+      return;
+    }
+    // 容量诊断：瓶颈船（最慢段）相邻的非空段船若因剩余舱容装不下边界站而无法
+    // 接手分担，用真实吨位/体积说明——解释为何瓶颈无法被摊薄（常见是大宗到货
+    // 的单站体积超过小/中船的剩余体积，如整站 > 1000m³）。仅当确实装不下才提示，
+    // 能装下而未转移属时间最优，不误报。
+    const notes: string[] = [];
+    {
+      const sizes = chainStopShipmentSizes(p);
+      const n = stopIds.length;
+      let maxIdx = 0;
+      for (let j = 1; j < alloc.hours.length; j++) {
+        if (alloc.hours[j]! > alloc.hours[maxIdx]!) {
+          maxIdx = j;
+        }
+      }
+      const sumRange = (from: number, to: number) => {
+        let w = 0;
+        let v = 0;
+        for (let k = from; k < to; k++) {
+          w += sizes[k]!.weight;
+          v += sizes[k]!.volume;
+        }
+        return { w, v };
+      };
+      const tryTransfer = (neighborIdx: number, stopIdx: number) => {
+        if (neighborIdx < 0 || neighborIdx >= ships.length || stopIdx < 0 || stopIdx >= n) {
+          return;
+        }
+        // alloc 是 planTimeBalancedSegments 的原始产物：ranges 是按船对齐的**半开
+        // 下标区间 [start,end)**（空段 = start === end），不是站点 id 数组。此前用
+        // `.length` 判断参与与否恒得 undefined，导致下方诊断整体失效。
+        if (alloc.ranges[neighborIdx]!.start >= alloc.ranges[neighborIdx]!.end) {
+          return; // 相邻船本就不参与，无需提示。
+        }
+        const cap = capacities[neighborIdx]!;
+        const own = sumRange(alloc.ranges[neighborIdx]!.start, alloc.ranges[neighborIdx]!.end);
+        const extra = sizes[stopIdx]!;
+        const freeW = cap.freeWeight - own.w;
+        const freeV = cap.freeVolume - own.v;
+        if (extra.weight <= freeW && extra.volume <= freeV) {
+          return; // 能装下：DP 未转移是时间最优，不误报。
+        }
+        notes.push(
+          `${shipLabel(ships[neighborIdx]!)} 接不下 ${p.stops[stopIdx]!.planetName}（该站约 ` +
+            `${fixed0(extra.weight)}t/${fixed0(extra.volume)}m³，其剩余约 ` +
+            `${fixed0(Math.max(0, freeW))}t/${fixed0(Math.max(0, freeV))}m³），` +
+            `该站只能留在瓶颈船 ${shipLabel(ships[maxIdx]!)}（约 ${formatFlightDuration(
+              alloc.hours[maxIdx]! * 3600000,
+            )}）。`,
+        );
+      };
+      // 左侧非空段船接手瓶颈首站（= 左段末站）；右侧非空段船接手瓶颈末站（= 右段首站）。
+      for (let j = maxIdx - 1; j >= 0; j--) {
+        if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
+          tryTransfer(j, alloc.ranges[j]!.end);
+          break;
+        }
+      }
+      for (let j = maxIdx + 1; j < alloc.ranges.length; j++) {
+        if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
+          tryTransfer(j, alloc.ranges[j]!.start - 1);
+          break;
+        }
+      }
+    }
+    timeAlloc.value = {
+      ranges: alloc.ranges.map(r => stopIds.slice(r.start, r.end)),
+      loopHours: alloc.hours,
+      stopIds,
+      notes,
+    };
+    allocStatus.value = 'ready';
+  } catch (e) {
+    console.warn('[XIT/FLEET] time-balanced alloc failed', e);
+    if (token === allocToken) {
+      timeAlloc.value = undefined;
+      allocStatus.value = 'idle';
+    }
+  }
+}
+
+watch(
+  [allocStopKey, allocShipKey, () => shipsStore.fetched.value],
+  () => {
+    void computeTimeAlloc();
+  },
+  { immediate: true },
+);
+
+// 当前 plan 对应的时间均衡分段（站点序列匹配才有效；否则退回舱容贪心）。
+function allocFor(plan: ChainPlan | undefined): string[][] | undefined {
+  const ta = timeAlloc.value;
+  if (!ta || !plan || plan.stops.length !== ta.stopIds.length) {
+    return undefined;
+  }
+  for (let i = 0; i < plan.stops.length; i++) {
+    if (plan.stops[i]!.naturalId !== ta.stopIds[i]) {
+      return undefined;
+    }
+  }
+  return ta.ranges;
+}
+
+// ── 多船分配结果 ─────────────────────────────────────────────
+// 并行分段：每艘船跑航线的连续一段，同时出动。有时间均衡结果时按它切段
+//（总耗时 ≈ 最慢船的闭环时长），否则退回按舱容贪心切段（旧行为）。
+// baseShipPlans 不含到达时刻产出（飞行预估依赖它，避免循环依赖）。
+const baseShipPlans = computed(() => {
+  const p = basePlan.value;
+  if (!p || selectedShips.value.length === 0) {
+    return [];
+  }
+  return splitChainPlanAcrossShips(
+    p,
+    selectedShips.value,
+    selectedBases.value,
+    undefined,
+    allocFor(p),
+  );
 });
+
+// 各站预计到达时刻（相对规划时刻的小时数）：由飞行预估（异步）推导。
+// 预估就绪前为空 Map（取货按当前库存规划）；每站取服务该船的环线预估
+// 到达时刻（多船分段时各船并行出动、分别到站）。
+const arrivalHoursByNaturalId = computed(() => {
+  const map = new Map<string, number>();
+  for (const sp of baseShipPlans.value) {
+    const est = flightEstimates.value.get(sp.ship.ship.id);
+    if (!est) {
+      continue;
+    }
+    // 预估不完整（含判缺段）⇒ 整船不提供到达时刻，退回基础规划（= 未就绪时同一路径）。
+    // 判缺段不推进累计时长，其后各段的 arriveAtMs 都按「缺的那段 0 小时」算、系统偏早；
+    // 而缺段自身那一站，下面的 !leg.ok 只剔除它自己（其余站点的偏早时刻仍会被当成真值）。
+    // 偏早的时刻传下去 = 到港产出/消耗被算成更早到货。宁可不算到港产出，也不传偏早值。
+    if (!est.ok) {
+      continue;
+    }
+    const startAtMs = est.legs[0]?.departAtMs ?? gameNow();
+    for (let i = 0; i < sp.plan.stops.length; i++) {
+      const stop = sp.plan.stops[i]!;
+      const leg = est.legs.at(i);
+      if (leg === undefined || !leg.ok) {
+        continue;
+      }
+      const hours = (leg.arriveAtMs - startAtMs) / 3600000;
+      if (hours <= 0) {
+        continue;
+      }
+      const existing = map.get(stop.naturalId);
+      if (existing === undefined || hours < existing) {
+        map.set(stop.naturalId, hours);
+      }
+    }
+  }
+  return map;
+});
+
+// 主规划：含到达时刻预计产出（取货量更贴近到港时实际可提取量）。
+// 飞行预估就绪后自动重算；未就绪时复用基础规划结果（避免重复计算）。
+const plan = computed(() => {
+  const hours = arrivalHoursByNaturalId.value;
+  return hours.size === 0 ? basePlan.value : runPlanChainRoute(hours);
+});
+
+const loading = computed(
+  () =>
+    selectedBases.value.length > 0 && selectedShips.value.length > 0 && plan.value === undefined,
+);
+const hasStops = computed(() => (plan.value?.stops.length ?? 0) > 0);
+
+// 过滤提示必须读取主规划：过滤站点不会进入按船拆分后的子规划。
+const filteredStopNotices = computed(() => plan.value?.filteredStops ?? []);
+
+// 主多船分配结果（用于展示与执行）。
+// 传到达时刻产出映射，使分段子计划的取货量也按到港时预计库存计算。
+const shipPlans = computed(() => {
+  const p = plan.value;
+  if (!p || selectedShips.value.length === 0) {
+    return [];
+  }
+  return splitChainPlanAcrossShips(
+    p,
+    selectedShips.value,
+    selectedBases.value,
+    arrivalHoursByNaturalId.value,
+    allocFor(p),
+  );
+});
+
+// 未参与分配的船（无货舱，或船多于站点数）。
+const unusedShipCount = computed(() =>
+  selectedShips.value.length > 0 ? selectedShips.value.length - shipPlans.value.length : 0,
+);
+
+// 时间均衡状态横幅：计算中提示 + 就绪后各船预计闭环时长与瓶颈船。
+const allocBanner = computed<{ kind: 'info' | 'ok'; text: string } | undefined>(() => {
+  if (allocStatus.value === 'computing') {
+    return { kind: 'info', text: '正在按飞行时长均衡分配船只（预估各船环线时长）…' };
+  }
+  const ta = timeAlloc.value;
+  if (!ta || ta.loopHours.length < 2) {
+    return undefined;
+  }
+  const used = usableChainShips.value;
+  // 该船当前分配段的精确实测（飞行预估 watch 对已定段的闭环实测）：
+  // 与 ta.ranges[j] 匹配（首段目标 = 段首站、段数一致）才采用，保证横幅
+  // 与下方各船卡片的「飞行时长」同口径；分配刚切换、精确实测未就绪时
+  // 回退到 DP 估算（ta.loopHours）。
+  const preciseHoursOf = (j: number): number | undefined => {
+    const stops = ta.ranges[j]!;
+    if (stops.length === 0) {
+      return undefined;
+    }
+    const est = flightEstimates.value.get(used[j]!.ship.id);
+    if (
+      est !== undefined &&
+      est.ok &&
+      est.legs.length === stops.length + 1 &&
+      (est.legs[0]?.to ?? '').toUpperCase() === stops[0]!.toUpperCase()
+    ) {
+      return est.totalHours;
+    }
+    return undefined;
+  };
+  // 仅统计实际承担站段的船（空段 = 不参与，不列出）。
+  const parts: string[] = [];
+  let maxIdx = -1;
+  let maxHours = 0;
+  for (let j = 0; j < used.length; j++) {
+    if (ta.ranges[j]!.length === 0) {
+      continue;
+    }
+    const hours = preciseHoursOf(j) ?? ta.loopHours[j] ?? 0;
+    if (hours <= 0) {
+      continue;
+    }
+    parts.push(`${shipLabel(used[j]!)}：${formatFlightDuration(hours * 3600000)}`);
+    if (hours > maxHours) {
+      maxHours = hours;
+      maxIdx = j;
+    }
+  }
+  if (maxIdx < 0) {
+    return undefined;
+  }
+  return {
+    kind: 'ok',
+    text: `时间均衡分段：${parts.join(' ／ ')}。整条环线首轮约 ${formatFlightDuration(
+      maxHours * 3600000,
+    )} 完成（瓶颈：${shipLabel(used[maxIdx]!)}）。`,
+  };
+});
+
+// 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
+// 同时响应规划（baseShipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
+// eligibleShips / baseShipPlans 中，但飞行列仍需读取预估——按 shipId 收集
+// 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
+// 预估基于 baseShipPlans（不含到达时刻产出）：到达时刻产出只影响取货量、
+// 不影响站点顺序，避免「预估 → 规划 → 预估」循环。
+// 注：watch 内部会引用 activeRuns，必须在 activeRuns 定义之后再注册；放在下方
+// 「环线执行进度」computed 之后调用 registerFlightTimeWatch()。
+let flightTimeToken = 0;
+function registerFlightTimeWatch() {
+  watch(
+    [baseShipPlans, activeRuns, () => shipsStore.fetched.value],
+    async ([plans, runs, shipsFetched]) => {
+      // 船数据未就绪时跳过（估算需读取飞船实时质量/加速度与蓝图）。
+      if (!shipsFetched) {
+        return;
+      }
+      const token = ++flightTimeToken;
+      // 统一为 shipId → {ship, origin, stops}：规划取实时计划，执行中取链快照/持久化链记录。
+      const entries = new Map<
+        string,
+        {
+          ship: PrunApi.Ship;
+          origin: string;
+          stops: { naturalId: string; planetName: string }[];
+        }
+      >();
+      for (const sp of plans) {
+        if (sp.plan.stops === undefined) {
+          continue;
+        }
+        entries.set(sp.ship.ship.id, {
+          ship: sp.ship.ship,
+          origin: sp.plan.originNaturalId,
+          stops: sp.plan.stops.map(s => ({
+            naturalId: s.naturalId,
+            planetName: s.planetName,
+          })),
+        });
+      }
+      for (const run of runs) {
+        if (entries.has(run.shipId)) {
+          continue;
+        }
+        const ship = shipsStore.getById(run.shipId);
+        if (!ship) {
+          continue;
+        }
+        if (run.run.stops === undefined) {
+          continue;
+        }
+        entries.set(run.shipId, {
+          ship,
+          origin: run.run.originNaturalId,
+          stops: run.run.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName })),
+        });
+      }
+      if (entries.size === 0) {
+        return;
+      }
+      flightTimesLoading.value = true;
+      const estimates = new Map<string, ChainFlightEstimate>(flightEstimates.value);
+      try {
+        for (const [shipId, info] of entries) {
+          const est = await estimateChainFlightTimes(info);
+          if (token !== flightTimeToken) {
+            return; // 计划已变化，丢弃过期结果。
+          }
+          estimates.set(shipId, est);
+        }
+        if (token !== flightTimeToken) {
+          return;
+        }
+        flightEstimates.value = estimates;
+      } catch (e) {
+        console.warn('[XIT/FLEET] flightTime estimate failed', e);
+      } finally {
+        if (token === flightTimeToken) {
+          flightTimesLoading.value = false;
+        }
+      }
+    },
+    { immediate: true },
+  );
+}
 
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
@@ -195,13 +700,71 @@ const executeTooltip = computed(() => {
   return undefined;
 });
 
+function upsertPackage(pkg: UserData.ActionPackageData) {
+  const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
+  if (index >= 0) {
+    userData.actionPackages[index] = pkg;
+  } else {
+    userData.actionPackages.push(pkg);
+  }
+}
+
+function upsertTrigger(trigger: UserData.TriggerData) {
+  const index = userData.triggers.findIndex(
+    x => x.packageName === trigger.packageName && x.event.type === 'FLIGHT_ENDED',
+  );
+  if (index >= 0) {
+    userData.triggers[index] = trigger;
+  } else {
+    userData.triggers.push(trigger);
+  }
+}
+
+// 删除指定船的全部环线 ACT 操作包与一次性触发器（含未 autoDelete 的历史残留）。
+// 用于「清理计划」按钮（含已完成）与重执行前清理旧脚本。
+// shipId 级范围：chainRuns[shipId] 固化包名（改名无关）∪ 未被其它船占用的当前名匹配。
+function removeShipChainScripts(shipId: string, shipName: string) {
+  const scope = shipChainScriptScope(shipId, shipName);
+  const isShipScript = (name: string) => scope.has(name) || name === `环线派遣 ${shipName}`; // 历史格式兼容
+  for (let i = userData.actionPackages.length - 1; i >= 0; i--) {
+    if (isShipScript(userData.actionPackages[i]!.global.name)) {
+      userData.actionPackages.splice(i, 1);
+    }
+  }
+  for (let i = userData.triggers.length - 1; i >= 0; i--) {
+    if (isShipScript(userData.triggers[i]!.packageName)) {
+      userData.triggers.splice(i, 1);
+    }
+  }
+}
+
 const executeNotice = ref<string | undefined>(undefined);
 // 状态检查结果提示：环线运行中网页关闭导致到港触发器错过时，提示自动恢复情况。
+const statusCheckNotice = ref<string | undefined>(undefined);
 
 // 执行时的计划快照：环线执行中船离港后 shipPlans 为空，
 // 用快照保持「与规划一致」的表格显示，仅在序列叠加进度图标。
 // 快照同时持久化到 chainRuns.plan，页面刷新后仍可显示阶段载重。
 const planSnapshot = ref<ShipChainPlan[]>([]);
+
+// 完成清理定时器（历史遗留）：完成态环线保留在状态列表不再自动清理；
+// 仅重执行/清理计划时用于取消旧定时器。
+const finishedCleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearFinishedCleanup(shipId: string) {
+  const timer = finishedCleanupTimers.get(shipId);
+  if (timer !== undefined) {
+    clearTimeout(timer);
+    finishedCleanupTimers.delete(shipId);
+  }
+}
+
+onBeforeUnmount(() => {
+  for (const timer of finishedCleanupTimers.values()) {
+    clearTimeout(timer);
+  }
+  finishedCleanupTimers.clear();
+});
 
 // 按船清理计划（含已完成）：确认后删除该船环线运行记录 + 相关 ACT 操作包与触发器。
 function onClearShipPlanClick(
@@ -214,11 +777,20 @@ function onClearShipPlanClick(
   showConfirmationOverlay(
     e,
     () => {
-      clearShipChainPlan(sp.shipId, shipName);
+      // 记录本端清理的代际（run 删除后空快照推送带 clearedFp 传播删除；
+      // clearedFp 由同步控制器持久化，用于推送前拦截同代残留复活）。
+      const clearedFp = userData.chainRuns[sp.shipId]?.fp;
+      if (clearedFp !== undefined) {
+        chainSync.markShipCleared(sp.shipId, clearedFp);
+      }
+      removeShipChainScripts(sp.shipId, shipName);
+      clearFinishedCleanup(sp.shipId);
+      delete userData.chainRuns[sp.shipId];
       planSnapshot.value = planSnapshot.value.filter(p => p.ship.ship.id !== sp.shipId);
       statusCheckNotice.value = `已清理 ${label} 的环线计划及 ACT 脚本/触发器。`;
       // 删除传播：清掉 chainRuns 后粗粒度 watch 不再标脏该船（它已不在
       // chainRuns 键里），显式标脏以把「空快照」推上云端，清除远端陈旧记录。
+      chainSync.markDirtyShip(sp.shipId);
     },
     { message: `删除 ${label} 的环线计划及其 ACT 脚本/触发器？`, confirmLabel: '删除' },
   );
@@ -236,25 +808,427 @@ function execute() {
       '正在按飞行时长均衡分配船只（预估各船环线时长）… 就绪后会自动切换到更快的时间均衡分段，请稍候再执行。';
     return;
   }
-  const result = executeChainPlans(allPlans, {
-    autoLaunch: chainAutoLaunch.value,
-    autoTrigger: chainAutoTrigger.value,
-  });
-  if (result.notice !== undefined) {
-    executeNotice.value = result.notice;
+  // 多环线并行：正在执行环线的船不能重复生成（会覆盖其脚本与运行状态），
+  // 跳过并提示；其余船照常生成新环线。
+  const runningIds = new Set(activeRuns.value.map(r => r.shipId));
+  const plans = allPlans.filter(p => !runningIds.has(p.ship.ship.id));
+  if (plans.length === 0) {
+    executeNotice.value = '所选船只均在执行环线中，无法重复生成。请等待归航或先清理计划。';
+    return;
   }
-  if (result.plans.length > 0) {
-    planSnapshot.value = [
-      ...planSnapshot.value.filter(x => !result.plans.some(p => p.ship.ship.id === x.ship.ship.id)),
-      ...result.plans,
-    ];
+
+  const triggerMode: UserData.TriggerMode = chainAutoTrigger.value ? 'AUTO' : 'CONFIRM';
+  const mainPkgs: UserData.ActionPackageData[] = [];
+
+  for (const { ship, plan: shipPlan } of plans) {
+    // 每艘船 mint 一枚代际指纹：铸入 run 与全部 ACT 包/触发器名——改名无关的归属锚点。
+    const fp = mintChainFp();
+    const actionPlan = buildChainActionPackages(ship, shipPlan, {
+      autoLaunch: chainAutoLaunch.value,
+      triggerMode,
+      fp,
+    });
+    if (!actionPlan) {
+      continue;
+    }
+    // 重新执行时清掉旧完成清理定时器，避免误删新记录；
+    // 先清掉该船旧版/已完成的环线脚本，防止 ACT 列表残留过期包。
+    clearFinishedCleanup(ship.ship.id);
+    const shipName =
+      sanitizeActName(ship.ship.name ?? ship.ship.registration) || ship.ship.registration;
+    removeShipChainScripts(ship.ship.id, shipName);
+
+    // 记录环线运行进度（以船为键），并持久化计划快照：
+    // 页面刷新后仍按规划样式显示各阶段操作与「当前阶段载重」。
+    userData.chainRuns[ship.ship.id] = {
+      shipId: ship.ship.id,
+      shipName: ship.ship.name ?? ship.ship.registration,
+      fp,
+      startedAt: Date.now(),
+      originNaturalId: shipPlan.originNaturalId,
+      stops: shipPlan.stops.map((stop, i) => {
+        const unloadAt: Record<string, number> = { ...stop.unloadCx };
+        for (const [ticker, entry] of stop.unloadChain) {
+          unloadAt[ticker] = (unloadAt[ticker] ?? 0) + entry.amount;
+        }
+        const loadAt: Record<string, number> = {};
+        const loadTo: Record<string, string> = {};
+        for (const [ticker, entry] of stop.load) {
+          loadAt[ticker] = entry.amount;
+          loadTo[ticker] = entry.to;
+        }
+        return {
+          naturalId: stop.naturalId,
+          planetName: stop.planetName,
+          pkgName: actionPlan.stopPkgs[i]!.pkg.global.name,
+          // 持久化进度状态：删除 ACT/触发器后列表仍能正确展示。
+          state: 'pending',
+          plan: {
+            unloadAt,
+            loadAt,
+            loadTo,
+            loadOnArrival: stop.loadOnArrival,
+            loadOnDeparture: stop.loadOnDeparture,
+            clipped: stop.clipped,
+          },
+        };
+      }),
+      finalPkgName: actionPlan.finalPkg?.pkg.global.name,
+      mainPkgName: actionPlan.mainPkg.global.name,
+      originState: 'pending',
+      finalState: 'pending',
+      plan: {
+        capacity: shipPlan.capacity,
+        originLoadOnDeparture: shipPlan.loadOnDeparture,
+        loadOnReturn: shipPlan.loadOnReturn,
+        purchaseBill: shipPlan.purchaseBill,
+        originPickup: shipPlan.originPickup,
+        finalUnload: shipPlan.finalUnload,
+        finalUnloadNotes: shipPlan.finalUnloadNotes,
+      },
+    };
+
+    // 阶段脚本按序写入 ACT 列表：0 主包 → 1..N 站点包 → N+1 归航包；
+    // 各包执行成功后自动删除（主包改由 autoDelete 处理）。
+    upsertPackage(actionPlan.mainPkg);
+    for (const { pkg, trigger } of actionPlan.stopPkgs) {
+      upsertPackage(pkg);
+      upsertTrigger(trigger);
+    }
+    if (actionPlan.finalPkg) {
+      upsertPackage(actionPlan.finalPkg.pkg);
+      upsertTrigger(actionPlan.finalPkg.trigger);
+    }
+    mainPkgs.push(actionPlan.mainPkg);
+  }
+
+  if (mainPkgs.length === 0) {
+    executeNotice.value = '未生成任何主包（所选船只缺少货舱/仓库）';
+    return;
+  }
+  // 保存计划快照：环线执行期间显示它（格式与规划一致，序列叠加进度图标）。
+  // 多环线并行时按船合并，避免覆盖其他运行中环线的快照。
+  planSnapshot.value = [
+    ...planSnapshot.value.filter(p => !plans.some(np => np.ship.ship.id === p.ship.ship.id)),
+    ...plans,
+  ];
+
+  if (mainPkgs.length === 1) {
+    stageMainPackage(mainPkgs[0]!);
+  } else {
+    // 多船并行分段：全部主包一次性暂存到 FLEETACT（所有船可见可执行），
+    // 自动模式下按顺序自动执行；DEPART 后各船独立飞行，飞行阶段并行。
+    for (const pkg of mainPkgs) {
+      upsertPackage(pkg);
+    }
+    const stagedPkgs = mainPkgs.map(p => JSON.parse(JSON.stringify(p)));
+    stagedDispatch.value = { pkgs: stagedPkgs };
+    if (chainAutoTrigger.value) {
+      void runStagedPkgs(stagedPkgs);
+    } else {
+      showBuffer('XIT FLEETACT');
+    }
+    executeNotice.value = `已生成 ${mainPkgs.length} 艘船的主包，全部暂存至 FLEETACT 逐艘执行（飞行阶段并行）。`;
   }
 }
 
-const { statusCheckNotice, onStatusCheckClick } = useChainRecovery(() => chainAutoRecover.value);
+// 多船自动执行：按顺序触发各主包（FLEETACT 窗口内多个执行实例），
+// 前一艘执行完成后再触发下一艘，避免多个 ActionRunner 并发抢占游戏窗口；
+// 所有包执行完后自动关闭 FLEETACT 窗口。
+async function runStagedPkgs(pkgs: UserData.ActionPackageData[]) {
+  dispatchFinished.value = false;
+  // getPackageFinished 复用已存在的 ref：上次执行留下的 true 会让
+  // watchUntil 立即 resolve（并发触发）并让 closeWhen 初始为 true（窗口早关）。
+  // 与 trigger-engine 一致，入队前重置为 false。
+  for (const pkg of pkgs) {
+    getPackageFinished(pkg.global.name).value = false;
+  }
+  void showBuffer('XIT FLEETACT', {
+    force: true,
+    autoClose: true,
+    closeWhen: computed(() => pkgs.every(p => getPackageFinished(p.global.name).value)),
+  });
+  for (const pkg of pkgs) {
+    queueTriggerRun({ triggerId: createId(), packageName: pkg.global.name });
+    await watchUntil(getPackageFinished(pkg.global.name));
+  }
+}
 
-const { chainSync, syncNotice } = getFleetRuntime();
-const chainSyncState = computed(() => chainSync.state);
+function stageMainPackage(pkg: UserData.ActionPackageData) {
+  stagedDispatch.value = { pkg: JSON.parse(JSON.stringify(pkg)) };
+  if (chainAutoTrigger.value) {
+    dispatchFinished.value = false;
+    queueTriggerRun({ triggerId: createId(), packageName: pkg.global.name });
+    void showBuffer('XIT FLEETACT', {
+      force: true,
+      autoClose: true,
+      closeWhen: computed(() => dispatchFinished.value),
+    });
+  } else {
+    showBuffer('XIT FLEETACT');
+  }
+}
+
+// ── 状态检查（断线恢复） ─────────────────────────────────────
+// 环线运行中若网页关闭，到港触发器（FLIGHT_ENDED 告警事件）错过触发，
+// 重新打开页面后环线会卡在当前阶段。状态检查依据船当前停靠位置与
+// 持久化阶段状态，判断当前阶段并自动执行下一步操作包。
+interface PendingChainStep {
+  pkgName: string;
+  label: string;
+}
+
+// 刷新后脚本一致性校验：chainRuns 中「持久化为未完成」的阶段，其操作包应仍存在。
+// 执行过的阶段包会被 autoDelete 删除（属正常）；旧记录无持久化状态则跳过校验
+// （回退到「包消失 = 完成」的推导）。
+function verifyChainRunScript(run: UserData.ChainRun): { ok: boolean; missing: string[] } {
+  const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
+  const missing: string[] = [];
+  if (
+    run.originState === 'pending' &&
+    run.mainPkgName !== undefined &&
+    !pkgExists(run.mainPkgName)
+  ) {
+    missing.push(run.mainPkgName);
+  }
+  for (const stop of run.stops) {
+    if (stop.state === 'pending' && stop.pkgName && !pkgExists(stop.pkgName)) {
+      missing.push(stop.pkgName);
+    }
+  }
+  if (
+    run.finalState === 'pending' &&
+    run.finalPkgName !== undefined &&
+    !pkgExists(run.finalPkgName)
+  ) {
+    missing.push(run.finalPkgName);
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+function verifyAllChainRuns(): { ok: boolean; diffs: string[] } {
+  const diffs: string[] = [];
+  for (const run of Object.values(userData.chainRuns)) {
+    const { ok, missing } = verifyChainRunScript(run);
+    if (!ok) {
+      diffs.push(`${run.shipName}：缺失 ${missing.join('、')}`);
+    }
+  }
+  return { ok: diffs.length === 0, diffs };
+}
+
+// 扫描全部运行中的环线，找出「船已就位但操作包未执行」的下一阶段。
+// includeOrigin=false：刷新自动恢复时不自动执行第 0 步（出发），
+// 仅刷新状态显示为「未开始」，出发由用户手动触发。
+function collectPendingChainSteps(includeOrigin = true): PendingChainStep[] {
+  const steps: PendingChainStep[] = [];
+  for (const run of Object.values(userData.chainRuns)) {
+    const ship = shipsStore.getById(run.shipId);
+    if (ship === undefined) {
+      continue;
+    }
+    const dockedAt = ship.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+    const pkgExists = (name: string) => userData.actionPackages.some(p => p.global.name === name);
+    // 出发阶段：船仍在出发地、主包未执行（包未被 autoDelete 删除）时执行主包。
+    if (
+      includeOrigin &&
+      run.mainPkgName !== undefined &&
+      run.originState !== 'done' &&
+      dockedAt === run.originNaturalId &&
+      pkgExists(run.mainPkgName) &&
+      !hasPendingTriggerRun(run.mainPkgName)
+    ) {
+      steps.push({ pkgName: run.mainPkgName, label: `${run.shipName} 出发` });
+      continue;
+    }
+    // 站点阶段：取第一个未完成站，若船正停靠该站则执行该站包。
+    let allStopsDone = true;
+    for (const stop of run.stops) {
+      if (stop.state === 'done') {
+        continue;
+      }
+      allStopsDone = false;
+      if (
+        dockedAt === stop.naturalId &&
+        pkgExists(stop.pkgName) &&
+        !hasPendingTriggerRun(stop.pkgName)
+      ) {
+        steps.push({ pkgName: stop.pkgName, label: `${run.shipName} ${stop.planetName}` });
+      }
+      break;
+    }
+    // 归航阶段：全部站点完成、船已回出发地且归航包未执行时执行归航包。
+    if (
+      allStopsDone &&
+      run.finalPkgName !== undefined &&
+      run.finalState !== 'done' &&
+      dockedAt === run.originNaturalId &&
+      pkgExists(run.finalPkgName) &&
+      !hasPendingTriggerRun(run.finalPkgName)
+    ) {
+      steps.push({ pkgName: run.finalPkgName, label: `${run.shipName} 归航卸货` });
+    }
+  }
+  return steps;
+}
+
+// 静默执行环线操作包：与触发器引擎同通道（入队 + 隐藏窗口自动执行、结束自动关窗）。
+function runChainStepSilently(pkgName: string) {
+  const finished = getPackageFinished(pkgName);
+  finished.value = false;
+  queueTriggerRun({ triggerId: createId(), packageName: pkgName });
+  showBuffer(`XIT ACT_${pkgName.replace(' ', '_')}`, {
+    force: true,
+    autoClose: true,
+    closeWhen: computed(() => finished.value),
+  });
+}
+
+// 状态检查：自动判断当前阶段并自动处理下一步。
+function onStatusCheckClick() {
+  const steps = collectPendingChainSteps();
+  if (steps.length === 0) {
+    // 诊断：无运行中环线 vs 船已就位但未匹配到可执行阶段。
+    // 后一种情况给出每艘船的实际停靠位置与预期阶段，便于核对位置/脚本差异。
+    const runs = Object.values(userData.chainRuns).filter(
+      r => shipsStore.getById(r.shipId) !== undefined,
+    );
+    if (runs.length === 0) {
+      statusCheckNotice.value =
+        '状态检查：未发现需要恢复的环线步骤（无运行中的环线，或船数据未加载完成，可稍后再试）。';
+    } else {
+      const details = runs.map(run => {
+        const ship = shipsStore.getById(run.shipId)!;
+        const dockedAt = ship.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+        const progress = runProgress(run);
+        const next = progress.stops.find(s => s.state !== 'done');
+        const expected = next ? `${next.planetName}（${next.naturalId}）` : '归航';
+        return `${run.shipName}：停靠 ${dockedAt ?? '未知'}，预期 ${expected}`;
+      });
+      statusCheckNotice.value =
+        `状态检查：${runs.length} 艘运行中但无待恢复步骤 —— ` +
+        details.join('；') +
+        '。请核对停靠位置、货舱与操作包是否一致。';
+    }
+    return;
+  }
+  for (const step of steps) {
+    runChainStepSilently(step.pkgName);
+  }
+  statusCheckNotice.value = `状态检查：${steps.length} 个阶段待恢复，已自动执行 —— ${steps
+    .map(s => s.label)
+    .join('、')}。`;
+}
+
+// ── 自动恢复（断线自动续跑） ────────────────────────────────
+// 船数据就绪且「自动恢复」开启后运行：扫描运行中的环线，自动执行断线阶段。
+// 服务器重连（页面未自动刷新）时 store 会重置后重新推送；数据就绪时若本次
+// 来自重连（模块级监听置位）则提示用户，并自动再次检测断线阶段。
+watch(
+  () => shipsStore.fetched.value,
+  fetched => {
+    if (!fetched) {
+      return;
+    }
+    // 刷新后脚本一致性校验：未完成阶段的脚本应仍存在；缺失则提示差异，
+    // 且不自动恢复（避免执行到错误/被另一端改动的脚本）。
+    const { ok, diffs } = verifyAllChainRuns();
+    if (!ok) {
+      statusCheckNotice.value = `环线脚本差异：${diffs.join('；')}。请检查 ACT/TRIGGER 列表或执行云端同步。`;
+      return;
+    }
+    // 消费重连提示（模块级标志跨实例共享，避免首次连接误报）。
+    if (chainReconnectNotice) {
+      chainReconnectNotice = false;
+      if (chainAutoRecover.value && Object.keys(userData.chainRuns).length > 0) {
+        statusCheckNotice.value = '检测到服务器重连（页面未自动刷新），自动恢复已重新启用。';
+      }
+    }
+    if (!chainAutoRecover.value || chainAutoRecovered) {
+      return;
+    }
+    chainAutoRecovered = true;
+    // 刷新后不自动执行第 0 步（出发）：状态显示「未开始」，出发由用户手动触发。
+    const steps = collectPendingChainSteps(false);
+    if (steps.length === 0) {
+      return;
+    }
+    for (const step of steps) {
+      runChainStepSilently(step.pkgName);
+    }
+    statusCheckNotice.value = `自动恢复：检测到 ${steps.length} 个环线阶段断线，已自动执行 —— ${steps
+      .map(s => s.label)
+      .join('、')}。`;
+  },
+  { immediate: true },
+);
+
+// ── 环线多端同步（org-api 服务器，跨浏览器/设备） ─────────────
+// 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，互不覆盖。
+// 环线面板的全局配置（分组/基地/船勾选/自动开关）仅本地保存，不参与云同步。
+// 无自动轮询——仅在本地环线状态改变时防抖推送；覆盖仅由「云端同步」对话框手动选择。
+const chainSyncState = ref<ChainSyncState>({
+  syncing: false,
+  lastSyncAt: null,
+  dirty: false,
+  conflict: false,
+  mergeKeys: [],
+  error: null,
+});
+const syncNotice = ref<string | undefined>(undefined);
+// 同步提示横幅计时器：仅提示当前最新事件，数秒后自动消失，避免常驻遮挡。
+let syncNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+const chainSync = createChainSyncController({
+  // shipId → 该船净化后的名字（环线包名后缀），用于按船收集/匹配脚本。
+  resolveShipName: shipId => {
+    const ship = shipsStore.getById(shipId);
+    if (!ship) {
+      return undefined;
+    }
+    return sanitizeActName(ship.name ?? ship.registration) || ship.registration;
+  },
+  onState: s => {
+    chainSyncState.value = s;
+  },
+  onNotice: msg => {
+    syncNotice.value = msg;
+    if (syncNoticeTimer) {
+      clearTimeout(syncNoticeTimer);
+    }
+    syncNoticeTimer = setTimeout(() => {
+      syncNotice.value = undefined;
+      syncNoticeTimer = null;
+    }, 8000);
+  },
+});
+
+// 环线数据变化 → 按船标记脏 → 防抖推送（每船只推自己的数据）。
+// 远端应用引发的变化由 controller 抑制，避免「应用远端 → 重推 → 远端更新」循环。
+watch(
+  () => [
+    userData.chainRuns,
+    userData.actionPackages.filter(p => isChainPackageName(p.global.name)),
+    userData.triggers.filter(isChainTrigger),
+  ],
+  () => {
+    for (const shipId of Object.keys(userData.chainRuns)) {
+      chainSync.markDirtyShip(shipId);
+    }
+  },
+  { deep: true },
+);
+
+onMounted(() => {
+  chainSync.start();
+});
+onUnmounted(() => {
+  chainSync.stop();
+  if (syncNoticeTimer) {
+    clearTimeout(syncNoticeTimer);
+    syncNoticeTimer = null;
+  }
+});
 
 // 冲突条目的展示名：状态条/悬浮提示指明具体冲突对象（船名）。
 function conflictEntryLabel(key: string): string {
@@ -331,6 +1305,276 @@ async function onChainSyncClick(e: Event) {
 }
 
 // ── 环线执行进度（多船简化列表） ─────────────────────────────
+function deriveChainRun(shipId: string): UserData.ChainRun | undefined {
+  const ship = shipsStore.getById(shipId);
+  if (!ship) {
+    return undefined;
+  }
+  const shipName = sanitizeActName(ship.name ?? ship.registration) || ship.registration;
+  const stopTriggers = userData.triggers
+    .filter(
+      t =>
+        t.event.type === 'FLIGHT_ENDED' &&
+        (t.packageName.endsWith(` Loop ${shipName}`) ||
+          t.packageName.endsWith(` 环线 ${shipName}`)),
+    )
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (stopTriggers.length === 0) {
+    return undefined;
+  }
+  const stops = stopTriggers.map(t => {
+    const naturalId = t.event.type === 'FLIGHT_ENDED' ? t.event.planet : undefined;
+    const site = naturalId ? sitesStore.getByPlanetNaturalId(naturalId) : undefined;
+    return {
+      naturalId: naturalId ?? '',
+      planetName: site
+        ? (getEntityNameFromAddress(site.address) ?? naturalId ?? t.packageName)
+        : (naturalId ?? t.packageName),
+      pkgName: t.packageName,
+    };
+  });
+  const finalTrigger = userData.triggers.find(
+    t =>
+      t.event.type === 'FLIGHT_ENDED' &&
+      (t.packageName.endsWith(`Chain Return ${shipName}`) ||
+        t.packageName === `环线归航 ${shipName}`),
+  );
+  return {
+    shipId: ship.id,
+    shipName: ship.name ?? ship.registration,
+    startedAt: stopTriggers[0]!.createdAt,
+    // 归航触发器以出发地为 planet，取它作为出发地标记。
+    originNaturalId:
+      finalTrigger && finalTrigger.event.type === 'FLIGHT_ENDED'
+        ? (finalTrigger.event.planet ?? '')
+        : '',
+    stops,
+    finalPkgName: finalTrigger?.packageName,
+  };
+}
+
+// 逆推：从操作包还原站点操作清单（无快照时——页面刷新 / 旧版本环线）。
+// 已完成站的包已被 autoDelete 删除，无法还原（对应进度「完成」）。
+function deriveStopOps(pkgName: string): {
+  unload: Record<string, number>;
+  load: Record<string, number>;
+} {
+  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
+  return {
+    unload: pkg?.groups.find(g => g.name === '卸货')?.materials ?? {},
+    load: pkg?.groups.find(g => g.name === '提取')?.materials ?? {},
+  };
+}
+
+// 归航卸货：从归航包（Chain Return 船名）的「卸货」组还原。
+function deriveFinalOps(pkgName: string): Record<string, number> {
+  const pkg = userData.actionPackages.find(p => p.global.name === pkgName);
+  return pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+}
+
+// 持久化快照 → 计划对象：页面刷新后仍按规划样式显示阶段操作与载重。
+function chainPlanFromRun(run: UserData.ChainRun): ChainPlan | undefined {
+  const snap = run.plan;
+  if (snap === undefined) {
+    return undefined;
+  }
+  const stops: ChainStopPlan[] = run.stops.map(s => {
+    const unloadAt = s.plan?.unloadAt ?? {};
+    const loadAt = s.plan?.loadAt ?? {};
+    return {
+      naturalId: s.naturalId,
+      planetName: s.planetName,
+      days: 0,
+      cxBuy: false,
+      unloadCx: unloadAt,
+      unloadChain: new Map(),
+      load: new Map(
+        Object.entries(loadAt).map(([ticker, amount]) => [
+          ticker,
+          { amount, to: s.plan?.loadTo?.[ticker] ?? '' },
+        ]),
+      ),
+      clipped: s.plan?.clipped ?? false,
+      loadOnArrival: s.plan?.loadOnArrival ?? { weight: 0, volume: 0 },
+      loadOnDeparture: s.plan?.loadOnDeparture ?? { weight: 0, volume: 0 },
+    };
+  });
+  const cxBill: Record<string, number> = { ...snap.purchaseBill };
+  for (const [ticker, amount] of Object.entries(snap.originPickup)) {
+    cxBill[ticker] = (cxBill[ticker] ?? 0) + amount;
+  }
+  const loads = [snap.originLoadOnDeparture, ...stops.map(s => s.loadOnDeparture)];
+  const peak = loads.reduce(
+    (acc, l) => ({
+      weight: Math.max(acc.weight, l.weight),
+      volume: Math.max(acc.volume, l.volume),
+    }),
+    { weight: 0, volume: 0 },
+  );
+  return {
+    originNaturalId: run.originNaturalId,
+    stops,
+    finalUnload: snap.finalUnload,
+    cxBill,
+    purchaseBill: snap.purchaseBill,
+    originPickup: snap.originPickup,
+    warnings: [],
+    peakLoad: peak,
+    freeCapacity: {
+      weight: Math.max(0, snap.capacity.weight - peak.weight),
+      volume: Math.max(0, snap.capacity.volume - peak.volume),
+    },
+    capacity: snap.capacity,
+    loadOnDeparture: snap.originLoadOnDeparture,
+    loadOnReturn: snap.loadOnReturn,
+    overCapacity: false,
+    finalUnloadNotes: snap.finalUnloadNotes,
+  };
+}
+
+// 计算一批材料的重量/体积（用于从旧 ACT 包还原阶段载重）。
+function materialsLoad(record: Record<string, number>) {
+  let weight = 0;
+  let volume = 0;
+  for (const [ticker, amount] of Object.entries(record)) {
+    const mat = materialsStore.getByTicker(ticker);
+    if (mat) {
+      weight += mat.weight * amount;
+      volume += mat.volume * amount;
+    }
+  }
+  return { weight, volume };
+}
+
+// ── 主包解析（取代按船名切片反推）──────────────────────────
+// 旧版/无 plan 快照的 run 需从 ACT 包反推采购/装载。主包定位优先级：
+// 1) run.mainPkgName 精确匹配（execute 固化、改名无关）；
+// 2) run 带代际指纹时按 `0 Chain … <fp>` 定位（改名后仍准确）；
+// 3) 古早记录（两者皆无）才回退「Loop <船名>」切船名后缀匹配。
+function findRunMainPkg(run: UserData.ChainRun): UserData.ActionPackageData | undefined {
+  if (run.mainPkgName !== undefined) {
+    const pkg = userData.actionPackages.find(p => p.global.name === run.mainPkgName);
+    if (pkg) {
+      return pkg;
+    }
+  }
+  if (run.fp !== undefined) {
+    const suffix = ` ${run.fp}`;
+    const pkg = userData.actionPackages.find(
+      p =>
+        isChainPackageName(p.global.name) &&
+        p.global.name.startsWith('0 Chain') &&
+        p.global.name.endsWith(suffix),
+    );
+    if (pkg) {
+      return pkg;
+    }
+  }
+  const firstPkgName = run.stops[0]?.pkgName ?? '';
+  const idx = firstPkgName.lastIndexOf(' Loop ');
+  if (idx < 0) {
+    return undefined;
+  }
+  const shipName = firstPkgName.slice(idx + ' Loop '.length);
+  return userData.actionPackages.find(p => p.global.name.endsWith(`Chain ${shipName}`));
+}
+
+// 旧版/导入的环线记录没有 plan 快照时，从现有 ACT 包（主包/站点包/归航包）
+// 反推一份计划载重快照，让「载重」列显示阶段载重而非实时舱载。
+function buildPlanFromPackages(
+  run: UserData.ChainRun,
+): { plan: UserData.ChainRunPlan; stops: UserData.ChainRunStop[] } | undefined {
+  const mainPkg = findRunMainPkg(run);
+  const buyGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '));
+  const loadGroup = mainPkg?.groups.find(g => (g.name ?? '').startsWith('装载 '));
+  const purchaseBill = buyGroup?.materials ?? {};
+  const cxBill = loadGroup?.materials ?? {};
+  const originPickup: Record<string, number> = {};
+  for (const [ticker, amount] of Object.entries(cxBill)) {
+    const pickup = amount - (purchaseBill[ticker] ?? 0);
+    if (pickup > 0) {
+      originPickup[ticker] = pickup;
+    }
+  }
+  const finalPkg = run.finalPkgName
+    ? userData.actionPackages.find(p => p.global.name === run.finalPkgName)
+    : undefined;
+  const finalUnload = finalPkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+  // 旧版单船主包未写入 ACT 列表：用站点包「卸货」之和近似原始装载量。
+  const fallbackBill: Record<string, number> = {};
+  if (Object.keys(cxBill).length === 0) {
+    for (const stop of run.stops) {
+      const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
+      const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+      for (const [ticker, amount] of Object.entries(unload)) {
+        fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
+      }
+    }
+    for (const [ticker, amount] of Object.entries(finalUnload)) {
+      fallbackBill[ticker] = (fallbackBill[ticker] ?? 0) + amount;
+    }
+  }
+  const originBill = Object.keys(cxBill).length > 0 ? cxBill : fallbackBill;
+  const ship = shipsStore.getById(run.shipId);
+  const cargo = ship ? storagesStore.getById(ship.idShipStore) : undefined;
+  const capacity = cargo
+    ? { weight: cargo.weightCapacity, volume: cargo.volumeCapacity }
+    : { weight: 0, volume: 0 };
+  let current = materialsLoad(originBill);
+  const stops: UserData.ChainRunStop[] = run.stops.map((stop, i) => {
+    if (stop.plan !== undefined) {
+      return stop;
+    }
+    const pkg = userData.actionPackages.find(p => p.global.name === stop.pkgName);
+    const unload = pkg?.groups.find(g => g.name === '卸货')?.materials ?? {};
+    const load = pkg?.groups.find(g => g.name === '提取')?.materials ?? {};
+    const unloadLoad = materialsLoad(unload);
+    const loadLoad = materialsLoad(load);
+    const next = run.stops[i + 1]?.planetName ?? run.originNaturalId;
+    const loadOnArrival = {
+      weight: Math.max(0, current.weight - unloadLoad.weight),
+      volume: Math.max(0, current.volume - unloadLoad.volume),
+    };
+    current = {
+      weight: loadOnArrival.weight + loadLoad.weight,
+      volume: loadOnArrival.volume + loadLoad.volume,
+    };
+    const loadTo: Record<string, string> = {};
+    for (const ticker of Object.keys(load)) {
+      loadTo[ticker] = next;
+    }
+    return {
+      ...stop,
+      plan: {
+        unloadAt: unload,
+        loadAt: load,
+        loadTo,
+        loadOnArrival,
+        loadOnDeparture: current,
+        clipped: false,
+      },
+    };
+  });
+  return {
+    plan: {
+      capacity,
+      originLoadOnDeparture: materialsLoad(originBill),
+      loadOnReturn: current,
+      purchaseBill,
+      originPickup,
+      finalUnload,
+    },
+    stops,
+  };
+}
+
+// 出发行采购：从主包（Chain 船名）的「购买」组还原。
+// 主包定位走 findRunMainPkg（mainPkgName / 代际指纹优先），不再切船名。
+function derivePurchaseBill(run: UserData.ChainRun): Record<string, number> {
+  const mainPkg = findRunMainPkg(run);
+  return mainPkg?.groups.find(g => (g.name ?? '').startsWith('购买 '))?.materials ?? {};
+}
+
 type StopState = UserData.ChainRunStopState;
 
 function stopMarker(state: StopState) {
@@ -359,8 +1603,146 @@ function markClassKey(state: StopState): string {
   }
 }
 
+interface RunProgress {
+  originNaturalId: string;
+  stops: { naturalId: string; planetName: string; state: StopState }[];
+  done: number;
+  total: number;
+  originState: StopState;
+  finalState: StopState;
+}
+
+// 单船各站状态：与执行前一致，沿「origin → 各站 → origin」给出每站进度。
+// 新版本将状态持久化到 chainRuns：删除 ACT/触发器后列表仍能展示站点与操作；
+// 旧记录（无持久化状态）回退到「包消失 = 完成」的推导。
+// 是否已完成（全部站点 + 归航完成）：状态列表据此显示「已完成」标记。
+function isRunFinished(sp: { progress?: RunProgress }): boolean {
+  return (
+    sp.progress !== undefined &&
+    sp.progress.finalState === 'done' &&
+    sp.progress.done >= sp.progress.total
+  );
+}
+
 // 空间站 naturalId → 所属系统 naturalId（空间站地址被 AddressSelector 规范化为系统，
 // 归航/飞往空间站的航段比较需先解析到系统）。
+function stationSystemOf(naturalId: string): string | undefined {
+  const station = stationsStore.getByNaturalId(naturalId);
+  if (!station) {
+    return undefined;
+  }
+  return getSystemLineFromAddress(station.address)?.entity.naturalId;
+}
+
+function runProgress(run: UserData.ChainRun): RunProgress {
+  const ship = shipsStore.getById(run.shipId);
+  const flight = ship?.flightId ? flightsStore.getById(ship.flightId) : undefined;
+  const flightDest = flight ? getEntityNaturalIdFromAddress(flight.destination) : undefined;
+  const dockedAt = ship?.address ? getEntityNaturalIdFromAddress(ship.address) : undefined;
+  // 环线按序执行：船已通过（停靠或飞行途中的目标站）之前的所有站必然已执行完成。
+  // 中断恢复后船可能已在途（正飞往后续站），上一站状态可能未持久化为 done——
+  // 按停靠位置（dockedAt）或飞行目的站（flightDest）前推为完成。
+  const stopIndexAt = (id: string | undefined) =>
+    id === undefined ? -1 : run.stops.findIndex(s => s.naturalId === id);
+  const dockedStopIndex = stopIndexAt(dockedAt);
+  // 归航在途：飞行目的地是出发地（空间站地址可能被规范化为系统，按归属系统比较）。
+  const homeward =
+    flightDest !== undefined &&
+    (flightDest.toUpperCase() === run.originNaturalId.toUpperCase() ||
+      (stationSystemOf(run.originNaturalId) ?? '').toUpperCase() === flightDest.toUpperCase());
+  // 已通过前缀终点（不含该站本身）：停靠站 > 在途目的站 > 归航（全部站）。
+  const passedUpTo =
+    dockedStopIndex >= 0 ? dockedStopIndex : homeward ? run.stops.length : stopIndexAt(flightDest);
+  const stops = run.stops.map((stop, i) => {
+    const pkgExists = userData.actionPackages.some(p => p.global.name === stop.pkgName);
+    const fired = (userData.triggers.find(t => t.packageName === stop.pkgName)?.runCount ?? 0) > 0;
+    let state: StopState;
+    if (stop.state === 'done' || (passedUpTo >= 0 && i < passedUpTo)) {
+      state = 'done';
+    } else if (dockedAt === stop.naturalId || (pkgExists && fired)) {
+      state = 'arrived';
+    } else if (flightDest === stop.naturalId) {
+      state = 'transit';
+    } else if (stop.state !== undefined) {
+      // 持久化状态优先：删除 ACT/触发器不会把未完成站误判为「完成」。
+      state = stop.state;
+    } else if (!pkgExists) {
+      state = 'done';
+    } else {
+      state = 'pending';
+    }
+    return { naturalId: stop.naturalId, planetName: stop.planetName, state };
+  });
+  const done = stops.filter(s => s.state === 'done').length;
+  const allStopsDone = stops.every(s => s.state === 'done');
+  const originState: StopState =
+    run.originState === 'done' || (stops.length > 0 && stops[0]!.state !== 'pending')
+      ? 'done'
+      : 'pending';
+  const finalPkgExists =
+    run.finalPkgName !== undefined &&
+    userData.actionPackages.some(p => p.global.name === run.finalPkgName);
+  let finalState: StopState;
+  if (run.finalState === 'done') {
+    finalState = 'done';
+  } else if (allStopsDone) {
+    if (dockedAt === run.originNaturalId) {
+      // 新记录保留持久化状态（避免删除归航包被误判完成）；旧记录按原逻辑处理。
+      finalState = run.finalState === undefined ? (finalPkgExists ? 'arrived' : 'done') : 'arrived';
+    } else if (homeward) {
+      // 归航在途：目的地为出发地（空间站地址可能被规范化为系统）。
+      finalState = 'transit';
+    } else {
+      finalState = run.finalState ?? 'pending';
+    }
+  } else {
+    finalState = run.finalState ?? 'pending';
+  }
+  return {
+    originNaturalId: run.originNaturalId,
+    stops,
+    done,
+    total: stops.length,
+    originState,
+    finalState,
+  };
+}
+
+const activeRuns = computed(() => {
+  const result: { shipId: string; run: UserData.ChainRun; progress: RunProgress }[] = [];
+  // 主：执行中的环线记录。不限于「可分配船只」——船 DEPART 后离开空间站，
+  // 已不在 ships props / eligibleShips 中，只要船仍存在就持续显示进度。
+  for (const run of Object.values(userData.chainRuns)) {
+    if (shipsStore.getById(run.shipId) === undefined) {
+      continue;
+    }
+    result.push({ shipId: run.shipId, run, progress: runProgress(run) });
+  }
+  // 兜底：从触发器推导环线（旧版本执行 / chainRuns 记录丢失时）。
+  // 遍历全部船而非仅选中船——执行中的船已不在 CX，selectedShips 为空。
+  for (const ship of shipsStore.all.value ?? []) {
+    if (result.some(x => x.shipId === ship.id)) {
+      continue;
+    }
+    const run = deriveChainRun(ship.id);
+    if (run === undefined) {
+      continue;
+    }
+    const progress = runProgress(run);
+    // 全部站点与归航包都完成后视为已结束，不再显示（避免占用进度区）。
+    if (progress.done >= progress.total) {
+      const finalDone =
+        run.finalPkgName === undefined ||
+        !userData.actionPackages.some(p => p.global.name === run.finalPkgName);
+      if (finalDone) {
+        continue;
+      }
+    }
+    result.push({ shipId: ship.id, run, progress });
+  }
+  return result;
+});
+
 // 各船环线进度索引（按 shipId）。
 const progressByShip = computed(() => {
   const map = new Map<string, RunProgress>();
@@ -368,6 +1750,73 @@ const progressByShip = computed(() => {
     map.set(entry.shipId, entry.progress);
   }
   return map;
+});
+
+// 飞行时间 watch（依赖 activeRuns，需在 activeRuns 之后注册）。
+registerFlightTimeWatch();
+
+// 把推导出的进度状态持久化到 chainRuns：列表全局状态与 ACT/触发器解耦，
+// 删除 ACT 脚本或触发器后，站点与操作内容仍能完整展示。
+watchEffect(() => {
+  for (const run of Object.values(userData.chainRuns)) {
+    const progress = runProgress(run);
+    if (run.originState !== progress.originState) {
+      run.originState = progress.originState;
+    }
+    if (run.finalState !== progress.finalState) {
+      run.finalState = progress.finalState;
+    }
+    for (let i = 0; i < run.stops.length; i++) {
+      const stop = run.stops[i]!;
+      const state = progress.stops[i]!.state;
+      if (stop.state !== state) {
+        stop.state = state;
+      }
+    }
+  }
+});
+
+// 兜底：逆推出的旧版环线记录直接持久化，删除触发器后站点列表不再丢失。
+watchEffect(() => {
+  for (const ship of shipsStore.all.value ?? []) {
+    if (userData.chainRuns[ship.id] !== undefined) {
+      continue;
+    }
+    const derived = deriveChainRun(ship.id);
+    if (derived === undefined) {
+      continue;
+    }
+    const progress = runProgress(derived);
+    const finished = progress.finalState === 'done' && progress.done >= progress.total;
+    if (!finished) {
+      userData.chainRuns[ship.id] = derived;
+    }
+  }
+});
+
+// 旧版/导入记录无 plan 快照时，从现有 ACT 包反推并持久化计划载重，
+// 使「载重」列显示阶段载重而不是实时舱载。
+watchEffect(() => {
+  for (const run of Object.values(userData.chainRuns)) {
+    if (run.plan !== undefined) {
+      continue;
+    }
+    const built = buildPlanFromPackages(run);
+    if (built === undefined) {
+      continue;
+    }
+    // 舱容数据未加载前不落盘，等数据就绪后再重建（避免 0 容量占位）。
+    if (built.plan.capacity.weight <= 0 && built.plan.capacity.volume <= 0) {
+      continue;
+    }
+    run.plan = built.plan;
+    for (let i = 0; i < run.stops.length; i++) {
+      const stopPlan = built.stops[i]?.plan;
+      if (stopPlan !== undefined) {
+        run.stops[i]!.plan = stopPlan;
+      }
+    }
+  }
 });
 
 type ChainTableRow = {
@@ -465,8 +1914,46 @@ function isRowBodyVisible(sp: { shipId: string; progress?: unknown }) {
   return !sp.progress || !isRunCollapsed(sp.shipId);
 }
 
-// 组件只维护本地快照和折叠状态；运行记录清理由页面服务处理。
+// 环线运行记录保留策略：遍历全部 chainRuns（不限于当前选中的船）。
+// 完成的环线（含归航卸载）不再自动清理，保留在状态列表显示「完成」；
+// 孤立的预留列表（ACT 脚本与触发器已全部删除且非完成态）直接移除，
+// 避免导入旧 JSON 后删除全部脚本/触发器时残留空列表。
 watchEffect(() => {
+  for (const [shipId, run] of Object.entries(userData.chainRuns)) {
+    const progress = runProgress(run);
+    const hasAnyScript =
+      (run.mainPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.mainPkgName) ||
+          userData.triggers.some(t => t.packageName === run.mainPkgName))) ||
+      run.stops.some(
+        s =>
+          userData.actionPackages.some(p => p.global.name === s.pkgName) ||
+          userData.triggers.some(t => t.packageName === s.pkgName),
+      ) ||
+      (run.finalPkgName !== undefined &&
+        (userData.actionPackages.some(p => p.global.name === run.finalPkgName) ||
+          userData.triggers.some(t => t.packageName === run.finalPkgName)));
+    const finished = progress.finalState === 'done' && progress.done >= progress.total;
+    if (!hasAnyScript) {
+      // 正常完成的运行保留展示（状态列表显示「完成」）；孤立的预留列表立即移除。
+      const completedNewRun =
+        run.mainPkgName !== undefined &&
+        run.originState === 'done' &&
+        run.finalState === 'done' &&
+        progress.done >= progress.total;
+      if (completedNewRun) {
+        continue;
+      }
+      delete userData.chainRuns[shipId];
+      clearFinishedCleanup(shipId);
+      continue;
+    }
+    if (finished) {
+      // 完成：保留在状态列表，显示「完成」。
+      continue;
+    }
+    clearFinishedCleanup(shipId);
+  }
   // 没有运行记录时清空计划快照，避免残留旧数据影响下次规划。
   if (Object.keys(userData.chainRuns).length === 0) {
     planSnapshot.value = [];
@@ -635,6 +2122,27 @@ function legInTransit(shipId: string, legIndex: number): boolean {
 }
 
 // 中文精确时长（≥1 天 天/时/分；<1 天 时/分/秒），与 FTC 面板口径一致。
+function formatFlightDuration(ms: number): string {
+  if (ms <= 0) {
+    return '--';
+  }
+  const totalSec = Math.floor(ms / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (days > 0) {
+    return `${days}天 ${hours}小时 ${minutes}分钟`;
+  }
+  if (hours > 0) {
+    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+  }
+  if (minutes > 0) {
+    return `${minutes}分钟 ${seconds}秒`;
+  }
+  return `${seconds}秒`;
+}
+
 // 到达时刻文本：HH:MM（本地时间，浏览器时区）；跨天时带 MM-DD。
 function arrivalClockText(ms: number): string {
   const t = new Date(ms);

@@ -2,7 +2,7 @@
 // 环线多端同步：跨浏览器/设备经 org-api 服务器同步「单船飞行配置」快照。
 // - 按船同步：每艘船（chainRuns + 该船环线 ACT 包/触发器）独立一条快照，互不覆盖。
 //   环线面板的全局配置（分组/基地/船勾选/自动开关）仅本地保存，不参与云同步。
-// - 无自动轮询：仅在本地环线运行状态改变（页面级运行服务触发 markDirtyShip）
+// - 无自动轮询：仅在本地环线运行状态改变（ChainView watch 触发 markDirtyShip）
 //   时防抖推送；覆盖仅由「云端同步」对话框手动选择。
 // - 冲突闸：条目一旦发生实质冲突（LWW 拒绝 / 409 且内容不一致）即标记
 //   awaitingMerge，自动推送不再触碰该条目，直到用户在「云端同步」对话框手动
@@ -17,9 +17,10 @@
 //   run 的代际 == clearedFp（残留脚本被导入/重建），直接移除本地而非推回云端——
 //   堵住「采纳清除后基准已刷新、同代残留经 CAS 直接放行复活」的洞。
 import { userData } from '@src/store/user-data';
-import { nextTick, reactive } from 'vue';
-import { collectShipDoc, applyShipDoc, contentSignature, normalizeDoc } from './chain-snapshot';
-import type { SyncComparison } from './chain-snapshot';
+import { stripDeletedActions } from '@src/features/XIT/ACT/utils';
+import { chainFpSuffix } from '@src/features/XIT/FLEET/chain-planner';
+import { createId } from '@src/store/create-id';
+import { nextTick } from 'vue';
 import { HttpError } from '@src/infrastructure/org-api/client';
 import { loadSession } from '@src/infrastructure/org-api/session';
 import {
@@ -39,8 +40,6 @@ interface BaselineRecord {
   base: number; // 服务端行时间（updated_at，CAS 乐观锁基准）
   ts: number; // 云端 payload 时间戳（LWW 比较基准）
   sig: string | null; // 上次成功推送/拉取内容的签名
-  pending?: boolean;
-  local?: number;
   merge?: boolean; // 冲突待人工合并（awaitingMerge 的跨会话持久化）
   cleared?: string; // 本地已知被云端清除的代际 fp（推送侧防复活守卫，跨会话持久化）
 }
@@ -82,8 +81,248 @@ function saveBaselines(map: BaselineMap): void {
   }
 }
 
+// ── 环线数据识别（与 ChainView 同一套命名约定）────────────────
+// 环线相关 = 本面板生成的到港触发器与其操作包（主包/站点包/归航包）。
+// 命名约定与 buildChainActionPackages / sanitizeActName 一致：
+//   主包       `0 Chain ${船名}`（旧版 `Chain ${船名}`）
+//   站点包     `${序号} ${站点} Loop ${船名}`（旧版 `${站点} Loop/环线 ${船名}`）
+//   归航包     `${序号} Chain Return ${船名}`（旧版 `Chain Return/环线归航 ${船名}`）
+export function isChainPackageName(name: string): boolean {
+  return (
+    /(?:^|\s)\d+\s+Chain(?: Return)?\s/.test(name) ||
+    name.startsWith('Chain ') ||
+    name.startsWith('环线归航 ') ||
+    name.includes(' Loop ') ||
+    name.includes(' 环线 ')
+  );
+}
+
+export function isChainTrigger(t: UserData.TriggerData): boolean {
+  return t.event.type === 'FLIGHT_ENDED' && isChainPackageName(t.packageName);
+}
+
+// 事件为扁平对象，按键排序归一化后序列化，避免键序差异导致同一触发器签名不同。
+export function canonicalEvent(event: UserData.TriggerEventData) {
+  return Object.fromEntries(Object.entries(event).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function triggerSignature(t: UserData.TriggerData) {
+  return JSON.stringify([t.name, t.packageName, canonicalEvent(t.event), t.mode]);
+}
+
+// 深拷贝（reactive 代理 → 纯对象），供 JSON 传输与整包替换。
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+// 内容签名（不含 updatedAt）：判断该条目推送内容是否真的变化。
+// ChainView 的粗粒度 watch 会把「未实际改动」的船与配置也标脏，若一律以新
+// 时间戳推送会把云端（他端）对同一条目的更新覆盖掉、架空 LWW 保护。
+// 推送前比对签名：内容未变则跳过且不推进时间戳。
+function contentSignature(doc: ChainSyncDoc): string {
+  const content = { ...doc };
+  delete (content as Partial<ChainSyncDoc>).updatedAt;
+  // 触发器 id 是设备本地标识（applyShipDoc 拉取导入时用 createId 重新生成），
+  // 不计入签名，避免「拉取后内容相同却多推一次」的抖动。
+  content.triggers = (content.triggers ?? []).map(t => {
+    const copy = { ...t };
+    delete (copy as { id?: string }).id;
+    return copy;
+  });
+  return JSON.stringify(content);
+}
+
+// 时间戳显示（同步提示用）。
 function formatTime(ms: number): string {
   return new Date(ms).toLocaleTimeString();
+}
+
+// 远端 payload 形状校验（透传数据，前端自校验）。
+function normalizeDoc(payload: unknown): ChainSyncDoc | null {
+  const p = payload as Partial<ChainSyncDoc> | null;
+  if (
+    !p ||
+    p.version !== 1 ||
+    typeof p.updatedAt !== 'number' ||
+    !p.chainRuns ||
+    !Array.isArray(p.actionPackages) ||
+    !Array.isArray(p.triggers)
+  ) {
+    return null;
+  }
+  return p as ChainSyncDoc;
+}
+
+// 对比数据：本地（各活跃船） vs 远端（各船）。
+export interface SyncComparison {
+  localShips: Map<string, ChainSyncDoc>;
+  remoteShips: Map<string, ChainSyncDoc>;
+  // 云端各条目服务端行时间（updated_at，CAS 乐观锁基准）；无远端记录时缺省。
+  remoteServerUpdatedAt: Map<string, number>;
+}
+
+// ── 船的环线脚本归属（shipId 级关联）────────────────────────────
+// 环线包/触发器名里只编码了「船名」（命名时没有 shipId）。若按当前船名做后缀
+// 匹配：船改名后本端会找不到旧名包（推送变空/误删云端），且船名互为后缀时
+// （如「Cargo」与「Big Cargo」）会互相误收/误删。
+// 归属判定改为以 shipId 为锚：chainRuns[shipId] 里固化的包名（main/final/
+// stops，执行时写入、与后续改名无关）是权威来源；当前船名匹配只作兜底，
+// 且当包名已被其它船的运行固化时让给那艘船，避免后缀误收。
+function runPackageNames(run: UserData.ChainRun | undefined): Set<string> {
+  const names = new Set<string>();
+  if (!run) {
+    return names;
+  }
+  if (run.mainPkgName) {
+    names.add(run.mainPkgName);
+  }
+  if (run.finalPkgName) {
+    names.add(run.finalPkgName);
+  }
+  for (const stop of run.stops) {
+    if (stop.pkgName) {
+      names.add(stop.pkgName);
+    }
+  }
+  return names;
+}
+
+function nameMatchesShip(name: string, shipName: string): boolean {
+  return name.endsWith(` ${shipName}`) || name === `环线派遣 ${shipName}`;
+}
+
+// 某船当前的环线脚本名集合（shipId 级关联，collect/apply/清理共用）：
+// 权威（新版本）= 本船 run 的代际指纹（chainRuns[shipId].fp，创建时铸入、改名无关）——
+//   凡以 ` <fp>` 结尾的环线包/触发器都属于本船，无需再按船名后缀/让位判断；
+// 兜底（legacy，无 fp）= chainRuns[shipId] 固化包名（main/final/stops）∪
+//   当前船名后缀匹配的孤儿/历史残留（已被其它船运行固化的让出）。
+export function shipChainScriptScope(shipId: string, shipName: string | undefined): Set<string> {
+  const names = runPackageNames(userData.chainRuns[shipId]);
+  const fp = userData.chainRuns[shipId]?.fp;
+  if (fp !== undefined) {
+    // fp 权威分支：直接按代际指纹枚举，船名/改名完全无关。
+    const suffix = chainFpSuffix(fp);
+    for (const pkg of userData.actionPackages) {
+      if (isChainPackageName(pkg.global.name) && pkg.global.name.endsWith(suffix)) {
+        names.add(pkg.global.name);
+      }
+    }
+    for (const trigger of userData.triggers) {
+      if (isChainTrigger(trigger) && trigger.packageName.endsWith(suffix)) {
+        names.add(trigger.packageName);
+      }
+    }
+    return names;
+  }
+  if (shipName === undefined) {
+    return names;
+  }
+  const claimedByOther = (name: string) =>
+    Object.entries(userData.chainRuns).some(
+      ([otherId, run]) => otherId !== shipId && runPackageNames(run).has(name),
+    );
+  const collectMatch = (name: string) => {
+    if (nameMatchesShip(name, shipName) && !claimedByOther(name)) {
+      names.add(name);
+    }
+  };
+  for (const pkg of userData.actionPackages) {
+    if (isChainPackageName(pkg.global.name)) {
+      collectMatch(pkg.global.name);
+    }
+  }
+  for (const trigger of userData.triggers) {
+    if (isChainTrigger(trigger)) {
+      collectMatch(trigger.packageName);
+    }
+  }
+  return names;
+}
+
+// ── 收集 ─────────────────────────────────────────────────────────────
+// 该船快照：chainRuns 只含本船（无运行记录时为空），操作包/触发器只含本船。
+// 本地无该船记录时仍返回快照（chainRuns 空）——「用本地覆盖云端」可据此清空云端。
+// clearedFp：无运行记录时由调用方传入本船「本地已知被云端清除」的代际指纹
+// （来自 entry.clearedFp），作为空快照删除传播的轻量 tombstone；缺省省略
+// （旧版空快照语义）。
+function collectShipDoc(
+  shipId: string,
+  updatedAt: number,
+  resolveShipName: (shipId: string) => string | undefined,
+  clearedFp?: string,
+): ChainSyncDoc {
+  const run = userData.chainRuns[shipId];
+  const scope = shipChainScriptScope(shipId, resolveShipName(shipId));
+  return {
+    version: 1,
+    updatedAt,
+    fp: run?.fp,
+    clearedFp: run === undefined ? clearedFp : undefined,
+    chainRuns: run === undefined ? {} : { [shipId]: clone(run) },
+    actionPackages: userData.actionPackages
+      .filter(p => isChainPackageName(p.global.name) && scope.has(p.global.name))
+      .map(clone),
+    triggers: userData.triggers
+      .filter(t => isChainTrigger(t) && scope.has(t.packageName))
+      .map(clone),
+  };
+}
+
+// ── 应用 ─────────────────────────────────────────────────────────────
+// 应用远端船快照：只动该船数据（chainRuns 该船条目 + 该船环线包/触发器），
+// 不影响其他船。远端无该船条目时删除本地该船记录（删除传播）。
+// 删除范围以「覆盖 chainRuns 前的本地归属快照」判定（shipId 级）：船改名后
+// 旧名包仍能命中，不会因远端/本地名字不一致而误删或留下孤儿。
+function applyShipDoc(
+  shipId: string,
+  doc: ChainSyncDoc,
+  resolveShipName: (shipId: string) => string | undefined,
+): void {
+  // 覆盖 chainRuns 前，先快照本地当前属于该船的包/触发器名（改名无关）。
+  const localNames = shipChainScriptScope(shipId, resolveShipName(shipId));
+
+  if (doc.chainRuns[shipId] !== undefined) {
+    userData.chainRuns[shipId] = clone(doc.chainRuns[shipId]);
+  } else {
+    delete userData.chainRuns[shipId];
+  }
+
+  // 删除本地该船包中不在远端的（以远端名单为准，与名字是否匹配当前船名无关）。
+  const remotePkgs = new Set(doc.actionPackages.map(p => p.global.name));
+  for (let i = userData.actionPackages.length - 1; i >= 0; i--) {
+    const pkg = userData.actionPackages[i]!;
+    if (localNames.has(pkg.global.name) && !remotePkgs.has(pkg.global.name)) {
+      userData.actionPackages.splice(i, 1);
+    }
+  }
+  for (const pkg of doc.actionPackages) {
+    stripDeletedActions(pkg);
+    const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
+    if (index >= 0) {
+      userData.actionPackages[index] = pkg;
+    } else {
+      userData.actionPackages.push(pkg);
+    }
+  }
+  const remoteTriggers = new Set(doc.triggers.map(triggerSignature));
+  for (let i = userData.triggers.length - 1; i >= 0; i--) {
+    const trigger = userData.triggers[i]!;
+    if (
+      isChainTrigger(trigger) &&
+      localNames.has(trigger.packageName) &&
+      !remoteTriggers.has(triggerSignature(trigger))
+    ) {
+      userData.triggers.splice(i, 1);
+    }
+  }
+  const localSignatures = new Set(userData.triggers.map(triggerSignature));
+  for (const trigger of doc.triggers) {
+    if (localSignatures.has(triggerSignature(trigger))) {
+      continue;
+    }
+    userData.triggers.push({ ...trigger, id: createId() });
+    localSignatures.add(triggerSignature(trigger));
+  }
 }
 
 // ── 同步状态 ─────────────────────────────────────────────────────────
@@ -125,7 +364,6 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     remoteBaseUpdatedAt: number; // 乐观锁基准（服务器 updated_at）
     lastLocalChangeAt: number; // 本地最后修改时间
     dirty: boolean;
-    revision: number;
     // 冲突待人工合并：409/LWW 拒绝后置位；未在对话框手动处理前，自动推送
     // 跳过该条目（防止 409 刷新基准后静默覆盖他端更新）。
     awaitingMerge: boolean;
@@ -153,9 +391,8 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
       e = {
         remoteUpdatedAt: saved?.ts ?? 0,
         remoteBaseUpdatedAt: saved?.base ?? 0,
-        lastLocalChangeAt: saved?.local ?? 0,
-        dirty: saved?.pending === true,
-        revision: 0,
+        lastLocalChangeAt: 0,
+        dirty: false,
         // 冲突闸跨会话恢复：重载后该条目仍需人工处理才能再次自动推送。
         awaitingMerge: saved?.merge === true,
         // 已清除代际恢复：重载后仍拦截同代残留推回（防复活守卫跨会话生效）。
@@ -173,15 +410,12 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     const stored = loadBaselines();
     for (const [key, e] of entries) {
       if (
-        e.dirty ||
         e.remoteBaseUpdatedAt > 0 ||
         e.remoteUpdatedAt > 0 ||
         e.pushedSignature !== null ||
         e.clearedFp !== undefined
       ) {
         stored[key] = {
-          pending: e.dirty || undefined,
-          local: e.lastLocalChangeAt > 0 ? e.lastLocalChangeAt : undefined,
           base: e.remoteBaseUpdatedAt,
           ts: e.remoteUpdatedAt,
           sig: e.pushedSignature,
@@ -231,9 +465,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     }
     const e = entry(shipId);
     e.lastLocalChangeAt = Date.now();
-    e.revision++;
     e.dirty = true;
-    persistBaselines();
     // 仅当没有任何「冲突待处理」条目时才清 conflict：其它船/配置上的未解决
     // 冲突不应被本船的新变化掩盖（保持状态条「有冲突」提示）。
     setState({ dirty: true, conflict: hasPendingMerge(), error: null });
@@ -304,6 +536,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
   async function performPush(force: boolean, targetKey?: string): Promise<void> {
     setState({ syncing: true });
     // 批次中是否刷新过基准（首拉/成功/409 重取）：有才写回 localStorage。
+    let baselineTouched = false;
     try {
       const keys = targetKey !== undefined ? [targetKey] : [...entries.keys()];
       for (const key of keys) {
@@ -328,10 +561,10 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
             if (remoteDoc?.clearedFp !== undefined) {
               e.clearedFp = remoteDoc.clearedFp;
             }
+            baselineTouched = true;
           }
         }
         const localUpdatedAt = e.lastLocalChangeAt > 0 ? e.lastLocalChangeAt : Date.now();
-        const revision = e.revision;
         const doc = collectShipDoc(key, localUpdatedAt, opts.resolveShipName, e.clearedFp);
         // 推送前同代拦截：本地 run 的代际 == 本端已知「云端已清除」的代际
         // （残留脚本被导入/重建）→ 直接移除本地，不推回云端。fp 每次 execute
@@ -363,18 +596,15 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
           // 用户已确认覆盖云端：以最新 base 重试一次。
           e.remoteBaseUpdatedAt = res.latest.updatedAt;
           e.remoteUpdatedAt = normalizeDoc(res.latest.payload)?.updatedAt ?? 0;
+          baselineTouched = true;
           res = await pushChainSync(key, doc, e.remoteBaseUpdatedAt);
-        }
-        if (!res.ok && revision !== e.revision) {
-          e.awaitingMerge = true;
-          setState({ conflict: true });
-          continue;
         }
         if (res.ok) {
           e.remoteBaseUpdatedAt = res.updatedAt;
           e.remoteUpdatedAt = doc.updatedAt;
           e.pushedSignature = contentSignature(doc);
-          e.dirty = e.revision !== revision;
+          baselineTouched = true;
+          e.dirty = false;
           e.awaitingMerge = false; // force 覆盖成功即视为解决该条目冲突。
           setState({ lastSyncAt: res.updatedAt, error: null });
           if (force) {
@@ -391,6 +621,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
             if (remoteDoc?.clearedFp !== undefined) {
               e.clearedFp = remoteDoc.clearedFp;
             }
+            baselineTouched = true;
             // ── 代际指纹规则（仅自动路径；force 为用户显式覆盖，不走）──
             if (!force && remoteDoc !== null) {
               const localRunFp = doc.chainRuns[key]?.fp;
@@ -413,7 +644,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
                   e.remoteBaseUpdatedAt = res.updatedAt;
                   e.remoteUpdatedAt = doc.updatedAt;
                   e.pushedSignature = contentSignature(doc);
-                  e.dirty = e.revision !== revision;
+                  e.dirty = false;
                   e.awaitingMerge = false;
                   setState({ lastSyncAt: res.updatedAt, error: null });
                   opts.onNotice?.(`${entryLabel(key)}已用本地覆盖云端。`);
@@ -426,7 +657,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
               // 双方内容一致（签名剔除 updatedAt 与触发器 id）：只是云端被
               // 同内容更新/重放，无实质分歧——收敛基准并清脏，不设冲突闸。
               e.pushedSignature = contentSignature(doc);
-              e.dirty = e.revision !== revision;
+              e.dirty = false;
               e.awaitingMerge = false;
               setState({ lastSyncAt: latest.updatedAt, error: null });
             } else if (
@@ -449,7 +680,7 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
                     ? undefined
                     : e.clearedFp;
               e.pushedSignature = contentSignature(remoteDoc);
-              e.dirty = e.revision !== revision;
+              e.dirty = false;
               e.awaitingMerge = false;
               setState({ lastSyncAt: latest.updatedAt, error: null });
             } else {
@@ -480,7 +711,9 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
       }
     } finally {
       // 批次中可能刷新了基准（首拉/成功/409 重取），写回供跨会话使用。
-      persistBaselines();
+      if (baselineTouched) {
+        persistBaselines();
+      }
       setState({ syncing: false });
     }
   }
@@ -514,13 +747,10 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
   // 应用远端（抑制由此引发的 markDirty）。
   function suppressFor(fn: () => void) {
     suppressDirty = true;
-    try {
-      fn();
-    } finally {
-      void nextTick().then(() => {
-        suppressDirty = false;
-      });
-    }
+    fn();
+    void nextTick().then(() => {
+      suppressDirty = false;
+    });
   }
 
   // 应用远端到本地并收敛该条目基准（自动采纳清除 / 手动下拉共用）。
@@ -663,9 +893,6 @@ export function createChainSyncController(opts: ChainSyncControllerOptions) {
     // hasPendingMerge() 中持续可见（冲突横幅不会因其它船的成功推送被误清），
     // 但门闩使其不被自动推送——只等用户在对话框手动处理。
     for (const key of Object.keys(persisted)) {
-      if (persisted[key]?.pending) {
-        entry(key).dirty = true;
-      }
       if (persisted[key]?.merge) {
         const e = entry(key);
         e.awaitingMerge = true;

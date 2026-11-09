@@ -273,7 +273,7 @@ declare namespace UserData {
 
   // 环线执行记录：以 shipId 为键，供 FLEET 环线页签展示「正在执行的环线」进度。
   // stops.pkgName 为净化后的站点操作包名，用于关联 FLIGHT_ENDED 触发器与操作包
-  // 判定各站状态；成功执行持久化 done，不依赖包删除。
+  // 判定各站状态（包被 autoDelete 移除即完成）。
   // 环线快照载荷：页面刷新后仍可按规划样式显示「当前阶段载重/操作」。
   interface ChainRunLoad {
     weight: number;

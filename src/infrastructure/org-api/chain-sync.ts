@@ -1,11 +1,11 @@
 // src/infrastructure/org-api/chain-sync.ts
 // 环线多端同步客户端：经 org-api 服务器在跨浏览器/设备间同步环线快照。
 // 命名空间 = 公司代码（后端从 JWT 取 company_code）；每条记录 = 一艘船的
-// 环线快照，船之间互不覆盖；全局面板配置只保存在本地。
+// 环线快照（'__config__' 为环线面板全局配置），船之间互不覆盖。
 // 推送带 baseUpdatedAt 乐观锁：库内该船已有更新时返回 409，调用方重新合并。
 import { HttpError, request } from './client';
 
-// 历史 __config__ 快照形状，仅保留读取类型兼容；当前客户端不收发此条目。
+// 环线面板配置（tileState 中的环线字段）。远端快照与本地共享该形状。
 export interface ChainSyncConfig {
   chainGroup?: string;
   chainShipIds?: string[];
@@ -15,7 +15,8 @@ export interface ChainSyncConfig {
   chainAutoRecover?: boolean;
 }
 
-// 单船同步快照；历史 __config__ 条目由调用方忽略。
+// 环线同步快照：默认按船（该船 chainRuns + 该船环线 ACT 包/触发器）；
+// '__config__' 条目携带 config，其余字段为空。
 export interface ChainSyncDoc {
   version: 1;
   // 数据最后修改时间（毫秒）；LWW 冲突解决基准。

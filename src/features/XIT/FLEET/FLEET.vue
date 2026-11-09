@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
-import { buildDispatchActionPlan, type IncludedBase } from './dispatch-actions';
 import PrunButton from '@src/components/PrunButton.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
@@ -9,7 +8,7 @@ import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
 import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
 import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
 import ChainView from '@src/features/XIT/FLEET/ChainView.vue';
-import type { ChainPlannerBase } from '@src/features/XIT/FLEET/chain-types';
+import type { ChainPlannerBase } from '@src/features/XIT/FLEET/chain-planner';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
@@ -19,15 +18,16 @@ import {
 } from '@src/infrastructure/prun-api/data/addresses';
 import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
-import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
-import { timestampEachMinute } from '@src/utils/dayjs';
 import { comparePlanets } from '@src/core/game-lookups';
 import { useTileState } from '@src/store/user-data-tiles';
 import { normalizeDispatchBaseConfigs } from '@src/store/user-data-migrations';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
+import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
+import { createId } from '@src/store/create-id';
 import { stagedDispatch } from '@src/features/XIT/FLEET/staged';
 import { vDraggable } from 'vue-draggable-plus';
 import { grip } from '@src/components/grip';
@@ -41,6 +41,7 @@ import {
   combinedBaseBill,
   fitDaysForShip,
   getShipsAtCX,
+  mergeBills,
   regroupByShip,
 } from '@src/features/XIT/FLEET/utils';
 
@@ -95,7 +96,6 @@ const sortDirection = useTileState<SortDirection>('sortDirection', 'asc');
 const planetFilter = ref('');
 
 function setSort(key: SortKey) {
-  baseOrder.value = [];
   if (sortKey.value === key) {
     sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
   } else {
@@ -230,11 +230,7 @@ const filteredRows = computed(() => {
       }
     }
     if (sortKey.value === 'repair') {
-      const ageA = getPlanetRepairAge(a.base.siteId, timestampEachMinute.value) ?? -Infinity;
-      const ageB = getPlanetRepairAge(b.base.siteId, timestampEachMinute.value) ?? -Infinity;
-      if (ageA !== ageB) {
-        return (ageA - ageB) * dir;
-      }
+      return comparePlanets(a.base.naturalId, b.base.naturalId) * dir;
     }
     return comparePlanets(a.base.naturalId, b.base.naturalId) * dir;
   });
@@ -308,6 +304,14 @@ watchEffect(() => {
   const remaining = list
     .filter(x => !orderedSet.has(x.base.naturalId))
     .map(x => x.base)
+    .sort((a, b) => {
+      const daysA = burnDaysRemaining(a.siteId);
+      const daysB = burnDaysRemaining(b.siteId);
+      if (daysA !== daysB) {
+        return daysA - daysB;
+      }
+      return comparePlanets(a.naturalId, b.naturalId);
+    })
     .map(x => x.naturalId);
   const next = [...ordered, ...remaining];
   if (next.length !== orderedIds.value.length || next.some((id, i) => id !== orderedIds.value[i])) {
@@ -416,6 +420,14 @@ const executeTooltip = computed(() => {
   return undefined;
 });
 
+interface IncludedBase {
+  naturalId: string;
+  planetName: string;
+  site: PrunApi.Site;
+  config: DispatchBaseConfig;
+  dispatchShip: DispatchShip;
+}
+
 const includedBases = computed(() => {
   const result: IncludedBase[] = [];
   for (const id of orderedIds.value) {
@@ -480,34 +492,204 @@ function execute() {
     return;
   }
 
-  const plan = buildDispatchActionPlan(includedBases.value, billByBase.value, {
-    autoLaunch: autoLaunch.value,
-    autoUnload: autoUnloadTrigger.value,
-  });
-  if (plan.notices.length > 0) {
-    setNotice(plan.notices.join('；'));
+  const groupNameOf = (base: IncludedBase) => base.planetName || base.naturalId;
+
+  const groups: UserData.MaterialGroupData[] = [];
+  const cxBuyActions: UserData.ActionData[] = [];
+  const exchangeBills = new Map<string, Record<string, number>>();
+  const stagedBases: IncludedBase[] = [];
+
+  for (const base of includedBases.value) {
+    const { naturalId, config, dispatchShip } = base;
+    const bill = billByBase.value.get(naturalId);
+    if (bill === undefined) {
+      setNotice(`${base.planetName}: burn 数据未加载，稍后再试`);
+      continue;
+    }
+    if (Object.keys(bill).length === 0) {
+      setNotice(`${base.planetName}: 当前库存已满足目标天数，无需补给`);
+      continue;
+    }
+
+    stagedBases.push(base);
+
+    groups.push({
+      type: 'Manual',
+      name: groupNameOf(base),
+      planet: naturalId,
+      materials: bill,
+    });
+
+    if (config.cxBuy) {
+      const code = dispatchShip.exchangeCode;
+      exchangeBills.set(code, mergeBills(exchangeBills.get(code), bill)!);
+    }
   }
-  if (plan.pkg === undefined) {
+
+  if (stagedBases.length === 0) {
+    setNotice('所有选中基地当前无需补给或维修');
     return;
   }
-  for (const pkg of plan.unloadPackages) {
-    const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
-    if (index >= 0) {
-      userData.actionPackages[index] = pkg;
+
+  const byShip = new Map<string, IncludedBase[]>();
+  for (const base of stagedBases) {
+    const shipId = base.config.ship!;
+    let list = byShip.get(shipId);
+    if (!list) {
+      list = [];
+      byShip.set(shipId, list);
+    }
+    list.push(base);
+  }
+
+  const multiShipGroups: IncludedBase[][] = [];
+  const singleShipBases: IncludedBase[] = [];
+  for (const shipBases of byShip.values()) {
+    if (shipBases.length >= 2) {
+      multiShipGroups.push(shipBases);
     } else {
-      userData.actionPackages.push(pkg);
+      singleShipBases.push(shipBases[0]!);
     }
   }
-  for (const trigger of plan.triggers) {
-    const index = userData.triggers.findIndex(x => x.packageName === trigger.packageName);
-    if (index >= 0) {
-      userData.triggers[index] = trigger;
-    } else {
-      userData.triggers.push(trigger);
+
+  const mtraActions: UserData.ActionData[] = [];
+  const sfcActions: UserData.ActionData[] = [];
+
+  const pushShipMtra = (shipBases: IncludedBase[]) => {
+    const first = shipBases[0]!;
+    const dispatchShip = first.dispatchShip;
+    const shipName = dispatchShip.ship.name ?? dispatchShip.ship.registration;
+    const loadName = `装载 ${shipName}`;
+    const origin = serializeStorage(dispatchShip.warehouseStore!);
+    const dest = serializeStorage(dispatchShip.cargoStore!);
+
+    let materials: Record<string, number> | undefined;
+    for (const base of shipBases) {
+      const group = groups.find(x => x.name === groupNameOf(base));
+      materials = mergeBills(materials, group?.materials);
     }
+
+    groups.push({
+      type: 'Manual',
+      name: loadName,
+      materials: materials!,
+    });
+
+    mtraActions.push({ type: 'MTRA', name: loadName, group: loadName, origin, dest });
+    sfcActions.push({
+      type: 'OPEN SFC',
+      name: `卸货 ${shipName}`,
+      destination: first.naturalId,
+      shipSourceAction: loadName,
+    });
+    if (autoLaunch.value) {
+      sfcActions.push({
+        type: 'DEPART',
+        name: `出发 ${shipName}`,
+        registration: dispatchShip.ship.registration,
+      });
+    }
+  };
+
+  for (const shipBases of multiShipGroups) {
+    pushShipMtra(shipBases);
   }
-  stagedDispatch.value = { pkg: JSON.parse(JSON.stringify(plan.pkg)) };
+
+  for (const base of singleShipBases) {
+    pushShipMtra([base]);
+  }
+
+  for (const [code, materials] of exchangeBills) {
+    if (Object.keys(materials).length === 0) {
+      continue;
+    }
+    const groupName = `购买 ${code}`;
+    groups.push({
+      type: 'Manual',
+      name: groupName,
+      materials,
+    });
+    cxBuyActions.push({
+      type: 'CX Buy',
+      name: groupName,
+      group: groupName,
+      exchange: code,
+      useCXInv: true,
+    });
+  }
+
+  const pkg: UserData.ActionPackageData = {
+    global: { name: '派遣' },
+    groups,
+    actions: [...cxBuyActions, ...mtraActions, ...sfcActions],
+  };
+
+  stagedDispatch.value = {
+    pkg: JSON.parse(JSON.stringify(pkg)),
+  };
   showBuffer('XIT FLEETACT');
+
+  for (const base of stagedBases) {
+    const bill = billByBase.value.get(base.naturalId);
+    if (!bill) {
+      continue;
+    }
+    const unloadName = `${base.planetName} Unload`;
+    const unloadPkg: UserData.ActionPackageData = {
+      global: { name: unloadName },
+      autoDelete: true,
+      groups: [
+        {
+          type: 'Manual',
+          name: 'Unload',
+          materials: bill,
+        },
+      ],
+      actions: [
+        {
+          type: 'MTRA',
+          name: 'Unload',
+          group: 'Unload',
+          origin: configurableValue,
+          dest: `${base.planetName || base.naturalId} Base`,
+          originType: 'SHIP_STORE',
+        },
+      ],
+    };
+    const existingUnload = userData.actionPackages.find(x => x.global.name === unloadName);
+    if (existingUnload) {
+      const index = userData.actionPackages.indexOf(existingUnload);
+      userData.actionPackages[index] = unloadPkg;
+    } else {
+      userData.actionPackages.push(unloadPkg);
+    }
+
+    // 到港自动卸货：同步创建一次性触发器，飞船到达该基地时执行上方操作包。
+    if (autoUnloadTrigger.value) {
+      const trigger: UserData.TriggerData = {
+        id: createId(),
+        name: `${base.planetName} 卸货`,
+        enabled: true,
+        event: {
+          type: 'FLIGHT_ENDED',
+          ship: base.dispatchShip.ship.registration,
+          planet: base.naturalId,
+        },
+        packageName: unloadName,
+        mode: 'CONFIRM',
+        cooldownMin: 60,
+        createdAt: Date.now(),
+        autoDelete: true,
+      };
+      const existingTrigger = userData.triggers.find(x => x.packageName === unloadName);
+      if (existingTrigger) {
+        const index = userData.triggers.indexOf(existingTrigger);
+        userData.triggers[index] = trigger;
+      } else {
+        userData.triggers.push(trigger);
+      }
+    }
+  }
 }
 
 function reset() {
@@ -541,8 +723,6 @@ function collectDispatchConfig(): DispatchConfigPayload {
     exchangeFilter: exchangeFilter.value,
   };
 }
-
-onUnmounted(() => clearTimeout(noticeTimer));
 
 async function exportDispatchConfig() {
   const json = JSON.stringify({ type: dispatchConfigType, data: collectDispatchConfig() });

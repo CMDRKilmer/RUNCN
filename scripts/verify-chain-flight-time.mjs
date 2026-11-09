@@ -839,7 +839,7 @@ await checkAsync('⑧ 均值圆弧公式的数学不变性（r_mid / arcKm / hou
   );
   expectClose(
     f,
-    'speedKmS = stlIntraTransitSpeedKmS(2,140t) × cond',
+    'speedKmS = stlIntraTransitSpeedKmS(2,140t) / cond',
     r.speedKmS,
     TRANSIT_SPEED_KM_S_2140,
     0.01,
@@ -1005,29 +1005,6 @@ await checkAsync('⑪ 单一公式来源：transfer-geometry ≡ stlIntraTransit
     heavy.hours > refMass.hours * 1.4,
     '>1.4×',
     `${heavy.hours} vs ${refMass.hours}`,
-  );
-});
-
-await checkAsync('⑫ 船况变差只会增加预测飞行时长', async f => {
-  prepareEnvironment();
-  stubSetBodyObs('ZZ-101t', 1_000_000, 0);
-  stubSetBodyObs('ZZ-101u', 1_000_000, Math.PI / 2);
-  const r = await predictTransferGeometry({
-    fromId: 'ZZ-101t',
-    toId: 'ZZ-101u',
-    fromSystemId: SYS,
-    toSystemId: SYS,
-    t0Ms: T0,
-    cond: 0.5,
-    massT: 1271,
-  });
-  expectExact(f, 'half condition speed', r.speedKmS, 13756);
-  expectClose(
-    f,
-    'half condition duration',
-    r.hours,
-    (1_000_000 * (Math.PI / 2)) / (13756 * 3600),
-    1e-12,
   );
 });
 

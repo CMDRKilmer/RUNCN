@@ -10,7 +10,7 @@
 // 唯一例外是**环线预估**在系内航线缺前向记录时可用**几何预测**近似（显式标注，
 // 见 predictTransferGeometry）：弧长 = 均值圆弧（r_mid × Δθ，**初版**，待 prun-log.json
 // TRANSIT 段样本到位后用真实椭圆弧长重新标定）+ 时长 = d / (stlIntraTransitSpeedKmS(质量)
-// × 状况)。速度口径 = fuel-model.ts 的 BTF 实测「参考速度 + 质量幂律」
+// / 状况)。速度口径 = fuel-model.ts 的 BTF 实测「参考速度 + 质量幂律」
 // （VH-331g → HRT 599M km / 21,780s ≈ 27,512 km/s，船质量 1,271t；重船按 (1271/m)^0.78 减速）。
 // ⚠️ 2026-09-24 之前「A+C」路径中的 C（反方向原生记录近似，见旧版
 // reverseTransitApproximation）已被本公式路线（transfer-geometry.ts）一次性替代 ——
@@ -214,7 +214,7 @@ export async function estimateChainFlightTimes(
       // （见 fuel-model 的退化保护注释），绝不报错。于是旧实现把这种 0 小时写成了 ok = true：
       // 面板「飞行」列被 formatFlightDuration(0) 显示为「--（与出发同一时刻到达）」、
       // 循环里的 elapsedMs 原地不动（后续段都在"出发时刻"算几何）、汇总只累加第 1 段，更糟的是
-      // 多船时间均衡（chain-allocation.planTimeBalancedSegments 的 complete 门 = 所有段 est.ok）与
+      // 多船时间均衡（chain-planner.planTimeBalancedSegments 的 complete 门 = 所有段 est.ok）与
       // 到港库存预测（chain-planner 的 arrivalHoursByNaturalId）都把这些 0 当真值消费。
       // 现在：输入残缺即显式判缺（ok = false + 成因全文），宁可面板写「缺原生 STL 段记录」。
       const missing = missingModelInputs(perf, metrics);
