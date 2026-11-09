@@ -425,9 +425,48 @@ await check('combined planning retains stops for ships at another exchange', asy
     useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
   );
   assert.equal(planning.basePlan.value.stops.length, 2);
+  assert.equal(planning.shipPlans.value.length, 1);
+  assert.equal(planning.hasStops.value, true);
   assert.equal(planning.shipPlans.value.find(x => x.ship.ship.id === 'S2').plan.cxBill.RAT, 10);
   scope.stop();
   await nextTick();
+});
+await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
+  const bs = bases();
+  const vessel = ship('S');
+  fixture.ships.S = vessel.ship;
+  fixture.supply['RAT.AI1'] = 0;
+  const scope = effectScope();
+  const planning = scope.run(() =>
+    useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
+  );
+  assert.equal(planning.basePlan.value.stops.length, 2);
+  assert.deepEqual(planning.shipPlans.value, []);
+  assert.equal(planning.hasStops.value, false);
+  const result = executeChainPlans(planning.shipPlans.value, {
+    autoLaunch: false,
+    autoTrigger: false,
+  });
+  assert.equal(result.plans.length, 0);
+  assert.deepEqual(userData.chainRuns, {});
+  assert.equal(userData.actionPackages.length, 0);
+  assert.equal(userData.triggers.length, 0);
+  assert.equal(windows.length, 0);
+  scope.stop();
+  await nextTick();
+});
+await check('zero market supply retains deliveries backed by warehouse stock', () => {
+  const bs = bases();
+  const items = [{ quantity: { material: { ticker: 'RAT' }, amount: 10 } }];
+  const vessel = ship('S', items);
+  fixture.supply['RAT.AI1'] = 0;
+  const plan = planChainRoute({ originNaturalId: 'CX', capacity, bases: bs });
+  const plans = splitChainPlanAcrossShips(plan, [vessel], bs);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].plan.stops.length, 1);
+  assert.deepEqual(plans[0].plan.originPickup, { RAT: 10 });
+  assert.deepEqual(plans[0].plan.purchaseBill, {});
+  assert.deepEqual(plans[0].plan.stops[0].unloadCx, { RAT: 10 });
 });
 await check('clearing selection invalidates pending allocation and flight estimates', async () => {
   const bs = bases();

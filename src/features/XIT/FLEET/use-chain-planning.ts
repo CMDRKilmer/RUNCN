@@ -332,7 +332,6 @@ export function useChainPlanning(input: {
     () =>
       selectedBases.value.length > 0 && selectedShips.value.length > 0 && plan.value === undefined,
   );
-  const hasStops = computed(() => (plan.value?.stops.length ?? 0) > 0);
 
   // 过滤提示必须读取主规划：过滤站点不会进入按船拆分后的子规划。
   const filteredStopNotices = computed(() => plan.value?.filteredStops ?? []);
@@ -352,6 +351,7 @@ export function useChainPlanning(input: {
       allocFor(p),
     );
   });
+  const hasStops = computed(() => shipPlans.value.length > 0);
 
   // 未参与分配的船（无货舱，或船多于站点数）。
   const unusedShipCount = computed(() =>

@@ -395,7 +395,7 @@ export function splitChainPlanAcrossShips(
       exchangeCode: ship.exchangeCode,
       ...(arrivalHoursByNaturalId !== undefined ? { arrivalHoursByNaturalId } : {}),
     });
-    if (sub) {
+    if (sub && sub.stops.length > 0) {
       for (const [ticker, amount] of Object.entries(sub.originPickup)) {
         stock[ticker] = Math.max(0, (stock[ticker] ?? 0) - amount);
       }
