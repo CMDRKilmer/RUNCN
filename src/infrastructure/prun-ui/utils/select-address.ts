@@ -26,14 +26,35 @@ export function findStationBySystemId(id: string) {
   );
 }
 
+let pendingSelection = Promise.resolve();
+
+export function selectAddress(
+  container: Element,
+  locationName: string,
+  { allowPartial = true } = {},
+): Promise<boolean> {
+  const selection = pendingSelection.then(() =>
+    selectAddressInPortal(container, locationName, allowPartial),
+  );
+  pendingSelection = selection.then(
+    () => undefined,
+    () => undefined,
+  );
+  return selection;
+}
+
 // AddressSelector suggestions are rendered in #autosuggest-portal outside the
 // tile DOM. Only one portal can be open at a time, so we search it directly.
 // Typing fires a read-only NOMENCLATURE_QUERY_ADDRESSES lookup to the game
 // server; selecting a suggestion is pure local form state.
-export async function selectAddress(container: Element, locationName: string): Promise<boolean> {
+async function selectAddressInPortal(
+  container: Element,
+  locationName: string,
+  allowPartial: boolean,
+): Promise<boolean> {
   const input = _$(container, C.AddressSelector.input) as HTMLInputElement | undefined;
   const portal = document.getElementById('autosuggest-portal');
-  if (!input || !portal) {
+  if (!input?.isConnected || !portal) {
     return false;
   }
 
@@ -83,9 +104,12 @@ export async function selectAddress(container: Element, locationName: string): P
     const suggestions = () => _$$(portal, C.AddressSelector.suggestionContent) as HTMLElement[];
     const findBoundaryMatch = () => suggestions().find(s => boundary.test(s.textContent ?? ''));
     await waitFor(() => !!findBoundaryMatch(), 5000);
-    const match =
-      findBoundaryMatch() ??
-      suggestions().find(s => s.textContent?.trim().toLowerCase().includes(query.toLowerCase()));
+    let match = findBoundaryMatch();
+    if (match === undefined && allowPartial) {
+      match = suggestions().find(s =>
+        s.textContent?.trim().toLowerCase().includes(query.toLowerCase()),
+      );
+    }
     if (!match) {
       return false;
     }
@@ -96,7 +120,11 @@ export async function selectAddress(container: Element, locationName: string): P
     // filtered out and leaves the item highlighted but unselected (see
     // docs/feature-patterns.md "Click recipe").
     match.click();
-    return true;
+    return await waitFor(
+      () => input.value !== '' && (!portal.contains(match) || input.value !== query),
+      1000,
+      25,
+    );
   } finally {
     portal.style.visibility = prevVisibility;
   }

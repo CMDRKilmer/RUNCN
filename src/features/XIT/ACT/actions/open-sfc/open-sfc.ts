@@ -33,10 +33,13 @@ act.addAction({
       return;
     }
 
+    const nextAction = pkg.actions.at(pkg.actions.indexOf(data) + 1);
     emitStep(
       OPEN_SFC({
         registration: ship.registration,
         destination: data.destination ?? '',
+        followedByDepart:
+          nextAction?.type === 'DEPART' && nextAction.registration === ship.registration,
       }),
     );
   },

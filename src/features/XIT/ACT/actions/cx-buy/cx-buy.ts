@@ -28,23 +28,19 @@ act.addAction({
     assert(exchange, '缺少交易所');
 
     // 如果请求了，从 CX 库存中取出材料
-    if ((data.useCXInv ?? true) && data.exchange) {
-      for (const mat of Object.keys(materials)) {
-        for (const CXMat of Object.keys(state.WAR[data.exchange])) {
-          if (CXMat === mat) {
-            // 使用的材料数量（所需量与持有量的最小值）
-            const used = Math.min(materials[mat], state.WAR[data.exchange][CXMat]);
-            materials[mat] -= used;
-            state.WAR[data.exchange][CXMat] -= used;
-            if (state.WAR[data.exchange][mat] <= 0) {
-              // 从已分配的 CX 库存中移除材料
-              delete state.WAR[data.exchange][CXMat];
-            }
-          }
+    if (data.useCXInv ?? true) {
+      const warehouse = state.WAR[exchange];
+      for (const [ticker, amount] of Object.entries(materials)) {
+        const stock = warehouse[ticker] ?? 0;
+        const reserved = data.cxInvReserve?.[ticker] ?? 0;
+        const used = Math.min(amount, Math.max(0, stock - reserved));
+        warehouse[ticker] = stock - used;
+        if (warehouse[ticker] <= 0) {
+          delete warehouse[ticker];
         }
-        if (materials[mat] <= 0) {
-          // 如果 CX 上已有足够材料，则从列表中移除
-          delete materials[mat];
+        materials[ticker] = amount - used;
+        if (materials[ticker] <= 0) {
+          delete materials[ticker];
         }
       }
     }
