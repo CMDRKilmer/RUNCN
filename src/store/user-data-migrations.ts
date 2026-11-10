@@ -44,6 +44,90 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '08.11.2026 Add BLU hidden blueprints settings',
+    userData => {
+      // 存量数据没有这两个字段：默认不隐藏任何蓝图、不显示隐藏项，
+      // 保证升级后清单仍是完整的，只有玩家主动点眼睛才改变。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      if (!Array.isArray(settings.hiddenBlueprints)) {
+        settings.hiddenBlueprints = [];
+      }
+      settings.showHiddenBlueprints ??= false;
+    },
+  ],
+  [
+    '08.11.2026 Add BSN products auto-load toggle',
+    userData => {
+      // 存量数据没有该字段，回填关闭：自动搬库存属于有副作用的行为，
+      // 绝不因为升级就默认替玩家执行。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      if (!settings.autoLoadProducts || typeof settings.autoLoadProducts !== 'object') {
+        settings.autoLoadProducts = { enabled: false };
+      } else if (settings.autoLoadProducts.enabled === undefined) {
+        settings.autoLoadProducts.enabled = false;
+      }
+    },
+  ],
+  [
+    '08.11.2026 Remove mint theme',
+    userData => {
+      // 青蓝清爽主题已移除；存量设置回退到同为浅色的「浅色明亮」，避免主题失效。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      if (settings.theme === 'mint') {
+        settings.theme = 'light';
+      }
+    },
+  ],
+  [
+    '08.11.2026 Add INV compact layout toggle',
+    userData => {
+      // 存量数据没有该字段，回填 false：默认保持游戏原版排列与图标大小。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      settings.invCompact ??= false;
+    },
+  ],
+  [
+    '07.11.2026 Replace invert dark mode with interface themes',
+    userData => {
+      // 反色滤镜已移除，改为整套界面主题。清掉老字段，回填默认主题。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      delete settings.darkMode;
+      settings.theme ??= 'default';
+    },
+  ],
+  [
+    '06.11.2026 Add repair board settings',
+    userData => {
+      // 维修到期看板（XIT REPD）的设置。存量用户没有这一段，回填默认值。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      settings.repairBoard ??= {
+        useOptimal: true,
+        targetDays: 90,
+        dueSoonDays: 7,
+        arrivalDays: 0,
+        subtractStore: true,
+      };
+    },
+  ],
+  [
     '04.09.2026 Add screen variables',
     userData => {
       if (!userData.screenVariables || typeof userData.screenVariables !== 'object') {
@@ -139,41 +223,14 @@ const migrations: MigrationEntry[] = [
   ],
   [
     '15.07.2026 Convert dark mode to invert mode',
-    userData => {
-      const dm = userData.settings.darkMode;
-      if (!dm) {
-        return;
-      }
-      // 反色模式不再使用配色覆盖字段。
-      delete dm.background;
-      delete dm.text;
-      delete dm.selectionBackground;
-      delete dm.selectionText;
-      dm.enabled ??= false;
-      dm.brightness ??= 100;
-      dm.contrast ??= 100;
-      dm.sepia ??= 0;
-      dm.grayscale ??= 0;
+    () => {
+      // 反色模式已移除，历史迁移保留占位以维持检查点顺序。
     },
   ],
   [
     '15.07.2026 Add dark mode settings',
-    userData => {
-      if (!userData.settings.darkMode) {
-        userData.settings.darkMode = {
-          enabled: false,
-          brightness: 100,
-          contrast: 100,
-          sepia: 0,
-          grayscale: 0,
-        };
-      } else {
-        userData.settings.darkMode.enabled ??= false;
-        userData.settings.darkMode.brightness ??= 100;
-        userData.settings.darkMode.contrast ??= 100;
-        userData.settings.darkMode.sepia ??= 0;
-        userData.settings.darkMode.grayscale ??= 0;
-      }
+    () => {
+      // 反色模式已移除，历史迁移保留占位以维持检查点顺序。
     },
   ],
   [

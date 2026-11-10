@@ -20,11 +20,18 @@ if (userData.settings.mode === undefined) {
 
 const isFullMode = userData.settings.mode === 'FULL';
 
-const disabledFeatures = computed(() => new Set(userData.settings.disabled));
+// BSN 产物自动装船的开关已搬到 XIT FB 面板内 XIT FLT 的标题栏右侧
+// （basic/flt-autoload-toggle.tsx），此页不再重复放开关。
+// 下方列表仍按 feature registry 的 hidden 过滤，避免与其它专门设置项重复。
+const listed = features.registry.filter(x => !x.hidden);
 
-const available = isFullMode ? features.registry : features.registry.filter(x => !x.advanced);
+const disabledFeatures = computed(
+  () => new Set(userData.settings.disabled.filter(id => listed.some(x => x.id === id))),
+);
 
-const advanced = features.registry.filter(x => x.advanced);
+const available = isFullMode ? listed : listed.filter(x => !x.advanced);
+
+const advanced = listed.filter(x => x.advanced);
 
 const sorted = available.sort((a, b) => {
   const aDisabled = disabledFeatures.value.has(a.id);
@@ -181,7 +188,7 @@ async function onChangeModeClick() {
 }
 
 .description {
-  font-size: 10px;
+  font-size: 11px;
   color: #888;
 }
 

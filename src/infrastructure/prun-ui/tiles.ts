@@ -14,6 +14,11 @@ interface PrunTileObserver {
 
 const pastWindows: WeakSet<Element> = new WeakSet();
 const activeTiles: PrunTile[] = [];
+// FB 面板把原生磁贴 appendChild 搬移、或切换游戏内标签导致磁贴断开再重连时，
+// reconciliate 会把同一个 frame 当成新 frame 再次 activateFrame，从而让所有
+// tiles.observe 回调在同一节点上重复注入 UI（隐藏眼睛图标、别名 / WAREHOUSE
+// 按钮等各多出一份）。记录已激活过的 frame，重激活时先清掉上一轮的注入。
+const activatedFrames: WeakSet<Element> = new WeakSet();
 const commandObservers: Map<string, PrunTileObserver[]> = new Map();
 const anyCommandObservers: PrunTileObserver[] = [];
 
@@ -66,6 +71,19 @@ function reconciliate(mutations: MutationRecord[]) {
 }
 
 function activateFrame(frame: HTMLDivElement, anchor: HTMLDivElement) {
+  if (activatedFrames.has(frame)) {
+    // 断开期间 FragmentApp 会因 onNodeDisconnected 卸载，但节点仍留在 frame 上
+    // （app 挂在空的 DocumentFragment 上，unmount 清不到这里）。留着会变成
+    // 点不动的死节点并和新注入的叠加，所以先清干净，再让 observer 重建一套活的。
+    for (const stale of frame.querySelectorAll('[data-rp-ui]')) {
+      stale.remove();
+    }
+    for (const marked of frame.querySelectorAll('[data-rp-ui-hide-controls-restore]')) {
+      marked.removeAttribute('data-rp-ui-hide-controls-restore');
+    }
+  }
+  activatedFrames.add(frame);
+
   const tileElement = frame.parentElement!;
   const container = tileElement.parentElement!;
   const docked = !container.classList.contains(C.Window.body);

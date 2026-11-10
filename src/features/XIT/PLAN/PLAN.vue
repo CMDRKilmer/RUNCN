@@ -1795,7 +1795,7 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .slotHint {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.6;
 }
 
@@ -1910,11 +1910,11 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .materialAmount {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .hint {
-  font-size: 9px;
+  font-size: 11px;
   opacity: 0.6;
   font-weight: normal;
 }
@@ -1935,7 +1935,7 @@ function wfOk(tier: WfTier): boolean {
 
 .priceX {
   opacity: 0.5;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .priceInput {
@@ -1947,7 +1947,7 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .priceSubtotal {
-  font-size: 10px;
+  font-size: 11px;
   opacity: 0.8;
   min-width: 80px;
 }

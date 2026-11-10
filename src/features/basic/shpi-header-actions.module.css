@@ -1,0 +1,43 @@
+/* 标题栏右侧的两个小方块图标，样式对齐 XIT FLT / ETA 列的动作按钮。
+   颜色走主题语义变量：原样主题回退到 FLT 原本的橙 / 绿，浅色主题用更深的
+   同色系实底 + 白图标（见 theme.ts 的 CONTROL_CSS 覆盖）。 */
+.group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  /* header 是 flex 容器，auto 外边距把整组推到标题栏最右侧 */
+  margin-left: auto;
+  margin-right: 4px;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 2;
+}
+
+.button {
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: #fff;
+  cursor: pointer;
+  box-sizing: border-box;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 2px;
+  text-shadow: none;
+}
+
+.button:hover {
+  filter: brightness(1.12);
+}
+
+.unload {
+  background-color: var(--rp-skin-action-unload, #f7a600);
+}
+
+.flight {
+  background-color: var(--rp-skin-action-flight, #5cb85c);
+}

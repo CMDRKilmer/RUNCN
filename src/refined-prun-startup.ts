@@ -8,6 +8,7 @@ import {
   encryptWithSessionKey,
   loadSessionKey,
 } from './infrastructure/storage/session-key';
+import { needsStartupMarker } from './features/basic/theme-registry';
 
 // Sentinel the page script can recognise as an encrypted value rather
 // than a real API key. The real encrypted payload follows after the
@@ -40,6 +41,17 @@ async function startup() {
     userData = undefined;
   }
   await waitDocumentReady();
+  // 首屏防闪：色板定义在 refined-prun.css 里的主题（注册表中 mode:'token'），
+  // 只要 data-theme 在游戏脚本恢复执行、React 首次绘制之前就位，第一帧就是
+  // 主题底色，不会先闪一帧原生深色。其余主题保持原有加载时序（由 theme.ts
+  // 标记），以免改变现有主题的首屏行为。
+  const storedTheme =
+    userData && typeof userData === 'object' && 'settings' in userData
+      ? (userData as { settings?: { theme?: unknown } }).settings?.theme
+      : undefined;
+  if (typeof storedTheme === 'string' && needsStartupMarker(storedTheme)) {
+    document.documentElement.dataset.rpTheme = storedTheme;
+  }
   const container = document.createElement('refined-prun');
   document.documentElement.appendChild(container);
   const now = Date.now();

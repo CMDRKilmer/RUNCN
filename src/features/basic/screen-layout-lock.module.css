@@ -1,6 +1,13 @@
+/* 文字由 lock/unlk 改成固定「锁定」：两个汉字 + 选中态加粗，直接锁死宽度，
+   切换时按钮长度不跳动；30px 比原 26px 只多 4px，不会挤到屏幕名。 */
 .lockButton {
-  width: 26px;
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  padding: 0 2px;
+  box-sizing: border-box;
   text-align: center;
+  cursor: pointer;
 }
 
 .handle {

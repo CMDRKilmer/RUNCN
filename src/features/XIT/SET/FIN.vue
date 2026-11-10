@@ -60,6 +60,13 @@ function onIgnoredMaterialsSubmit() {
   userData.settings.financial.ignoredMaterials = formatted;
   ignoredMaterials.value = formatted;
 }
+
+const priceTooltips = computed({
+  get: () => userData.settings.pricing.materialPriceTooltips === true,
+  set: (value: boolean) => {
+    userData.settings.pricing.materialPriceTooltips = value;
+  },
+});
 </script>
 
 <template>
@@ -74,6 +81,12 @@ function onIgnoredMaterialsSubmit() {
     <RadioItem v-model="userData.fullEquityMode">完整权益</RadioItem>
   </Active>
   <SectionHeader>价格设置</SectionHeader>
+  <Active
+    label="物料价格悬浮提示"
+    tooltip="鼠标悬浮在库存、MAT 等界面的物料图标上时，显示各交易所的实时买卖价、均价与供需。
+      价格取自插件已有的价格缓存，不会发起额外的服务器请求。">
+    <RadioItem v-model="priceTooltips">显示物料价格悬浮窗</RadioItem>
+  </Active>
   <Active label="MM 材料" tooltip="逗号分隔的做市商材料列表。这些材料的价格将等于 MM 买入价。">
     <TextInput
       v-model="mmMaterials"

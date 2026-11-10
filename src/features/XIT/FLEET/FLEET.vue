@@ -19,8 +19,6 @@ import {
 } from '@src/infrastructure/prun-api/data/addresses';
 import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
-import { getPlanetRepairAge } from '@src/features/XIT/REP/entries';
-import { timestampEachMinute } from '@src/utils/dayjs';
 import { comparePlanets } from '@src/core/game-lookups';
 import { useTileState } from '@src/store/user-data-tiles';
 import { normalizeDispatchBaseConfigs } from '@src/store/user-data-migrations';
@@ -64,6 +62,8 @@ const exchangeFilterOptions: { label: string; code: string }[] = [
 // 重复加油会让仓库循环抽料。故 FLEET 不再保留 refuel 配置与包动作。
 
 const tile = useTile();
+// 嵌在其他面板里（例如 FB）时可以收紧「分配」列，独立使用时保持原样。
+const props = defineProps<{ compactShip?: boolean }>();
 const panesEl = ref<HTMLElement | null>(null);
 
 // Mode
@@ -73,6 +73,9 @@ const viewMode = useTileState<ViewMode>('viewMode', 'plan');
 // Plan mode state
 const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfigs', {});
 const baseOrder = useTileState<string[]>('baseOrder', []);
+// 默认按列头排序；用户拖过行之后只认手动顺序，再点列头又回到自动排序。
+// 没有这个开关时 baseOrder（拖拽 / 飞船分组写入）会永久覆盖列排序。
+const manualOrder = useTileState<boolean>('manualOrder', false);
 const orderedIds = ref<string[]>([]);
 const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefined);
 // 执行时同步在 TRIGGER 面板创建一次性到港卸货触发器。
@@ -80,28 +83,25 @@ const autoUnloadTrigger = useTileState<boolean>('autoUnloadTrigger', true);
 // 自动发船：在每个 OPEN SFC 步骤后追加 DEPART，执行时自动点击「开始」。
 const autoLaunch = useTileState<boolean>('autoLaunch', false);
 
-// Column visibility
-const showBurn = useTileState('showBurn', true);
+// Column visibility。「消耗」列常驻且可排序，因此不提供开关；
+// 「维修」开关同时控制 维修 / 维护 / 提前 三列。
 const showProd = useTileState('showProd', true);
 const showRepair = useTileState('showRepair', true);
 const showInv = useTileState('showInv', true);
 const showWar = useTileState('showWar', true);
+const showFill = useTileState('showFill', true);
 
-// Sort
-type SortKey = 'name' | 'burn' | 'repair';
+// Sort：只有「消耗」列可排序（按剩余天数），点表头切换升/降序。
+// 「维护」列是普通表头，不再有排序按钮，也不参与排序。
 type SortDirection = 'asc' | 'desc';
-const sortKey = useTileState<SortKey>('sortKey', 'burn');
 const sortDirection = useTileState<SortDirection>('sortDirection', 'asc');
 const planetFilter = ref('');
 
-function setSort(key: SortKey) {
+function toggleBurnSort() {
+  sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
+  // 点列头即要求按这一列重排，放弃手动拖拽 / 飞船分组固化的顺序。
+  manualOrder.value = false;
   baseOrder.value = [];
-  if (sortKey.value === key) {
-    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortKey.value = key;
-    sortDirection.value = 'asc';
-  }
 }
 
 function createBaseConfig(naturalId: string): DispatchBaseConfig {
@@ -222,19 +222,11 @@ const filteredRows = computed(() => {
 
   const dir = sortDirection.value === 'asc' ? 1 : -1;
   return [...result].sort((a, b) => {
-    if (sortKey.value === 'burn') {
-      const daysA = burnDaysRemaining(a.base.siteId);
-      const daysB = burnDaysRemaining(b.base.siteId);
-      if (daysA !== daysB) {
-        return (daysA - daysB) * dir;
-      }
-    }
-    if (sortKey.value === 'repair') {
-      const ageA = getPlanetRepairAge(a.base.siteId, timestampEachMinute.value) ?? -Infinity;
-      const ageB = getPlanetRepairAge(b.base.siteId, timestampEachMinute.value) ?? -Infinity;
-      if (ageA !== ageB) {
-        return (ageA - ageB) * dir;
-      }
+    const daysA = burnDaysRemaining(a.base.siteId);
+    const daysB = burnDaysRemaining(b.base.siteId);
+    if (daysA !== daysB) {
+      // 两边都是 Infinity 时做减法会得到 NaN，比较器失效等于没排序。
+      return (daysA < daysB ? -1 : 1) * dir;
     }
     return comparePlanets(a.base.naturalId, b.base.naturalId) * dir;
   });
@@ -294,22 +286,22 @@ const billByBase = computed(() => {
   return map;
 });
 
-// Keep orderedIds in sync with bases + baseOrder.
+// Keep orderedIds in sync with the active ordering mode.
+// 自动模式：行序就是 filteredRows 的列排序结果，点列头 / 天数变化都会即时反映。
+// 手动模式：baseOrder 里的排前面，其余缺失基地沿用 filteredRows 的顺序补在后面。
 watchEffect(() => {
   const list = filteredRows.value;
-  const present = new Map(list.map(x => [x.base.naturalId, x.base]));
-  const ordered: string[] = [];
-  for (const id of baseOrder.value) {
-    if (present.has(id)) {
-      ordered.push(id);
-    }
+  const ids = list.map(x => x.base.naturalId);
+  let next: string[];
+  if (!manualOrder.value) {
+    next = ids;
+  } else {
+    const present = new Set(ids);
+    const ordered = baseOrder.value.filter(id => present.has(id));
+    const orderedSet = new Set(ordered);
+    const remaining = ids.filter(id => !orderedSet.has(id));
+    next = [...ordered, ...remaining];
   }
-  const orderedSet = new Set(ordered);
-  const remaining = list
-    .filter(x => !orderedSet.has(x.base.naturalId))
-    .map(x => x.base)
-    .map(x => x.naturalId);
-  const next = [...ordered, ...remaining];
   if (next.length !== orderedIds.value.length || next.some((id, i) => id !== orderedIds.value[i])) {
     orderedIds.value = next;
   }
@@ -327,6 +319,10 @@ const shipAssignments = computed(() => {
 });
 
 watch(shipAssignments, map => {
+  // 自动排序模式下不按飞船重新分组，否则会把刚排好的列顺序又打乱。
+  if (!manualOrder.value) {
+    return;
+  }
   const next = regroupByShip(orderedIds.value, map);
   if (next.some((id, i) => id !== orderedIds.value[i])) {
     orderedIds.value = next;
@@ -338,6 +334,7 @@ const dragOptions = {
   ...grip.draggable,
   onEnd: (evt: unknown) => {
     grip.draggable.onEnd?.(evt as never);
+    manualOrder.value = true;
     baseOrder.value = [...orderedIds.value];
   },
 };
@@ -513,6 +510,7 @@ function execute() {
 function reset() {
   baseConfigs.value = {};
   baseOrder.value = [];
+  manualOrder.value = false;
 }
 
 const dispatchConfigType = 'rp-dispatch-config';
@@ -598,6 +596,7 @@ async function importDispatchConfig() {
   normalizeDispatchBaseConfigs(configs);
   baseConfigs.value = configs;
   baseOrder.value = config.baseOrder ?? [];
+  manualOrder.value = (config.baseOrder?.length ?? 0) > 0;
   exchangeFilter.value = config.exchangeFilter;
   setNotice('配置已导入');
 }
@@ -605,28 +604,62 @@ async function importDispatchConfig() {
 
 <template>
   <div :class="$style.layout">
-    <!-- Mode toggle -->
+    <!-- 顶部工具栏分两行：第一行是视图模式、列开关与操作按钮（右上按钮位置不变）；
+         第二行放交易所筛选与发船 / 卸货开关。 -->
     <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
-      <RadioItem
-        :model-value="viewMode === 'plan'"
-        horizontal
-        @update:model-value="viewMode = 'plan'">
-        基地规划
-      </RadioItem>
-      <RadioItem
-        :model-value="viewMode === 'inventory'"
-        horizontal
-        @update:model-value="viewMode = 'inventory'">
-        库存总览
-      </RadioItem>
-      <RadioItem
-        :model-value="viewMode === 'chain'"
-        horizontal
-        @update:model-value="viewMode = 'chain'">
-        产业链环线
-      </RadioItem>
-      <div :class="$style.separator" />
-      <template v-if="viewMode === 'plan'">
+      <div :class="$style.filterRow">
+        <RadioItem
+          :model-value="viewMode === 'plan'"
+          horizontal
+          @update:model-value="viewMode = 'plan'">
+          基地规划
+        </RadioItem>
+        <RadioItem
+          :model-value="viewMode === 'inventory'"
+          horizontal
+          @update:model-value="viewMode = 'inventory'">
+          库存总览
+        </RadioItem>
+        <RadioItem
+          :model-value="viewMode === 'chain'"
+          horizontal
+          @update:model-value="viewMode = 'chain'">
+          产业链环线
+        </RadioItem>
+        <template v-if="viewMode === 'plan'">
+          <div :class="$style.separator" />
+          <RadioItem v-model="showProd" horizontal>生产</RadioItem>
+          <RadioItem v-model="showRepair" horizontal>维修</RadioItem>
+          <RadioItem v-model="showInv" horizontal>库存</RadioItem>
+          <RadioItem v-model="showWar" horizontal>仓储</RadioItem>
+          <RadioItem v-model="showFill" horizontal>填满</RadioItem>
+          <div :class="$style.searchContainer">
+            <TextInput v-model="planetFilter" />
+            <PrunButton
+              v-if="planetFilter"
+              dark
+              :class="[fa.solid, $style.clearButton]"
+              @click="planetFilter = ''">
+              {{ '' }}
+            </PrunButton>
+          </div>
+          <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
+          <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
+          <span v-if="notice" :class="$style.notice">{{ notice }}</span>
+          <div :class="$style.spacer" />
+          <PrunButton dark @click="reset">重置</PrunButton>
+          <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
+            <PrunButton primary :disabled="overloadedShips.size > 0" @click="execute">
+              执行
+            </PrunButton>
+          </Tooltip>
+          <PrunButton v-else primary :disabled="overloadedShips.size > 0" @click="execute">
+            执行
+          </PrunButton>
+        </template>
+      </div>
+      <div v-if="viewMode === 'plan'" :class="$style.filterRow">
+        <span :class="$style.rowLabel">出发CX：</span>
         <RadioItem
           v-for="option in exchangeFilterOptions"
           :key="option.code"
@@ -636,39 +669,11 @@ async function importDispatchConfig() {
           {{ option.label }}
         </RadioItem>
         <div :class="$style.separator" />
+        <!-- 自动发船 / 到港卸货 属同一组，中间不放分隔线，
+             只沿用 .filterRow 的 3px gap，与第一行同组选项一致。 -->
         <RadioItem v-model="autoLaunch" horizontal>自动发船</RadioItem>
-        <div :class="$style.separator" />
         <RadioItem v-model="autoUnloadTrigger" horizontal>到港卸货</RadioItem>
-        <div :class="$style.separator" />
-        <RadioItem v-model="showBurn" horizontal>消耗</RadioItem>
-        <RadioItem v-model="showProd" horizontal>生产</RadioItem>
-        <RadioItem v-model="showRepair" horizontal>维修</RadioItem>
-        <RadioItem v-model="showInv" horizontal>库存</RadioItem>
-        <RadioItem v-model="showWar" horizontal>仓储</RadioItem>
-        <div :class="$style.searchContainer">
-          <TextInput v-model="planetFilter" />
-          <PrunButton
-            v-if="planetFilter"
-            dark
-            :class="[fa.solid, $style.clearButton]"
-            @click="planetFilter = ''">
-            {{ '' }}
-          </PrunButton>
-        </div>
-        <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
-        <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
-        <span v-if="notice" :class="$style.notice">{{ notice }}</span>
-        <div :class="$style.spacer" />
-        <PrunButton dark @click="reset">重置</PrunButton>
-        <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
-          <PrunButton primary :disabled="overloadedShips.size > 0" @click="execute">
-            执行
-          </PrunButton>
-        </Tooltip>
-        <PrunButton v-else primary :disabled="overloadedShips.size > 0" @click="execute">
-          执行
-        </PrunButton>
-      </template>
+      </div>
     </div>
 
     <!-- Inventory mode -->
@@ -683,7 +688,7 @@ async function importDispatchConfig() {
       <div v-else ref="panesEl" :class="$style.panes">
         <ShipPool :ships="filteredCxShips" :base-configs="baseConfigs" />
         <div :class="$style.left">
-          <table :class="$style.table">
+          <table :class="[$style.table, props.compactShip && $style.compactShip]">
             <thead>
               <tr>
                 <th :class="[$style.narrowCol, $style.centered]">分配</th>
@@ -693,29 +698,19 @@ async function importDispatchConfig() {
                 <th :class="[$style.narrowCol, $style.centered]">天数</th>
                 <th
                   :class="[$style.narrowCol, $style.centered, $style.sortable]"
-                  @click="setSort('burn')">
+                  @click="toggleBurnSort()">
                   消耗
-                  <span :class="sortKey === 'burn' ? $style.sortActive : $style.sortInactive">{{
-                    sortKey === 'burn' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
-                  }}</span>
+                  <span :class="$style.sortActive">{{ sortDirection === 'asc' ? '▲' : '▼' }}</span>
                 </th>
                 <th v-if="showProd" :class="[$style.narrowCol, $style.centered]">生产</th>
                 <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">维修</th>
-                <th
-                  v-if="showRepair"
-                  :class="[$style.narrowCol, $style.centered, $style.sortable]"
-                  @click="setSort('repair')">
-                  维护
-                  <span :class="sortKey === 'repair' ? $style.sortActive : $style.sortInactive">{{
-                    sortKey === 'repair' ? (sortDirection === 'asc' ? '▲' : '▼') : '▲'
-                  }}</span>
-                </th>
-                <th :class="[$style.narrowCol, $style.centered]">提前</th>
+                <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">维护</th>
+                <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">装载</th>
                 <th :class="[$style.narrowCol, $style.centered]">物资</th>
                 <th :class="[$style.narrowCol, $style.centered]">适配</th>
                 <th :class="[$style.narrowCol, $style.centered]">CX</th>
-                <th :class="[$style.narrowCol, $style.centered]">填满</th>
+                <th v-if="showFill" :class="[$style.narrowCol, $style.centered]">填满</th>
                 <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
                 <th v-if="showWar" :class="$style.warHeaderCol">仓储</th>
               </tr>
@@ -735,6 +730,7 @@ async function importDispatchConfig() {
                   :show-repair="showRepair"
                   :show-inv="showInv"
                   :show-war="showWar"
+                  :show-fill="showFill"
                   :overloaded="
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)
@@ -765,8 +761,33 @@ async function importDispatchConfig() {
   flex: 1;
 }
 
+/* 顶部工具栏固定两行；右上「重置 / 执行」仍由 .spacer 推在第一行最右。 */
 .filterBar {
-  flex-wrap: wrap;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 2px;
+}
+
+.filterRow {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 第二行交易所组的说明文字。字号与 RadioItem 对齐（全局 11px），
+   颜色不写死、继承工具栏文字色，三套主题与原样主题都能自动跟随。 */
+.rowLabel {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  margin-right: 4px;
 }
 
 .separator {
@@ -853,6 +874,26 @@ async function importDispatchConfig() {
   border-collapse: collapse;
 }
 
+/* 收紧「分配」列：船名不会太长，6 个汉字左右够用，超长省略号。 */
+.compactShip td:first-child > div {
+  width: 64px;
+  max-width: 64px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compactShip td:first-child > div > button {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compactShip td:first-child span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .table thead tr {
   border-bottom: 1px solid #2b485a;
   box-sizing: border-box;
@@ -877,15 +918,17 @@ async function importDispatchConfig() {
   font-weight: bold;
 }
 
-.sortInactive {
-  color: rgb(63, 162, 222);
-}
-
 .invHeaderCol {
   width: 67%;
+  white-space: nowrap;
 }
 
 .warHeaderCol {
   width: 33%;
+  /* 只打开「仓储」时表格里没有 67% 的库存列，十几个 .narrowCol(width:0) 会把
+     这一列挤到不足两个汉字宽，「仓储」折成上下两行，表头行变高、表体随之下移
+     一格。nowrap 把 min-content 抬到两字宽，auto 布局就会给足宽度，行高恒定。 */
+  min-width: 28px;
+  white-space: nowrap;
 }
 </style>

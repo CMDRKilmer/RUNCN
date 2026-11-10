@@ -1,0 +1,39 @@
+/* 固定文字「紧凑排列」+ 选中态（与 BLU「隐藏」/ FLT「产出装船」同构）。
+   选中态规则会把 font-weight 提到 700，汉字字宽可能微调，所以直接锁死宽度，
+   保证切换时按钮长度完全不跳动。
+   按钮绝对定位到 TileFrame__body（position:relative）内部右上角：body 顶部 +2px
+   正好是 StoreView__row 的第一行，也就是「Animus a (VH-874a)（制造）」站点名行。
+   重量 / 体积已被 inv-compress-inventory-info 压到该行的第二行，所以第一行右侧
+   是空白，按钮贴右放置不会挡住任何文字。挂在 body 上（而非 frame 上）还能让
+   按钮随上下文命令行显隐、窗口高度变化一起移动，不会出现跳位。
+   回退挂到 frame 时由 tsx 把 --rp-inv-compact-top 设成 47px 补偿标题栏高度。
+
+   高度 15px 与该行 16px 的 capacity 行一致，line-height 11px 配合
+   align-items:center 使文字基线也对齐；按钮在 DOM 中位于 TileFrame__anchor
+   之后且带 z-index，不会被 anchor 盖住。 */
+.toggle {
+  position: absolute;
+  top: var(--rp-inv-compact-top, 2px);
+  right: 6px;
+  z-index: 5;
+  height: 15px;
+  width: 56px;
+  min-width: 56px;
+  max-width: 56px;
+  padding: 0 6px;
+  margin: 0;
+  font-size: 10px;
+  line-height: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+/* 激活态只有一条下划线：不加底色、不改文字颜色、不改字重。
+   下划线用主题强调色，但按钮本身的配色在三态之间完全不变。 */
+.active {
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--rp-accent-rgb));
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}

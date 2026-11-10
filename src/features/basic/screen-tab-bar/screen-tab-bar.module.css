@@ -11,9 +11,15 @@
   }
 }
 
+/* 文字由 hide/shw 改成固定「隐藏」：定宽，选中态加粗也不跳宽。 */
 .hideButton {
-  width: 26px;
+  width: 30px;
+  min-width: 30px;
+  max-width: 30px;
+  padding: 0 2px;
+  box-sizing: border-box;
   text-align: center;
+  cursor: pointer;
 }
 
 .hiddenName {

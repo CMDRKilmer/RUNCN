@@ -19,6 +19,9 @@ const pendingResolvers: (() => void)[] = [];
 
 interface ShowBufferOptions {
   force?: boolean;
+  // 插到等待队列最前面。仍是同一时间只创建一个窗口（seenWindows 检测不能并发），
+  // 只是不再排在后面那一串请求之后。给 FB 这类「面板自己的原生磁贴」用。
+  priority?: boolean;
   autoSubmit?: boolean;
   autoClose?: boolean;
   closeWhen?: Ref<boolean>;
@@ -41,7 +44,7 @@ export async function showBuffer(command: string, options?: ShowBufferOptions) {
       return window;
     }
   }
-  await acquireSlot();
+  await acquireSlot(options?.priority);
   const create = await $(document.documentElement, C.Dock.create);
 
   try {
@@ -66,13 +69,23 @@ export async function showBuffer(command: string, options?: ShowBufferOptions) {
   }
 }
 
-async function acquireSlot() {
+async function acquireSlot(priority = false) {
   if (!isBusy) {
     isBusy = true;
     return;
   }
 
-  await new Promise<void>(resolve => pendingResolvers.push(resolve));
+  // 刷新时 FLEET/PROD 会为每个基地触发 requestBS()，一口气排十几个
+  // showBuffer('BS <星球>', { autoClose: true })。普通 FIFO 会把 FB 面板自己
+  // 的 BS/SHPI 磁贴排到最后，右下角空好几秒。priority 只改变排队顺序，
+  // 串行创建窗口的约束不变，避免两个调用抢到同一个新窗口。
+  await new Promise<void>(resolve => {
+    if (priority) {
+      pendingResolvers.unshift(resolve);
+    } else {
+      pendingResolvers.push(resolve);
+    }
+  });
 }
 
 function releaseSlot() {
@@ -105,8 +118,11 @@ async function processWindow(window: HTMLDivElement, command: string, options?: 
       dockTab.classList.add(css.hidden);
     }
   }
-  const message = UI_TILES_CHANGE_COMMAND(id!, command);
-  if (!dispatchClientPrunMessage(message)) {
+  // 新建窗口的磁贴偶尔还没拿到 id。此时注入 UI_TILES_CHANGE_COMMAND 会让游戏
+  // 用 undefined 作为窗口键，底栏多出一个标题为 NaN 的坏按钮（点开是空白窗口）。
+  // 没有 id 就退回游戏原生的表单提交，不要发这条消息。
+  const applied = id ? dispatchClientPrunMessage(UI_TILES_CHANGE_COMMAND(id, command)) : false;
+  if (!applied) {
     changeInputValue(input, command);
     await sleep(0);
     form.requestSubmit();

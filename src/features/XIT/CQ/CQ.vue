@@ -483,19 +483,19 @@ const lmTotal = computed(() => {
   color: #ccc;
   border: 1px solid #2b485a;
   padding: 2px 8px;
-  font-size: 0.9em;
+  font-size: 1em;
   min-width: 220px;
 }
 
 .hint {
-  font-size: 0.75em;
+  font-size: 1em;
   opacity: 0.6;
 }
 
 .companyBar {
   padding: 6px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.95em;
+  font-size: 1em;
 }
 
 .section {
@@ -514,7 +514,7 @@ const lmTotal = computed(() => {
 }
 
 .sectionStat {
-  font-size: 0.8em;
+  font-size: 1em;
   opacity: 0.7;
 }
 
@@ -522,7 +522,7 @@ const lmTotal = computed(() => {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.9em;
+  font-size: 1em;
 }
 
 .container table th {
@@ -545,7 +545,7 @@ const lmTotal = computed(() => {
 }
 
 .tickerSmall {
-  font-size: 0.75em;
+  font-size: 1em;
   opacity: 0.55;
   font-family: var(--rp-font-mono, monospace);
 }

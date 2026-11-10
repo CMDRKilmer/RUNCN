@@ -351,13 +351,13 @@ function onOpenNxClick() {
 }
 
 .builtinStatus {
-  font-size: 0.85em;
+  font-size: 1em;
   color: #888;
 }
 
 .builtinHint {
   margin: 2px 0 0;
-  font-size: 0.8em;
+  font-size: 1em;
   color: #666;
 }
 
@@ -370,7 +370,7 @@ function onOpenNxClick() {
 }
 
 .autoBadge {
-  font-size: 0.8em;
+  font-size: 1em;
   color: #56b6c2;
   font-family: monospace;
   letter-spacing: 0.5px;

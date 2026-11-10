@@ -5,6 +5,8 @@ interface FeatureDescriptor {
   id: string;
   description: string;
   advanced?: boolean;
+  // 由专门设置项控制的功能：不显示在 XIT SET 功能列表，也不受该列表的禁用状态影响。
+  hidden?: boolean;
   init: () => void;
 }
 
@@ -40,7 +42,7 @@ function logError(id: string, error: unknown): void {
   console.groupEnd();
 }
 
-function add(path: string, init: () => void, description: string) {
+function add(path: string, init: () => void, description: string, hidden = false) {
   const parts = path.split('/');
   const id = parts.pop()!.split('.')[0];
   let mode = parts.pop()!;
@@ -55,6 +57,7 @@ function add(path: string, init: () => void, description: string) {
     description,
     init,
     advanced: mode === 'advanced',
+    hidden,
   });
 }
 
@@ -65,7 +68,7 @@ function init() {
     if (userData.settings.mode !== 'FULL' && feature.advanced) {
       continue;
     }
-    if (disabledFeatures.has(feature.id)) {
+    if (!feature.hidden && disabledFeatures.has(feature.id)) {
       log.info('↩️', 'Skipping ' + feature.id);
       continue;
     }

@@ -1,0 +1,26 @@
+/* 标题栏右侧的「产出装船」按钮：文字固定，不写「开 / 关」。
+   frame 自身 position:relative；header 在 frame 内 top=1px、高 30px、
+   padding 5px 8px，文字区约在 frame+6..24px，所以 top=7px / height=15px
+   正好与「舰队总览」标题同一行垂直居中，又不碰下方上下文命令行。
+
+   不在 TileFrame.controls 里：FB 面板把内嵌磁贴的控件区整个隐藏了。
+   显隐由 refined-prun.css 按 [data-rp-fb-panel] 祖先控制，本文件只管外观。
+   选中态按用户要求只有一条下划线，不加底色、不改文字颜色；规则统一写在
+   refined-prun.css 的共用选中态段，用高特异性压住三套自定义主题对
+   原生 Button__btn 的 !important 覆盖。 */
+.toggle {
+  position: absolute;
+  top: 7px;
+  right: 6px;
+  z-index: 5;
+  height: 15px;
+  min-width: 56px;
+  padding: 0 6px;
+  margin: 0;
+  font-size: 10px;
+  line-height: 11px;
+  white-space: nowrap;
+  text-align: center;
+  cursor: pointer;
+  box-sizing: border-box;
+}

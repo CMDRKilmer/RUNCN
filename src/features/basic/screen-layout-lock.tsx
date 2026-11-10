@@ -27,9 +27,19 @@ async function onScreenItemReady(item: HTMLElement) {
     e.preventDefault();
   }
 
+  // 与 BLU「隐藏」/ FLT「产出装船」统一：文字恒为「锁定」，状态靠
+  // aria-pressed + data-rp-selected（反色实底）表达，不再写 lock / unlk。
+  // 原本是 div 而非 button，补 role/aria-label 让状态对读屏软件可感知。
   createFragmentApp(() => (
-    <div class={[C.ScreenControls.delete, C.type.typeSmall, $style.lockButton]} onClick={onClick}>
-      {locked.value ? 'unlk' : 'lock'}
+    <div
+      data-rp-ui="screen-lock-toggle"
+      data-rp-selected={locked.value ? 'on' : 'off'}
+      role="button"
+      aria-label="锁定屏幕布局"
+      aria-pressed={locked.value}
+      class={[C.ScreenControls.delete, C.type.typeSmall, $style.lockButton]}
+      onClick={onClick}>
+      锁定
     </div>
   )).before(copy);
 }

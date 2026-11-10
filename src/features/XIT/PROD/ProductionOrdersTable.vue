@@ -169,7 +169,7 @@ const formatTime = (ts: number) => {
   padding-bottom: 2px;
   font-weight: normal;
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .numericColumn {

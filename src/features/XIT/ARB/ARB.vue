@@ -872,8 +872,8 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .input:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 
@@ -892,8 +892,8 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .select:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 
@@ -918,7 +918,7 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .checkbox input {
-  accent-color: rgb(255, 176, 0);
+  accent-color: rgb(var(--rp-accent-rgb));
 }
 
 .shipInfo {
@@ -928,7 +928,7 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .shipInfo strong {
-  color: rgb(255, 176, 0);
+  color: rgb(var(--rp-accent-rgb));
 }
 
 .summaryBar {
@@ -939,7 +939,7 @@ function localizedCategory(o: ArbOpportunity): string {
   padding: 6px 8px;
   margin-bottom: 6px;
   border: 1px solid rgb(61, 74, 84);
-  background: rgba(255, 176, 0, 0.06);
+  background: rgba(var(--rp-accent-rgb), 0.06);
   border-radius: 4px;
 }
 
@@ -949,7 +949,7 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .summaryItem strong {
-  color: rgb(255, 176, 0);
+  color: rgb(var(--rp-accent-rgb));
   font-size: 13px;
   padding: 0 2px;
 }
@@ -965,7 +965,7 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .checkCol input {
-  accent-color: rgb(255, 176, 0);
+  accent-color: rgb(var(--rp-accent-rgb));
   cursor: pointer;
 }
 
@@ -976,7 +976,7 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .checkCell input {
-  accent-color: rgb(255, 176, 0);
+  accent-color: rgb(var(--rp-accent-rgb));
   cursor: pointer;
 }
 
@@ -989,7 +989,7 @@ function localizedCategory(o: ArbOpportunity): string {
   display: inline-block;
   padding: 1px 6px;
   border-radius: 8px;
-  background: rgba(255, 176, 0, 0.2);
+  background: rgba(var(--rp-accent-rgb), 0.2);
   color: rgb(255, 200, 64);
   font-weight: 600;
   font-size: 11px;
@@ -1085,7 +1085,7 @@ function localizedCategory(o: ArbOpportunity): string {
   min-width: 14px;
   padding: 0 4px;
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 14px;
   text-align: center;
   font-weight: bold;

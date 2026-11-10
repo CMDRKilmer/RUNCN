@@ -46,7 +46,7 @@ function onAddClick(ev: Event) {
 
 .plus {
   grid-area: 1 / 1;
-  font-size: 8px;
+  font-size: 10px;
   display: flex;
   justify-content: center;
   align-items: center;

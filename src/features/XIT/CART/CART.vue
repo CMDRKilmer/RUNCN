@@ -500,8 +500,8 @@ function setStatus(message: string, isError = false) {
 }
 
 .surfaceInput:focus {
-  border-color: rgb(255, 176, 0);
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  border-color: rgb(var(--rp-accent-rgb));
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
 }
 
@@ -544,7 +544,7 @@ function setStatus(message: string, isError = false) {
 
 .materialTicker {
   display: block;
-  color: rgb(255, 176, 0);
+  color: rgb(var(--rp-accent-rgb));
 }
 
 .materialName {
@@ -562,7 +562,7 @@ function setStatus(message: string, isError = false) {
 }
 
 .dropActive {
-  box-shadow: inset 0 0 0 1px rgb(255, 176, 0);
+  box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(36, 44, 50);
 }
 
@@ -577,7 +577,7 @@ function setStatus(message: string, isError = false) {
 }
 
 .checkbox {
-  accent-color: rgb(255, 176, 0);
+  accent-color: rgb(var(--rp-accent-rgb));
 }
 
 .amountColumn {

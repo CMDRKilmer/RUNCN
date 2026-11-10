@@ -21,14 +21,28 @@ export async function writeScreenVariable(name: string, naturalId: string): Prom
     const bar = document.querySelector(
       '[class*="ScreenVariableControls__bar"]',
     ) as HTMLElement | null;
-    const input = bar?.querySelector('input') as HTMLInputElement | null;
-    if (input !== null) {
+    const input = bar?.querySelector('input') as HTMLInputElement | null | undefined;
+    // 没有原生变量栏时 bar?.querySelector 得到的是 undefined（不是 null），
+    // 早期只判 !== null 会让下面 input.closest 抛 TypeError，整条写入链路中断。
+    if (input) {
       const container = input.closest(`.${C.AddressSelector.container}`) as HTMLElement | null;
       if (container !== null && (await selectAddress(container, naturalId))) {
         return;
       }
     }
-    showBuffer(`BS ${naturalId}`);
+    // FB 面板没有原生变量栏。以前这里会 showBuffer('BS <id>') 兜底，结果是每次点
+    // 基地都新建（并关掉）一个 BS 缓存窗口：窗口闪一下、磁贴 DOM 变成不响应
+    // 更新的僵尸节点，还会把用户自己开的窗口挤掉。FB 自己会按 screenVariables
+    // 原地改子磁贴命令，所以这里直接返回，不再开窗。
+    // 可能同时存在多块 FB（标签页 + 新建缓存窗口里的 XIT FB），只要有任意一块
+    // 正在显示就不能走兜底，否则在浮动 FB 里点基地会额外弹一个 BS 窗口。
+    const fbVisible = [...document.querySelectorAll('[class*="FB__layout"]')].some(
+      element => element.getClientRects().length > 0,
+    );
+    if (fbVisible) {
+      return;
+    }
+    void showBuffer(`BS ${naturalId}`);
   });
 }
 

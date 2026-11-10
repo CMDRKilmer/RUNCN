@@ -60,9 +60,19 @@ async function onScreenItemReady(item: HTMLElement) {
     e.preventDefault();
   }
 
+  // 与 BLU「隐藏」/ FLT「产出装船」统一：文字恒为「隐藏」，状态靠
+  // aria-pressed + data-rp-selected（反色实底）表达，不再写 hide / shw。
+  // 原本是 div 而非 button，补 role/aria-label 让状态对读屏软件可感知。
   createFragmentApp(() => (
-    <div class={[C.ScreenControls.delete, C.type.typeSmall, $style.hideButton]} onClick={onClick}>
-      {hidden.value ? 'shw' : 'hide'}
+    <div
+      data-rp-ui="screen-hide-toggle"
+      data-rp-selected={hidden.value ? 'on' : 'off'}
+      role="button"
+      aria-label="在标签栏隐藏此屏幕"
+      aria-pressed={hidden.value}
+      class={[C.ScreenControls.delete, C.type.typeSmall, $style.hideButton]}
+      onClick={onClick}>
+      隐藏
     </div>
   )).before(copy);
 }

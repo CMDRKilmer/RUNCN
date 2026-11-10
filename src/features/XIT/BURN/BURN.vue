@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import CopyButton from '@src/components/CopyButton.vue';
+import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import { BurnValues, getPlanetBurn, MaterialBurn, PlanetBurn } from '@src/core/burn';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { BurnValues, getPlanetBurn, MaterialBurn } from '@src/core/burn';
 import { comparePlanets } from '@src/core/game-lookups';
 import BurnSection from '@src/features/XIT/BURN/BurnSection.vue';
 import { useBurnTileState, useBurnFilters } from '@src/features/XIT/BURN/burn-state';
@@ -11,7 +12,7 @@ import MaterialRow from '@src/features/XIT/BURN/MaterialRow.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
-import { countDays, getSortedTickers } from '@src/features/XIT/BURN/utils';
+import { countDays } from '@src/features/XIT/BURN/utils';
 import InlineFlex from '@src/components/InlineFlex.vue';
 import { querySites } from '@src/features/XIT/shared/site-query';
 
@@ -154,47 +155,28 @@ function onExpandAllClick() {
   }
 }
 
-// Exports all materials regardless of active color filters (RED/YELLOW/GREEN/INF)
-// so spreadsheet users always get the complete dataset.
-function formatBurnTable(burns: PlanetBurn[]) {
-  const header =
-    io.value === true
-      ? '星球\t代号\t库存\t输入\t输出\t净变化\t天数'
-      : '星球\t代号\t库存\t消耗/天\t天数';
-  const lines = [header];
-  for (const planet of burns) {
-    const sorted = getSortedTickers(planet);
-    for (const material of sorted) {
-      const mat = planet.burn[material.ticker];
-      // Floor needed here: per-planet burns are pre-floored, but overall burn is not.
-      const days = mat.dailyAmount >= 0 ? '' : Math.floor(mat.daysLeft).toString();
-      const burn = Math.round(mat.dailyAmount * 1000) / 1000;
-      if (io.value === true) {
-        const inAmt = Math.round((mat.input + mat.workforce) * 1000) / 1000;
-        const outAmt = Math.round(mat.output * 1000) / 1000;
-        lines.push(
-          `${planet.planetName}\t${material.ticker}\t${mat.inventory}\t${inAmt}\t${outAmt}\t${burn}\t${days}`,
-        );
-      } else {
-        lines.push(`${planet.planetName}\t${material.ticker}\t${mat.inventory}\t${burn}\t${days}`);
-      }
-    }
+// 「比价」按钮用 XIT CBUY <星球编码> 打开采购比价：CBUY 会按该星球消耗品报告的
+// 「需要」列生成临时清单，不读写 XIT CART 购物车。多星球 / 总览没有唯一的
+// 补货清单，这时不显示按钮。
+const trialNaturalId = computed(() => {
+  const planets = planetBurn.value;
+  if (!planets || planets.length !== 1 || !planets[0].naturalId) {
+    return undefined;
   }
-  return lines.join('\n');
-}
+  return planets[0].naturalId;
+});
 
-function copyBurnTable() {
-  if (!planetBurn.value) {
-    return '';
+function onTrialClick() {
+  if (trialNaturalId.value) {
+    showBuffer(`XIT CBUY ${trialNaturalId.value}`);
   }
-  return formatBurnTable(planetBurn.value);
 }
 </script>
 
 <template>
   <LoadingSpinner v-if="planetBurn === undefined" />
   <template v-else>
-    <div :class="C.ComExOrdersPanel.filter">
+    <div :class="[C.ComExOrdersPanel.filter, $style.burnFilter]">
       <RadioItem v-model="red" horizontal>红色</RadioItem>
       <RadioItem v-model="yellow" horizontal>黄色</RadioItem>
       <RadioItem v-model="green" horizontal>绿色</RadioItem>
@@ -219,7 +201,15 @@ function copyBurnTable() {
       <div :class="$style.separator" />
       <RadioItem v-model="io" horizontal>I/O</RadioItem>
       <div :class="$style.spacer" />
-      <CopyButton :copy-fn="copyBurnTable" data-tooltip-position="bottom" />
+      <PrunButton
+        v-if="trialNaturalId"
+        primary
+        :class="$style.compareButton"
+        data-tooltip="按当前星球的补给需求，用游戏实时盘口对比各交易所采购成本"
+        data-tooltip-position="top"
+        @click="onTrialClick"
+        >比价</PrunButton
+      >
     </div>
     <table>
       <thead>
@@ -263,6 +253,24 @@ function copyBurnTable() {
 </template>
 
 <style module>
+/* 「比价」被 .spacer 推到工具栏最右。原来留 16px 时按钮比下方表格右缘
+   缩进一大截，视觉不统一。但窗口宽度不同时，6px 的自定义垂直滚动条轨道
+   （ScrollView__track-vertical）会横向压进内容区最多约 9px：留 4px 时
+   实测按钮最右 5px 正好被轨道盖住并截走点击（轨道在更高层 stacking
+   context，单靠按钮 z-index 提不上去）。10px 是在最窄实测窗口下也能让
+   按钮整体停在轨道左侧的最小留白，同时比原来的 16px 右移了 6px。 */
+.burnFilter {
+  padding-right: 10px !important;
+  box-sizing: border-box;
+}
+
+/* 按钮抬到轨道之上作为附加保险：宽窗口下轨道不压进内容区时，按钮中心
+   与右缘都能稳定命中；窄窗口下则由上面的 10px 留白从几何上避开。 */
+.compareButton {
+  position: relative;
+  z-index: 3;
+}
+
 .fakeRow {
   visibility: collapse;
 }
@@ -290,4 +298,8 @@ function copyBurnTable() {
 .radioItemWithTooltip {
   padding: 0;
 }
+
+/* 悬浮说明的指示三角已由 refined-prun.css 的全局 [data-tooltip]::after
+   规则统一隐藏（覆盖 ⓘ 图标、比价按钮、生产/劳动力等所有触发元素），
+   这里不再逐处打补丁；::before 说明文字框保持原样。 */
 </style>

@@ -304,7 +304,7 @@ function marginClass(margin: number) {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 .searchLabel {
-  font-size: 0.85em;
+  font-size: 1em;
   opacity: 0.7;
 }
 .searchInput {
@@ -312,7 +312,7 @@ function marginClass(margin: number) {
   color: #ccc;
   border: 1px solid #2b485a;
   padding: 2px 6px;
-  font-size: 0.85em;
+  font-size: 1em;
   width: 160px;
 }
 </style>

@@ -134,15 +134,19 @@ const stats = computed(() => {
 });
 
 // ── 状态文本 & 样式类 ──
+// cls 必须是 <style module> 里的类名键：CSS Modules 会把 .statusPlaced 编译成
+// .rp-CXOS__statusPlaced___hash，早先这里写 'status-placed' 原始字符串、
+// 模板又直接当普通 class 用，导致这五条颜色规则从未命中任何元素，
+// 状态 / 买卖方向全是一个默认灰字。改成 $style[...] 取哈希后的真实类名。
 const statusMap: Record<string, { label: string; cls: string }> = {
-  PLACED: { label: '已挂单', cls: 'status-placed' },
-  PARTIALLY_FILLED: { label: '部分成交', cls: 'status-partial' },
-  FILLED: { label: '已成交', cls: 'status-filled' },
+  PLACED: { label: '已挂单', cls: 'statusPlaced' },
+  PARTIALLY_FILLED: { label: '部分成交', cls: 'statusPartial' },
+  FILLED: { label: '已成交', cls: 'statusFilled' },
 };
 
 const typeMap: Record<string, { label: string; cls: string }> = {
-  BUYING: { label: '买入', cls: 'type-buying' },
-  SELLING: { label: '卖出', cls: 'type-selling' },
+  BUYING: { label: '买入', cls: 'typeBuying' },
+  SELLING: { label: '卖出', cls: 'typeSelling' },
 };
 
 // 表格里金额显示：formatCurrency 默认用玩家主币符号，但订单实际货币可能是
@@ -581,7 +585,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
             </div>
           </td>
           <!-- 类型 -->
-          <td :class="typeMap[order.type].cls">
+          <td :class="$style[typeMap[order.type].cls]">
             {{ typeMap[order.type].label }}
           </td>
           <!-- 交易所 -->
@@ -613,7 +617,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
             {{ formatOrderAmount(order.amount * order.limit.amount, order.limit.currency) }}
           </td>
           <!-- 状态 -->
-          <td :class="[statusMap[order.status].cls, $style.statusCell]">
+          <td :class="[$style[statusMap[order.status].cls], $style.statusCell]">
             {{ statusMap[order.status].label }}
           </td>
           <!-- 操作 -->
@@ -652,18 +656,38 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 /* ── 统计栏 ── */
+/* 统计栏回到基准字号且不压透明度：原先 0.9em(≈9.9px) 再叠 0.85 透明，
+   浅色主题下数字又小又淡。强调数字的颜色由不带字面量的变量保证。 */
 .summaryBar {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   padding: 4px 8px;
-  opacity: 0.85;
-  font-size: 0.9em;
+  font-size: 1em;
 }
 
+/* 强调文字（统计数字 / 材料名 / 排名）不能用 --rp-color-accent-primary：
+   主题引擎会把 refined-prun.css 里 html{--rp-color-accent-primary:#ffc856}
+   连变量定义一起重映射，自定义主题下它变成 #e7eef4 近白色，浅底上对比度
+   只有约 1.0，几乎看不见。改用 --rp-skin-selection（light 深石板蓝 #33566f、
+   暖米纸深棕 #9b6b2f，主题引擎不会重刷这组变量）；default「原样」主题没有
+   这组变量，回退到原来的琥珀黄，仍是深底亮字。整条声明只写 var()、不含颜色
+   字面量，主题引擎的 COLOR_RE 扫描会跳过，不会被二次改写。 */
 .summaryBar b {
-  color: var(--rp-color-accent-primary, #ffc856);
+  color: var(--rp-skin-selection, var(--rp-color-accent-primary));
 }
+
+/* 以下两处（材料名链接、排名）同理，只引用变量、不写颜色字面量。 */
+
+/* ── 可读性：颜色一律走三套自定义主题都定义了的 --rp-skin-* token ──────
+   上一轮全库筛查发现 CXOS 还留着一批游戏深底时代的硬编码色（#1a2632 /
+   #ccc / #5bc0de / …）和 0.75~0.85 的低不透明度。硬编码色只能靠主题引擎
+   CSSOM 扫描重映射兜底，碰到扫描顺序 / 组件后注入的样式表就会失效；低
+   opacity 在浅底上又会把文字冲淡。统一改成与 NX.vue 相同的写法：
+   var(--rp-skin-*, <原深底色回退>)。自定义主题取主题的深色 token，
+   default「原样」主题没有这组变量，回退值仍是原来的深底亮字，两套都可读。
+   回退里虽含颜色字面量会被主题引擎扫描，但自定义主题下变量一定存在、
+   回退不参与计算，因此不影响结果。 */
 
 /* ── 筛选栏 ── */
 .filterBar {
@@ -672,7 +696,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   gap: 12px;
   align-items: center;
   padding: 4px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--rp-skin-border, rgba(255, 255, 255, 0.08));
 }
 
 .statusGroup {
@@ -687,25 +711,30 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 .filterLabel {
-  font-size: 0.85em;
-  opacity: 0.7;
+  font-size: 1em;
+  color: var(--rp-skin-ink, #ccc);
 }
 
 .select {
-  background: #1a2632;
-  color: #ccc;
-  border: 1px solid #2b485a;
+  background: var(--rp-skin-input-bg, #1a2632);
+  color: var(--rp-skin-ink, #ccc);
+  border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 0.85em;
+  font-size: 1em;
 }
 
 .searchInput {
-  background: #1a2632;
-  color: #ccc;
-  border: 1px solid #2b485a;
+  background: var(--rp-skin-input-bg, #1a2632);
+  color: var(--rp-skin-ink, #ccc);
+  border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 0.85em;
+  font-size: 1em;
   width: 90px;
+}
+
+.searchInput::placeholder {
+  color: var(--rp-skin-muted, #999);
+  opacity: 1;
 }
 
 /* ── 材料 ── */
@@ -717,7 +746,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 
 .tickerLink {
   cursor: pointer;
-  color: var(--rp-color-accent-primary, #ffc856);
+  color: var(--rp-skin-selection, var(--rp-color-accent-primary));
 }
 
 .tickerLink:hover {
@@ -729,21 +758,23 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 0.85em;
+  font-size: 1em;
   white-space: nowrap;
 }
 
 .progressTrack {
   width: 80px;
   height: 4px;
-  background: #1a2632;
+  background: var(--rp-skin-panel-strong, #1a2632);
+  border: 1px solid var(--rp-skin-border, #1a2632);
   border-radius: 2px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .progressFill {
   height: 100%;
-  background: #337ab7;
+  background: var(--rp-skin-selection, #337ab7);
   border-radius: 2px;
   transition: width 0.3s;
 }
@@ -754,42 +785,49 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 .rankCell {
-  color: var(--rp-color-accent-primary, #ffc856);
+  color: var(--rp-skin-selection, var(--rp-color-accent-primary));
   font-weight: bold;
 }
 
-/* ── 状态 ── */
+/* ── 状态 / 买卖方向 ──
+   颜色取主题里「深色语义 token」：light 是低饱和深蓝 / 棕 / 墨绿 / 暗红，
+   paper 是对应的暖调深色，ceramic 由 theme-ceramic.ts 把 --rp-skin-action-*
+   映射到自己的色带文字色；default「原样」没有这些变量，回退到原先的亮色，
+   正好适配深底。全部避开 --rp-color-accent-primary（会被主题引擎重映射成近白）。
+   不再用 opacity 压淡，低对比度文字在浅底上会糊掉。
+   五类各占一个色相，互不相同：已挂单=蓝、部分成交=棕橙、已成交=靛紫、
+   买入=墨绿、卖出=暗红。状态用冷/中性色、买卖方向用红绿，避免「已成交」
+   和「买入」以前共用 action-flight 撞成同一个绿色。 */
 .statusCell {
   white-space: nowrap;
 }
 
-.status-placed {
-  color: #5bc0de;
+.statusPlaced {
+  color: var(--rp-skin-eta, #5bc0de);
 }
 
-.status-partial {
-  color: #f0ad4e;
+.statusPartial {
+  color: var(--rp-skin-action-unload, #f0ad4e);
 }
 
-.status-filled {
-  color: #5cb85c;
-  opacity: 0.6;
+.statusFilled {
+  color: var(--rp-skin-action-done, #b39ddb);
 }
 
 /* ── 类型 ── */
-.type-buying {
-  color: #5cb85c;
+.typeBuying {
+  color: var(--rp-skin-action-flight, #5cb85c);
   white-space: nowrap;
 }
 
-.type-selling {
-  color: #d9534f;
+.typeSelling {
+  color: var(--rp-skin-action-fuel, #d9534f);
   white-space: nowrap;
 }
 
-/* ── 已成交行 ── */
+/* ── 已成交行：不用 opacity 做退后感，改用主题的次要文字色 ── */
 .filledRow {
-  opacity: 0.5;
+  color: var(--rp-skin-muted, #999);
 }
 
 /* ── 操作 ── */
@@ -798,7 +836,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   white-space: nowrap;
 }
 
-/* ── 选中复选框（游戏风格深蓝） ── */
+/* ── 选中复选框 ── */
 .container input[type='checkbox'] {
   appearance: none;
   -webkit-appearance: none;
@@ -806,8 +844,8 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   height: 14px;
   margin: 0;
   padding: 0;
-  background: #0d1a24;
-  border: 1px solid #2b485a;
+  background: var(--rp-skin-input-bg, #0d1a24);
+  border: 1px solid var(--rp-skin-border, #2b485a);
   border-radius: 2px;
   cursor: pointer;
   position: relative;
@@ -818,17 +856,19 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 .container input[type='checkbox']:hover {
-  border-color: #3d6a8a;
+  border-color: var(--rp-skin-border-strong, #3d6a8a);
 }
 
 .container input[type='checkbox']:checked {
-  background: #1a6a8a;
-  border-color: #2b7a9a;
+  background: var(--rp-skin-selection, #1a6a8a);
+  border-color: var(--rp-skin-selection, #2b7a9a);
 }
 
 .container input[type='checkbox']:checked::after {
   content: '✓';
-  color: #d8ecf5;
+  /* 选中块在自定义主题下是深色，勾必须浅；--rp-skin-bg 是页面浅底色。
+     default 主题无此变量，回退到原来的浅蓝字（深底上同样清晰）。 */
+  color: var(--rp-skin-bg, #d8ecf5);
   font-size: 11px;
   font-weight: bold;
   line-height: 1;
@@ -839,14 +879,26 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 .container input[type='checkbox']:disabled {
-  opacity: 0.3;
+  opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* 禁用态按钮（未选中订单时的「批量压价 (0)」）在游戏原生皮肤里是
+   --rp-skin-disabled #98a3ac，浅底上只有 2.31:1，连按钮写什么都读不出来。
+   WCAG 虽豁免 inactive 控件，但这里仍把文字提到主题次要色（light #4a5863，
+   约 7:1），禁用感交给原有的浅底/浅边框表达。只作用于 CXOS 容器，
+   不影响其它窗口的禁用按钮；选择器带 html[data-rp-theme] + 容器类，
+   特异性高于 CONTROL_CSS 的全局 disabled 规则。 */
+html[data-rp-theme] .container button:disabled,
+html[data-rp-theme] .container [class*='Button__btn'][class*='Button__disabled'] {
+  color: var(--rp-skin-muted, #999) !important;
+  -webkit-text-fill-color: var(--rp-skin-muted, #999) !important;
 }
 
 /* ── 空状态 ── */
 .empty {
   text-align: center;
-  opacity: 0.5;
+  color: var(--rp-skin-muted, #999);
   padding: 12px;
 }
 </style>
