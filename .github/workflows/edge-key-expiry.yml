@@ -12,7 +12,7 @@ permissions:
 env:
   # Partner Center「发布 API」页 Key_1 的到期日期（UTC）。续期后更新此值，
   # 并同步更新 release.yml 顶部的 EDGE_API_KEY_EXPIRY。
-  EDGE_API_KEY_EXPIRY: '2026-11-09'
+  EDGE_API_KEY_EXPIRY: '2027-01-21'
   # 距到期不足该天数（天）时触发提醒（运行失败 + 尽力开 issue）
   REMIND_DAYS: '30'
 

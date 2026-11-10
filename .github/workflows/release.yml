@@ -2,7 +2,7 @@ env:
   DIRECTORY: dist
   KEEP_RELEASES: '10'
   # Edge Add-ons API 密钥到期日（UTC），续期后同步更新 edge-key-expiry.yml
-  EDGE_API_KEY_EXPIRY: '2026-11-09'
+  EDGE_API_KEY_EXPIRY: '2027-01-21'
   # 发布产物的**文件名必须纯 ASCII**：GitHub 会剥掉 release 附件名里的非 ASCII
   # 字符（26.9.26 实测：本地文件名确实是 `琉璃小工具-26.9.26.zip`，上传后变成
   # `-26.9.26.zip`）。release **标题**是另一个字段，可以继续用中文。
