@@ -1,0 +1,28 @@
+.fields {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.compactNumber input {
+  width: 56px;
+}
+
+.note {
+  margin: 6px 0;
+}
+
+.summary {
+  display: list-item;
+  list-style-position: inside;
+  cursor: pointer;
+}
+
+.amountTable tr > :not(:first-child, .textCell) {
+  text-align: right;
+}
+
+.textCell {
+  text-align: left;
+}

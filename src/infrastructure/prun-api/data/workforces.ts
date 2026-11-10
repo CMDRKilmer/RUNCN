@@ -25,4 +25,5 @@ const getById = createRequestGetter(state.getById, x => request.workforce(x));
 export const workforcesStore = {
   ...state,
   getById,
+  getLoadedById: state.getById,
 };

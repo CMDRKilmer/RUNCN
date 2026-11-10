@@ -44,17 +44,13 @@ export const fioBuildingsStore = shallowReactive<{
   error: false,
 });
 
-// 标记是否已发起过请求，避免重复加载。
-let fetchStarted = false;
-
 const FIO_URL = 'https://rest.fnar.net/building/allbuildings';
 
 // 懒加载建筑数据，每次会话只请求一次。
 export async function loadFioBuildings() {
-  if (fetchStarted) {
+  if (fioBuildingsStore.loading || fioBuildingsStore.buildings !== undefined) {
     return;
   }
-  fetchStarted = true;
   fioBuildingsStore.loading = true;
   fioBuildingsStore.error = false;
   try {

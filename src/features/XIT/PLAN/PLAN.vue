@@ -5,9 +5,17 @@ import {
   fioBuildingsStore,
   loadFioBuildings,
   FioBuilding,
-  FioRecipe,
   FioRecipeIO,
 } from '@src/features/XIT/PLAN/fio-buildings';
+import { getPlanetRecipes, loadPlanetEnvironment, type PlanetEnvironment } from './plan-planet';
+import { envMaterials } from './plan-materials';
+import {
+  HABITATION_FALLBACK,
+  getHousingCapacity,
+  planHousing,
+  wfTiers,
+  type WfTier,
+} from './plan-housing';
 import { workforceNeedsStore, loadWorkforceNeeds } from '@src/features/XIT/PLAN/workforce-needs';
 import { BUILDING_NAMES_ZH } from '@src/features/XIT/PLAN/building-names-zh';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
@@ -17,6 +25,7 @@ import { planetsStore } from '@src/infrastructure/prun-api/data/planets';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sortMaterials } from '@src/core/sort-materials';
+import { EXPERT_BONUSES, EXPERTISE_LABELS } from '@src/core/experts';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
@@ -63,9 +72,6 @@ const jhPlanId = useTileState('jhPlanId');
   }
 }
 
-// 专家加成固定值（index = 专家数量）。
-const EXPERT_BONUSES = [0, 0.0306, 0.0826, 0.1534, 0.2315, 0.284];
-
 const EXPERTISE_CATEGORIES = [
   'AGRICULTURE',
   'CHEMISTRY',
@@ -77,18 +83,6 @@ const EXPERTISE_CATEGORIES = [
   'METALLURGY',
   'RESOURCE_EXTRACTION',
 ] as const;
-
-const EXPERTISE_LABELS: Record<string, string> = {
-  AGRICULTURE: '农业',
-  CHEMISTRY: '化学',
-  CONSTRUCTION: '建筑材料',
-  ELECTRONICS: '电子',
-  FOOD_INDUSTRIES: '食品工业',
-  FUEL_REFINING: '燃料精炼',
-  MANUFACTURING: '制造',
-  METALLURGY: '冶金',
-  RESOURCE_EXTRACTION: '资源开采',
-};
 
 function getEfficiencyMultiplier(expertise: string | null | undefined): number {
   if (!expertise) {
@@ -121,104 +115,7 @@ loadFioBuildings();
 // 懒加载人口消耗品数据。
 loadWorkforceNeeds();
 
-// ── 星球环境建材 ──────────────────────────────────────────────
-interface PlanetResource {
-  ticker: string;
-  type: 'MINERAL' | 'LIQUID' | 'GASEOUS';
-  factor: number;
-}
-
-interface PlanetEnvironment {
-  gravity: number;
-  temperature: number;
-  pressure: number;
-  surface: boolean;
-  resources: PlanetResource[];
-}
-
-const RESOURCE_TYPE_BUILDING: Record<string, string> = {
-  MINERAL: 'EXT',
-  LIQUID: 'RIG',
-  GASEOUS: 'COL',
-};
-
-const planetEnvCache = new Map<string, PlanetEnvironment>();
-const planetEnv = ref<PlanetEnvironment | undefined>();
-
-async function fetchPlanetDetail(naturalId: string) {
-  if (planetEnvCache.has(naturalId)) {
-    planetEnv.value = planetEnvCache.get(naturalId);
-    return;
-  }
-  try {
-    const resp = await fetch(`https://rest.fnar.net/planet/${encodeURIComponent(naturalId)}`);
-    if (!resp.ok) {
-      planetEnv.value = undefined;
-      return;
-    }
-    const data = await resp.json();
-    const resources: PlanetResource[] = [];
-    for (const r of (data.Resources ?? []) as {
-      MaterialId: string;
-      ResourceType: string;
-      Factor: number;
-    }[]) {
-      const mat = materialsStore.getById(r.MaterialId);
-      if (mat) {
-        resources.push({
-          ticker: mat.ticker,
-          type: r.ResourceType as PlanetResource['type'],
-          factor: r.Factor,
-        });
-      }
-    }
-    const env: PlanetEnvironment = {
-      gravity: data.Gravity as number,
-      temperature: data.Temperature as number,
-      pressure: data.Pressure as number,
-      surface: data.Surface as boolean,
-      resources,
-    };
-    planetEnvCache.set(naturalId, env);
-    planetEnv.value = env;
-  } catch {
-    planetEnv.value = undefined;
-  }
-}
-
-// 根据星球环境参数和建筑面积计算环境建材需求。
-function getPlanetEnvMaterials(areaCost: number): Record<string, number> {
-  const env = planetEnv.value;
-  if (!env) {
-    return {};
-  }
-  const mats: Record<string, number> = {};
-  // 星球表面类型
-  if (env.surface) {
-    mats['MCG'] = areaCost * 4;
-  } else {
-    mats['AEF'] = Math.ceil(areaCost / 3);
-  }
-  // 重力
-  if (env.gravity < 0.25) {
-    mats['MGC'] = 1;
-  } else if (env.gravity > 2.5) {
-    mats['BL'] = 1;
-  }
-  // 气压
-  if (env.pressure < 0.25) {
-    mats['SEA'] = areaCost;
-  } else if (env.pressure > 2.0) {
-    mats['HSE'] = 1;
-  }
-  // 温度
-  if (env.temperature < -25) {
-    mats['INS'] = areaCost * 10;
-  } else if (env.temperature > 75) {
-    mats['TSH'] = 1;
-  }
-  return mats;
-}
+const planetEnv = ref<PlanetEnvironment>();
 
 // 交易所选项列表。
 const exchangeOptions = ['IC1', 'AI1', 'NC1', 'CI1', 'NC2', 'CI2'];
@@ -262,15 +159,6 @@ const buildingMeta = computed(() => {
   }
   return map;
 });
-
-type WfTier = 'Pioneers' | 'Settlers' | 'Technicians' | 'Engineers' | 'Scientists';
-const tierToLevel: Record<WfTier, PrunApi.WorkforceLevel> = {
-  Pioneers: 'PIONEER',
-  Settlers: 'SETTLER',
-  Technicians: 'TECHNICIAN',
-  Engineers: 'ENGINEER',
-  Scientists: 'SCIENTIST',
-};
 
 function getBuildingType(ticker: string): PrunApi.PlatformModuleType | undefined {
   return buildingMeta.value.get(ticker)?.type;
@@ -325,29 +213,8 @@ function isStorageBuilding(ticker: string): boolean {
 // 获取居住建筑在指定层级的容量。
 // 优先使用游戏 API 数据，容量为 0 或不可用时回退到硬编码表。
 function getWfCapacity(ticker: string, tier: WfTier): number {
-  const meta = buildingMeta.value.get(ticker);
-  if (meta) {
-    const gameCap = meta.wfCapacities.find(c => c.level === tierToLevel[tier])?.capacity;
-    if (gameCap !== undefined && gameCap > 0) {
-      return gameCap;
-    }
-  }
-  return HABITATION_FALLBACK[ticker]?.[tier] ?? 0;
+  return getHousingCapacity(ticker, tier, buildingMeta.value.get(ticker)?.wfCapacities);
 }
-
-// 已知居住建筑的默认容量回退表。
-// 数据来源：PRUNner 开源项目，与游戏内部数据一致。
-const HABITATION_FALLBACK: Record<string, Partial<Record<WfTier, number>>> = {
-  HB1: { Pioneers: 100 },
-  HB2: { Settlers: 100 },
-  HB3: { Technicians: 100 },
-  HB4: { Engineers: 100 },
-  HB5: { Scientists: 100 },
-  HBB: { Pioneers: 75, Settlers: 75 },
-  HBC: { Settlers: 75, Technicians: 75 },
-  HBM: { Technicians: 75, Engineers: 75 },
-  HBL: { Engineers: 75, Scientists: 75 },
-};
 
 // 获取建筑显示名称：中文 → 游戏内名称 → FIO camelCase 格式化。
 function getBuildingDisplayName(ticker: string): string {
@@ -695,7 +562,7 @@ const totalMaterials = computed<Record<string, number>>(() => {
       result[cost.CommodityTicker] = (result[cost.CommodityTicker] ?? 0) + cost.Amount * count;
     }
     // 环境建材（根据星球环境和建筑面积计算）
-    const envMats = getPlanetEnvMaterials(fb.AreaCost);
+    const envMats = envMaterials(fb.AreaCost, planetEnv.value);
     for (const [ticker, amount] of Object.entries(envMats)) {
       result[ticker] = (result[ticker] ?? 0) + amount * count;
     }
@@ -747,8 +614,6 @@ const dailyRevenue = computed<number | undefined>(() => {
   }
   return total;
 });
-
-const wfTiers: WfTier[] = ['Pioneers', 'Settlers', 'Technicians', 'Engineers', 'Scientists'];
 
 const wfTierNames: Record<WfTier, string> = {
   Pioneers: '先驱',
@@ -856,12 +721,7 @@ function onAutoBalance() {
   }
 
   // 收集所有居住建筑候选及其容量/面积。
-  interface HabOption {
-    ticker: string;
-    caps: Record<WfTier, number>;
-    area: number;
-  }
-  const options: HabOption[] = allFio
+  const options = allFio
     .filter(
       fb => isHabitationBuilding(fb.Ticker) && wfTiers.some(t => getWfCapacity(fb.Ticker, t) > 0),
     )
@@ -878,103 +738,12 @@ function onAutoBalance() {
     return;
   }
 
-  // DFS 剪枝搜索最优解。
-  // 只枚举实际有缺口层级涉及的建筑。
-  const relevantOptions = options.filter(opt =>
-    wfTiers.some(t => baseDeficit[t] > 0 && opt.caps[t] > 0),
-  );
-
-  // 贪心初解：每层独立取最优单层住房，得到上界面积。
-  let bestArea = Infinity;
-  let bestCounts: number[] = relevantOptions.map(() => 0);
-
-  // 计算初始上界（贪心）。
-  {
-    const greedyCounts = relevantOptions.map(() => 0);
-    const rem = { ...baseDeficit };
-    for (const tier of wfTiers) {
-      if (rem[tier] <= 0) {
-        continue;
-      }
-      // 单层住房中找容量/面积比最大的。
-      let bestIdx = -1;
-      let bestRatio = -1;
-      for (let i = 0; i < relevantOptions.length; i++) {
-        const cap = relevantOptions[i].caps[tier];
-        if (cap <= 0) {
-          continue;
-        }
-        const ratio = cap / relevantOptions[i].area;
-        if (ratio > bestRatio) {
-          bestRatio = ratio;
-          bestIdx = i;
-        }
-      }
-      if (bestIdx < 0) {
-        continue;
-      }
-      const cap = relevantOptions[bestIdx].caps[tier];
-      greedyCounts[bestIdx] += Math.ceil(rem[tier] / cap);
-    }
-    const greedyArea = greedyCounts.reduce((s, c, i) => s + c * relevantOptions[i].area, 0);
-    if (greedyArea < bestArea) {
-      bestArea = greedyArea;
-      bestCounts = [...greedyCounts];
-    }
-  }
-
-  const counts = relevantOptions.map(() => 0);
-
-  function dfs(idx: number, rem: Record<WfTier, number>, usedArea: number) {
-    // 剪枝：已超过当前最优。
-    if (usedArea >= bestArea) {
-      return;
-    }
-    // 满足条件。
-    if (wfTiers.every(t => rem[t] <= 0)) {
-      bestArea = usedArea;
-      bestCounts = relevantOptions.map((_, i) => counts[i]);
-      return;
-    }
-    if (idx >= relevantOptions.length) {
-      return;
-    }
-
-    const opt = relevantOptions[idx];
-    // 计算该建筑最多需要几个（满足所有它能覆盖的层级）。
-    let maxNeeded = 0;
-    for (const tier of wfTiers) {
-      if (opt.caps[tier] > 0 && rem[tier] > 0) {
-        maxNeeded = Math.max(maxNeeded, Math.ceil(rem[tier] / opt.caps[tier]));
-      }
-    }
-    // 加一点余量防止剪枝过激，但限制最大搜索量。
-    const maxTry = Math.min(maxNeeded + 1, Math.floor((bestArea - usedArea) / opt.area) + 1);
-
-    for (let c = maxTry; c >= 0; c--) {
-      counts[idx] = c;
-      const newRem = { ...rem };
-      for (const tier of wfTiers) {
-        if (opt.caps[tier] > 0) {
-          newRem[tier] = rem[tier] - opt.caps[tier] * c;
-        }
-      }
-      dfs(idx + 1, newRem, usedArea + c * opt.area);
-    }
-    counts[idx] = 0;
-  }
-
-  dfs(0, { ...baseDeficit }, 0);
-
-  // 转换结果。
-  const additions: { ticker: string; count: number }[] = [];
-  for (let i = 0; i < relevantOptions.length; i++) {
-    if (bestCounts[i] > 0) {
-      additions.push({ ticker: relevantOptions[i].ticker, count: bestCounts[i] });
-    }
-  }
+  const additions = planHousing(baseDeficit, options);
 
   // 一次性替换居住建筑。
+  if (additions === undefined) {
+    return;
+  }
   if (additions.length === 0) {
     buildings.value = nonHabBuildings;
     return;
@@ -1188,57 +957,24 @@ function addCoreIfMissing() {
 
 watch(
   planet,
-  newVal => {
+  async (newVal, _, onCleanup) => {
+    let active = true;
+    onCleanup(() => (active = false));
+    planetEnv.value = undefined;
     const matched = planetsStore.find(newVal.trim());
     if (matched) {
       addCoreIfMissing();
-      fetchPlanetDetail(matched.naturalId);
-    } else {
-      planetEnv.value = undefined;
+      const env = await loadPlanetEnvironment(matched.naturalId);
+      if (active) {
+        planetEnv.value = env;
+      }
     }
   },
   { immediate: true },
 );
 
-// 开采产量计算常量（来源：PRUNplanner）。
-const TOTAL_MS_DAY = 86400000;
-const BASE_DAILY: Record<string, number> = { MINERAL: 70, LIQUID: 70, GASEOUS: 60 };
-const DAILY_TYPE_SHARE: Record<string, number> = {
-  MINERAL: 43200000 / TOTAL_MS_DAY, // EXT 12h → 0.5
-  LIQUID: 17280000 / TOTAL_MS_DAY, // RIG 4h48m → 0.2
-  GASEOUS: 21600000 / TOTAL_MS_DAY, // COL 6h → 0.25
-};
-
-// 获取建筑的有效配方列表。
-// 对于开采类建筑（EXT/RIG/COL），FIO 只有空配方，需根据星球资源生成。
-function getEffectiveRecipes(fb: FioBuilding): FioRecipe[] {
-  const ticker = fb.Ticker;
-  const buildingForType = RESOURCE_TYPE_BUILDING;
-  const matchingType = Object.entries(buildingForType).find(([, b]) => b === ticker)?.[0];
-  if (!matchingType) {
-    return fb.Recipes;
-  }
-  const env = planetEnv.value;
-  if (!env || env.resources.length === 0) {
-    return fb.Recipes;
-  }
-  const planetResources = env.resources.filter(r => r.type === matchingType);
-  if (planetResources.length === 0) {
-    return fb.Recipes;
-  }
-  return planetResources.map(r => {
-    const dailyExtraction = r.factor * (BASE_DAILY[r.type] ?? 70);
-    const share = DAILY_TYPE_SHARE[r.type] ?? 0.5;
-    const amount = Math.trunc(Math.ceil(dailyExtraction * share));
-    const timeMs =
-      amount > 0 ? Math.round(amount * (TOTAL_MS_DAY / dailyExtraction)) : TOTAL_MS_DAY;
-    return {
-      RecipeName: `=>${amount}x${r.ticker} (${(r.factor * 100).toFixed(1)}%)`,
-      DurationMs: timeMs,
-      Inputs: [],
-      Outputs: [{ CommodityTicker: r.ticker, Amount: amount }],
-    };
-  });
+function getEffectiveRecipes(fb: FioBuilding) {
+  return getPlanetRecipes(fb, planetEnv.value);
 }
 
 function recipeOptions(fb: FioBuilding) {
