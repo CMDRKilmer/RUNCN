@@ -97,6 +97,8 @@ declare namespace UserData {
     buyPartial?: boolean;
     exchange?: string;
     useCXInv?: boolean;
+    // 已分配给装船的仓库库存，不能再抵扣采购量。
+    cxInvReserve?: Record<string, number>;
     priceLimits?: Record<string, number>;
 
     origin?: string;

@@ -67,6 +67,7 @@ export function buildChainActionPackages(
       group: buyGroupName,
       exchange: ship.exchangeCode,
       useCXInv: true,
+      cxInvReserve: { ...plan.originPickup },
     });
   }
 

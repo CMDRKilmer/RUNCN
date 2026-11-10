@@ -123,6 +123,20 @@ await check('two ships reserve a shared warehouse only once', () => {
     10,
   );
 });
+await check('departure package separates planned purchases from reserved warehouse stock', () => {
+  const plan = planChainRoute({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bases(),
+    originStock: { RAT: 6 },
+  });
+  const { mainPkg } = buildChainActionPackages(ship('S'), plan);
+  const purchase = mainPkg.actions.find(x => x.type === 'CX Buy');
+  const load = mainPkg.actions.find(x => x.type === 'MTRA');
+  assert.deepEqual(mainPkg.groups.find(x => x.name === purchase.group).materials, { RAT: 14 });
+  assert.deepEqual(purchase.cxInvReserve, { RAT: 6 });
+  assert.deepEqual(mainPkg.groups.find(x => x.name === load.group).materials, { RAT: 20 });
+});
 await check('cargo verification retains cargo allocated to the next stop', () => {
   const plan = planChainRoute({ originNaturalId: 'CX', capacity, bases: bases() });
   const built = buildChainActionPackages(ship('S'), plan);
