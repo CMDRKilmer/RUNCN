@@ -1,8 +1,13 @@
 <script setup lang="ts">
 const model = defineModel<string>();
 
-const { focusOnMount = false, type = 'text' } = defineProps<{
+const {
+  focusOnMount = false,
+  list,
+  type = 'text',
+} = defineProps<{
   focusOnMount?: boolean;
+  list?: string;
   type?: string;
 }>();
 
@@ -21,6 +26,7 @@ onMounted(() => {
       ref="input"
       v-model="model"
       :type="type"
+      :list="list"
       autocomplete="off"
       data-1p-ignore="true"
       data-lpignore="true" />

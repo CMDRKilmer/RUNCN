@@ -7,7 +7,7 @@ interface WorkforceNeedItem {
   Amount: number;
 }
 
-interface WorkforceNeed {
+export interface WorkforceNeed {
   WorkforceType: string;
   Needs: WorkforceNeedItem[];
 }
@@ -15,18 +15,18 @@ interface WorkforceNeed {
 export const workforceNeedsStore = shallowReactive<{
   needs: WorkforceNeed[] | undefined;
   fetched: boolean;
+  loading: boolean;
 }>({
   needs: undefined,
   fetched: false,
+  loading: false,
 });
 
-let fetchStarted = false;
-
 export async function loadWorkforceNeeds() {
-  if (fetchStarted) {
+  if (workforceNeedsStore.loading || workforceNeedsStore.fetched) {
     return;
   }
-  fetchStarted = true;
+  workforceNeedsStore.loading = true;
   try {
     const resp = await fetch('https://rest.fnar.net/global/workforceneeds');
     if (!resp.ok) {
@@ -35,6 +35,8 @@ export async function loadWorkforceNeeds() {
     workforceNeedsStore.needs = (await resp.json()) as WorkforceNeed[];
     workforceNeedsStore.fetched = true;
   } catch {
-    // 静默失败
+    // 保留未加载状态，调用方可重试。
+  } finally {
+    workforceNeedsStore.loading = false;
   }
 }

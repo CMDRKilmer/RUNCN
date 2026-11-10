@@ -38,7 +38,8 @@
     "uuid": "^14.0.1",
     "vue": "^3.5.44",
     "vue-chartjs": "^5.3.2",
-    "vue-draggable-plus": "^0.6.0"
+    "vue-draggable-plus": "^0.6.0",
+    "yalps": "0.6.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.15.0",

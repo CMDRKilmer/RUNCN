@@ -73,6 +73,13 @@ const getByShortSiteId = createGroupMapGetter(state.all, x => x.siteId.substring
 
 const getByFullSiteId = createGroupMapGetter(state.all, x => x.siteId);
 
+function getLoadedBySiteId(siteId: string) {
+  if (fetchedAll.value || fetchedSites.has(siteId)) {
+    return getByFullSiteId(siteId) ?? [];
+  }
+  return undefined;
+}
+
 const getBySiteId = (value?: string | null) => {
   const result = getByFullSiteId(value) ?? getByShortSiteId(value);
   if (result) {
@@ -95,4 +102,5 @@ const getBySiteId = (value?: string | null) => {
 export const productionStore = {
   ...state,
   getBySiteId,
+  getLoadedBySiteId,
 };

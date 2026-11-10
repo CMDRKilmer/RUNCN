@@ -3,6 +3,18 @@
 
 // https://handbook.apex.prosperousuniverse.com/wiki/efficiency-factors/index.html#expert-spawn-rates--bonuses
 export const EXPERT_DAYS = [10.0, 12.5, 57.57, 276.5, 915.1];
+export const EXPERT_BONUSES = [0, 0.0306, 0.0696, 0.1248, 0.1974, 0.284];
+export const EXPERTISE_LABELS: Record<string, string> = {
+  AGRICULTURE: '农业',
+  CHEMISTRY: '化学',
+  CONSTRUCTION: '建筑材料',
+  ELECTRONICS: '电子',
+  FOOD_INDUSTRIES: '食品工业',
+  FUEL_REFINING: '燃料精炼',
+  MANUFACTURING: '制造',
+  METALLURGY: '冶金',
+  RESOURCE_EXTRACTION: '资源开采',
+};
 export const MS_IN_DAY = 24 * 60 * 60 * 1000;
 
 export function getTotalExperts(entry: PrunApi.ExpertFieldEntry): number {

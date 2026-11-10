@@ -40,6 +40,7 @@ import './LMSCAN';
 import './HAUL/HAUL';
 import './HELP';
 import './HQUC';
+import './IND/IND';
 import './MATS';
 import './NOTE/NOTE';
 import './NX/NX';
