@@ -697,6 +697,61 @@ await check('fitting counts clipped deliveries without rejecting clipped surplus
     scope.stop();
   }
 });
+await check('return surplus leaves room for deliveries picked up at later stops', () => {
+  const bs = ['A', 'B', 'C', 'D'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 30 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 5, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.products.A = ['Z'];
+  fixture.products.B = ['X'];
+  fixture.burns.A = { burn: { Z: { input: 1, output: 2, workforce: 0, inventory: 20 } } };
+  fixture.burns.B = { burn: { X: { input: 0, output: 1, workforce: 0, inventory: 100 } } };
+  fixture.burns.C = { burn: { Z: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.D = { burn: { X: { input: 0.5, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.bills.C = config => (config.days > 0 ? { Z: Math.ceil(config.days) } : {});
+  fixture.bills.D = config => (config.days > 0 ? { X: Math.ceil(config.days / 2) } : {});
+  const vessel = ship('S');
+  Object.assign(vessel.cargoStore, { weightCapacity: 15, volumeCapacity: 15 });
+
+  const fiveDays = planChainRoute({
+    originNaturalId: 'CX',
+    bases: bs,
+    capacity: { weight: 15, volume: 15, freeWeight: 15, freeVolume: 15 },
+  });
+  assert.equal(fiveDays.hasUnmetChainDemand, undefined);
+  assert.deepEqual(
+    fiveDays.stops.map(stop => stop.naturalId),
+    ['A', 'B', 'C', 'D'],
+  );
+  assert.equal(fiveDays.stops[0].loadOnDeparture.weight, 12);
+  assert.equal(fiveDays.stops[1].loadOnArrival.weight, 12);
+  assert.equal(fiveDays.stops[1].loadOnDeparture.weight, 15);
+  assert.deepEqual(fiveDays.loadOnReturn, { weight: 7, volume: 7 });
+  assert.deepEqual(fiveDays.finalUnload, { Z: 7 });
+
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
+    );
+    const plan = planning.shipPlans.value[0].plan;
+    assert.equal(plan.hasUnmetChainDemand, undefined);
+    assert.equal(plan.stops[2].days, 10);
+    assert.equal(plan.stops[2].unloadChain.get('Z').amount, 10);
+    assert.equal(plan.stops[3].unloadChain.get('X').amount, 5);
+    assert.deepEqual(plan.peakLoad, { weight: 15, volume: 15 });
+  } finally {
+    scope.stop();
+  }
+});
 await check('fitting checks stock at a later selected ship’s warehouse', () => {
   const bs = bases();
   for (const base of bs) {

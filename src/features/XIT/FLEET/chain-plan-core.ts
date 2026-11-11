@@ -5,14 +5,13 @@ import {
   type CargoItem as CargoItemFit,
   type CargoState,
 } from './chain-fit';
-import {
-  ORIGIN_DEST,
-  type ChainCapacity,
-  type ChainPlan,
-  type ChainStopPlan,
-  type CargoItem,
-  type ChainFlow,
-  type ChainFilteredStop,
+import type {
+  ChainCapacity,
+  ChainPlan,
+  ChainStopPlan,
+  CargoItem,
+  ChainFlow,
+  ChainFilteredStop,
 } from './chain-types';
 
 export interface ChainPlanningBase {
@@ -505,8 +504,7 @@ export function computeChainPlan(
     closureDownstreamNeed.set(ticker, totalNeed > 0);
   }
 
-  // 沿航线模拟舱容：到站先卸（含链输送），再提取（链输送 + 最终产物），
-  // 超载按比例缩减提取量并同步削减下游到货。
+  // 沿航线先模拟必需交付，再用各段剩余舱容安排返航货物。
   let cargoWeight = 0;
   let cargoVolume = 0;
   let cargo: CargoItem[] = [];
@@ -581,6 +579,7 @@ export function computeChainPlan(
   plan.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
 
   const stops: ChainStopPlan[] = [];
+  const returnPickups: Pick<CargoItem, 'ticker' | 'amount'>[][] = [];
   for (const id of order) {
     const base = byNaturalId.get(id)!;
     const stop: ChainStopPlan = {
@@ -633,24 +632,21 @@ export function computeChainPlan(
       }
     }
 
-    // 提取：拆两阶段。
-    //   阶段 1：链输送（送下游）——受舱容约束，超载按比例缩减、警告。
-    //   阶段 2：最终产物（回出发地）——不裁剪，超载仅警告并截到裁点之前的部分（不缩减全部）。
-    // 这样保证船尽量装满产物运回，下游补给也不会被过裁。
+    // 第一遍只模拟送往下游的必需货物，返航货物在第二遍分配。
     const chainPickup: CargoItem[] = [];
     for (const flow of flows) {
       if (flow.from === id && flow.amount > 0) {
         chainPickup.push({ ticker: flow.ticker, amount: flow.amount, from: id, dest: flow.to });
       }
     }
-    const finalPickup: CargoItem[] = [];
+    const finalPickup: Pick<CargoItem, 'ticker' | 'amount'>[] = [];
     for (const ticker of finalTickers.get(id) ?? []) {
       // 最终产物装尽到港时预计库存（含飞行期间新增产出）：不扣自用预留
       // （自用是该基地 burn 的事）。链上 flows 仍按 avail（扣自用）避免抽空基地断粮。
       const mat = burns.get(id)![ticker];
       const amount = Math.max(0, Math.floor(projectedInventory(mat, ticker, id)));
       if (amount > 0) {
-        finalPickup.push({ ticker, amount, from: id, dest: ORIGIN_DEST });
+        finalPickup.push({ ticker, amount });
       }
     }
     // 有前向下游边的产物：已按需补给下游（flows），剩余 avail 运回空间站。
@@ -660,7 +656,7 @@ export function computeChainPlan(
       const sent = delivered.get(id)?.get(ticker) ?? 0;
       const surplus = Math.max(0, avail(id, ticker) - sent);
       if (surplus > 0) {
-        finalPickup.push({ ticker, amount: surplus, from: id, dest: ORIGIN_DEST });
+        finalPickup.push({ ticker, amount: surplus });
       }
     }
 
@@ -696,12 +692,39 @@ export function computeChainPlan(
       }
     }
 
-    // 阶段 2:最终产物。逐 ticker 尝试 push,装不下则跳过该 ticker 并警告,
-    // 让下一站的产物有机会被装上,不一次性裁掉全部。
+    if (chainClipped) {
+      plan.hasUnmetChainDemand = true;
+      warnings.push(
+        `「${stop.planetName}」链上输送超出船舱剩余载量，按下游优先度逐条截断（次要下游留待下航次）。`,
+      );
+    }
+    stop.clipped = chainClipped;
+    trackPeak();
+    stop.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
+    stops.push(stop);
+    returnPickups.push(finalPickup);
+  }
+
+  // 返航货物一直留在船上，只能使用从本站到归航期间每段都空闲的舱容。
+  const futurePeak = Array<{ weight: number; volume: number }>(stops.length);
+  let peakWeight = 0;
+  let peakVolume = 0;
+  for (let i = stops.length - 1; i >= 0; i--) {
+    const load = stops[i]!.loadOnDeparture;
+    peakWeight = Math.max(peakWeight, load.weight);
+    peakVolume = Math.max(peakVolume, load.volume);
+    futurePeak[i] = { weight: peakWeight, volume: peakVolume };
+  }
+  let returnWeight = 0;
+  let returnVolume = 0;
+  for (const [index, stop] of stops.entries()) {
+    stop.loadOnArrival.weight += returnWeight;
+    stop.loadOnArrival.volume += returnVolume;
+    const reserved = futurePeak[index]!;
     let finalClipped = false;
-    for (const item of finalPickup) {
-      const remainingW = freeCapacity.weight - cargoWeight;
-      const remainingV = freeCapacity.volume - cargoVolume;
+    for (const item of returnPickups[index]!) {
+      const remainingW = freeCapacity.weight - reserved.weight - returnWeight;
+      const remainingV = freeCapacity.volume - reserved.volume - returnVolume;
       if (remainingW <= 0 || remainingV <= 0) {
         finalClipped = true;
         continue;
@@ -721,11 +744,10 @@ export function computeChainPlan(
         finalClipped = true;
         continue;
       }
-      item.amount = amount;
       const { weight, volume } = matWeightVolume(item.ticker, amount);
-      cargoWeight += weight;
-      cargoVolume += volume;
-      cargo = [...cargo, item];
+      returnWeight += weight;
+      returnVolume += volume;
+      plan.finalUnload[item.ticker] = (plan.finalUnload[item.ticker] ?? 0) + amount;
       const existing = stop.load.get(item.ticker);
       if (existing) {
         existing.amount += amount;
@@ -735,37 +757,23 @@ export function computeChainPlan(
       } else {
         stop.load.set(item.ticker, { amount, to: '回出发地' });
       }
-      if (amount < item.amount || totalW > remainingW || totalV > remainingV) {
+      if (amount < item.amount) {
         finalClipped = true;
       }
     }
 
-    stop.clipped = chainClipped || finalClipped;
-    if (chainClipped) {
-      plan.hasUnmetChainDemand = true;
-      warnings.push(
-        `「${stop.planetName}」链上输送超出船舱剩余载量，按下游优先度逐条截断（次要下游留待下航次）。`,
-      );
-    }
     if (finalClipped) {
+      stop.clipped = true;
       warnings.push(`「${stop.planetName}」最终产物受舱容限制，部分未装上船。`);
     }
-
-    trackPeak();
-    // 卸货+提取后舱载（离开本站时）。
-    stop.loadOnDeparture = { weight: cargoWeight, volume: cargoVolume };
-    stops.push(stop);
+    stop.loadOnDeparture.weight += returnWeight;
+    stop.loadOnDeparture.volume += returnVolume;
+    plan.peakLoad.weight = Math.max(plan.peakLoad.weight, stop.loadOnDeparture.weight);
+    plan.peakLoad.volume = Math.max(plan.peakLoad.volume, stop.loadOnDeparture.volume);
   }
 
   // 归航前舱载（最后站离开后、卸最终产物前）。
-  plan.loadOnReturn = { weight: cargoWeight, volume: cargoVolume };
-
-  // 归航：卸下最终产物。
-  for (const item of cargo) {
-    if (item.dest === ORIGIN_DEST && item.amount > 0) {
-      plan.finalUnload[item.ticker] = (plan.finalUnload[item.ticker] ?? 0) + item.amount;
-    }
-  }
+  plan.loadOnReturn = { weight: cargoWeight + returnWeight, volume: cargoVolume + returnVolume };
 
   // 汇总装船总账单（全部站）与 CX 采购账单（仅开启「购买」的站，
   // 扣除出发地「取货」补足的部分——取货不产生采购）。

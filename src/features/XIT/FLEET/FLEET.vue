@@ -214,7 +214,7 @@ const chainBases = computed<ChainPlannerBase[]>(() =>
     naturalId: base.naturalId,
     planetName: base.planetName,
     site: base.site,
-    config,
+    config: withAllResupplyMaterials(config),
   })),
 );
 
