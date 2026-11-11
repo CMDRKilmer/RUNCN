@@ -259,20 +259,22 @@ interface AllocationStep {
 export function planFastestChainSegments(input: {
   timings: ChainShipTiming[];
   capacities: { freeWeight: number; freeVolume: number }[];
-  stopSizes: { weight: number; volume: number }[];
+  // Summed stop sizes. Omit to leave capacity entirely to `canUseSegment`
+  // (callers that replan each candidate segment and inspect its peak load).
+  stopSizes?: { weight: number; volume: number }[];
   canUseSegment?: (ship: number, start: number, end: number) => boolean;
 }): { ranges: ShipSegment[]; hours: number[] } | undefined {
   const { timings, capacities, stopSizes } = input;
-  const count = stopSizes.length;
-  if (count === 0 || timings.length === 0 || timings.length !== capacities.length) {
+  const count = stopSizes?.length ?? (timings[0]?.between.length ?? -1) + 1;
+  if (count <= 0 || timings.length === 0 || timings.length !== capacities.length) {
     return undefined;
   }
 
   const weight = [0];
   const volume = [0];
-  for (const [index, stop] of stopSizes.entries()) {
-    weight.push(weight[index]! + stop.weight);
-    volume.push(volume[index]! + stop.volume);
+  for (const stop of stopSizes ?? []) {
+    weight.push(weight[weight.length - 1]! + stop.weight);
+    volume.push(volume[volume.length - 1]! + stop.volume);
   }
   const adjacent = timings.map(timing => {
     const hours = [0];
@@ -328,8 +330,9 @@ export function planFastestChainSegments(input: {
           const nextUsed = used | bit;
           for (let end = start + 1; end <= count; end++) {
             if (
-              weight[end]! - weight[start]! > cap.freeWeight ||
-              volume[end]! - volume[start]! > cap.freeVolume
+              stopSizes !== undefined &&
+              (weight[end]! - weight[start]! > cap.freeWeight ||
+                volume[end]! - volume[start]! > cap.freeVolume)
             ) {
               break;
             }

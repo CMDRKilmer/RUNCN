@@ -869,6 +869,51 @@ await check('capacity fitting ignores optional return cargo', () => {
     scope.stop();
   }
 });
+await check('capacity fitting counts chain cargo once per segment', () => {
+  const bs = ['A', 'B', 'C'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 10 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 10, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.products.A = ['X'];
+  fixture.burns.A = { burn: { X: { input: 0, output: 1, workforce: 0, inventory: 100 } } };
+  fixture.burns.B = { burn: { X: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.C = { burn: { Y: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.bills.A = {};
+  fixture.bills.B = config => (config.days > 0 ? { X: Math.ceil(config.days) } : {});
+  fixture.bills.C = config => (config.days > 0 ? { Y: Math.ceil(config.days) } : {});
+  const ships = [ship('S1'), ship('S2')];
+  for (const vessel of ships) {
+    Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
+  }
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    const plans = planning.shipPlans.value;
+    assert.deepEqual(
+      plans.map(part => [part.ship.ship.id, part.plan.stops.map(stop => stop.naturalId)]),
+      [
+        ['S1', ['A', 'B']],
+        ['S2', ['C']],
+      ],
+    );
+    assert.equal(plans[0].plan.stops[1].days, 10);
+    assert.equal(plans[0].plan.stops[1].unloadChain.get('X').amount, 10);
+    assert.equal(plans[1].plan.stops[0].unloadCx.Y, 10);
+    assert.ok(plans.every(part => !part.plan.overCapacity));
+  } finally {
+    scope.stop();
+  }
+});
 await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
   const bs = bases();
   const vessel = ship('S');

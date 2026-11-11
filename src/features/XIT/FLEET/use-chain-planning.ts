@@ -109,32 +109,26 @@ export function useChainPlanning(input: {
     const capacities = usable.map(ship => shipChainCapacity(ship)!);
     const stopSizes = chainStopShipmentSizes(plan);
     const timings = usable.map(() => ({ outbound, inbound: outbound, between }));
-    const split =
-      planFastestChainSegments({ timings, capacities, stopSizes }) ??
-      planTimeBalancedSegments({
-        loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
-        capacities,
-        stopSizes,
-      });
-    if (!split) {
-      return greedy;
-    }
-    const ranges = split.ranges.map(({ start, end }) => stopIds.slice(start, end));
-    const balanced = splitWith(ranges);
-    if (balanced.every(part => fitsChainPlan(part.plan))) {
-      return balanced;
-    }
-    if (!hasSupplyGap(greedy) && !hasSupplyGap(balanced)) {
-      return greedy;
+    // Every candidate is re-split before acceptance: subplans clip what does not fit.
+    const verified = (ranges: { start: number; end: number }[]) => {
+      const parts = splitWith(ranges.map(range => stopIds.slice(range.start, range.end)));
+      return parts.length > 0 && parts.every(part => fitsChainPlan(part.plan)) ? parts : undefined;
+    };
+    const sized = planFastestChainSegments({ timings, capacities, stopSizes });
+    if (sized) {
+      const parts = verified(sized.ranges);
+      if (parts) {
+        return parts;
+      }
     }
 
-    // Estimate segment feasibility at each ship’s own warehouse. Recheck the full
-    // assignment afterward because ships can draw from shared stock.
+    // Stop sizes count cargo picked up and delivered inside the same segment twice, so they
+    // cannot reject a segment on their own. Replan each candidate segment and accept it only
+    // when the subplan's peak mandatory load fits (no clipping or unmet chain demand).
     const checked = new Map<string, boolean>();
-    const supplySplit = planFastestChainSegments({
+    const exact = planFastestChainSegments({
       timings,
       capacities,
-      stopSizes,
       canUseSegment: (ship, start, end) => {
         const key = `${ship}:${start}:${end}`;
         const known = checked.get(key);
@@ -147,13 +141,24 @@ export function useChainPlanning(input: {
         return fits;
       },
     });
-    if (!supplySplit) {
-      return greedy;
+    if (exact) {
+      const parts = verified(exact.ranges);
+      if (parts) {
+        return parts;
+      }
     }
-    const supplied = splitWith(
-      supplySplit.ranges.map(({ start, end }) => stopIds.slice(start, end)),
-    );
-    return supplied.every(part => fitsChainPlan(part.plan)) ? supplied : greedy;
+    const balanced = planTimeBalancedSegments({
+      loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
+      capacities,
+      stopSizes,
+    });
+    if (balanced) {
+      const parts = verified(balanced.ranges);
+      if (parts) {
+        return parts;
+      }
+    }
+    return greedy;
   }
 
   // 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
