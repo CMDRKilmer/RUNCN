@@ -15,6 +15,7 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { useChainPlanning } from './use-chain-planning';
 import { shipLabel, formatFlightDuration } from './chain-format';
@@ -777,7 +778,7 @@ function flightTotalText(shipId: string): string {
 
 <template>
   <div :class="$style.layout">
-    <div :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
+    <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
       <SelectInput
         v-model="groupSelect"
         :options="groupOptions"
@@ -809,7 +810,7 @@ function flightTotalText(shipId: string): string {
     <!-- 分组内基地勾选 -->
     <div
       v-if="chainGroup && groupBases.length > 0"
-      :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
+      :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
       <span :class="$style.barLabel">基地</span>
       <RadioItem
         v-for="base in groupBases"
@@ -827,7 +828,7 @@ function flightTotalText(shipId: string): string {
     <!-- 分配船只（多选） -->
     <div
       v-if="selectedBases.length > 0 && eligibleShips.length > 0"
-      :class="[C.ComExOrdersPanel.filter, $style.filterBar]">
+      :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
       <span :class="$style.barLabel">分配船只</span>
       <RadioItem
         v-for="ship in eligibleShips"
@@ -1223,11 +1224,8 @@ function flightTotalText(shipId: string): string {
   min-height: 0;
 }
 
-.filterBar {
-  flex-wrap: wrap;
-}
-
-.filterBar :global(.SelectInput__container) {
+.layout .groupSelect {
+  max-width: 100%;
   margin: 0;
 }
 
