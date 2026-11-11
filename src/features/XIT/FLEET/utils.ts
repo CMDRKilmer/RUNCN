@@ -9,7 +9,11 @@ import {
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { calculatePlanetBurn } from '@src/core/burn';
 import type { MaterialBurn } from '@src/core/burn';
-import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
+import {
+  clampTargetDays,
+  fitTargetDays,
+  getSuppliesCap,
+} from '@src/features/XIT/FLEET/supplies-cap';
 import { isRepairableBuilding } from '@src/core/buildings';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
@@ -393,27 +397,11 @@ export function fitDaysForShip(
       return undefined;
     }
     // 与 computeResupplyBill 一致的补给容量上限(suppliesCapDays)。
-    const cap = getSuppliesCap(base.site);
-    saturation = Math.max(saturation, cap);
-  }
-  // 搜索上界:各基地 cap 中的最大值(此时所有基地都已补到各自的总天数上限)。
-  let hi = hasResupply ? Math.max(0, saturation) : 999;
-
-  if (fits(hi)) {
-    return hi;
-  }
-
-  // 二分搜索最大补给天数，支持小数（参考 BURN act 的小数精度搜索）。
-  let lo = 0;
-  for (let i = 0; i < 100; i++) {
-    const mid = (lo + hi) / 2;
-    if (fits(mid)) {
-      lo = mid;
-    } else {
-      hi = mid;
+    if (invDays !== Infinity) {
+      saturation = Math.max(saturation, getSuppliesCap(base.site));
     }
   }
-  return Math.floor(lo * 100) / 100;
+  return fitTargetDays(hasResupply ? saturation : 999, fits);
 }
 
 export function formatBurnDays(days: number) {

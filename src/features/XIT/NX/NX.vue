@@ -143,41 +143,28 @@ async function buyAll() {
   box-sizing: border-box;
 }
 
-/* 表格配色全部走三套自定义主题都定义了的 --rp-skin-* token。
-   原来用 rgba(255,255,255,0.06) 做行线、opacity:0.7 压表头，在浅色主题下
-   几乎看不见；空间站列更严重：--rp-color-accent-primary 在 light 主题下被
-   主题引擎重映射成 #e7eef4（近白），压在浅灰格子上对比度约 1.1:1。
-   --rp-skin-* 规则不含会被扫描的颜色字面量，不会被二次重映射；
-   var() 里的回退只在原样深色主题（无 skin 变量）时生效。 */
 .table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 1em;
-  color: var(--rp-skin-ink, #ccc);
+  font-size: 0.92em;
 }
 
 .table th,
 .table td {
   padding: 4px 8px;
   text-align: left;
-  border-bottom: 1px solid var(--rp-skin-border, #2b485a);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .table th {
-  color: var(--rp-skin-muted, #999);
-  background-color: var(--rp-skin-panel-strong, #1a2632);
-  border-bottom-color: var(--rp-skin-border-strong, #2b485a);
-  font-weight: 600;
+  opacity: 0.7;
+  font-weight: normal;
   white-space: nowrap;
-}
-
-.table tbody tr:hover {
-  background-color: var(--rp-skin-hover, transparent);
 }
 
 .station {
   font-weight: bold;
-  color: var(--rp-skin-selection, #ffc856);
+  color: var(--rp-color-accent-primary);
   white-space: nowrap;
 }
 
@@ -192,7 +179,7 @@ async function buyAll() {
   color: var(--rp-skin-ink, #ccc);
   border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 1em;
+  font-size: 0.92em;
 }
 
 .input:focus {
@@ -200,15 +187,9 @@ async function buyAll() {
   outline: none;
 }
 
-.input:disabled {
-  color: var(--rp-skin-muted, #888);
-  background: var(--rp-skin-disabled-bg, transparent);
-}
-
 .result {
-  font-size: 1em;
+  font-size: 0.85em;
   white-space: nowrap;
-  color: var(--rp-skin-ink, #ccc);
 }
 
 .footer {
@@ -219,7 +200,49 @@ async function buyAll() {
 }
 
 .status {
-  color: var(--rp-skin-muted, #ccc);
+  opacity: 0.8;
+  font-size: 0.9em;
+}
+
+:global(html[data-rp-theme]) .table {
+  color: var(--rp-skin-ink);
+}
+
+:global(html[data-rp-theme]) .table th {
+  opacity: 1;
+  color: var(--rp-skin-muted);
+  background-color: var(--rp-skin-panel-strong);
+  font-weight: 600;
+}
+
+:global(html[data-rp-theme]:not([data-rp-borders='off'])) .table th {
+  border-bottom-color: var(--rp-skin-border-strong);
+}
+
+:global(html[data-rp-theme]) .table tbody tr:hover {
+  background-color: var(--rp-skin-hover);
+}
+
+:global(html[data-rp-theme]) .station {
+  color: var(--rp-skin-selection);
+}
+
+:global(html[data-rp-theme]) .input:disabled {
+  color: var(--rp-skin-muted);
+  background: var(--rp-skin-disabled-bg);
+}
+
+:global(html[data-rp-theme]) .result {
+  color: var(--rp-skin-ink);
+}
+
+:global(html[data-rp-theme]) .status {
+  opacity: 1;
+  color: var(--rp-skin-muted);
+}
+
+:global(html[data-rp-theme]:not([data-rp-font-size='standard']))
+  :is(.table, .input, .result, .status) {
   font-size: 1em;
 }
 </style>

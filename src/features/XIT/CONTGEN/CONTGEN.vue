@@ -603,7 +603,7 @@ function applyTotalPrice() {
   border: 1px solid #555;
   color: inherit;
   padding: 1px 8px;
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   cursor: pointer;
 }
 
@@ -681,7 +681,7 @@ function applyTotalPrice() {
   gap: 4px;
   align-items: center;
   padding: 0 2px 4px;
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   color: #888;
 }
 

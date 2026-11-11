@@ -15,8 +15,8 @@ function isCheckpoint(entry: MigrationEntry): entry is Checkpoint {
 
 // 将旧版 FLEET 派遣配置归一为当前 schema：
 // materialFilter（字符串）拆分为 consumablesOnly / includeConsumables / cxBuy，
-// 数字型 repAdvance 归一为 BRA 三档。剪贴板导入旧配置时也会调用。
-export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
+// 数字型 repAdvance 归一为 BRA 三档。
+function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
   for (const naturalId of Object.keys(configs)) {
     const config = configs[naturalId];
     if (config === null || typeof config !== 'object') {
@@ -43,6 +43,17 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 新的迁移应添加到列表顶部。
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
+  [
+    '11.11.2026 Add theme appearance settings',
+    userData => {
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      settings.themeFontSize ??= 'large';
+      settings.themeBorders ??= 'theme';
+    },
+  ],
   [
     '08.11.2026 Add BLU hidden blueprints settings',
     userData => {

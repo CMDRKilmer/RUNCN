@@ -125,6 +125,7 @@ export function chainPlanFromRun(run: UserData.ChainRun): ChainPlan | undefined 
           { amount, to: s.plan?.loadTo?.[ticker] ?? '' },
         ]),
       ),
+      returnLoad: {},
       clipped: s.plan?.clipped ?? false,
       loadOnArrival: s.plan?.loadOnArrival ?? { weight: 0, volume: 0 },
       loadOnDeparture: s.plan?.loadOnDeparture ?? { weight: 0, volume: 0 },

@@ -1,0 +1,7 @@
+:global(.refined-prun) .toolbar {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+}

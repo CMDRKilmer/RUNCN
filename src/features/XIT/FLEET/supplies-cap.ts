@@ -34,3 +34,35 @@ export function clampDaysInput(days: number, capDays: number | undefined): numbe
   }
   return days;
 }
+
+// Search in hundredths of a day, expanding the upper bound for bases without a storage limit.
+export function fitTargetDays(cap: number, fits: (days: number) => boolean): number | undefined {
+  if (Number.isFinite(cap) && fits(cap)) {
+    return cap;
+  }
+  if (!fits(0)) {
+    return 0;
+  }
+
+  let upper = Math.floor(cap * 100);
+  if (!Number.isSafeInteger(upper)) {
+    upper = 100;
+    while (fits(upper / 100)) {
+      upper *= 2;
+      if (!Number.isSafeInteger(upper)) {
+        return undefined;
+      }
+    }
+  }
+
+  let lower = 0;
+  while (lower < upper) {
+    const middle = lower + Math.ceil((upper - lower) / 2);
+    if (fits(middle / 100)) {
+      lower = middle;
+    } else {
+      upper = middle - 1;
+    }
+  }
+  return lower / 100;
+}

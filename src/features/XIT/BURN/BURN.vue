@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { BurnValues, getPlanetBurn, MaterialBurn } from '@src/core/burn';
 import { comparePlanets } from '@src/core/game-lookups';
@@ -176,7 +177,7 @@ function onTrialClick() {
 <template>
   <LoadingSpinner v-if="planetBurn === undefined" />
   <template v-else>
-    <div :class="[C.ComExOrdersPanel.filter, $style.burnFilter]">
+    <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar, $style.burnFilter]">
       <RadioItem v-model="red" horizontal>红色</RadioItem>
       <RadioItem v-model="yellow" horizontal>黄色</RadioItem>
       <RadioItem v-model="green" horizontal>绿色</RadioItem>

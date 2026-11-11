@@ -44,12 +44,20 @@ const deadlineStyle = computed(() => {
       <ContractLink :contract="contract" />
       <span
         v-if="dependencyInfo.blocked > 0"
-        style="font-size: 11px; color: #f0ad4e; margin-left: 4px">
+        style="
+          font-size: calc(10px + 1px * var(--rp-font-enlargement));
+          color: #f0ad4e;
+          margin-left: 4px;
+        ">
         ⟶{{ dependencyInfo.blocked }}
       </span>
       <span
         v-if="dependencyInfo.blocking > 0"
-        style="font-size: 11px; color: #d9534f; margin-left: 4px">
+        style="
+          font-size: calc(10px + 1px * var(--rp-font-enlargement));
+          color: #d9534f;
+          margin-left: 4px;
+        ">
         ⟵{{ dependencyInfo.blocking }}
       </span>
     </td>

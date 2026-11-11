@@ -309,10 +309,14 @@ ${P} [class*='Window__window'] {
      repeat(auto-fit, minmax(210px, 1fr)) 就刚好放不下两列而塌成单列。
      层级边界一律用不占盒模型的 box-shadow 表达。 */
   border: 0 !important;
+}
+${P}:where(:not([data-rp-borders='off'])) [class*='Window__window'] {
   box-shadow: 0 0 0 1px var(--rp-cc-border-default), var(--rp-cc-shadow-card) !important;
 }
 ${P} [class*='Window__header'] {
   background-color: var(--rp-cc-surface-alt) !important;
+}
+${P}:where(:not([data-rp-borders='off'])) [class*='Window__header'] {
   box-shadow: inset 0 -2px 0 0 var(--rp-cc-accent-line) !important;
 }
 ${P} :is([class*='Overlay__overlay'], [class*='Modal__backdrop'], [class*='Dialog__backdrop']) {
@@ -341,8 +345,10 @@ ${P} :is(td, th):not([class*='ColoredValue']) {
   color: var(--rp-cc-table-text) !important;
 }
 ${P} :is(td, th) {
-  border-bottom: 1px solid var(--rp-cc-table-border) !important;
   font-variant-numeric: tabular-nums;
+}
+${P}:where(:not([data-rp-borders='off'])) :is(td, th) {
+  border-bottom: 1px solid var(--rp-cc-table-border) !important;
 }
 ${P} :is(thead, th, [class*='Table__header']) {
   background-color: var(--rp-cc-table-head-bg) !important;

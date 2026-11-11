@@ -188,7 +188,7 @@ async function onChangeModeClick() {
 }
 
 .description {
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   color: #888;
 }
 

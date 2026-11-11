@@ -92,6 +92,7 @@ export interface ChainFlightEstimate {
   // 其中借**几何预测**出时长的段数（> 0 时汇总文案须标注「近似」）。
   // 来源标注见 ChainFlightLeg.approximated.kind === 'predicted'（transfer-geometry.ts）。
   approximatedLegs: number;
+  endpointHours?: { outbound: (number | undefined)[]; inbound: (number | undefined)[] };
 }
 
 export interface ChainFlightTimeInput {
@@ -102,6 +103,8 @@ export interface ChainFlightTimeInput {
   stops: { naturalId: string; planetName: string }[];
   // 起始时刻（毫秒，游戏世界时间）；缺省为当前游戏时刻。
   startAtMs?: number;
+  // Sample each possible segment endpoint for multi-ship allocation.
+  includeEndpointHours?: boolean;
   // 价格（可选；0 时平衡点不依赖价格）。
   stlPrice?: number;
   ftlPrice?: number;
@@ -173,12 +176,11 @@ export async function estimateChainFlightTimes(
   }
   const nodeName = (id: string) => nameOf.get(id.toUpperCase()) ?? id;
 
-  const legs: ChainFlightLeg[] = [];
-  let elapsedMs = 0;
-  for (let i = 0; i <= stops.length; i++) {
-    const from = i === 0 ? origin : stops[i - 1]!.naturalId;
-    const to = i === stops.length ? origin : stops[i]!.naturalId;
-    const departAtMs = startAtMs + elapsedMs;
+  async function estimateLeg(
+    from: string,
+    to: string,
+    departAtMs: number,
+  ): Promise<ChainFlightLeg> {
     const leg: ChainFlightLeg = {
       from,
       to,
@@ -192,16 +194,14 @@ export async function estimateChainFlightTimes(
     // 起点与终点相同（如站点重复/归航即出发地）：无航程。
     if (from.toUpperCase() === to.toUpperCase()) {
       leg.ok = true;
-      legs.push(leg);
-      continue;
+      return leg;
     }
     try {
       const planned = planRoutes(from, to);
       const route = useGateway ? (planned.gateway ?? planned.natural) : planned.natural;
       if (!route) {
         leg.error = '航线不可达（需恒星位置数据）';
-        legs.push(leg);
-        continue;
+        return leg;
       }
       // STL 起降几何只取服务器原生记录，与时刻无关（自建轨道模型回退已删除），
       // 故一轮计算即可 —— 旧实现按预测到达时刻重算第二轮几何，现已无意义。
@@ -213,9 +213,7 @@ export async function estimateChainFlightTimes(
       // totalHours === 0，而 findBalanceOption 对「燃料/时间无梯度」的退化输入只会退到最省油端
       // （见 fuel-model 的退化保护注释），绝不报错。于是旧实现把这种 0 小时写成了 ok = true：
       // 面板「飞行」列被 formatFlightDuration(0) 显示为「--（与出发同一时刻到达）」、
-      // 循环里的 elapsedMs 原地不动（后续段都在"出发时刻"算几何）、汇总只累加第 1 段，更糟的是
-      // 多船时间均衡（chain-allocation.planTimeBalancedSegments 的 complete 门 = 所有段 est.ok）与
-      // 到港库存预测（chain-planner 的 arrivalHoursByNaturalId）都把这些 0 当真值消费。
+      // 多船分配与到港库存预测都会把这样的 0 当成有效飞行时间。
       // 现在：输入残缺即显式判缺（ok = false + 成因全文），宁可面板写「缺原生 STL 段记录」。
       const missing = missingModelInputs(perf, metrics);
       // A1 几何预测三条件（替代旧 C 反方向记录近似）：
@@ -264,8 +262,7 @@ export async function estimateChainFlightTimes(
         leg.ok = false;
         leg.hours = 0;
         leg.arriveAtMs = departAtMs;
-        legs.push(leg);
-        continue;
+        return leg;
       }
       // 系内几何预测段（approximation 有值 + hours 有值）→ **不调 bestOptionFor**。
       // 理由：系内航线真实段结构是单段 TRANSIT（feature-patterns.md 「系内「转移」段标定」
@@ -288,16 +285,13 @@ export async function estimateChainFlightTimes(
         };
         leg.hours = hours;
         leg.arriveAtMs = departAtMs + hours * 3600000;
-        elapsedMs += hours * 3600000;
-        legs.push(leg);
-        continue;
+        return leg;
       }
       // 非近似路径（段原有逻辑：bestOptionFor 算整段方案）。
       const option = await bestOptionFor(perf, usedMetrics, prices);
       if (!option) {
         leg.error = '未能生成有效滑块组合';
-        legs.push(leg);
-        continue;
+        return leg;
       }
       const hours = option.totalHours;
       leg.ok = true;
@@ -306,11 +300,33 @@ export async function estimateChainFlightTimes(
       leg.option = option;
       leg.hours = hours;
       leg.arriveAtMs = departAtMs + hours * 3600000;
-      elapsedMs += hours * 3600000;
     } catch (e) {
       leg.error = e instanceof Error ? e.message : String(e);
     }
+    return leg;
+  }
+
+  const legs: ChainFlightLeg[] = [];
+  let departAtMs = startAtMs;
+  for (let i = 0; i <= stops.length; i++) {
+    const from = i === 0 ? origin : stops[i - 1]!.naturalId;
+    const to = i === stops.length ? origin : stops[i]!.naturalId;
+    const leg = await estimateLeg(from, to, departAtMs);
     legs.push(leg);
+    departAtMs = leg.arriveAtMs;
+  }
+
+  let endpointHours: ChainFlightEstimate['endpointHours'];
+  if (input.includeEndpointHours) {
+    endpointHours = { outbound: [], inbound: [] };
+    for (const [index, stop] of stops.entries()) {
+      const out = index === 0 ? legs[0]! : await estimateLeg(origin, stop.naturalId, startAtMs);
+      // Sample the return at direct arrival; the final assigned route recomputes its actual ETA.
+      const back =
+        stops.length === 1 ? legs[1]! : await estimateLeg(stop.naturalId, origin, out.arriveAtMs);
+      endpointHours.outbound.push(out.ok ? out.hours : undefined);
+      endpointHours.inbound.push(back.ok ? back.hours : undefined);
+    }
   }
 
   const totalHours = legs.reduce((sum, l) => sum + (l.ok ? l.hours : 0), 0);
@@ -321,5 +337,6 @@ export async function estimateChainFlightTimes(
     legs,
     totalHours,
     approximatedLegs: legs.filter(l => l.approximated !== undefined).length,
+    ...(endpointHours !== undefined ? { endpointHours } : {}),
   };
 }

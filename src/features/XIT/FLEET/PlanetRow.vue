@@ -20,6 +20,7 @@ import { fixed0 } from '@src/utils/format';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
 import { writeScreenVariable } from '@src/features/basic/screen-variables';
+import { isCustomTheme } from '@src/features/basic/theme-registry';
 import { getPlanetProduction } from '@src/core/production';
 import { sumBy } from '@src/utils/sum-by';
 import { getStorageAlarmLevel } from '@src/core/storage-analysis';
@@ -27,6 +28,7 @@ import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { clampDaysInput, normalizeSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import type { DispatchBaseConfig } from '@src/features/XIT/FLEET/utils';
 import { billTotals, burnDaysClass, formatBurnDays } from '@src/features/XIT/FLEET/utils';
+import { userData } from '@src/store/user-data';
 
 const {
   siteId,
@@ -59,10 +61,8 @@ const {
 }>();
 
 const emit = defineEmits<{
-  fit: [];
+  assignShip: [shipId: string];
 }>();
-
-const canFit = computed(() => !!config.ship);
 
 const burn = computed(() => getPlanetBurn(siteId));
 const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined));
@@ -82,7 +82,8 @@ watch(
   { immediate: true },
 );
 
-// 数字默认不带底色；只在黄/红异常时标色，正常（绿色）状态保持素底。
+const showHealthyBackground = computed(() => !isCustomTheme(userData.settings.theme));
+
 const burnBgClass = computed(() => {
   if (days.value === undefined) {
     return {};
@@ -91,6 +92,7 @@ const burnBgClass = computed(() => {
   return {
     [C.Workforces.daysMissing]: classes[C.Workforces.daysMissing],
     [C.Workforces.daysWarning]: classes[C.Workforces.daysWarning],
+    [C.Workforces.daysSupplied]: showHealthyBackground.value && classes[C.Workforces.daysSupplied],
   };
 });
 
@@ -98,10 +100,6 @@ const daysText = computed(() => (days.value === undefined ? '-' : formatBurnDays
 
 const repairAge = computed(() => getPlanetRepairAge(siteId, timestampEachMinute.value));
 
-// 维修列异常标色：
-//   age ≥ optimalDay            → 红 (daysMissing,已到触发)
-//   optimalDay − 3 ≤ age < optimalDay → 黄 (daysWarning,警告期)
-//   age < optimalDay − 3        → 不标色（原绿色底色已去掉）
 const REPAIR_WARN_OFFSET = 3;
 const optimalDay = computed(() => calculateSiteOptimalDay(siteId));
 const repairBgClass = computed(() => {
@@ -117,7 +115,7 @@ const repairBgClass = computed(() => {
   if (d >= od - REPAIR_WARN_OFFSET) {
     return { [C.Workforces.daysWarning]: true };
   }
-  return {};
+  return { [C.Workforces.daysSupplied]: showHealthyBackground.value };
 });
 
 const repairDaysText = computed(() => {
@@ -196,8 +194,7 @@ const fillBgClass = computed(() => {
     case 'yellow':
       return { [C.Workforces.daysWarning]: true };
     default:
-      // 正常状态不加底色（原 daysSupplied 绿色底色已去掉）。
-      return {};
+      return { [C.Workforces.daysSupplied]: showHealthyBackground.value };
   }
 });
 
@@ -248,7 +245,7 @@ function onDrop(event: DragEvent) {
   }
 
   setTimeout(() => {
-    config.ship = shipId;
+    emit('assignShip', shipId);
   }, 0);
 }
 
@@ -322,9 +319,9 @@ const prodBgClass = computed(() => {
   if (!totals) {
     return {};
   }
-  // 满产时素底，只有产线空闲（订单 < 产能）才标红。
   return {
     [C.Workforces.daysMissing]: totals.orders < totals.capacity,
+    [C.Workforces.daysSupplied]: showHealthyBackground.value && totals.orders >= totals.capacity,
   };
 });
 const prodText = computed(() => {
@@ -428,18 +425,6 @@ const barAlarmReason = computed(() =>
         overloaded && [C.Workforces.daysMissing, $style.loadOverloaded],
       ]">
       {{ loadText }}
-    </td>
-    <td :class="$style.selectCell">
-      <div :class="$style.selectWrap">
-        <RadioItem v-model="config.consumablesOnly" horizontal>消耗品</RadioItem>
-        <RadioItem v-model="config.includeConsumables" horizontal>原料</RadioItem>
-      </div>
-    </td>
-    <td :class="$style.fitCell">
-      <PrunButton dark inline :disabled="!canFit" @click="emit('fit')">适配</PrunButton>
-    </td>
-    <td :class="$style.advToggleCell">
-      <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
     </td>
     <td v-if="showFill" :class="$style.statusCell">
       <div :class="[$style.statusContent, fillBgClass]">
@@ -648,34 +633,6 @@ const barAlarmReason = computed(() =>
   border-color: rgb(var(--rp-accent-rgb));
   box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
-}
-
-.selectCell {
-  width: 0;
-  white-space: nowrap;
-  padding: 0 2px;
-  line-height: 22px;
-  vertical-align: middle;
-}
-
-.selectWrap {
-  display: flex;
-}
-
-.advToggleCell {
-  width: 0;
-  white-space: nowrap;
-  padding: 0 2px;
-  vertical-align: middle;
-  text-align: center;
-}
-
-.fitCell {
-  width: 0;
-  white-space: nowrap;
-  padding: 0 4px;
-  line-height: 22px;
-  vertical-align: middle;
 }
 
 .invCell {

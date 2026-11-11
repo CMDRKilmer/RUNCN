@@ -10,6 +10,7 @@ import {
   getLocationLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
@@ -169,7 +170,7 @@ const filteredRows = computed(() => {
   <div :class="$style.layout">
     <LoadingSpinner v-if="!filteredRows" />
     <template v-else>
-      <div :class="C.ComExOrdersPanel.filter">
+      <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
         <RadioItem v-model="showCx" horizontal>CX</RadioItem>
         <RadioItem v-model="showBase" horizontal>BS</RadioItem>
         <RadioItem v-model="showShip" horizontal>SHP</RadioItem>
@@ -284,9 +285,11 @@ const filteredRows = computed(() => {
 .searchContainer {
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .searchInput {
+  min-width: 0;
   background-color: #42361d;
   border-width: 0 0 1px;
   border-bottom: 1px solid #8d6411;
@@ -304,6 +307,7 @@ const filteredRows = computed(() => {
 
 .clearButton {
   display: flex;
+  flex: 0 0 auto;
   justify-content: center;
   align-items: center;
   margin-left: 2px;

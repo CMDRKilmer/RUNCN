@@ -199,4 +199,4 @@ Two structural rules for generated packages:
 
 The FLEET contract script covers snapshot isolation, started-order projection, downstream priority, planning-task invalidation, execution guards and page-runtime cleanup using the real modules. Its estimator is deferred only for hook lifecycle checks; flight model verification remains separate.
 
-Targeted verification: `node scripts/verify-fleet-contracts.mjs`, `node scripts/verify-chain-fit-priority.mjs` and `node scripts/verify-chain-flight-time.mjs`. Store/HTTP fixtures do not replace browser acceptance checks.
+Targeted verification: `node --experimental-strip-types scripts/verify-fleet-contracts.mjs`, `node --experimental-strip-types scripts/verify-chain-fit-priority.mjs` and `node --experimental-strip-types scripts/verify-chain-flight-time.mjs` (the scripts import `.ts` modules; the flag is required on the minimum supported Node 22.16). Store/HTTP fixtures do not replace browser acceptance checks.

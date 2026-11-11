@@ -351,13 +351,13 @@ function onOpenNxClick() {
 }
 
 .builtinStatus {
-  font-size: 1em;
+  font-size: calc(0.85em + 0.15em * var(--rp-font-enlargement));
   color: #888;
 }
 
 .builtinHint {
   margin: 2px 0 0;
-  font-size: 1em;
+  font-size: calc(0.8em + 0.2em * var(--rp-font-enlargement));
   color: #666;
 }
 
@@ -370,7 +370,7 @@ function onOpenNxClick() {
 }
 
 .autoBadge {
-  font-size: 1em;
+  font-size: calc(0.8em + 0.2em * var(--rp-font-enlargement));
   color: #56b6c2;
   font-family: monospace;
   letter-spacing: 0.5px;

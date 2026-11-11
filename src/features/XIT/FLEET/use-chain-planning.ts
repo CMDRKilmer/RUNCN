@@ -8,67 +8,39 @@ import {
   shipChainCapacity,
   chainStopShipmentSizes,
   planTimeBalancedSegments,
+  planFastestChainSegments,
+  type ChainShipTiming,
 } from './chain-allocation';
 import { estimateChainFlightTimes, type ChainFlightEstimate } from './chain-flight-time';
 import type { ChainPlannerBase, ChainPlan } from './chain-types';
 import type { DispatchShip } from './utils';
+import { fitTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
 import { gameNow } from '@src/infrastructure/fio/orbit';
+
+function fitsChainPlan(plan: ChainPlan) {
+  return !plan.overCapacity && plan.hasUnmetChainDemand !== true;
+}
 
 export function useChainPlanning(input: {
   ships: () => DispatchShip[];
   bases: () => ChainPlannerBase[];
   runs: () => { shipId: string; run: UserData.ChainRun }[];
 }) {
-  const selectedShips = computed(input.ships);
-  const selectedBases = computed(input.bases);
   const activeRuns = computed(input.runs);
+  const selectedShips = computed(() => {
+    const runningShips = new Set(activeRuns.value.map(run => run.shipId));
+    return input.ships().filter(ship => !runningShips.has(ship.ship.id));
+  });
+  const selectedBases = computed(input.bases);
   // ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
   // 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
   // 显示在「飞行」列与汇总「飞行时长」行；下游基地用未来预计位置计算。
   // 声明在本节顶部：环线规划（plan）读取预估推导各站到达时刻产出。
   const flightEstimates = ref<Map<string, ChainFlightEstimate>>(new Map());
   const flightTimesLoading = ref(false);
-
-  // ── 环线计划（合并容量，单一路线） ───────────────────────────
-  const planOrigin = computed(() =>
-    selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
-  );
-
-  // 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
-  // 飞行期间基地继续生产，到港时实际可提取量 = 当前库存 + 日均净变化 × 到达前小时数。
-  function runPlanChainRoute(arrivalHours?: Map<string, number>) {
-    if (selectedBases.value.length === 0 || selectedShips.value.length === 0) {
-      return undefined;
-    }
-    const capacity = buildCombinedCapacity(selectedShips.value);
-    if (!capacity) {
-      return undefined;
-    }
-    // 合并规划保留候选站点，交易所供应限制由分船后的子规划应用。
-    return planChainRoute({
-      originNaturalId: planOrigin.value,
-      capacity,
-      bases: selectedBases.value,
-      // 出发地空间站仓库库存：组内产出的缺口由仓库以「取货」补足。
-      originStock: shipWarehouseStock(selectedShips.value[0]!),
-      ...(arrivalHours !== undefined ? { arrivalHoursByNaturalId: arrivalHours } : {}),
-    });
-  }
-
-  // 基础规划（未含到达时刻产出）：决定站点顺序，供飞行预估与「站→船」映射。
-  const basePlan = computed(() => runPlanChainRoute());
-
-  // ── 多船时间均衡分段（优先按速度分配） ───────────────────────
-  // 并行出动时整条环线完成一轮补给的总耗时 = 最慢那艘船的闭环时长（瓶颈船）。
-  // 给每艘可用船沿「整条合并环线」预估一次飞行（异步），用前缀和把任意连续段
-  // 代价 O(1) 求出，再经 DP 求 makespan 最小的连续分段——多船真正并行提速、
-  // 快船多跑慢船少跑；空段（不参与）由 DP 自动决定，避免切得太碎徒增往返。
-  // 预估/求解就绪前退回按舱容贪心（旧行为），就绪后自动切换。
-  // 注意：分配只决定「哪艘船跑哪些站」，不改站点顺序——顺序由 basePlan（拓扑序）
-  // 决定，分配与飞行预估之间无循环依赖。
   const usableChainShips = computed(() =>
     selectedShips.value.filter(s => {
       const c = shipChainCapacity(s);
@@ -76,6 +48,173 @@ export function useChainPlanning(input: {
     }),
   );
 
+  // ── 环线计划（合并容量，单一路线） ───────────────────────────
+  const planOrigin = computed(() =>
+    selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
+  );
+  const combinedOriginStock = computed(() => {
+    const stock: Record<string, number> = {};
+    const seen = new Set<string>();
+    for (const ship of usableChainShips.value) {
+      const warehouse = ship.warehouseStore;
+      if (!warehouse || seen.has(warehouse.id)) {
+        continue;
+      }
+      seen.add(warehouse.id);
+      for (const [ticker, amount] of Object.entries(shipWarehouseStock(ship) ?? {})) {
+        stock[ticker] = (stock[ticker] ?? 0) + amount;
+      }
+    }
+    return stock;
+  });
+
+  function splitCandidate(
+    plan: ChainPlan,
+    bases: ChainPlannerBase[],
+    arrivalHours?: Map<string, number>,
+    ranges?: string[][],
+  ) {
+    return splitChainPlanAcrossShips(plan, selectedShips.value, bases, arrivalHours, ranges, {
+      includeEmptyPlans: true,
+    });
+  }
+
+  function splitForCapacity(
+    plan: ChainPlan,
+    bases: ChainPlannerBase[],
+    arrivalHours?: Map<string, number>,
+  ) {
+    const greedy = splitCandidate(plan, bases, arrivalHours);
+    const usable = usableChainShips.value;
+    if (usable.length < 2 || greedy.every(shipPlan => fitsChainPlan(shipPlan.plan))) {
+      return greedy;
+    }
+    const stopIds = plan.stops.map(stop => stop.naturalId);
+    const splitWith = (ranges: string[][]) => splitCandidate(plan, bases, arrivalHours, ranges);
+    const assignedTo = (ship: number, start: number, end: number) =>
+      usable.map((_, index) => (index === ship ? stopIds.slice(start, end) : []));
+    const hasSupplyGap = (parts: typeof greedy) =>
+      parts.some(part => part.plan.hasUnmetChainDemand === true);
+    if (hasSupplyGap(greedy)) {
+      for (const [index] of usable.entries()) {
+        const parts = splitWith(assignedTo(index, 0, stopIds.length));
+        if (parts.length > 0 && parts.every(part => fitsChainPlan(part.plan))) {
+          return parts;
+        }
+      }
+    }
+    // Unit travel times let the segment solver test capacity before flight estimates arrive.
+    const outbound = plan.stops.map(() => 1);
+    const between = outbound.slice(1);
+    const capacities = usable.map(ship => shipChainCapacity(ship)!);
+    const stopSizes = chainStopShipmentSizes(plan);
+    const timings = usable.map(() => ({ outbound, inbound: outbound, between }));
+    // Every candidate is re-split before acceptance: subplans clip what does not fit.
+    const verified = (ranges: { start: number; end: number }[]) => {
+      const parts = splitWith(ranges.map(range => stopIds.slice(range.start, range.end)));
+      return parts.length > 0 && parts.every(part => fitsChainPlan(part.plan)) ? parts : undefined;
+    };
+    const sized = planFastestChainSegments({ timings, capacities, stopSizes });
+    if (sized) {
+      const parts = verified(sized.ranges);
+      if (parts) {
+        return parts;
+      }
+    }
+
+    // Stop sizes count cargo picked up and delivered inside the same segment twice, so they
+    // cannot reject a segment on their own. Replan each candidate segment and accept it only
+    // when the subplan's peak mandatory load fits (no clipping or unmet chain demand).
+    const checked = new Map<string, boolean>();
+    const exact = planFastestChainSegments({
+      timings,
+      capacities,
+      canUseSegment: (ship, start, end) => {
+        const key = `${ship}:${start}:${end}`;
+        const known = checked.get(key);
+        if (known !== undefined) {
+          return known;
+        }
+        const parts = splitWith(assignedTo(ship, start, end));
+        const fits = parts.length > 0 && parts.every(part => fitsChainPlan(part.plan));
+        checked.set(key, fits);
+        return fits;
+      },
+    });
+    if (exact) {
+      const parts = verified(exact.ranges);
+      if (parts) {
+        return parts;
+      }
+    }
+    const balanced = planTimeBalancedSegments({
+      loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
+      capacities,
+      stopSizes,
+    });
+    if (balanced) {
+      const parts = verified(balanced.ranges);
+      if (parts) {
+        return parts;
+      }
+    }
+    return greedy;
+  }
+
+  // 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
+  // 飞行期间基地继续生产，到港时实际可提取量 = 当前库存 + 日均净变化 × 到达前小时数。
+  function fitChainRoute(arrivalHours?: Map<string, number>) {
+    const bases = selectedBases.value;
+    const ships = selectedShips.value;
+    if (bases.length === 0 || ships.length === 0) {
+      return undefined;
+    }
+    const capacity = buildCombinedCapacity(ships);
+    if (!capacity) {
+      return undefined;
+    }
+    const route = {
+      originNaturalId: planOrigin.value,
+      capacity,
+      // The combined plan preserves stops supplied by any origin; subplans check actual stock.
+      originStock: combinedOriginStock.value,
+      arrivalHoursByNaturalId: arrivalHours,
+    };
+    const planAt = (days?: number) => {
+      const fittedBases = bases.map(base =>
+        days !== undefined && base.config.resupply
+          ? { ...base, config: { ...base.config, days } }
+          : base,
+      );
+      return { bases: fittedBases, plan: planChainRoute({ ...route, bases: fittedBases }) };
+    };
+    const resupplyBases = bases.filter(base => base.config.resupply);
+    if (resupplyBases.length === 0) {
+      return planAt();
+    }
+    const cap = Math.max(...resupplyBases.map(base => getSuppliesCap(base.site)));
+    const days = fitTargetDays(cap, target => {
+      const candidate = planAt(target);
+      if (!candidate.plan || !fitsChainPlan(candidate.plan)) {
+        return false;
+      }
+      // 合并舱容可装下时，分段后仍可能有单艘船超载。
+      const parts = splitForCapacity(candidate.plan, candidate.bases, arrivalHours);
+      return (
+        (candidate.plan.stops.length === 0 || parts.length > 0) &&
+        parts.every(shipPlan => fitsChainPlan(shipPlan.plan))
+      );
+    });
+    return planAt(days);
+  }
+
+  // 基础规划（未含到达时刻产出）：决定站点顺序，供飞行预估与「站→船」映射。
+  const fittedBaseRoute = computed(() => fitChainRoute());
+  const basePlan = computed(() => fittedBaseRoute.value?.plan);
+
+  // ── 多船时间均衡分段（优先按速度分配） ───────────────────────
+  // 并行出动时整条环线完成一轮补给的总耗时 = 最慢那艘船的闭环时长（瓶颈船）。
+  // 按每艘船的出发站与各段端点估时，分段顺序沿用 basePlan 的拓扑序。
   interface TimeAlloc {
     // 与 usableChainShips 对齐：每艘船分配的连续站点 naturalId（空数组 = 不参与）。
     ranges: string[][];
@@ -90,22 +229,64 @@ export function useChainPlanning(input: {
   const timeAlloc = ref<TimeAlloc | undefined>(undefined);
   const allocStatus = ref<'idle' | 'computing' | 'ready'>('idle');
 
-  // 触发键：站点序列 / 参与船集合 / 船数据就绪度变化才重算；量变（仓库、生产
-  // 等频繁刷新）不触发，避免反复做异步飞行预估。与 basePlan 对象分离，
-  // 也避免 basePlan 因量化变化重算时无谓重跑预估。
   const allocStopKey = computed(() =>
     (basePlan.value?.stops ?? []).map(s => s.naturalId).join('>'),
   );
-  const allocShipKey = computed(() => usableChainShips.value.map(s => s.ship.id).join(','));
+  const timingKey = computed(() =>
+    JSON.stringify([
+      allocStopKey.value,
+      usableChainShips.value.map(s => [
+        s.ship.id,
+        shipOriginNaturalId(s),
+        s.ship.blueprintNaturalId,
+        s.ship.condition,
+      ]),
+    ]),
+  );
+  const allocationCapacityKey = computed(() =>
+    JSON.stringify([
+      usableChainShips.value.map(shipChainCapacity),
+      basePlan.value ? chainStopShipmentSizes(basePlan.value) : [],
+    ]),
+  );
 
+  async function estimateAllocationTimings(
+    key: string,
+    ships: DispatchShip[],
+    stops: { naturalId: string; planetName: string }[],
+  ): Promise<ChainShipTiming[]> {
+    const startAtMs = gameNow();
+    const timings: ChainShipTiming[] = [];
+    for (const ship of ships) {
+      const est = await estimateChainFlightTimes({
+        ship: ship.ship,
+        origin: shipOriginNaturalId(ship),
+        stops,
+        startAtMs,
+        includeEndpointHours: true,
+      });
+      if (timingCache?.key !== key) {
+        break;
+      }
+      timings.push({
+        outbound: est.endpointHours?.outbound ?? [],
+        inbound: est.endpointHours?.inbound ?? [],
+        between: est.legs.slice(1, -1).map(leg => (leg.ok ? leg.hours : undefined)),
+      });
+    }
+    return timings;
+  }
+
+  let timingCache: { key: string; timings: Promise<ChainShipTiming[]> } | undefined;
   let allocToken = 0;
   async function computeTimeAlloc() {
     const token = ++allocToken;
     const p = basePlan.value;
     const ships = usableChainShips.value;
-    if (!p || p.stops.length < 2 || ships.length < 2 || !shipsStore.fetched.value) {
+    if (!p || p.stops.length === 0 || ships.length < 2 || !shipsStore.fetched.value) {
       timeAlloc.value = undefined;
       allocStatus.value = 'idle';
+      timingCache = undefined;
       return;
     }
     allocStatus.value = 'computing';
@@ -119,40 +300,19 @@ export function useChainPlanning(input: {
         const c = shipChainCapacity(s)!;
         return { freeWeight: c.freeWeight, freeVolume: c.freeVolume };
       });
-      const loopLegHours: number[][] = [];
-      let complete = true;
-      for (const ship of ships) {
-        const est = await estimateChainFlightTimes({
-          ship: ship.ship,
-          origin: shipOriginNaturalId(ship),
-          stops,
-        });
-        if (token !== allocToken) {
-          return; // 计划/配置已变化，丢弃过期结果。
-        }
-        // 判缺段 ⇒ est.ok = false（chain-flight-time：ok = legs.every(l => l.ok)，判缺段
-        // 不再把 0 小时伪装成 ok）⇒ complete = false ⇒ alloc = undefined ⇒ allocFor 返回
-        // undefined ⇒ splitChainPlanAcrossShips 退回舱容贪心（旧行为）。判缺段的 0 小时
-        // 因此永远到不了 planTimeBalancedSegments，故此门不放宽。
-        if (!est.ok || est.legs.length !== stopIds.length + 1) {
-          complete = false;
-          break;
-        }
-        loopLegHours.push(est.legs.map(l => l.hours));
+      const key = timingKey.value;
+      if (timingCache?.key !== key) {
+        timingCache = { key, timings: estimateAllocationTimings(key, ships, stops) };
       }
+      const timings = await timingCache.timings;
       if (token !== allocToken) {
         return;
       }
-      const alloc = complete
-        ? planTimeBalancedSegments({
-            loopLegHours,
-            capacities,
-            stopSizes: chainStopShipmentSizes(p),
-          })
-        : undefined;
-      if (token !== allocToken) {
-        return;
-      }
+      const alloc = planFastestChainSegments({
+        timings,
+        capacities,
+        stopSizes: chainStopShipmentSizes(p),
+      });
       if (!alloc) {
         timeAlloc.value = undefined;
         allocStatus.value = 'idle';
@@ -185,12 +345,6 @@ export function useChainPlanning(input: {
           if (neighborIdx < 0 || neighborIdx >= ships.length || stopIdx < 0 || stopIdx >= n) {
             return;
           }
-          // alloc 是 planTimeBalancedSegments 的原始产物：ranges 是按船对齐的**半开
-          // 下标区间 [start,end)**（空段 = start === end），不是站点 id 数组。此前用
-          // `.length` 判断参与与否恒得 undefined，导致下方诊断整体失效。
-          if (alloc.ranges[neighborIdx]!.start >= alloc.ranges[neighborIdx]!.end) {
-            return; // 相邻船本就不参与，无需提示。
-          }
           const cap = capacities[neighborIdx]!;
           const own = sumRange(alloc.ranges[neighborIdx]!.start, alloc.ranges[neighborIdx]!.end);
           const extra = sizes[stopIdx]!;
@@ -208,19 +362,11 @@ export function useChainPlanning(input: {
               )}）。`,
           );
         };
-        // 左侧非空段船接手瓶颈首站（= 左段末站）；右侧非空段船接手瓶颈末站（= 右段首站）。
-        for (let j = maxIdx - 1; j >= 0; j--) {
-          if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
-            tryTransfer(j, alloc.ranges[j]!.end);
-            break;
-          }
-        }
-        for (let j = maxIdx + 1; j < alloc.ranges.length; j++) {
-          if (alloc.ranges[j]!.start < alloc.ranges[j]!.end) {
-            tryTransfer(j, alloc.ranges[j]!.start - 1);
-            break;
-          }
-        }
+        const bottleneck = alloc.ranges[maxIdx]!;
+        const left = alloc.ranges.findIndex(r => r.start < r.end && r.end === bottleneck.start);
+        const right = alloc.ranges.findIndex(r => r.start < r.end && r.start === bottleneck.end);
+        tryTransfer(left, bottleneck.start);
+        tryTransfer(right, bottleneck.end - 1);
       }
       timeAlloc.value = {
         ranges: alloc.ranges.map(r => stopIds.slice(r.start, r.end)),
@@ -233,6 +379,7 @@ export function useChainPlanning(input: {
     } catch (e) {
       console.warn('[XIT/FLEET] time-balanced alloc failed', e);
       if (token === allocToken) {
+        timingCache = undefined;
         timeAlloc.value = undefined;
         allocStatus.value = 'idle';
       }
@@ -240,7 +387,7 @@ export function useChainPlanning(input: {
   }
 
   watch(
-    [allocStopKey, allocShipKey, () => shipsStore.fetched.value],
+    [timingKey, allocationCapacityKey, () => shipsStore.fetched.value],
     () => {
       void computeTimeAlloc();
     },
@@ -270,19 +417,27 @@ export function useChainPlanning(input: {
   // 并行分段：每艘船跑航线的连续一段，同时出动。有时间均衡结果时按它切段
   //（总耗时 ≈ 最慢船的闭环时长），否则退回按舱容贪心切段（旧行为）。
   // baseShipPlans 不含到达时刻产出（飞行预估依赖它，避免循环依赖）。
-  const baseShipPlans = computed(() => {
-    const p = basePlan.value;
-    if (!p || selectedShips.value.length === 0) {
+  function splitFittedRoute(
+    fitted: ReturnType<typeof fitChainRoute>,
+    arrivalHours?: Map<string, number>,
+  ) {
+    if (!fitted?.plan) {
       return [];
     }
-    return splitChainPlanAcrossShips(
-      p,
-      selectedShips.value,
-      selectedBases.value,
-      undefined,
-      allocFor(p),
+    const { plan, bases } = fitted;
+    const allocation = allocFor(plan);
+    if (allocation) {
+      const balanced = splitCandidate(plan, bases, arrivalHours, allocation);
+      if (balanced.every(shipPlan => fitsChainPlan(shipPlan.plan))) {
+        return balanced.filter(shipPlan => shipPlan.plan.stops.length > 0);
+      }
+    }
+    return splitForCapacity(plan, bases, arrivalHours).filter(
+      shipPlan => shipPlan.plan.stops.length > 0,
     );
-  });
+  }
+
+  const baseShipPlans = computed(() => splitFittedRoute(fittedBaseRoute.value));
 
   // 各站预计到达时刻（相对规划时刻的小时数）：由飞行预估（异步）推导。
   // 预估就绪前为空 Map（取货按当前库存规划）；每站取服务该船的环线预估
@@ -323,10 +478,11 @@ export function useChainPlanning(input: {
 
   // 主规划：含到达时刻预计产出（取货量更贴近到港时实际可提取量）。
   // 飞行预估就绪后自动重算；未就绪时复用基础规划结果（避免重复计算）。
-  const plan = computed(() => {
+  const fittedRoute = computed(() => {
     const hours = arrivalHoursByNaturalId.value;
-    return hours.size === 0 ? basePlan.value : runPlanChainRoute(hours);
+    return hours.size === 0 ? fittedBaseRoute.value : fitChainRoute(hours);
   });
+  const plan = computed(() => fittedRoute.value?.plan);
 
   const loading = computed(
     () =>
@@ -338,19 +494,9 @@ export function useChainPlanning(input: {
 
   // 主多船分配结果（用于展示与执行）。
   // 传到达时刻产出映射，使分段子计划的取货量也按到港时预计库存计算。
-  const shipPlans = computed(() => {
-    const p = plan.value;
-    if (!p || selectedShips.value.length === 0) {
-      return [];
-    }
-    return splitChainPlanAcrossShips(
-      p,
-      selectedShips.value,
-      selectedBases.value,
-      arrivalHoursByNaturalId.value,
-      allocFor(p),
-    );
-  });
+  const shipPlans = computed(() =>
+    splitFittedRoute(fittedRoute.value, arrivalHoursByNaturalId.value),
+  );
   const hasStops = computed(() => shipPlans.value.length > 0);
 
   // 未参与分配的船（无货舱，或船多于站点数）。
@@ -368,6 +514,20 @@ export function useChainPlanning(input: {
       return undefined;
     }
     const used = usableChainShips.value;
+    const allocation = allocFor(plan.value);
+    if (
+      !allocation ||
+      !allocation.every((stops, index) => {
+        const shipPlan = shipPlans.value.find(p => p.ship.ship.id === used[index]!.ship.id);
+        const plannedStops = shipPlan?.plan.stops ?? [];
+        return (
+          plannedStops.length === stops.length &&
+          plannedStops.every((stop, i) => stop.naturalId === stops[i])
+        );
+      })
+    ) {
+      return undefined;
+    }
     // 该船当前分配段的精确实测（飞行预估 watch 对已定段的闭环实测）：
     // 与 ta.ranges[j] 匹配（首段目标 = 段首站、段数一致）才采用，保证横幅
     // 与下方各船卡片的「飞行时长」同口径；分配刚切换、精确实测未就绪时
@@ -421,8 +581,7 @@ export function useChainPlanning(input: {
   // 同时响应规划（baseShipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
   // eligibleShips / baseShipPlans 中，但飞行列仍需读取预估——按 shipId 收集
   // 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
-  // 预估基于 baseShipPlans（不含到达时刻产出）：到达时刻产出只影响取货量、
-  // 不影响站点顺序，避免「预估 → 规划 → 预估」循环。
+  // 预估基于 baseShipPlans（不含到达时刻产出），避免最终适配结果反向触发估时。
   let flightTimeToken = 0;
   function registerFlightTimeWatch() {
     watch(
@@ -506,6 +665,7 @@ export function useChainPlanning(input: {
   registerFlightTimeWatch();
   onScopeDispose(() => {
     allocToken++;
+    timingCache = undefined;
     flightTimeToken++;
   });
   return {

@@ -12,9 +12,7 @@ import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data
 // 分段策略：
 // - 默认（无飞行预估）：按舱容贪心切连续段——只在「装不下」时换下一艘；
 //   结果以容量为准，不保证时间均衡，且单船装得下时其余船会闲置。
-// - 时间均衡（推荐，多船并行出动）：先给每艘船预估整条合并环线的飞行时长，
-//   再用 planTimeBalancedSegments 求 makespan 最小的连续分段（总耗时 =
-//   最慢那艘船的闭环时长），让多船真正并行提速，快船可多跑、慢船少跑。
+// - 飞行时间可用时，按各船的实际出发地估算候选站段，由最快完成整轮的分配接管。
 
 /** 单船舱容（含总量与剩余）。 */
 export function shipChainCapacity(ship: DispatchShip): ChainCapacity | undefined {
@@ -77,31 +75,35 @@ export interface ShipChainPlan {
   plan: ChainPlan;
 }
 
-// 站点货物总重量/体积（卸货 + 提取）——用于按容量分配站点。
+// 站点舱容需求：卸货量与必需装载量取较大者（到站先卸后装，两者不同时在舱内）。
+// 只计必需货物——运回出发地的可选货物可裁剪，不参与分段容量校验。
 function stopShipmentSize(stop: ChainStopPlan) {
-  let weight = 0;
-  let volume = 0;
-  const add = (ticker: string, amount: number) => {
+  const unload = { weight: 0, volume: 0 };
+  const load = { weight: 0, volume: 0 };
+  const add = (target: { weight: number; volume: number }, ticker: string, amount: number) => {
     if (amount <= 0) {
       return;
     }
     const wv = matWeightVolume(ticker, amount);
-    weight += wv.weight;
-    volume += wv.volume;
+    target.weight += wv.weight;
+    target.volume += wv.volume;
   };
   for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
-    add(ticker, amount);
+    add(unload, ticker, amount);
   }
   for (const [ticker, entry] of stop.unloadChain) {
-    add(ticker, entry.amount);
+    add(unload, ticker, entry.amount);
   }
   for (const [ticker, entry] of stop.load) {
-    add(ticker, entry.amount);
+    add(load, ticker, entry.amount - (stop.returnLoad[ticker] ?? 0));
   }
-  return { weight, volume };
+  return {
+    weight: Math.max(unload.weight, load.weight),
+    volume: Math.max(unload.volume, load.volume),
+  };
 }
 
-/** 每站货物总重量/体积（卸货 + 提取）——供时间均衡分段做容量约束。 */
+/** 每站舱容需求（卸货与必需装载取较大值）——供分段做容量约束。 */
 export function chainStopShipmentSizes(plan: ChainPlan): { weight: number; volume: number }[] {
   return plan.stops.map(stop => stopShipmentSize(stop));
 }
@@ -238,6 +240,145 @@ export function planTimeBalancedSegments(input: {
   };
 }
 
+type ShipSegment = { start: number; end: number };
+
+export interface ChainShipTiming {
+  outbound: (number | undefined)[];
+  inbound: (number | undefined)[];
+  // Adjacent station legs only. Index 0 is the first station to the second.
+  between: (number | undefined)[];
+}
+
+interface AllocationStep {
+  score: number;
+  ship: number;
+  segment: ShipSegment;
+  previous?: AllocationStep;
+}
+
+export function planFastestChainSegments(input: {
+  timings: ChainShipTiming[];
+  capacities: { freeWeight: number; freeVolume: number }[];
+  // Summed stop sizes. Omit to leave capacity entirely to `canUseSegment`
+  // (callers that replan each candidate segment and inspect its peak load).
+  stopSizes?: { weight: number; volume: number }[];
+  canUseSegment?: (ship: number, start: number, end: number) => boolean;
+}): { ranges: ShipSegment[]; hours: number[] } | undefined {
+  const { timings, capacities, stopSizes } = input;
+  const count = stopSizes?.length ?? (timings[0]?.between.length ?? -1) + 1;
+  if (count <= 0 || timings.length === 0 || timings.length !== capacities.length) {
+    return undefined;
+  }
+
+  const weight = [0];
+  const volume = [0];
+  for (const stop of stopSizes ?? []) {
+    weight.push(weight[weight.length - 1]! + stop.weight);
+    volume.push(volume[volume.length - 1]! + stop.volume);
+  }
+  const adjacent = timings.map(timing => {
+    const hours = [0];
+    const missing = [0];
+    for (let i = 0; i < count - 1; i++) {
+      const value = timing.between[i];
+      const known = value !== undefined && Number.isFinite(value) && value >= 0;
+      hours.push(hours[i]! + (known ? value : 0));
+      missing.push(missing[i]! + Number(!known));
+    }
+    return { hours, missing };
+  });
+  function segmentHours(ship: number, start: number, end: number) {
+    const { outbound, inbound } = timings[ship]!;
+    const out = outbound[start];
+    const back = inbound[end - 1];
+    const { hours, missing } = adjacent[ship]!;
+    if (
+      out === undefined ||
+      back === undefined ||
+      out < 0 ||
+      back < 0 ||
+      missing[end - 1] !== missing[start]
+    ) {
+      return Infinity;
+    }
+    return out + hours[end - 1]! - hours[start]! + back;
+  }
+
+  const empty = BigInt(0);
+  const bits = timings.map((_, index) => BigInt(1) << BigInt(index));
+  // Bound the number of ship subsets retained per station on large instances.
+  const limit = timings.length <= 10 && count <= 30 ? Infinity : 64;
+  function solve(maxHours?: number) {
+    const states = Array.from(
+      { length: count + 1 },
+      () => new Map<bigint, AllocationStep | undefined>(),
+    );
+    states[0]!.set(empty, undefined);
+    for (let start = 0; start < count; start++) {
+      const frontier = [...states[start]!];
+      if (frontier.length > limit) {
+        frontier.sort((a, b) => a[1]!.score - b[1]!.score);
+        frontier.length = limit;
+      }
+      for (const [used, previous] of frontier) {
+        const elapsed = previous?.score ?? 0;
+        for (const [ship, bit] of bits.entries()) {
+          if ((used & bit) !== empty) {
+            continue;
+          }
+          const cap = capacities[ship]!;
+          const nextUsed = used | bit;
+          for (let end = start + 1; end <= count; end++) {
+            if (
+              stopSizes !== undefined &&
+              (weight[end]! - weight[start]! > cap.freeWeight ||
+                volume[end]! - volume[start]! > cap.freeVolume)
+            ) {
+              break;
+            }
+            const hours = segmentHours(ship, start, end);
+            if (
+              !Number.isFinite(hours) ||
+              (maxHours !== undefined && hours > maxHours) ||
+              input.canUseSegment?.(ship, start, end) === false
+            ) {
+              continue;
+            }
+            const score = maxHours === undefined ? Math.max(elapsed, hours) : elapsed + hours;
+            const next = states[end]!;
+            if (score < (next.get(nextUsed)?.score ?? Infinity)) {
+              next.set(nextUsed, { score, ship, segment: { start, end }, previous });
+            }
+          }
+        }
+      }
+      states[start]!.clear();
+    }
+    let best: AllocationStep | undefined;
+    for (const candidate of states[count]!.values()) {
+      if (candidate !== undefined && candidate.score < (best?.score ?? Infinity)) {
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  const fastest = solve();
+  if (!fastest) {
+    return undefined;
+  }
+  // At the optimal finishing time, use total flight hours to break ties.
+  const step = solve(fastest.score) ?? fastest;
+  const ranges = timings.map(() => ({ start: count, end: count }));
+  const hours = timings.map(() => 0);
+  for (let current: AllocationStep | undefined = step; current; current = current.previous) {
+    const { ship, segment } = current;
+    ranges[ship] = segment;
+    hours[ship] = segmentHours(ship, segment.start, segment.end);
+  }
+  return { ranges, hours };
+}
+
 // 按飞船剩余舱容把有序站点切成连续段：逐站装箱，当前船装不下
 // （重量或体积任一超出该船剩余容量）才换下一艘，最后一艘兜底。
 // 产物密度（大重量小体积 / 大体积小重量）自然决定段边界：
@@ -308,9 +449,11 @@ export function splitChainPlanAcrossShips(
   //（基础规划不传，仅主规划传，避免影响飞行预估用的站点顺序）。
   arrivalHoursByNaturalId?: Map<string, number>,
   // 时间均衡分段结果（可选，与 usable 对齐：每艘船分配的连续站点 naturalId），
-  // 由 planTimeBalancedSegments 求解，使各船闭环时长均衡（更快完成补给）。
+  // 由调用方提供，船的顺序可以与航线分段顺序不同。
   // 未提供 / 长度与 usable 不匹配时退回按舱容贪心切段（旧行为）。
   allocByNaturalId?: string[][],
+  // Keep empty subplans during fitting so their capacity and supply failures remain visible.
+  options?: { includeEmptyPlans?: boolean },
 ): ShipChainPlan[] {
   const byId = new Map(bases.map(b => [b.naturalId, b] as const));
   const ordered = plan.stops
@@ -358,12 +501,17 @@ export function splitChainPlanAcrossShips(
   const warehouses = new Map<string, Record<string, number>>();
   const markets = new Map<string, Record<string, number>>();
   const result: ShipChainPlan[] = [];
-  for (let i = 0; i < chunks.length && i < usable.length; i++) {
+  const routePosition = new Map(plan.stops.map((stop, i) => [stop.naturalId, i]));
+  const shipOrder = chunks
+    .slice(0, usable.length)
+    .flatMap((chunk, i) => (chunk.length === 0 ? [] : [i]))
+    .sort(
+      (a, b) =>
+        routePosition.get(chunks[a]![0]!.naturalId)! - routePosition.get(chunks[b]![0]!.naturalId)!,
+    );
+  for (const i of shipOrder) {
     const ship = usable[i]!;
     const chunk = chunks[i]!;
-    if (chunk.length === 0) {
-      continue;
-    }
     const cap = shipChainCapacity(ship);
     if (!cap) {
       continue;
@@ -395,7 +543,7 @@ export function splitChainPlanAcrossShips(
       exchangeCode: ship.exchangeCode,
       ...(arrivalHoursByNaturalId !== undefined ? { arrivalHoursByNaturalId } : {}),
     });
-    if (sub && sub.stops.length > 0) {
+    if (sub && (sub.stops.length > 0 || options?.includeEmptyPlans === true)) {
       for (const [ticker, amount] of Object.entries(sub.originPickup)) {
         stock[ticker] = Math.max(0, (stock[ticker] ?? 0) - amount);
       }

@@ -541,7 +541,9 @@ function isBest(component: { bestExchange?: string }, code: string) {
           >
           <template v-else
             >点击卡片指定单市场 · 当前
-            <strong :class="$style.currentMarket">{{ chosenSingleExchange || '无' }}</strong></template
+            <strong :class="$style.currentMarket">{{
+              chosenSingleExchange || '无'
+            }}</strong></template
           >
         </span>
       </div>
@@ -965,7 +967,7 @@ function isBest(component: { bestExchange?: string }, code: string) {
 
 .currencyTag {
   color: rgb(148, 158, 166);
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   margin-left: 3px;
   font-weight: normal;
 }

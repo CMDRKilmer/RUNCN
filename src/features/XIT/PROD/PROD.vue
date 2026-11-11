@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import { getPlanetProduction, PlanetProduction } from '@src/core/production';
 import ProdSection from './ProdSection.vue';
 import { useTileState } from './tile-state';
@@ -58,7 +59,7 @@ function onExpandAllClick() {
 </script>
 
 <template>
-  <div :class="C.ComExOrdersPanel.filter">
+  <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
     <RadioItem v-model="headers" horizontal>表头</RadioItem>
     <RadioItem v-model="displayProduction" horizontal>生产</RadioItem>
     <RadioItem v-model="inactive" horizontal>未激活</RadioItem>

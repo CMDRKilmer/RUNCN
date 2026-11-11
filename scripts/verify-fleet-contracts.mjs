@@ -14,7 +14,8 @@ const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-p
 const { executeChainPlans, clearShipChainPlan } =
   await import('../src/features/XIT/FLEET/chain-commands.ts');
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
-const { splitChainPlanAcrossShips } = await import('../src/features/XIT/FLEET/chain-allocation.ts');
+const { planFastestChainSegments, splitChainPlanAcrossShips } =
+  await import('../src/features/XIT/FLEET/chain-allocation.ts');
 const { buildChainActionPackages } = await import('../src/features/XIT/FLEET/chain-actions.ts');
 const { completeActionPackage } = await import('../src/features/XIT/FLEET/action-completion.ts');
 const { collectPendingChainSteps } = await import('../src/features/XIT/FLEET/chain-recovery.ts');
@@ -40,12 +41,14 @@ async function check(name, fn) {
     stores: {},
     production: {},
     analyses: {},
+    materials: {},
   });
   Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
   windows.length = 0;
   estimation.calls = [];
   estimation.pending = null;
+  estimation.result = null;
   shipsStore.fetched.value = true;
   sitesStore.all.value = [];
   await fn();
@@ -444,6 +447,472 @@ await check('combined planning retains stops for ships at another exchange', asy
   assert.equal(planning.shipPlans.value.find(x => x.ship.ship.id === 'S2').plan.cxBill.RAT, 10);
   scope.stop();
   await nextTick();
+});
+await check('fastest split reverses ship order and breaks ties on total flight time', () => {
+  const cap = { freeWeight: 1, freeVolume: 1 };
+  const sizes = [
+    { weight: 1, volume: 1 },
+    { weight: 1, volume: 1 },
+  ];
+  const allocation = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: sizes,
+    timings: [
+      { outbound: [8, 3], inbound: [2, 7], between: [undefined] },
+      { outbound: [0.5, 5], inbound: [0.5, 2], between: [undefined] },
+    ],
+  });
+  assert.deepEqual(allocation, {
+    ranges: [
+      { start: 1, end: 2 },
+      { start: 0, end: 1 },
+    ],
+    hours: [10, 1],
+  });
+  const missing = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: sizes,
+    timings: [
+      { outbound: [undefined, 3], inbound: [2, 7], between: [undefined] },
+      { outbound: [0.5, undefined], inbound: [0.5, 2], between: [undefined] },
+    ],
+  });
+  assert.deepEqual(missing, allocation);
+  const oversized = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: [sizes[0], { weight: 1, volume: 2 }],
+    timings: [
+      { outbound: [8, 3], inbound: [2, 7], between: [1] },
+      { outbound: [0.5, 5], inbound: [0.5, 2], between: [1] },
+    ],
+  });
+  assert.equal(oversized, undefined);
+});
+await check(
+  'ring planning uses each origin and applies the faster order with partial estimates',
+  async () => {
+    const bs = bases();
+    const items = [{ quantity: { material: { ticker: 'RAT' }, amount: 10 } }];
+    const ships = [ship('S1', items), ship('S2', items)];
+    for (const vessel of ships) {
+      vessel.cargoStore.weightCapacity = vessel.cargoStore.volumeCapacity = 10;
+      vessel.ship.address.id = `CX-${vessel.ship.id}`;
+    }
+    estimation.result = input => ({
+      ok: false,
+      legs: [
+        { ok: true, hours: 5 },
+        { ok: false, hours: 0 },
+        { ok: true, hours: 5 },
+      ],
+      endpointHours: input.includeEndpointHours
+        ? input.ship.id === 'S1'
+          ? { outbound: [5, 1], inbound: [5, 1] }
+          : { outbound: [1, 5], inbound: [1, 5] }
+        : undefined,
+    });
+    const scope = effectScope();
+    try {
+      const planning = scope.run(() =>
+        useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(
+        estimation.calls.filter(call => call.includeEndpointHours).map(call => call.origin),
+        ['CX-S1', 'CX-S2'],
+      );
+      assert.deepEqual(
+        planning.shipPlans.value.map(p => [p.ship.ship.id, p.plan.stops[0].naturalId]),
+        [
+          ['S2', 'A'],
+          ['S1', 'B'],
+        ],
+      );
+      assert.equal(planning.shipPlans.value[0].plan.originPickup.RAT, 10);
+      assert.equal(planning.shipPlans.value[1].plan.purchaseBill.RAT, 10);
+    } finally {
+      scope.stop();
+      await nextTick();
+    }
+  },
+);
+await check(
+  'chain selection fits each ship without using dispatch assignments or days',
+  async () => {
+    const bs = bases();
+    for (const base of bs) {
+      base.config.resupply = true;
+      base.config.days = 2;
+      fixture.analyses[base.siteId] = { suppliesCapDays: 40 };
+      fixture.bills[base.siteId] = config =>
+        config.days > 0 ? { RAT: Math.ceil(Math.min(config.days, 40)) } : {};
+    }
+    const first = ship('S1');
+    first.cargoStore.volumeCapacity = 35;
+    first.cargoStore.volumeLoad = 5;
+    const second = ship('S2');
+    second.cargoStore.weightCapacity = 32;
+    second.cargoStore.weightLoad = 2;
+    const selected = ref([first]);
+    const runs = ref([]);
+    const scope = effectScope();
+    try {
+      const planning = scope.run(() =>
+        useChainPlanning({ ships: () => selected.value, bases: () => bs, runs: () => runs.value }),
+      );
+      const days = () => planning.shipPlans.value.flatMap(p => p.plan.stops.map(stop => stop.days));
+      assert.deepEqual(days(), [15, 15]);
+      selected.value = [first, second];
+      await nextTick();
+      assert.deepEqual(days(), [30, 30]);
+      assert.ok(planning.shipPlans.value.every(p => !p.plan.overCapacity));
+      selected.value = [
+        { ...first, cargoStore: { ...first.cargoStore, volumeCapacity: 10 } },
+        second,
+      ];
+      await nextTick();
+      assert.deepEqual(days(), [15, 15]);
+      assert.deepEqual(
+        planning.shipPlans.value.map(p => p.ship.ship.id),
+        ['S2'],
+      );
+      runs.value = [{ shipId: 'S1', run: {} }];
+      assert.deepEqual(days(), [15, 15]);
+      assert.deepEqual(
+        bs.map(base => [base.config.ship, base.config.days]),
+        [
+          [undefined, 2],
+          [undefined, 2],
+        ],
+      );
+    } finally {
+      scope.stop();
+      await nextTick();
+    }
+  },
+);
+await check('capacity fitting can assign complementary ships in reverse order', () => {
+  const bs = bases();
+  for (const base of bs) {
+    base.config.resupply = true;
+    fixture.analyses[base.siteId] = { suppliesCapDays: 1 };
+    const ticker = base.siteId === 'A' ? 'HEAVY' : 'BULKY';
+    fixture.bills[base.siteId] = config => (config.days > 0 ? { [ticker]: 1 } : {});
+  }
+  fixture.materials.HEAVY = { weight: 2, volume: 1 };
+  fixture.materials.BULKY = { weight: 1, volume: 2 };
+  const ships = [ship('S1'), ship('S2')];
+  Object.assign(ships[0].cargoStore, { weightCapacity: 1, volumeCapacity: 2 });
+  Object.assign(ships[1].cargoStore, { weightCapacity: 2, volumeCapacity: 1 });
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    assert.deepEqual(
+      planning.shipPlans.value.map(p => [
+        p.ship.ship.id,
+        p.plan.stops[0].naturalId,
+        p.plan.stops[0].days,
+      ]),
+      [
+        ['S2', 'A', 1],
+        ['S1', 'B', 1],
+      ],
+    );
+  } finally {
+    scope.stop();
+  }
+});
+await check(
+  'capacity fitting lowers targets that exhaust a producer’s transferable stock',
+  async () => {
+    const bs = bases();
+    for (const base of bs) {
+      base.config.resupply = true;
+      fixture.analyses[base.siteId] = { suppliesCapDays: 40 };
+    }
+    fixture.products.A = ['RAT'];
+    fixture.burns.A.burn.RAT = {
+      input: 1,
+      output: 2,
+      workforce: 0,
+      inventory: 10,
+      daysLeft: Infinity,
+    };
+    fixture.bills.A = {};
+    fixture.bills.B = config => (config.days > 0 ? { RAT: Math.ceil(config.days) } : {});
+    const ships = ref([ship('S1')]);
+    estimation.result = input => ({
+      ok: input.includeEndpointHours === true,
+      legs: [
+        { ok: true, hours: 1 },
+        { ok: true, hours: 10 },
+        { ok: true, hours: 1 },
+      ],
+      endpointHours: input.includeEndpointHours ? { outbound: [1, 1], inbound: [1, 1] } : undefined,
+    });
+    const scope = effectScope();
+    try {
+      const planning = scope.run(() =>
+        useChainPlanning({ ships: () => ships.value, bases: () => bs, runs: () => [] }),
+      );
+      const stops = planning.shipPlans.value.flatMap(p => p.plan.stops);
+      const consumer = stops.find(stop => stop.naturalId === 'B');
+      assert.equal(consumer?.days, 5);
+      assert.equal(consumer?.unloadChain.get('RAT')?.amount, 5);
+      ships.value.push(ship('S2'));
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(planning.allocStatus.value, 'ready');
+      assert.equal(planning.shipPlans.value.length, 1);
+      assert.equal(planning.shipPlans.value[0].plan.stops[1].unloadChain.get('RAT').amount, 5);
+    } finally {
+      scope.stop();
+    }
+  },
+);
+await check('fitting counts clipped deliveries without rejecting clipped surplus returns', () => {
+  const bs = bases();
+  for (const base of bs) {
+    base.config.resupply = true;
+    fixture.analyses[base.siteId] = { suppliesCapDays: 40 };
+  }
+  fixture.products.A = ['RAT'];
+  fixture.burns.A.burn.RAT = { input: 0, output: 2, workforce: 0, inventory: 100 };
+  fixture.bills.A = {};
+  fixture.bills.B = config => (config.days > 0 ? { RAT: Math.ceil(config.days) } : {});
+  const vessel = ship('S');
+  Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
+    );
+    const plan = planning.shipPlans.value[0].plan;
+    assert.equal(plan.stops[0].clipped, true);
+    assert.equal(plan.hasUnmetChainDemand, undefined);
+    assert.equal(plan.stops[1].days, 10);
+    assert.equal(plan.stops[1].unloadChain.get('RAT').amount, 10);
+  } finally {
+    scope.stop();
+  }
+});
+await check('return surplus leaves room for deliveries picked up at later stops', () => {
+  const bs = ['A', 'B', 'C', 'D'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 30 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 5, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.products.A = ['Z'];
+  fixture.products.B = ['X'];
+  fixture.burns.A = { burn: { Z: { input: 1, output: 2, workforce: 0, inventory: 20 } } };
+  fixture.burns.B = { burn: { X: { input: 0, output: 1, workforce: 0, inventory: 100 } } };
+  fixture.burns.C = { burn: { Z: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.D = { burn: { X: { input: 0.5, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.bills.C = config => (config.days > 0 ? { Z: Math.ceil(config.days) } : {});
+  fixture.bills.D = config => (config.days > 0 ? { X: Math.ceil(config.days / 2) } : {});
+  const vessel = ship('S');
+  Object.assign(vessel.cargoStore, { weightCapacity: 15, volumeCapacity: 15 });
+
+  const fiveDays = planChainRoute({
+    originNaturalId: 'CX',
+    bases: bs,
+    capacity: { weight: 15, volume: 15, freeWeight: 15, freeVolume: 15 },
+  });
+  assert.equal(fiveDays.hasUnmetChainDemand, undefined);
+  assert.deepEqual(
+    fiveDays.stops.map(stop => stop.naturalId),
+    ['A', 'B', 'C', 'D'],
+  );
+  assert.equal(fiveDays.stops[0].loadOnDeparture.weight, 12);
+  assert.equal(fiveDays.stops[1].loadOnArrival.weight, 12);
+  assert.equal(fiveDays.stops[1].loadOnDeparture.weight, 15);
+  assert.deepEqual(fiveDays.loadOnReturn, { weight: 7, volume: 7 });
+  assert.deepEqual(fiveDays.finalUnload, { Z: 7 });
+
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
+    );
+    const plan = planning.shipPlans.value[0].plan;
+    assert.equal(plan.hasUnmetChainDemand, undefined);
+    assert.equal(plan.stops[2].days, 10);
+    assert.equal(plan.stops[2].unloadChain.get('Z').amount, 10);
+    assert.equal(plan.stops[3].unloadChain.get('X').amount, 5);
+    assert.deepEqual(plan.peakLoad, { weight: 15, volume: 15 });
+  } finally {
+    scope.stop();
+  }
+});
+await check('fitting checks stock at a later selected ship’s warehouse', () => {
+  const bs = bases();
+  for (const base of bs) {
+    base.config.resupply = true;
+    fixture.analyses[base.siteId] = { suppliesCapDays: 10 };
+  }
+  fixture.products.A = ['RAT'];
+  fixture.burns.A.burn.RAT = { input: 0, output: 2, workforce: 0, inventory: 2 };
+  fixture.bills.A = {};
+  fixture.bills.B = config => (config.days > 0 ? { RAT: Math.ceil(config.days) } : {});
+  const stocked = ship('S2', [{ quantity: { material: { ticker: 'RAT' }, amount: 100 } }]);
+  stocked.warehouseStore.id = 'second-warehouse';
+  const ships = [ship('S1'), stocked];
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    const [part] = planning.shipPlans.value;
+    assert.equal(part.ship.ship.id, 'S2');
+    assert.equal(part.plan.stops[1].days, 10);
+    assert.equal(part.plan.originPickup.RAT, 8);
+    assert.equal(part.plan.stops[1].unloadChain.get('RAT').amount, 2);
+  } finally {
+    scope.stop();
+  }
+});
+await check('fitting swaps split segments to use the correct warehouses', () => {
+  const bs = bases();
+  const producer = { ...bs[0], siteId: 'P', naturalId: 'P', config: { ...bs[0].config } };
+  fixture.products.P = ['RAT', 'DW'];
+  fixture.burns.P = {
+    burn: Object.fromEntries(
+      ['RAT', 'DW'].map(ticker => [ticker, { input: 0, output: 1, workforce: 0, inventory: 0 }]),
+    ),
+  };
+  for (const [index, base] of bs.entries()) {
+    const ticker = index === 0 ? 'RAT' : 'DW';
+    base.config.resupply = true;
+    fixture.analyses[base.siteId] = { suppliesCapDays: 1 };
+    fixture.bills[base.siteId] = config => (config.days > 0 ? { [ticker]: 1 } : {});
+    fixture.burns[base.siteId].burn = {
+      [ticker]: { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 },
+    };
+  }
+  const ships = ['DW', 'RAT'].map((ticker, index) => {
+    const vessel = ship(`S${index + 1}`, [{ quantity: { material: { ticker }, amount: 1 } }]);
+    vessel.warehouseStore.id = ticker;
+    Object.assign(vessel.cargoStore, { weightCapacity: 1, volumeCapacity: 1 });
+    return vessel;
+  });
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => [...bs, producer], runs: () => [] }),
+    );
+    assert.deepEqual(
+      planning.shipPlans.value.map(part => [part.ship.ship.id, part.plan.stops[0].naturalId]),
+      [
+        ['S2', 'A'],
+        ['S1', 'B'],
+      ],
+    );
+  } finally {
+    scope.stop();
+  }
+});
+await check('capacity fitting ignores optional return cargo', () => {
+  const bs = ['A', 'B', 'C'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 1 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 1, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.bills.A = config => (config.days > 0 ? { M1: 6 } : {});
+  fixture.bills.B = config => (config.days > 0 ? { M2: 4 } : {});
+  fixture.bills.C = config => (config.days > 0 ? { M3: 10 } : {});
+  fixture.products.A = ['Z'];
+  fixture.burns.A = { burn: { Z: { input: 0, output: 1, workforce: 0, inventory: 12 } } };
+  fixture.burns.B = { burn: { M2: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.C = { burn: { M3: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  const ships = [ship('S1'), ship('S2')];
+  for (const vessel of ships) {
+    Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
+  }
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    assert.deepEqual(
+      planning.shipPlans.value.map(part => [
+        part.ship.ship.id,
+        part.plan.stops.map(stop => [stop.naturalId, stop.days]),
+      ]),
+      [
+        [
+          'S1',
+          [
+            ['A', 1],
+            ['B', 1],
+          ],
+        ],
+        ['S2', [['C', 1]]],
+      ],
+    );
+    assert.ok(planning.shipPlans.value.every(part => !part.plan.overCapacity));
+  } finally {
+    scope.stop();
+  }
+});
+await check('capacity fitting counts chain cargo once per segment', () => {
+  const bs = ['A', 'B', 'C'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 10 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 10, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.products.A = ['X'];
+  fixture.burns.A = { burn: { X: { input: 0, output: 1, workforce: 0, inventory: 100 } } };
+  fixture.burns.B = { burn: { X: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.C = { burn: { Y: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.bills.A = {};
+  fixture.bills.B = config => (config.days > 0 ? { X: Math.ceil(config.days) } : {});
+  fixture.bills.C = config => (config.days > 0 ? { Y: Math.ceil(config.days) } : {});
+  const ships = [ship('S1'), ship('S2')];
+  for (const vessel of ships) {
+    Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
+  }
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    const plans = planning.shipPlans.value;
+    assert.deepEqual(
+      plans.map(part => [part.ship.ship.id, part.plan.stops.map(stop => stop.naturalId)]),
+      [
+        ['S1', ['A', 'B']],
+        ['S2', ['C']],
+      ],
+    );
+    assert.equal(plans[0].plan.stops[1].days, 10);
+    assert.equal(plans[0].plan.stops[1].unloadChain.get('X').amount, 10);
+    assert.equal(plans[1].plan.stops[0].unloadCx.Y, 10);
+    assert.ok(plans.every(part => !part.plan.overCapacity));
+  } finally {
+    scope.stop();
+  }
 });
 await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
   const bs = bases();

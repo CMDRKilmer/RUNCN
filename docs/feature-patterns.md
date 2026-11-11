@@ -231,7 +231,7 @@ CXPO 表单即交易所下单表单：`form.children[7]` 数量输入、`childre
 - **⚠️ 上一条（2026-09-23 第三轮）的「口径未标定 → 仍判缺、不写滑块」「燃料与时长口径都未标定」、其「交叉验证 ② 时长」段落（模型 v(f) 恒高于实测平均速度、时长快 1.02–1.43×）以及旧「模型 2395 s vs 原生 2639 s」的对比，均已被 2026-09-23 收尾的 BTF 标定取代**：燃料口径 = 罐口径、时长口径 = 转移段速度式（数字见下方「系内「转移」段几何 + 燃料口径标定 + 星系 id 反查」条目）；`transitCalibrationPending` 门已删除，`missingModelInputs` 对系内航线**只剩两条**判缺理由（「口径未标定」这一条确实已删除）：① 原生转移段记录还没到（`fuel-model.ts` 第 938 行 `const dMissing = metrics.stlDistanceKm === undefined || !(metrics.stlDistanceKm > 0);`）；② STL 罐容量/余量缺失（同文件第 1048 行 `const tank = ship.stlRemaining ?? ship.stlFuelCapacity;`，为 undefined 或 ≤0 即判缺）。同一条里的「0.05% 比法」已作废（见下条），但**「系内航线的路程与是否勾选「使用跃迁点」无关」这一结论成立** —— 判据是 `planRoutes()` 对同星系两种模式都返回 `natural`（`legs` 为空），不是那两个数。 → **已于 2026-09-23 第四轮修正**（见下条）：`isJump` 已扩为 `'JUMP' || 'JUMP_GATEWAY'`，故上文「无 JUMP 的计划（同星系直飞）」应读作「无 `JUMP`/`JUMP_GATEWAY`」（网关航线段结构同构，走跨星系 `#gw` 表）；`missingModelInputs` 对跨星系网关航线的强制判缺（`gatewayMissing`）已删除。
 - **FLEET 环线预估：系内航段显式判缺（A）+ 反方向原生记录近似（C）**（2026-09-24，用户报「环线系内航段除首段外全 `--`」）：
   - **症状**：环线各站全在同一星系时（例 `HRT` = `VH-331` 星系的空间站，见 `public/json/stations.json`），面板「飞行」列除首段外全部 `--`（到达时刻 = 出发时刻），汇总「飞行时长」只等于首段。**根因链**：系内 STL 几何唯一来源是服务器原生「转移」（TRANSIT）段记录（`system-bodies.sameSystemRecords`，按 `出发天体|目标天体` **方向**键控）→ 记录缺失 → `routeMetrics().stlDistanceKm === undefined` → `fuel-model.computeFuelOption` 的 `totalKm = 0` → `stlHours = 0`，系内又无自然跃迁（`ftlHours = 0`）⟹ `totalHours === 0`；而旧 `chain-flight-time.ts` **只要拿到 option 就标 `ok = true`**（从不调用现成的 `missingModelInputs`）⇒ 0 小时被当成「算出来了」（`formatFlightDuration(0)` 显示 `--`、`est.ok` 仍为 true、循环里 `elapsedMs` 原地不动 → 后续段都在「出发时刻」算几何）。
-  - **后果面**：多船时间均衡（`ChainView.computeTimeAlloc` 的 `complete` 门 = 所有段 `est.ok`）与到港库存预测（`chain-planner` 的 `arrivalHoursByNaturalId`）都把这些 0 当真值。到港预测另有**半截 bug**：原实现只按站剔除判缺段本身，判缺段**之后**的段因 `elapsedMs` 不推进而系统性**偏早**（偏早时刻 = 更早到货）→ 已改为**整船**门 `if (!est.ok) continue;`（宁可不算到港产出，也不传偏早值）；前者门**未放宽**。
+  - **缺失估时**：多船分配跳过包含缺失航段的候选分段。到港库存预测只接受所有航段均可估时的整船计划，避免前一航段判缺导致后续到港时间偏早。
   - **A 诚实判缺**：每段先跑 `missingModelInputs(perf, metrics)`，非空 → `leg.ok = false`、`leg.error = '缺原生 STL 段记录'`、`leg.missingInputs = [成因全文]`、`hours = 0`、`arriveAtMs = departAtMs` 且**不推进** `elapsedMs`；`est.ok = legs.every(l => l.ok)` 语义不变。**C 反向近似**（只服务环线预估）三条同时成立才用：① 系内航线（`route.legs.length === 0`）② 前向几何确实缺失（`stlDistanceKm` undefined 或 ≤0）③ `stlSegmentsStore.getSameSystem(to, from)?.transit?.distanceKm > 0`（查表键优先 `metrics.toLookup/fromLookup`，即星系 id 反查后的实体键）；用**近似后的 metrics** 重算 option，补上几何后**再判一次** `missingModelInputs`（罐容量/余量缺失时仍判缺 —— **近似不得掩盖残缺**）。
   - **契约字段**：`leg.approximated = { kind: 'reverse-record', from, to, distanceKm }`、`leg.missingInputs`、`est.approximatedLegs`。**近似只影响时长**：系内转移段燃料是**罐口径** `0.98 × 罐 × min(f, 0.5)`（与距离无关）⟹ 逐 f 的燃料值与原生记录下逐位相同。
   - **可用性与局限**：转移段弧长由两体轨道几何主导，同航线同船同 f 的点间漂移**不到 1%**（`btf-load-sweep-2026-08-29 扫描`：HRT→VH-331g 报告 520,267,630 → 522,220,425 km）；⚠️ 计划时刻不同 ⇒ 相位不同 ⇒ 只是**近似值**。
@@ -684,6 +684,11 @@ This is what made the CodeQL alerts close on `deserialize-prun-app.ts:9` and `ch
 
 ## CSS
 
+The theme settings in `XIT SET THEME` apply across color themes. Size increases for existing text
+use `--rp-font-enlargement` (0 for 标准, 1 for 放大). Extra table separators and floating window
+outlines use `data-rp-borders` on `html`. An absent attribute follows the theme, `on` forces the
+enhancements, and `off` leaves the underlying table and window styles in effect.
+
 Each feature needing CSS gets a `.module.css` alongside the `.ts`. `applyCssRule` and `C` are auto-imported.
 
 ```ts
@@ -844,12 +849,18 @@ return formatCurrency(price, format);
 
 ## Chain Planner (XIT FLEET 环线)
 
+FLEET 基地规划在拖放分配船只后，按剩余载重、容积和维修占用重算同船基地的补给天数。
+基地规划和环线补给都计算消耗品和原料，顶部「CX 购买」控制两种规划生成的采购步骤。
+环线规划使用自身勾选的船只和基地试算补给天数，并按分段结果检查每艘船的舱容。
+两种规划都应用各基地的仓储上限，环线试算不写回主页面的天数。
+
 环线单船规划入口在 `chain-planner.ts`，`chain-data.ts` 采集输入快照，`chain-plan-core.ts` 负责计算；多船分配在 `chain-allocation.ts`，ACT 构造在 `chain-actions.ts`，`use-chain-planning.ts` 编排响应式规划与异步估时，`chain-commands.ts` 写入运行记录和脚本，UI 在 `ChainView.vue`。模块边界见 `docs/architecture.md` 的 FLEET 小节。
 
 - 单路线由 `planChainRoute` 规划：拓扑排序定航线 → 按目标天数平衡链上运量 → 沿航线模拟舱容。
 - **链上装船按下游优先度逐条装载（不按比例缩放）**：装载到下游站点的链输送（`chainPickup`）走 `pushItemsPrioritised`（`src/features/XIT/FLEET/chain-fit.ts`），按 dest 的 daysLeft 升序逐条装填，可装多少装多少，超载 item 跳过；缺货的下游留待下一航次。**关键**——按比例缩放会让每个下游都被裁到一半、谁都拿不到足额，按下游优先度则保证最急的下游拿满。出发地装载 CX 采购物资（`initialItems`）仍用 `pushItemsProportional`（整批按同一比例缩放，超载则让用户减少天数或换大船）。
 - **卸货后强制校验货舱再开船**：每个站点包在 MTRA 卸载+提取之后、OPEN SFC/DEPART 之前注入 `Verify Ship Cargo` 动作（chain-actions 写进 `pkg.actions`）；ACT 侧必须注册为**动作**才能被执行——`StepGenerator.generateSteps` 只按 `pkg.actions` 查 `getActionInfo`，只调 `addActionStep` 的步骤会被静默跳过（`src/features/XIT/ACT/actions/verify-ship-cargo/verify-ship-cargo.ts` 用 `addAction` 承载，`generateSteps` emit `src/features/XIT/ACT/action-steps/VERIFY_SHIP_CARGO.ts` 的步骤）。该步骤轮询飞船货舱 `storagesStore.getByAddressableId(ship.id)`，直到本站卸货 ticker 的余量不超过该阶段计划余量（包含后续站配送及本站提取，30s 超时失败）。这是因为 MTRA 用 `waitActionFeedback` 等游戏面板反馈但**底层货运跨客户端→服务器全链路完成有窗口**，若不强制等货舱真正清空就 DEPART，会出现「卸载包没卸完船就出发」。归航包同样校验 `finalUnload` 已离舱，保留计划之外原有货物；该校验不直接读取目的地仓库。
 - **组内产出的闭环**：BSN 白名单 + output>0 的 ticker 为「组内产出」，一律不进 CX 采购清单；缺口优先由出发地空间站仓库库存以「取货」（`originPickup`）补足，仍不足则警告。
+- 自动适配天数时允许交换船只接段顺序。合并规划按仓库去重汇总库存，分段子计划按各船实际出发仓库验证供给，空子计划也参与检查。裁减下游交付会使候选不可行。返航货物使用本站到归航全程的剩余舱容，为后续必需交付留出空间。分段容量校验只计卸货与必需装载（取两者较大值），可选返航货物可裁剪、不参与校验；站点尺寸会把同一批链货在装、卸两端各算一次，因此候选取不出来时改为逐段重规划，按子计划的峰值必需载荷（无裁减、无缺口）判定可行。
 - **购买时检测空间站库存**：两层检测。
   1. **空间站仓库库存抵扣**：生成采购清单时，出发地空间站仓库（`originStock`）已有的物资（含组内产物与普通补给）优先以「取货」装船（`originPickupByStop`），采购量在 `purchaseBill` 阶段扣除取货部分——仓库已有不重复购买。
   2. **订单簿供应检测**：合并规划不传 `exchangeCode`，保留候选站点供分船；分船后每艘船按自身出发地交易所代码（`exchangeCode`）查 `cxobStore` 订单簿（key = `ticker.exchangeCode`）的 `supply`（卖单总量），供应不足时在舱容模拟之前按航线顺序分配可购数量，使采购、分站卸货、载荷快照同步缩减并警告（「空间站库存不足（供应 X / 需 Y），采购量已缩减至 X」），防止执行时 `CX Buy` 因库存不足而整体失败。订单簿数据未加载（未打开过 CXOB）时跳过检测、不误报。
@@ -857,9 +868,9 @@ return formatCurrency(price, format);
 - **采购执行保留装船库存**：环线的采购组使用净采购量 `purchaseBill`，同时把计划取货量 `originPickup` 传给 ACT 作为库存保留量。只有超过该保留量的仓库库存才能抵扣采购，包括重试前已经买到的物资。
 - **本站发船**：`OPEN SFC` 等待本船的目的地输入框出现。共享的地址建议列表同一时间只处理一次选择；紧接自动发船时，必须匹配并选定计划目的地。
 - **进度与脚本**：执行时把计划快照持久化到 `userData.chainRuns.*.plan`，页面刷新后仍按规划样式显示各阶段载重/操作；生成的 ACT 操作包带阶段号（`0 Chain 船名`、`N 站点 Loop 船名`、`M Chain Return 船名`）。**环线主包/站点包/归航包不再 autoDelete**（保留完整脚本供状态列表/云端同步/手动清理），仅到港触发器仍 autoDelete；阶段完成由 `ExecuteActionPackage.vue` 在包执行成功后无条件调用 `markChainStageDone` 写回 `chainRuns` 持久化状态（**不能只依赖 `pkg.autoDelete` 分支**——环线包不 autoDelete 时该分支永不触发，站点/归航状态会永远停在 `arrived`，状态检查无法推进下一阶段）。
-- **多船 = 并行分段（唯一方案，已废弃 A/B/C 三策略）**：`splitChainPlanAcrossShips(plan, ships, bases)` 按拓扑序把站点切为连续段，每船独立规划其段并同时出动，总耗时 ≈ 单环线 / 船数。切分按**剩余舱容逐站装箱**（当前船装不下重量或体积任一才换下一艘，最后一艘兜底），产物密度（大重量小体积 / 大体积小重量）自然决定段边界，避免某船段载荷超出其容量。多船按仓库 ID 共享扣减现有库存，并共享扣减同交易所订单簿供应。跨段产物归航入库后可供下一轮使用，不抵扣本轮出发采购。传全局 `groupProducedTickers` 保证跨段产物在任何段都不被误采。
+- **多船并行分段**：`planFastestChainSegments` 沿拓扑序切连续站段，每艘船都可以接任意一段。候选段用该船出发地到段首、段内相邻站、段尾回出发地的方向估时，优先最小化最慢船的闭环时长，同样快时最小化总飞行时长。大船队限制每个站点前缀保留的船只组合数。缺少可用估时时沿用容量分配。逐船子计划按航线顺序扣减共享仓库和交易所供应，跨段产物归航后可供下一轮使用。
 - 无货舱（或剩余舱容 0）的船不参与分段。逐船应用库存和订单簿供应限制后，无剩余操作站点的子计划不返回；执行按钮仅在存在非空逐船计划时启用，避免为空计划生成运行记录和脚本。
 - **多环线并行**：有环线运行中仍可规划其他环线。表格分「规划中」「运行中」两个页签（`C.Tabs` 样式，`chainTab` 持久化，带计数）：`planTables` 为当前选中配置的实时规划（跳过运行中的船，避免同船重复），`runningTables` 为正在执行的环线进度（优先计划快照 `planSnapshot`——按船合并、不覆盖其他运行中环线的快照；快照未覆盖的从 `chainRuns` 还原）。船名括号标注状态：执行中 `（运行中）`、已完成 `（已完成）`、纯规划 `（CX 代码）`。`execute` 跳过正在执行环线的船（防止 `removeShipChainScripts` 误删运行中脚本），全部被跳过时提示先清理或等待归航。
 - **断线恢复（状态检查 + 自动恢复）**：环线各阶段靠到港 FLIGHT_ENDED 告警触发器驱动，网页关闭期间到港告警错过会导致环线卡在当前阶段。`use-chain-recovery.ts` 经 `chain-recovery.ts` 先归一化位置推导进度，再以「船当前停靠位置 + 持久化阶段状态 + 操作包是否仍存在」判断当前阶段（执行成功即 `markChainStageDone` 持久化 `done`，不会重复执行），经 `queueTriggerRun` + 隐藏 ACT 窗口（与触发器引擎同通道）静默执行下一步操作包，`hasPendingTriggerRun` 防重复入队。`runProgress` 按环线顺序执行假设，把**船当前停靠站点之前的所有站**推导为完成（`dockedStopIndex` 前推），旧记录（autoDelete 时代遗留的 arrived/pending）也能被状态检查推进。「状态检查」按钮手动触发；「自动恢复」开关（默认开）在船数据就绪后自动执行，且**服务器重连（页面未刷新）也能再次触发**：模块级 `CLIENT_CONNECTION_OPENED` 监听重置「已恢复」标志（状态放 `use-chain-recovery.ts` 模块作用域、跨组件实例共享，切换页签卸载/重挂载不丢失），store 重置后重新推送即自动再次检测断线阶段。状态检查无匹配步骤时输出诊断（每船停靠位置 vs 预期阶段），便于核对位置/脚本差异。
 - **多端同步（跨浏览器/设备）**：仅同步**各艘船的飞行配置**（`chainRuns` + 该船环线 ACT 包/触发器）；环线面板的**全局配置（分组/基地/船勾选/自动开关）仅本地保存、不参与云同步**（`src/features/XIT/FLEET/chain-sync.ts` + `src/infrastructure/org-api/chain-sync.ts`，后端 `/chain-sync` 端点）。命名空间 = 公司代码（JWT `company_code`）：同账号跨设备共享、多账号天然隔离。**无自动轮询、无启动拉取**——仅在本地环线状态改变（页面级 `chain-runtime.ts` 深 watch：`userData.chainRuns` + 环线 ACT 包/触发器 → `markDirtyShip`）时**防抖 5s 推送**（`pushNow` 串行执行批次）；覆盖方向仅由手动「云端同步」对话框按每船逐项选择（上传=本地覆盖云端 / 下载=云端覆盖本地）。冲突用 payload `updatedAt` LWW + PUT `baseUpdatedAt` 乐观锁（服务端 `updated_at`；409 时重取最新并提示「云端较新，先下拉」，force 覆盖以最新 base 重试一次）；推送前以**内容签名**（剔除 `updatedAt` 与触发器本地 `id`）比对，未实际变化即跳过且不推进时间戳（避免粗粒度 watch 误报把未变化内容以新时间戳推上去、架空 LWW）；应用远端时 `suppressDirty` 抑制由此引发的 markDirty，避免「应用远端 → 重推 → 远端更新」无限循环；手动「清理计划」后显式标脏推「空快照」清除远端陈旧记录；同步基准（CAS base / LWW 时间 / 推送签名）按公司隔离持久化到 localStorage（合并写，忽略并丢弃历史遗留的 `__config__` 基准），普通待推送修改也持久化，关闭页签不取消同步，上传完成仅确认对应修改版本；页面重载后补推未完成修改并恢复乐观锁/LWW/签名语义，陈旧本地不再静默覆盖云端。应用远端**只恢复列表与状态、不自动执行**（执行仍由本端状态检查/触发器引擎驱动）。网络不可达 / 未登录（401）静默降级，本地照常。
-- **`planTimeBalancedSegments` 的 `ranges` 是下标区间，不是站点数组**：它返回 `{ ranges: { start, end }[], hours }`，`ranges` 与 `loopLegHours`（= 参与船集合）**逐位对齐**，每项是半开区间 `[start, end)`；该船不参与时 `start === end`（空段，`hours` 为 0）。**不能用 `.length` 判断参与与否** —— 那是 Vue 侧 `TimeAlloc.ranges: string[][]`（`stopIds.slice(start, end)` 之后的形态）的口径。`ChainView.vue` 的瓶颈容量诊断曾写 `ranges[j].length === 0` / `> 0`，在 `{start,end}` 上恒得 `undefined`：护栏永不生效、`tryTransfer` 永不被调用，整块诊断是**死代码**，却在 `CHANGELOG` 里被当作已完成功能发布。变量同名不代表类型同形：同一个 `alloc.ranges` 在 `.vue` 内有**两种形态**（规划器原始区间 / 映射后的站点数组），改之前先确认拿到哪一种。
+- **分段返回值**：`ranges` 和 `hours` 与输入船只逐位对齐，非空半开区间 `[start, end)` 表示该船负责的站点。瓶颈站的相邻分段按站点下标确定。视图层用 `stopIds.slice(start, end)` 将区间转换为站点 ID。

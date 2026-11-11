@@ -1,8 +1,5 @@
 import type { DispatchBaseConfig } from './utils';
 
-// 出发地标记（最终产物运回出发地 CX）。
-export const ORIGIN_DEST = '__ORIGIN__';
-
 export interface ChainPlannerBase {
   siteId: string;
   naturalId: string;
@@ -33,7 +30,7 @@ export interface CargoItem {
   amount: number;
   // 装船站点（undefined = 出发地 CX 采购）。
   from?: string;
-  // 目的站点（ORIGIN_DEST = 回出发地）。
+  // 目的站点。
   dest: string;
 }
 
@@ -41,7 +38,7 @@ export interface ChainStopPlan {
   naturalId: string;
   planetName: string;
   days: number;
-  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
+  // 环线基地的采购配置，关闭时从出发地仓库取货。
   cxBuy: boolean;
   // 卸货（船→基地）：CX 采购的非链物资。
   unloadCx: Record<string, number>;
@@ -49,6 +46,9 @@ export interface ChainStopPlan {
   unloadChain: Map<string, { amount: number; from: string }>;
   // 提取（基地→船）：本站产物。ticker → { 数量, 去向标签 }。
   load: Map<string, { amount: number; to: string }>;
+  // 提取中运回出发地的可选货物：ticker → 数量。舱容不足时允许裁剪，
+  // 因此不计入分段舱容校验（load 中已包含这部分）。
+  returnLoad: Record<string, number>;
   // 提取被舱容缩减过。
   clipped: boolean;
   // 到站卸货后、提取前的舱载。
@@ -79,6 +79,7 @@ export interface ChainPlan {
   // 出发地「取货」清单：组内产出的缺口由空间站仓库库存补足（不采购，装船随行）。
   originPickup: Record<string, number>;
   warnings: string[];
+  hasUnmetChainDemand?: true;
   peakLoad: { weight: number; volume: number };
   freeCapacity: { weight: number; volume: number };
   // 飞船总舱容（不是剩余）。

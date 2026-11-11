@@ -1,12 +1,8 @@
 import { watchEffect } from 'vue';
 import { userData } from '@src/store/user-data';
+import { applyThemeAppearance } from './theme-appearance';
 import { buildCeramicSkin, buildComponentCss } from './theme-ceramic';
-import {
-  CUSTOM_THEME_ID_SET,
-  DEFAULT_THEME_ID,
-  THEMES,
-  usesTokenPalette,
-} from './theme-registry';
+import { CUSTOM_THEME_ID_SET, DEFAULT_THEME_ID, THEMES, usesTokenPalette } from './theme-registry';
 
 // 界面主题：不再使用 html 上的 invert/hue-rotate 滤镜，而是直接改写颜色。
 // 扫描页面样式表，把每条声明里的颜色按「角色」重映射到一套低饱和浅色皮肤：
@@ -924,6 +920,8 @@ function buildCss(skin: Skin): string {
 }
 
 function init() {
+  watchEffect(() => applyThemeAppearance(document.documentElement, userData.settings));
+
   const style = document.createElement('style');
   style.id = STYLE_ID;
   document.head.appendChild(style);
