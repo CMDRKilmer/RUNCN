@@ -46,6 +46,9 @@ export interface ChainStopPlan {
   unloadChain: Map<string, { amount: number; from: string }>;
   // 提取（基地→船）：本站产物。ticker → { 数量, 去向标签 }。
   load: Map<string, { amount: number; to: string }>;
+  // 提取中运回出发地的可选货物：ticker → 数量。舱容不足时允许裁剪，
+  // 因此不计入分段舱容校验（load 中已包含这部分）。
+  returnLoad: Record<string, number>;
   // 提取被舱容缩减过。
   clipped: boolean;
   // 到站卸货后、提取前的舱载。

@@ -590,6 +590,7 @@ export function computeChainPlan(
       unloadCx: {},
       unloadChain: new Map(),
       load: new Map(),
+      returnLoad: {},
       clipped: false,
       loadOnArrival: { weight: 0, volume: 0 },
       loadOnDeparture: { weight: 0, volume: 0 },
@@ -748,6 +749,7 @@ export function computeChainPlan(
       returnWeight += weight;
       returnVolume += volume;
       plan.finalUnload[item.ticker] = (plan.finalUnload[item.ticker] ?? 0) + amount;
+      stop.returnLoad[item.ticker] = (stop.returnLoad[item.ticker] ?? 0) + amount;
       const existing = stop.load.get(item.ticker);
       if (existing) {
         existing.amount += amount;

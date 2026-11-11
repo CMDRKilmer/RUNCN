@@ -75,31 +75,35 @@ export interface ShipChainPlan {
   plan: ChainPlan;
 }
 
-// 站点货物总重量/体积（卸货 + 提取）——用于按容量分配站点。
+// 站点舱容需求：卸货量与必需装载量取较大者（到站先卸后装，两者不同时在舱内）。
+// 只计必需货物——运回出发地的可选货物可裁剪，不参与分段容量校验。
 function stopShipmentSize(stop: ChainStopPlan) {
-  let weight = 0;
-  let volume = 0;
-  const add = (ticker: string, amount: number) => {
+  const unload = { weight: 0, volume: 0 };
+  const load = { weight: 0, volume: 0 };
+  const add = (target: { weight: number; volume: number }, ticker: string, amount: number) => {
     if (amount <= 0) {
       return;
     }
     const wv = matWeightVolume(ticker, amount);
-    weight += wv.weight;
-    volume += wv.volume;
+    target.weight += wv.weight;
+    target.volume += wv.volume;
   };
   for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
-    add(ticker, amount);
+    add(unload, ticker, amount);
   }
   for (const [ticker, entry] of stop.unloadChain) {
-    add(ticker, entry.amount);
+    add(unload, ticker, entry.amount);
   }
   for (const [ticker, entry] of stop.load) {
-    add(ticker, entry.amount);
+    add(load, ticker, entry.amount - (stop.returnLoad[ticker] ?? 0));
   }
-  return { weight, volume };
+  return {
+    weight: Math.max(unload.weight, load.weight),
+    volume: Math.max(unload.volume, load.volume),
+  };
 }
 
-/** 每站货物总重量/体积（卸货 + 提取）——供时间均衡分段做容量约束。 */
+/** 每站舱容需求（卸货与必需装载取较大值）——供分段做容量约束。 */
 export function chainStopShipmentSizes(plan: ChainPlan): { weight: number; volume: number }[] {
   return plan.stops.map(stop => stopShipmentSize(stop));
 }

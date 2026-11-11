@@ -124,8 +124,14 @@ function createBaseConfig(naturalId: string): DispatchBaseConfig {
   };
 }
 
-function withAllResupplyMaterials(config: DispatchBaseConfig): DispatchBaseConfig {
-  return { ...config, consumablesOnly: true, includeConsumables: true };
+// 计划口径：忽略已下线的每基地物资开关（材料全量参与），采购跟随顶部「CX 购买」。
+function planConfig(config: DispatchBaseConfig): DispatchBaseConfig {
+  return {
+    ...config,
+    consumablesOnly: true,
+    includeConsumables: true,
+    cxBuy: planCxBuy.value,
+  };
 }
 
 function burnDaysRemaining(siteId: string) {
@@ -214,7 +220,7 @@ const chainBases = computed<ChainPlannerBase[]>(() =>
     naturalId: base.naturalId,
     planetName: base.planetName,
     site: base.site,
-    config: withAllResupplyMaterials(config),
+    config: planConfig(config),
   })),
 );
 
@@ -289,7 +295,7 @@ const billByBase = computed(() => {
     if (!config.resupply && !config.repair) {
       continue;
     }
-    const bill = combinedBaseBill(base.naturalId, withAllResupplyMaterials(config), base.site);
+    const bill = combinedBaseBill(base.naturalId, planConfig(config), base.site);
     if (bill) {
       map.set(base.naturalId, bill);
     }
@@ -443,7 +449,7 @@ const includedBases = computed(() => {
       naturalId: base.naturalId,
       planetName: base.planetName,
       site: base.site,
-      config: { ...config, cxBuy: planCxBuy.value },
+      config: planConfig(config),
       dispatchShip,
     });
   }
@@ -458,7 +464,7 @@ function fitShip(shipId: string) {
 
   const sharingBases = rows.value.map(x => ({
     naturalId: x.base.naturalId,
-    config: withAllResupplyMaterials(x.config!),
+    config: planConfig(x.config!),
     site: x.base.site,
   }));
 

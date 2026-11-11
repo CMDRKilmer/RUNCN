@@ -819,6 +819,56 @@ await check('fitting swaps split segments to use the correct warehouses', () => 
     scope.stop();
   }
 });
+await check('capacity fitting ignores optional return cargo', () => {
+  const bs = ['A', 'B', 'C'].map(id => {
+    const site = { siteId: id, address: { id } };
+    sitesStore.all.value.push(site);
+    fixture.analyses[id] = { suppliesCapDays: 1 };
+    return {
+      siteId: id,
+      naturalId: id,
+      planetName: id,
+      site,
+      config: { days: 1, resupply: true, cxBuy: true },
+    };
+  });
+  fixture.bills.A = config => (config.days > 0 ? { M1: 6 } : {});
+  fixture.bills.B = config => (config.days > 0 ? { M2: 4 } : {});
+  fixture.bills.C = config => (config.days > 0 ? { M3: 10 } : {});
+  fixture.products.A = ['Z'];
+  fixture.burns.A = { burn: { Z: { input: 0, output: 1, workforce: 0, inventory: 12 } } };
+  fixture.burns.B = { burn: { M2: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  fixture.burns.C = { burn: { M3: { input: 1, output: 0, workforce: 0, inventory: 0 } } };
+  const ships = [ship('S1'), ship('S2')];
+  for (const vessel of ships) {
+    Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
+  }
+  const scope = effectScope();
+  try {
+    const planning = scope.run(() =>
+      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+    );
+    assert.deepEqual(
+      planning.shipPlans.value.map(part => [
+        part.ship.ship.id,
+        part.plan.stops.map(stop => [stop.naturalId, stop.days]),
+      ]),
+      [
+        [
+          'S1',
+          [
+            ['A', 1],
+            ['B', 1],
+          ],
+        ],
+        ['S2', [['C', 1]]],
+      ],
+    );
+    assert.ok(planning.shipPlans.value.every(part => !part.plan.overCapacity));
+  } finally {
+    scope.stop();
+  }
+});
 await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
   const bs = bases();
   const vessel = ship('S');
