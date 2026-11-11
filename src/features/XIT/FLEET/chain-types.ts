@@ -79,6 +79,7 @@ export interface ChainPlan {
   // 出发地「取货」清单：组内产出的缺口由空间站仓库库存补足（不采购，装船随行）。
   originPickup: Record<string, number>;
   warnings: string[];
+  hasUnmetChainDemand?: true;
   peakLoad: { weight: number; volume: number };
   freeCapacity: { weight: number; volume: number };
   // 飞船总舱容（不是剩余）。

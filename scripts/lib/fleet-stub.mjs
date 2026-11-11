@@ -9,6 +9,7 @@ export const fixture = {
   stores: {},
   production: {},
   analyses: {},
+  materials: {},
 };
 export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: [] });
 export const sitesStore = {
@@ -20,7 +21,9 @@ export const flightsStore = { getById: () => undefined };
 export const stationsStore = { getByNaturalId: () => undefined };
 export const storagesStore = { getByAddressableId: () => [], getById: id => fixture.stores[id] };
 export const productionStore = { getBySiteId: id => fixture.production[id] };
-export const materialsStore = { getByTicker: () => ({ weight: 1, volume: 1 }) };
+export const materialsStore = {
+  getByTicker: ticker => fixture.materials[ticker] ?? { weight: 1, volume: 1 },
+};
 export const cxobStore = {
   getByTicker: id =>
     fixture.supply[id] === undefined ? undefined : { supply: fixture.supply[id] },

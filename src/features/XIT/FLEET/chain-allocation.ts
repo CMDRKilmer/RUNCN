@@ -440,6 +440,8 @@ export function splitChainPlanAcrossShips(
   // 由调用方提供，船的顺序可以与航线分段顺序不同。
   // 未提供 / 长度与 usable 不匹配时退回按舱容贪心切段（旧行为）。
   allocByNaturalId?: string[][],
+  // Keep empty subplans during fitting so their capacity and supply failures remain visible.
+  options?: { includeEmptyPlans?: boolean },
 ): ShipChainPlan[] {
   const byId = new Map(bases.map(b => [b.naturalId, b] as const));
   const ordered = plan.stops
@@ -529,7 +531,7 @@ export function splitChainPlanAcrossShips(
       exchangeCode: ship.exchangeCode,
       ...(arrivalHoursByNaturalId !== undefined ? { arrivalHoursByNaturalId } : {}),
     });
-    if (sub && sub.stops.length > 0) {
+    if (sub && (sub.stops.length > 0 || options?.includeEmptyPlans === true)) {
       for (const [ticker, amount] of Object.entries(sub.originPickup)) {
         stock[ticker] = Math.max(0, (stock[ticker] ?? 0) - amount);
       }

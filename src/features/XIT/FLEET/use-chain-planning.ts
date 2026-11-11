@@ -20,6 +20,10 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { fixed0 } from '@src/utils/format';
 import { gameNow } from '@src/infrastructure/fio/orbit';
 
+function fitsChainPlan(plan: ChainPlan) {
+  return !plan.overCapacity && plan.hasUnmetChainDemand !== true;
+}
+
 export function useChainPlanning(input: {
   ships: () => DispatchShip[];
   bases: () => ChainPlannerBase[];
@@ -49,31 +53,51 @@ export function useChainPlanning(input: {
     selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
   );
 
+  function splitCandidate(
+    plan: ChainPlan,
+    bases: ChainPlannerBase[],
+    arrivalHours?: Map<string, number>,
+    ranges?: string[][],
+  ) {
+    return splitChainPlanAcrossShips(plan, selectedShips.value, bases, arrivalHours, ranges, {
+      includeEmptyPlans: true,
+    });
+  }
+
   function splitForCapacity(
     plan: ChainPlan,
     bases: ChainPlannerBase[],
     arrivalHours?: Map<string, number>,
   ) {
-    const ships = selectedShips.value;
-    const greedy = splitChainPlanAcrossShips(plan, ships, bases, arrivalHours);
+    const greedy = splitCandidate(plan, bases, arrivalHours);
     const usable = usableChainShips.value;
-    if (usable.length < 2 || greedy.every(shipPlan => !shipPlan.plan.overCapacity)) {
+    if (usable.length < 2 || greedy.every(shipPlan => fitsChainPlan(shipPlan.plan))) {
       return greedy;
     }
     // Unit travel times let the segment solver test capacity before flight estimates arrive.
-    const split = planTimeBalancedSegments({
-      loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
-      capacities: usable.map(ship => shipChainCapacity(ship)!),
-      stopSizes: chainStopShipmentSizes(plan),
-    });
+    const outbound = plan.stops.map(() => 1);
+    const between = outbound.slice(1);
+    const capacities = usable.map(ship => shipChainCapacity(ship)!);
+    const stopSizes = chainStopShipmentSizes(plan);
+    const split =
+      planFastestChainSegments({
+        timings: usable.map(() => ({ outbound, inbound: outbound, between })),
+        capacities,
+        stopSizes,
+      }) ??
+      planTimeBalancedSegments({
+        loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
+        capacities,
+        stopSizes,
+      });
     if (!split) {
       return greedy;
     }
     const ranges = split.ranges.map(({ start, end }) =>
       plan.stops.slice(start, end).map(stop => stop.naturalId),
     );
-    const balanced = splitChainPlanAcrossShips(plan, ships, bases, arrivalHours, ranges);
-    return balanced.every(shipPlan => !shipPlan.plan.overCapacity) ? balanced : greedy;
+    const balanced = splitCandidate(plan, bases, arrivalHours, ranges);
+    return balanced.every(shipPlan => fitsChainPlan(shipPlan.plan)) ? balanced : greedy;
   }
 
   // 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
@@ -110,12 +134,14 @@ export function useChainPlanning(input: {
     const cap = Math.max(...resupplyBases.map(base => getSuppliesCap(base.site)));
     const days = fitTargetDays(cap, target => {
       const candidate = planAt(target);
-      if (!candidate.plan || candidate.plan.overCapacity) {
+      if (!candidate.plan || !fitsChainPlan(candidate.plan)) {
         return false;
       }
       // 合并舱容可装下时，分段后仍可能有单艘船超载。
-      return splitForCapacity(candidate.plan, candidate.bases, arrivalHours).every(
-        shipPlan => !shipPlan.plan.overCapacity,
+      const parts = splitForCapacity(candidate.plan, candidate.bases, arrivalHours);
+      return (
+        (candidate.plan.stops.length === 0 || parts.length > 0) &&
+        parts.every(shipPlan => fitsChainPlan(shipPlan.plan))
       );
     });
     return planAt(days);
@@ -338,15 +364,16 @@ export function useChainPlanning(input: {
       return [];
     }
     const { plan, bases } = fitted;
-    const ships = selectedShips.value;
     const allocation = allocFor(plan);
     if (allocation) {
-      const balanced = splitChainPlanAcrossShips(plan, ships, bases, arrivalHours, allocation);
-      if (balanced.every(shipPlan => !shipPlan.plan.overCapacity)) {
-        return balanced;
+      const balanced = splitCandidate(plan, bases, arrivalHours, allocation);
+      if (balanced.every(shipPlan => fitsChainPlan(shipPlan.plan))) {
+        return balanced.filter(shipPlan => shipPlan.plan.stops.length > 0);
       }
     }
-    return splitForCapacity(plan, bases, arrivalHours);
+    return splitForCapacity(plan, bases, arrivalHours).filter(
+      shipPlan => shipPlan.plan.stops.length > 0,
+    );
   }
 
   const baseShipPlans = computed(() => splitFittedRoute(fittedBaseRoute.value));

@@ -442,6 +442,9 @@ export function computeChainPlan(
     }
   }
 
+  if (producedGap.size > 0) {
+    plan.hasUnmetChainDemand = true;
+  }
   for (const [ticker, gap] of producedGap) {
     warnings.push(`「${ticker}」为组内产出，缺口 ${gap} 未能由空间站库存补足，不再从 CX 采购。`);
   }
