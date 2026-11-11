@@ -468,11 +468,17 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='
   font-weight: 600 !important;
 }
 
-html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off'])) :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table th {
+html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off']))
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  table
+  th {
   border-bottom: 1px solid var(--rp-skin-border-strong, currentColor) !important;
 }
 
-html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off'])) :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table td {
+html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off']))
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  table
+  td {
   border-bottom: 1px solid var(--rp-skin-border, currentColor) !important;
 }
 
@@ -701,13 +707,15 @@ html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-comm
 }
 
 /* 用阴影描边，避免改变浮窗内容区尺寸。 */
-html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on']) [class*='Window__window'] {
+html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on'])
+  [class*='Window__window'] {
   box-shadow:
     0 0 0 2px rgb(var(--rp-window-border-rgb)),
     0 0 0 5px var(--rp-skin-panel, #222) !important;
 }
 
-html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on']) [class*='Window__header'] {
+html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on'])
+  [class*='Window__header'] {
   box-shadow: inset 0 -2px 0 0 rgb(var(--rp-window-border-rgb)) !important;
 }
 
