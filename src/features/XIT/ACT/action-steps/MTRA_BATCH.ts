@@ -49,10 +49,14 @@ function prepErrorText(error: string, ticker: string): string {
       return '缓冲区设置超时，已重试 3 次';
     case 'MTRA_NO_SUGGESTIONS':
       return `在材料选择器中未找到 ${ticker}`;
+    case 'MTRA_NO_INPUT':
+      return '未找到材料输入框';
     case 'MTRA_SLIDER_EMPTY':
       return '数量滑块未加载，无法确定最大可转移量';
     case 'MTRA_NO_AMOUNT_INPUT':
       return '未找到数量输入框';
+    case 'MTRA_SELECT_FAILED':
+      return `无法在材料选择器中选中 ${ticker}`;
     default:
       return error;
   }
@@ -136,7 +140,7 @@ export const MTRA_BATCH = act.addActionStep<Data>({
         const item = items[i];
         const win = windows[i];
         setStatus(`正在设置 ${item.ticker}（${i + 1}/${items.length}）...`);
-        const prep = await prepareMtraWindow(win.tile, item.ticker, retry => {
+        const prep = await prepareMtraWindow(win.tile.anchor, item.ticker, retry => {
           log.warning(`MTRA 缓冲区设置超时，正在重试...（${retry + 1}/${MTRA_MAX_RETRIES}）`);
         });
         if (typeof prep === 'string') {

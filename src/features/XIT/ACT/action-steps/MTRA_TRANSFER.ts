@@ -79,12 +79,16 @@ export const MTRA_TRANSFER = act.addActionStep<Data>({
       return;
     }
     setStatus('正在设置 MTRA 缓冲区...');
-    const prep = await prepareMtraWindow(tile, ticker, retry => {
+    const prep = await prepareMtraWindow(tile.anchor, ticker, retry => {
       log.warning(`MTRA 缓冲区设置超时，正在重试...（${retry + 1}/${MTRA_MAX_RETRIES}）`);
       setStatus(`正在重试设置 MTRA 缓冲区（${retry + 1}/${MTRA_MAX_RETRIES}）...`);
     });
     if (prep === 'MTRA_TIMEOUT') {
       fail('MTRA 缓冲区设置超时，已重试 3 次');
+      return;
+    }
+    if (prep === 'MTRA_NO_INPUT') {
+      fail('未找到 MTRA 材料输入框');
       return;
     }
     if (prep === 'MTRA_NO_SUGGESTIONS') {
@@ -93,6 +97,10 @@ export const MTRA_TRANSFER = act.addActionStep<Data>({
     }
     if (prep === 'MTRA_SLIDER_EMPTY') {
       fail(`${ticker} MTRA 数量滑块未加载，无法确定最大可转移量`);
+      return;
+    }
+    if (prep === 'MTRA_SELECT_FAILED') {
+      fail(`无法在材料选择器中选中 ${ticker}`);
       return;
     }
     if (prep === 'MTRA_NO_AMOUNT_INPUT') {

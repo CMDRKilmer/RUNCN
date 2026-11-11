@@ -8,8 +8,12 @@ import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { atSameLocation, serializeStorage, storageSort } from '@src/features/XIT/ACT/actions/utils';
+import {
+  MTRA_MAX_RETRIES,
+  prepareMtraWindow,
+} from '@src/features/XIT/ACT/action-steps/mtra-common';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
+import { changeInputValue, clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
 import type { RefuelResult } from './refuel-result';
 
@@ -42,11 +46,6 @@ interface PreparedTransfer {
   transferButton: HTMLElement;
 }
 
-const MTRA_TIMEOUT = 1700;
-const MTRA_COMMAND_RETRIES = 3;
-const MTRA_RETRY_DELAY = 150;
-const MTRA_TIMEOUT_ERROR = 'MTRA_TIMEOUT';
-const MTRA_NO_SUGGESTIONS_ERROR = 'MTRA_NO_SUGGESTIONS';
 const MTRA_SWITCH_TIMEOUT_ERROR = 'MTRA_SWITCH_TIMEOUT';
 
 const ship = computed(() => shipsStore.getByRegistration(registration));
@@ -188,22 +187,6 @@ function getMtraCommand(plan: TransferPlan) {
   return `MTRA from-${plan.from.id.substring(0, 8)} to-${plan.to.id.substring(0, 8)}`;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('打开转移界面超时。')), ms);
-    promise.then(
-      value => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      error => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
 async function readTransferBuffer(tileElement: HTMLElement): Promise<TransferBuffer> {
   const frame = (await $(tileElement, C.TileFrame.frame)) as HTMLElement;
   const anchor = (await $(tileElement, C.TileFrame.anchor)) as HTMLElement;
@@ -237,55 +220,10 @@ async function waitForTransferCommand(tileElement: HTMLElement, command: string)
   throw new Error(MTRA_SWITCH_TIMEOUT_ERROR);
 }
 
-async function setupMtraBuffer(anchor: HTMLElement, ticker: string) {
-  await clickElement(anchor);
-  window.getSelection()?.removeAllRanges();
-
-  const container = await withTimeout($(anchor, C.MaterialSelector.container), MTRA_TIMEOUT);
-  const input = (await withTimeout($(container, 'input'), MTRA_TIMEOUT)) as HTMLInputElement;
-  const suggestionsContainer = await withTimeout(
-    $(container, C.MaterialSelector.suggestionsContainer),
-    MTRA_TIMEOUT,
-  );
-
-  let suggestionsList: Element | undefined;
-  for (let attempt = 0; attempt < 15; attempt++) {
-    await clickElement(input);
-    focusElement(input);
-    input.focus();
-    changeInputValue(input, ticker);
-    window.getSelection()?.removeAllRanges();
-    await sleep(150);
-    suggestionsList = _$(container, C.MaterialSelector.suggestionsList);
-    if (suggestionsList) {
-      break;
-    }
-  }
-
-  if (!suggestionsList) {
-    throw new Error(`无法加载 ${ticker} 的可选材料。`);
-  }
-
-  return { suggestionsContainer, suggestionsList };
-}
-
-async function setupTransferWithRetry(buffer: TransferBuffer, ticker: TransferPlan['ticker']) {
-  let lastError: unknown;
-  for (let retry = 0; retry < MTRA_COMMAND_RETRIES; retry++) {
-    try {
-      return await setupMtraBuffer(buffer.anchor, ticker);
-    } catch (error: unknown) {
-      lastError = error;
-      if (retry === MTRA_COMMAND_RETRIES - 1) {
-        throw error;
-      }
-      appendLog(`${ticker} buffer setup retry ${retry + 1}/${MTRA_COMMAND_RETRIES}`);
-      await sleep(MTRA_RETRY_DELAY);
-    }
-  }
-
-  const message = lastError instanceof Error ? lastError.message : MTRA_TIMEOUT_ERROR;
-  throw new Error(message || MTRA_NO_SUGGESTIONS_ERROR);
+async function setupTransferWithRetry(buffer: TransferBuffer, plan: TransferPlan) {
+  return await prepareMtraWindow(buffer.anchor, plan.ticker, retry => {
+    appendLog(`${plan.ticker} buffer setup retry ${retry + 1}/${MTRA_MAX_RETRIES}`);
+  });
 }
 
 async function waitActionProgress(overlay: HTMLElement) {
@@ -332,51 +270,33 @@ async function waitTransferFeedback(frame: HTMLElement) {
   throw new Error('收到未知的转移反馈。');
 }
 
+const MTRA_PREPARE_ERRORS: Record<string, string> = {
+  MTRA_TIMEOUT: '转移界面加载超时。',
+  MTRA_NO_INPUT: '找不到材料输入框。',
+  MTRA_NO_SUGGESTIONS: '材料选择器中没有该材料。',
+  MTRA_SLIDER_EMPTY: '当前无法转移。',
+  MTRA_NO_AMOUNT_INPUT: '找不到转移数量输入框。',
+  MTRA_SELECT_FAILED: '无法在材料选择器中选中该材料。',
+};
+
 async function prepareTransfer(
   buffer: TransferBuffer,
   plan: TransferPlan,
 ): Promise<PreparedTransfer> {
-  const { suggestionsContainer, suggestionsList } = await setupTransferWithRetry(
-    buffer,
-    plan.ticker,
-  );
-
-  suggestionsContainer.style.display = 'none';
-  const match = _$$(suggestionsList, C.MaterialSelector.suggestionEntry).find(
-    entry => _$(entry, C.ColoredIcon.label)?.textContent === plan.ticker,
-  );
-  if (!match) {
-    suggestionsContainer.style.display = '';
-    throw new Error(`在材料选择器中找不到 ${plan.ticker}。`);
+  const prep = await setupTransferWithRetry(buffer, plan);
+  if (typeof prep === 'string') {
+    throw new Error(`${plan.ticker}：${MTRA_PREPARE_ERRORS[prep] ?? prep}`);
   }
 
-  await clickElement(match as HTMLElement);
-  suggestionsContainer.style.display = '';
-
-  const sliderNumbers = _$$(buffer.anchor, 'rc-slider-mark-text').map(x =>
-    Number(x.textContent ?? 0),
-  );
-  const maxAmount = Math.max(...sliderNumbers);
-  if (!Number.isFinite(maxAmount) || maxAmount <= 0) {
-    throw new Error(`${plan.ticker} 当前无法转移。`);
-  }
-
-  const amount = Math.min(plan.amount, maxAmount);
+  const amount = Math.min(plan.amount, prep.maxAmount);
   if (amount < plan.needed) {
     appendLog(`${plan.ticker} 仅可转移 ${amount}/${plan.needed}`);
   }
 
-  const allInputs = _$$(buffer.anchor, 'input');
-  const amountInput = allInputs[1] as HTMLInputElement | undefined;
-  if (!amountInput) {
-    throw new Error('找不到转移数量输入框。');
-  }
-
-  changeInputValue(amountInput, amount.toString());
+  changeInputValue(prep.amountInput, amount.toString());
   window.getSelection()?.removeAllRanges();
 
-  const transferButton = (await $(buffer.anchor, C.Button.btn)) as HTMLElement;
-  return { buffer, plan, transferButton };
+  return { buffer, plan, transferButton: prep.transferButton };
 }
 
 async function submitPreparedTransfer(prepared: PreparedTransfer) {
