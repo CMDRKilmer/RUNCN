@@ -1531,7 +1531,7 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .slotHint {
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   opacity: 0.6;
 }
 
@@ -1646,11 +1646,11 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .materialAmount {
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
 }
 
 .hint {
-  font-size: 11px;
+  font-size: calc(9px + 2px * var(--rp-font-enlargement));
   opacity: 0.6;
   font-weight: normal;
 }
@@ -1671,7 +1671,7 @@ function wfOk(tier: WfTier): boolean {
 
 .priceX {
   opacity: 0.5;
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
 }
 
 .priceInput {
@@ -1683,7 +1683,7 @@ function wfOk(tier: WfTier): boolean {
 }
 
 .priceSubtotal {
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   opacity: 0.8;
   min-width: 80px;
 }

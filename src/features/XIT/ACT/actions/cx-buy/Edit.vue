@@ -102,7 +102,7 @@ defineExpose({ validate, save });
 
 .priceOverviewHeader {
   color: #888;
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 4px;

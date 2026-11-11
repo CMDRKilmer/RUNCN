@@ -582,7 +582,6 @@ function isBest(component: { bestExchange?: string }, code: string) {
           </tbody>
         </table>
       </div>
-
     </template>
   </div>
 </template>
@@ -854,7 +853,7 @@ function isBest(component: { bestExchange?: string }, code: string) {
 
 .currencyTag {
   color: rgb(148, 158, 166);
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
   margin-left: 3px;
   font-weight: normal;
 }

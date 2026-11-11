@@ -663,7 +663,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   flex-wrap: wrap;
   gap: 12px;
   padding: 4px 8px;
-  font-size: 1em;
+  font-size: calc(0.9em + 0.1em * var(--rp-font-enlargement));
 }
 
 /* 强调文字（统计数字 / 材料名 / 排名）不能用 --rp-color-accent-primary：
@@ -711,7 +711,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
 }
 
 .filterLabel {
-  font-size: 1em;
+  font-size: calc(0.85em + 0.15em * var(--rp-font-enlargement));
   color: var(--rp-skin-ink, #ccc);
 }
 
@@ -720,7 +720,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   color: var(--rp-skin-ink, #ccc);
   border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 1em;
+  font-size: calc(0.85em + 0.15em * var(--rp-font-enlargement));
 }
 
 .searchInput {
@@ -728,7 +728,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   color: var(--rp-skin-ink, #ccc);
   border: 1px solid var(--rp-skin-border, #2b485a);
   padding: 2px 6px;
-  font-size: 1em;
+  font-size: calc(0.85em + 0.15em * var(--rp-font-enlargement));
   width: 90px;
 }
 
@@ -758,7 +758,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 1em;
+  font-size: calc(0.85em + 0.15em * var(--rp-font-enlargement));
   white-space: nowrap;
 }
 

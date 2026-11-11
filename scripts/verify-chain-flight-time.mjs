@@ -340,6 +340,35 @@ const run = (origin, stopIds) =>
     startAtMs: T0,
   });
 
+await checkAsync('分段端点分别估算去程和归航，缺失方向保留为空', async f => {
+  prepareEnvironment();
+  const origin = 'ZZ-101l';
+  const first = 'ZZ-101m';
+  const second = 'ZZ-101n';
+  dispatchTransit(origin, first, 30_000_000, 1800);
+  dispatchTransit(first, origin, 50_000_000, 2600);
+  dispatchTransit(origin, second, 45_000_000, 2200);
+  stub.stubForcePredictFail(true);
+  try {
+    const allocation = await estimateChainFlightTimes({
+      ship: SHIP,
+      origin,
+      stops: [first, second].map(naturalId => ({ naturalId, planetName: naturalId })),
+      startAtMs: T0,
+      includeEndpointHours: true,
+    });
+    const firstDirect = await run(origin, [first]);
+    const secondDirect = await run(origin, [second]);
+    expectExact(f, '首站去程', allocation.endpointHours?.outbound[0], firstDirect.legs[0].hours);
+    expectExact(f, '首站归航', allocation.endpointHours?.inbound[0], firstDirect.legs[1].hours);
+    expectExact(f, '末站去程', allocation.endpointHours?.outbound[1], secondDirect.legs[0].hours);
+    expectExact(f, '末站归航判缺', allocation.endpointHours?.inbound[1], undefined);
+    expectExact(f, '缺少相邻站估时', allocation.legs[1].ok, false);
+  } finally {
+    stub.stubForcePredictFail(false);
+  }
+});
+
 // ---- ① 系内 + 无任何原生记录 + 几何预测失败：每段判缺（锁 A1 路径的核心契约）----
 await checkAsync('① 系内 + 几何预测失败 → 每段判缺（ok=false / hours=0 / 不推进时刻）', async f => {
   prepareEnvironment();

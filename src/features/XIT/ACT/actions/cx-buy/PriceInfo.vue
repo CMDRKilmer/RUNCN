@@ -167,7 +167,7 @@ function nullable(v: number | null | undefined) {
 .sub {
   color: #777;
   margin-left: 4px;
-  font-size: 11px;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
 }
 
 .muted {

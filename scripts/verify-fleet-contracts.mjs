@@ -14,7 +14,8 @@ const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-p
 const { executeChainPlans, clearShipChainPlan } =
   await import('../src/features/XIT/FLEET/chain-commands.ts');
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
-const { splitChainPlanAcrossShips } = await import('../src/features/XIT/FLEET/chain-allocation.ts');
+const { planFastestChainSegments, splitChainPlanAcrossShips } =
+  await import('../src/features/XIT/FLEET/chain-allocation.ts');
 const { buildChainActionPackages } = await import('../src/features/XIT/FLEET/chain-actions.ts');
 const { completeActionPackage } = await import('../src/features/XIT/FLEET/action-completion.ts');
 const { collectPendingChainSteps } = await import('../src/features/XIT/FLEET/chain-recovery.ts');
@@ -46,6 +47,7 @@ async function check(name, fn) {
   windows.length = 0;
   estimation.calls = [];
   estimation.pending = null;
+  estimation.result = null;
   shipsStore.fetched.value = true;
   sitesStore.all.value = [];
   await fn();
@@ -445,6 +447,149 @@ await check('combined planning retains stops for ships at another exchange', asy
   scope.stop();
   await nextTick();
 });
+await check('fastest split reverses ship order and breaks ties on total flight time', () => {
+  const cap = { freeWeight: 1, freeVolume: 1 };
+  const sizes = [
+    { weight: 1, volume: 1 },
+    { weight: 1, volume: 1 },
+  ];
+  const allocation = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: sizes,
+    timings: [
+      { outbound: [8, 3], inbound: [2, 7], between: [undefined] },
+      { outbound: [0.5, 5], inbound: [0.5, 2], between: [undefined] },
+    ],
+  });
+  assert.deepEqual(allocation, {
+    ranges: [
+      { start: 1, end: 2 },
+      { start: 0, end: 1 },
+    ],
+    hours: [10, 1],
+  });
+  const missing = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: sizes,
+    timings: [
+      { outbound: [undefined, 3], inbound: [2, 7], between: [undefined] },
+      { outbound: [0.5, undefined], inbound: [0.5, 2], between: [undefined] },
+    ],
+  });
+  assert.deepEqual(missing, allocation);
+  const oversized = planFastestChainSegments({
+    capacities: [cap, cap],
+    stopSizes: [sizes[0], { weight: 1, volume: 2 }],
+    timings: [
+      { outbound: [8, 3], inbound: [2, 7], between: [1] },
+      { outbound: [0.5, 5], inbound: [0.5, 2], between: [1] },
+    ],
+  });
+  assert.equal(oversized, undefined);
+});
+await check(
+  'ring planning uses each origin and applies the faster order with partial estimates',
+  async () => {
+    const bs = bases();
+    const items = [{ quantity: { material: { ticker: 'RAT' }, amount: 10 } }];
+    const ships = [ship('S1', items), ship('S2', items)];
+    for (const vessel of ships) {
+      vessel.cargoStore.weightCapacity = vessel.cargoStore.volumeCapacity = 10;
+      vessel.ship.address.id = `CX-${vessel.ship.id}`;
+    }
+    estimation.result = input => ({
+      ok: false,
+      legs: [
+        { ok: true, hours: 5 },
+        { ok: false, hours: 0 },
+        { ok: true, hours: 5 },
+      ],
+      endpointHours: input.includeEndpointHours
+        ? input.ship.id === 'S1'
+          ? { outbound: [5, 1], inbound: [5, 1] }
+          : { outbound: [1, 5], inbound: [1, 5] }
+        : undefined,
+    });
+    const scope = effectScope();
+    try {
+      const planning = scope.run(() =>
+        useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
+      );
+      await new Promise(resolve => setImmediate(resolve));
+      assert.deepEqual(
+        estimation.calls.filter(call => call.includeEndpointHours).map(call => call.origin),
+        ['CX-S1', 'CX-S2'],
+      );
+      assert.deepEqual(
+        planning.shipPlans.value.map(p => [p.ship.ship.id, p.plan.stops[0].naturalId]),
+        [
+          ['S2', 'A'],
+          ['S1', 'B'],
+        ],
+      );
+      assert.equal(planning.shipPlans.value[0].plan.originPickup.RAT, 10);
+      assert.equal(planning.shipPlans.value[1].plan.purchaseBill.RAT, 10);
+    } finally {
+      scope.stop();
+      await nextTick();
+    }
+  },
+);
+await check(
+  'chain selection fits each ship without using dispatch assignments or days',
+  async () => {
+    const bs = bases();
+    for (const base of bs) {
+      base.config.resupply = true;
+      base.config.days = 2;
+      fixture.analyses[base.siteId] = { suppliesCapDays: 40 };
+      fixture.bills[base.siteId] = config =>
+        config.days > 0 ? { RAT: Math.ceil(Math.min(config.days, 40)) } : {};
+    }
+    const first = ship('S1');
+    first.cargoStore.volumeCapacity = 35;
+    first.cargoStore.volumeLoad = 5;
+    const second = ship('S2');
+    second.cargoStore.weightCapacity = 32;
+    second.cargoStore.weightLoad = 2;
+    const selected = ref([first]);
+    const runs = ref([]);
+    const scope = effectScope();
+    try {
+      const planning = scope.run(() =>
+        useChainPlanning({ ships: () => selected.value, bases: () => bs, runs: () => runs.value }),
+      );
+      const days = () => planning.shipPlans.value.flatMap(p => p.plan.stops.map(stop => stop.days));
+      assert.deepEqual(days(), [15, 15]);
+      selected.value = [first, second];
+      await nextTick();
+      assert.deepEqual(days(), [30, 30]);
+      assert.ok(planning.shipPlans.value.every(p => !p.plan.overCapacity));
+      selected.value = [
+        { ...first, cargoStore: { ...first.cargoStore, volumeCapacity: 10 } },
+        second,
+      ];
+      await nextTick();
+      assert.deepEqual(days(), [15, 15]);
+      assert.deepEqual(
+        planning.shipPlans.value.map(p => p.ship.ship.id),
+        ['S2'],
+      );
+      runs.value = [{ shipId: 'S1', run: {} }];
+      assert.deepEqual(days(), [15, 15]);
+      assert.deepEqual(
+        bs.map(base => [base.config.ship, base.config.days]),
+        [
+          [undefined, 2],
+          [undefined, 2],
+        ],
+      );
+    } finally {
+      scope.stop();
+      await nextTick();
+    }
+  },
+);
 await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
   const bs = bases();
   const vessel = ship('S');

@@ -44,6 +44,17 @@ export function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '11.11.2026 Add theme appearance settings',
+    userData => {
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      settings.themeFontSize ??= 'large';
+      settings.themeBorders ??= 'theme';
+    },
+  ],
+  [
     '08.11.2026 Add BLU hidden blueprints settings',
     userData => {
       // 存量数据没有这两个字段：默认不隐藏任何蓝图、不显示隐藏项，

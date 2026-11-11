@@ -270,7 +270,7 @@ function onClick() {
 
 .full {
   width: 100%;
-  font-size: 10px;
+  font-size: calc(8px + 2px * var(--rp-font-enlargement));
   display: flex;
   align-items: center;
   justify-content: center;

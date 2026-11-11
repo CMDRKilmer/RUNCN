@@ -1,4 +1,5 @@
 html {
+  --rp-font-enlargement: 1;
   --rp-color-text-component: #bbb;
   --rp-color-text: #999;
   --rp-color-disabled: #444;
@@ -79,9 +80,12 @@ html[data-rp-theme='paper'] {
   --rp-inv-cat-bg-rgb: var(--rp-inv-cat-other-rgb);
 }
 
-/* 所有 XIT 面板里的选项按钮（RadioItem）文字统一放大 1 号：10px → 11px。
-   游戏原生 typeSmall 是 10px，主题引擎只改颜色不改字号，这里用 !important 压过。 */
-[class*='RadioItem__value'] {
+html[data-rp-font-size='standard'] {
+  --rp-font-enlargement: 0;
+}
+
+/* 放大选项标签时覆盖游戏的原生字号。 */
+:where(html:not([data-rp-font-size='standard'])) [class*='RadioItem__value'] {
   font-size: 11px !important;
 }
 
@@ -345,8 +349,8 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] [data-rp-ui][data-rp-selected=
   border-bottom: 1px solid var(--rp-skin-border, rgba(169, 190, 205, 0.45)) !important;
 }
 
-/* 2) 表格数据行：HQ 库存分配、REPD 左侧基地栏、CBUY 等共用同一套原生表 */
-table td {
+/* 2) 增强表格行分隔 */
+:where(html[data-rp-theme]:not([data-rp-borders='off']), html[data-rp-borders='on']) table td {
   border-bottom: 1px solid var(--rp-skin-border, rgba(169, 190, 205, 0.45)) !important;
 }
 
@@ -461,11 +465,14 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='
   color: var(--rp-skin-ink, inherit) !important;
   opacity: 1 !important;
   background-color: var(--rp-skin-panel-strong, transparent) !important;
-  border-bottom: 1px solid var(--rp-skin-border-strong, currentColor) !important;
   font-weight: 600 !important;
 }
 
-html[data-rp-theme][data-rp-theme][data-rp-theme] :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table td {
+html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off'])) :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table th {
+  border-bottom: 1px solid var(--rp-skin-border-strong, currentColor) !important;
+}
+
+html[data-rp-theme][data-rp-theme][data-rp-theme]:where(:not([data-rp-borders='off'])) :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN']) table td {
   border-bottom: 1px solid var(--rp-skin-border, currentColor) !important;
 }
 
@@ -693,26 +700,14 @@ html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-comm
   content: '其他';
 }
 
-/* ── 自定义主题（浅色明亮 / 暖米纸）下的浮动缓存窗口边界 ──────────────
-   theme.ts 会把游戏原生窗口边框的颜色重映射成接近浅底的浅色，新建的缓存窗口
-   和点按钮弹出的窗口因此容易和背景融为一体。default「原样」主题会 delete
-   dataset.rpTheme，所以下面规则只在自定义主题下生效。
-   用 box-shadow 而不是 border：窗口宽高由游戏 inline style 精确控制，border
-   会占盒模型尺寸、可能把内容挤出滚动条。颜色只写 var() 且不带 # 回退，
-   避免被主题引擎的 COLOR_RE 扫描二次改写。
-   用户反馈原先的主题石板蓝描边仍不突出，先改成橙色、后又定为深蓝
-   （--rp-window-border-rgb）；内圈 2px / 外圈 5px 的结构保持不变。
-   颜色是纯 RGB 三元组变量，主题引擎只会跳过无法解析的 var()，
-   三套主题下都是同一个深蓝。
-   只匹配浮动窗口外壳 Window__window；底栏 Dock 项与 FB 面板内嵌磁贴
-   （TileFrame__frame）都不带这个类名，不会被误伤。 */
-html[data-rp-theme] [class*='Window__window'] {
+/* 用阴影描边，避免改变浮窗内容区尺寸。 */
+html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on']) [class*='Window__window'] {
   box-shadow:
     0 0 0 2px rgb(var(--rp-window-border-rgb)),
-    0 0 0 5px var(--rp-skin-panel) !important;
+    0 0 0 5px var(--rp-skin-panel, #222) !important;
 }
 
-html[data-rp-theme] [class*='Window__header'] {
+html:is([data-rp-theme]:where(:not([data-rp-borders='off'])), [data-rp-borders='on']) [class*='Window__header'] {
   box-shadow: inset 0 -2px 0 0 rgb(var(--rp-window-border-rgb)) !important;
 }
 
@@ -733,7 +728,7 @@ html[data-rp-theme] [class*='Window__header'] {
 }
 
 [data-rp-fb-panel] [data-fb-slot] [class*='TileFrame__title'] {
-  font-size: calc(1em + 2px) !important;
+  font-size: calc(1em + 2px * var(--rp-font-enlargement)) !important;
 }
 
 /* ══════════════════════════════════════════════════════════════════════

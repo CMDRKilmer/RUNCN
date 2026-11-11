@@ -439,14 +439,10 @@ const includedBases = computed(() => {
   return result;
 });
 
-function fitBase(naturalId: string) {
-  const config = baseConfigs.value[naturalId];
-  if (!config?.ship) {
-    return;
-  }
-  const dispatchShip = cxShipById.value.get(config.ship);
+function fitShip(shipId: string) {
+  const dispatchShip = cxShipById.value.get(shipId);
   if (!dispatchShip?.cargoStore) {
-    return;
+    return false;
   }
 
   const sharingBases = rows.value.map(x => ({
@@ -455,17 +451,37 @@ function fitBase(naturalId: string) {
     site: x.base.site,
   }));
 
-  const days = fitDaysForShip(config.ship, sharingBases, dispatchShip.cargoStore);
+  const days = fitDaysForShip(shipId, sharingBases, dispatchShip.cargoStore);
   if (days === undefined) {
-    return;
+    return false;
   }
 
   for (const base of sharingBases) {
-    if (base.config.ship === config.ship && base.config.resupply) {
+    if (base.config.ship === shipId && base.config.resupply) {
       base.config.days = days;
     }
   }
+  return true;
 }
+
+const pendingShipFits = reactive(new Map<string, string>());
+
+function assignShip(naturalId: string, shipId: string) {
+  const config = baseConfigs.value[naturalId];
+  if (config === undefined || !cxShipById.value.has(shipId)) {
+    return;
+  }
+  config.ship = shipId;
+  pendingShipFits.set(naturalId, shipId);
+}
+
+watchEffect(() => {
+  for (const [naturalId, shipId] of pendingShipFits) {
+    if (baseConfigs.value[naturalId]?.ship !== shipId || fitShip(shipId)) {
+      pendingShipFits.delete(naturalId);
+    }
+  }
+});
 
 function execute() {
   if (includedBases.value.length === 0) {
@@ -708,7 +724,6 @@ async function importDispatchConfig() {
                 <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">装载</th>
                 <th :class="[$style.narrowCol, $style.centered]">物资</th>
-                <th :class="[$style.narrowCol, $style.centered]">适配</th>
                 <th :class="[$style.narrowCol, $style.centered]">CX</th>
                 <th v-if="showFill" :class="[$style.narrowCol, $style.centered]">填满</th>
                 <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
@@ -735,7 +750,7 @@ async function importDispatchConfig() {
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)
                   "
-                  @fit="fitBase(rowById.get(id)!.base.naturalId)" />
+                  @assign-ship="assignShip(id, $event)" />
               </template>
             </tbody>
           </table>

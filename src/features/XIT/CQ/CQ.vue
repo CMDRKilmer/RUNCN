@@ -483,19 +483,19 @@ const lmTotal = computed(() => {
   color: #ccc;
   border: 1px solid #2b485a;
   padding: 2px 8px;
-  font-size: 1em;
+  font-size: calc(0.9em + 0.1em * var(--rp-font-enlargement));
   min-width: 220px;
 }
 
 .hint {
-  font-size: 1em;
+  font-size: calc(0.75em + 0.25em * var(--rp-font-enlargement));
   opacity: 0.6;
 }
 
 .companyBar {
   padding: 6px 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 1em;
+  font-size: calc(0.95em + 0.05em * var(--rp-font-enlargement));
 }
 
 .section {
@@ -514,7 +514,7 @@ const lmTotal = computed(() => {
 }
 
 .sectionStat {
-  font-size: 1em;
+  font-size: calc(0.8em + 0.2em * var(--rp-font-enlargement));
   opacity: 0.7;
 }
 
@@ -522,7 +522,7 @@ const lmTotal = computed(() => {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 1em;
+  font-size: calc(0.9em + 0.1em * var(--rp-font-enlargement));
 }
 
 .container table th {
@@ -545,7 +545,7 @@ const lmTotal = computed(() => {
 }
 
 .tickerSmall {
-  font-size: 1em;
+  font-size: calc(0.75em + 0.25em * var(--rp-font-enlargement));
   opacity: 0.55;
   font-family: var(--rp-font-mono, monospace);
 }

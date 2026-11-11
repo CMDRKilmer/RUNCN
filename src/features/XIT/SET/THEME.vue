@@ -2,12 +2,24 @@
 import SectionHeader from '@src/components/SectionHeader.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import Commands from '@src/components/forms/Commands.vue';
-import { userData } from '@src/store/user-data';
+import Active from '@src/components/forms/Active.vue';
+import SelectInput from '@src/components/forms/SelectInput.vue';
+import { initialUserData, userData } from '@src/store/user-data';
 import { DEFAULT_THEME_ID, THEMES, type ThemeId } from '@src/features/basic/theme-registry';
 
 // 主题列表来自注册表（唯一事实源）：新增主题只需改注册表，设置页自动出现卡片。
 // 主题在点击时立即生效（theme.ts 监听 userData），无需刷新页面。
 const current = computed(() => userData.settings.theme ?? DEFAULT_THEME_ID);
+
+const fontSizes = [
+  { value: 'standard', label: '标准' },
+  { value: 'large', label: '放大' },
+];
+const borderModes = [
+  { value: 'theme', label: '跟随主题' },
+  { value: 'on', label: '显示' },
+  { value: 'off', label: '关闭' },
+];
 
 function pick(id: ThemeId) {
   userData.settings.theme = id;
@@ -15,6 +27,8 @@ function pick(id: ThemeId) {
 
 function reset() {
   userData.settings.theme = DEFAULT_THEME_ID;
+  userData.settings.themeFontSize = initialUserData.settings.themeFontSize;
+  userData.settings.themeBorders = initialUserData.settings.themeBorders;
 }
 </script>
 
@@ -37,6 +51,12 @@ function reset() {
     </div>
   </form>
   <form>
+    <Active label="字体大小" tooltip="调整选项标签和部分面板的小字。">
+      <SelectInput v-model="userData.settings.themeFontSize" :options="fontSizes" />
+    </Active>
+    <Active label="增强边框" tooltip="控制额外添加的表格分隔线和浮窗描边。">
+      <SelectInput v-model="userData.settings.themeBorders" :options="borderModes" />
+    </Active>
     <Commands>
       <PrunButton primary @click="reset">恢复默认</PrunButton>
     </Commands>

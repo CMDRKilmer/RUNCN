@@ -98,6 +98,8 @@ export const initialUserData = deepFreeze({
       showOriginal: false,
     } as UserData.TranslationSettings,
     theme: 'default' as UserData.ThemeId,
+    themeFontSize: 'large' as 'standard' | 'large',
+    themeBorders: 'theme' as 'theme' | 'on' | 'off',
     // INV / SHPI 紧凑排列开关：默认原版，点击窗口右上按钮才开启，刷新后保持。
     invCompact: false,
     // BLU：被隐藏的造船蓝图（存蓝图 naturalId，取不到时存 id）与
