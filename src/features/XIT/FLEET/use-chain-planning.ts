@@ -52,6 +52,21 @@ export function useChainPlanning(input: {
   const planOrigin = computed(() =>
     selectedShips.value.length > 0 ? shipOriginNaturalId(selectedShips.value[0]!) : '',
   );
+  const combinedOriginStock = computed(() => {
+    const stock: Record<string, number> = {};
+    const seen = new Set<string>();
+    for (const ship of usableChainShips.value) {
+      const warehouse = ship.warehouseStore;
+      if (!warehouse || seen.has(warehouse.id)) {
+        continue;
+      }
+      seen.add(warehouse.id);
+      for (const [ticker, amount] of Object.entries(shipWarehouseStock(ship) ?? {})) {
+        stock[ticker] = (stock[ticker] ?? 0) + amount;
+      }
+    }
+    return stock;
+  });
 
   function splitCandidate(
     plan: ChainPlan,
@@ -74,17 +89,28 @@ export function useChainPlanning(input: {
     if (usable.length < 2 || greedy.every(shipPlan => fitsChainPlan(shipPlan.plan))) {
       return greedy;
     }
+    const stopIds = plan.stops.map(stop => stop.naturalId);
+    const splitWith = (ranges: string[][]) => splitCandidate(plan, bases, arrivalHours, ranges);
+    const assignedTo = (ship: number, start: number, end: number) =>
+      usable.map((_, index) => (index === ship ? stopIds.slice(start, end) : []));
+    const hasSupplyGap = (parts: typeof greedy) =>
+      parts.some(part => part.plan.hasUnmetChainDemand === true);
+    if (hasSupplyGap(greedy)) {
+      for (const [index] of usable.entries()) {
+        const parts = splitWith(assignedTo(index, 0, stopIds.length));
+        if (parts.length > 0 && parts.every(part => fitsChainPlan(part.plan))) {
+          return parts;
+        }
+      }
+    }
     // Unit travel times let the segment solver test capacity before flight estimates arrive.
     const outbound = plan.stops.map(() => 1);
     const between = outbound.slice(1);
     const capacities = usable.map(ship => shipChainCapacity(ship)!);
     const stopSizes = chainStopShipmentSizes(plan);
+    const timings = usable.map(() => ({ outbound, inbound: outbound, between }));
     const split =
-      planFastestChainSegments({
-        timings: usable.map(() => ({ outbound, inbound: outbound, between })),
-        capacities,
-        stopSizes,
-      }) ??
+      planFastestChainSegments({ timings, capacities, stopSizes }) ??
       planTimeBalancedSegments({
         loopLegHours: usable.map(() => Array<number>(plan.stops.length + 1).fill(1)),
         capacities,
@@ -93,11 +119,41 @@ export function useChainPlanning(input: {
     if (!split) {
       return greedy;
     }
-    const ranges = split.ranges.map(({ start, end }) =>
-      plan.stops.slice(start, end).map(stop => stop.naturalId),
+    const ranges = split.ranges.map(({ start, end }) => stopIds.slice(start, end));
+    const balanced = splitWith(ranges);
+    if (balanced.every(part => fitsChainPlan(part.plan))) {
+      return balanced;
+    }
+    if (!hasSupplyGap(greedy) && !hasSupplyGap(balanced)) {
+      return greedy;
+    }
+
+    // Estimate segment feasibility at each ship’s own warehouse. Recheck the full
+    // assignment afterward because ships can draw from shared stock.
+    const checked = new Map<string, boolean>();
+    const supplySplit = planFastestChainSegments({
+      timings,
+      capacities,
+      stopSizes,
+      canUseSegment: (ship, start, end) => {
+        const key = `${ship}:${start}:${end}`;
+        const known = checked.get(key);
+        if (known !== undefined) {
+          return known;
+        }
+        const parts = splitWith(assignedTo(ship, start, end));
+        const fits = parts.length > 0 && parts.every(part => fitsChainPlan(part.plan));
+        checked.set(key, fits);
+        return fits;
+      },
+    });
+    if (!supplySplit) {
+      return greedy;
+    }
+    const supplied = splitWith(
+      supplySplit.ranges.map(({ start, end }) => stopIds.slice(start, end)),
     );
-    const balanced = splitCandidate(plan, bases, arrivalHours, ranges);
-    return balanced.every(shipPlan => fitsChainPlan(shipPlan.plan)) ? balanced : greedy;
+    return supplied.every(part => fitsChainPlan(part.plan)) ? supplied : greedy;
   }
 
   // 规划环线（可选传入各站预计到达小时数）：取货量按到达时预计库存计算——
@@ -115,8 +171,8 @@ export function useChainPlanning(input: {
     const route = {
       originNaturalId: planOrigin.value,
       capacity,
-      // 出发地空间站仓库库存：组内产出的缺口由仓库以「取货」补足。
-      originStock: shipWarehouseStock(ships[0]!),
+      // The combined plan preserves stops supplied by any origin; subplans check actual stock.
+      originStock: combinedOriginStock.value,
       arrivalHoursByNaturalId: arrivalHours,
     };
     const planAt = (days?: number) => {

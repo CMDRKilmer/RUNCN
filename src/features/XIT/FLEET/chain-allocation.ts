@@ -256,6 +256,7 @@ export function planFastestChainSegments(input: {
   timings: ChainShipTiming[];
   capacities: { freeWeight: number; freeVolume: number }[];
   stopSizes: { weight: number; volume: number }[];
+  canUseSegment?: (ship: number, start: number, end: number) => boolean;
 }): { ranges: ShipSegment[]; hours: number[] } | undefined {
   const { timings, capacities, stopSizes } = input;
   const count = stopSizes.length;
@@ -329,7 +330,11 @@ export function planFastestChainSegments(input: {
               break;
             }
             const hours = segmentHours(ship, start, end);
-            if (!Number.isFinite(hours) || (maxHours !== undefined && hours > maxHours)) {
+            if (
+              !Number.isFinite(hours) ||
+              (maxHours !== undefined && hours > maxHours) ||
+              input.canUseSegment?.(ship, start, end) === false
+            ) {
               continue;
             }
             const score = maxHours === undefined ? Math.max(elapsed, hours) : elapsed + hours;

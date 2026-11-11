@@ -742,6 +742,7 @@ export function computeChainPlan(
 
     stop.clipped = chainClipped || finalClipped;
     if (chainClipped) {
+      plan.hasUnmetChainDemand = true;
       warnings.push(
         `「${stop.planetName}」链上输送超出船舱剩余载量，按下游优先度逐条截断（次要下游留待下航次）。`,
       );
