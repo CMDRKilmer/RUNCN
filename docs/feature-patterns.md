@@ -208,6 +208,8 @@ PrUn's modal dialogs (template selection, contract conditions) read their state 
 
 See `selectListboxItem` in `src/features/basic/contd-auto-fill.ts` for a working universal selector that handles both flat MaterialSelector lists and nested AddressSelector sections.
 
+建议列表可能被渲染到 tile/窗口之外的 portal（26.11.11 起为避免被窗口裁剪）。tile 内的 `C.MaterialSelector.suggestionsList` 查不到时，按输入框 `aria-controls` → 文档级 `[role="listbox"]` → `[class*="suggestionsList"]` 定位，条目按可见文本（ticker、`<TICKER> 名称` 或本地化名称）匹配（参考 `mtra-common.ts` 的 `findSuggestionsList` / `findSuggestionEntry`）。
+
 Only one listbox can be open at a time — react-autosuggest closes the focused input's listbox when another input takes focus, so listbox interactions in a multi-row form must run one row at a time. Plain value writes (amount, price) are safe to run in parallel, but a write can land on a node React swapped under a concurrent re-render. Follow parallel writes with a sequential verify-and-fixup pass that re-writes mismatches, so races become retries instead of silent corruption — see the two-wave fill in `contd-auto-fill.ts`.
 
 ### CXPO 卖出表单（挂单 vs 填单）
@@ -622,6 +624,7 @@ showBuffer('CXM AI1.RAT');  // opens a buffer with the given command
 
 - **每个目标开一个窗口**：`openMtraWindow` 用 `showBuffer(command, { force, autoSubmit, autoClose, closeWhen })`；`force` 允许多窗口并存，`autoClose`+`closeWhen` 全程隐藏（见上节）。
 - **setup 串行、提交并行**：材料选择器 listbox 一次只能开一个（本文件「Selecting from listbox」节），所以所有窗口的"输入→选建议"阶段必须串行；之后的点击提交与反馈等待互不干扰，可 `Promise.all`。
+- **建议列表可能在 portal 里**：为避免被窗口裁剪，游戏会把 listbox 渲染到窗口外，因此 `prepareMtraWindow` 从输入框的 `aria-controls` / 文档级 `[role="listbox"]` 定位列表，条目按 ticker（含 `<TICKER> 名称`）或本地化名称命中；不要再用 `C.MaterialSelector.suggestionsList` 在 tile 内查找。
 - **关闭**：`closeMtraWindows` 翻转各窗口的 `closeWhen` ref（触发 autoClose 关窗），`closePrunWindow` 兜底（覆盖 `processWindow` 提前返回、closeWhenDone 未启动的窗口）。
 - 隐藏窗口仍占游戏窗口槽位；取消/失败时必须在 `finally` 关闭窗口（见下节）。
 

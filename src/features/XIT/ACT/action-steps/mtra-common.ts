@@ -3,8 +3,11 @@ import { changeInputValue, clickElement, focusElement } from '@src/utils/dom';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { closePrunWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { getMaterialName } from '@src/infrastructure/prun-ui/i18n';
 import { Logger } from '@src/features/XIT/ACT/runner/logger';
 import { fixed0 } from '@src/utils/format';
+import { sleep } from '@src/utils/sleep';
 
 export const MTRA_TIMEOUT = 1700;
 export const MTRA_MAX_RETRIES = 3;
@@ -73,25 +76,122 @@ export function canFit(to: PrunApi.Store, material: PrunApi.Material) {
   return canFitWeight && canFitVolume;
 }
 
+const SUGGESTIONS_CONTAINER_SELECTOR = '[class*="suggestionsContainer"]';
+const SUGGESTIONS_LIST_SELECTOR =
+  '[role="listbox"], [class*="suggestionsList"], [class*="suggestionsContainer"]';
+
+function waitForElement<T>(find: () => T | undefined, timeout: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const deadline = Date.now() + timeout;
+    const attempt = () => {
+      const value = find();
+      if (value !== undefined) {
+        resolve(value);
+        return;
+      }
+      if (Date.now() >= deadline) {
+        reject(new Error('MTRA_TIMEOUT'));
+        return;
+      }
+      setTimeout(attempt, 25);
+    };
+    attempt();
+  });
+}
+
+/**
+ * 材料输入框。不使用具体 CSS 类名定位：游戏更新会重排选择器（下拉列表被移出
+ * 窗口以避开裁剪），按 aria-autocomplete / combobox 特征查找更稳定。
+ */
+async function waitForMaterialInput(anchor: HTMLElement) {
+  try {
+    return await waitForElement(() => {
+      const container =
+        anchor.querySelector<HTMLElement>('[class*="MaterialSelector__container"]') ?? undefined;
+      return (
+        container?.querySelector<HTMLInputElement>('input') ??
+        anchor.querySelector<HTMLInputElement>(
+          'input[aria-autocomplete], [role="combobox"] input, input[role="combobox"]',
+        ) ??
+        anchor.querySelector<HTMLInputElement>('input') ??
+        undefined
+      );
+    }, MTRA_TIMEOUT);
+  } catch {
+    throw new Error('MTRA_NO_INPUT');
+  }
+}
+
+/** react-autosuggest 可能把建议列表渲染到窗口外的 portal，因此从文档级查找。 */
+function suggestionListCandidates(input: HTMLInputElement) {
+  const combobox = input.closest('[role="combobox"]');
+  const controlsId = combobox?.getAttribute('aria-controls') ?? input.getAttribute('aria-controls');
+  const controlled = controlsId ? document.getElementById(controlsId) : null;
+  const candidates = Array.from(document.querySelectorAll(SUGGESTIONS_LIST_SELECTOR));
+  return controlled ? [controlled as Element, ...candidates] : candidates;
+}
+
+function normalizeSuggestionText(text: string) {
+  return text.replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+function suggestionText(entry: Element) {
+  const label = entry.querySelector('[class*="ColoredIcon__label"]');
+  return normalizeSuggestionText(label?.textContent ?? entry.textContent ?? '');
+}
+
+function containsToken(text: string, token: string) {
+  const index = text.indexOf(token);
+  if (index < 0) {
+    return false;
+  }
+  const isWordChar = (char: string | undefined) => char !== undefined && /[A-Z0-9]/.test(char);
+  return !isWordChar(text[index - 1]) && !isWordChar(text[index + token.length]);
+}
+
+/** 命中顺序：精确 ticker → `<TICKER> 名称` → 文本含 ticker 记号 → 本地化名称。 */
+function findSuggestionEntry(list: Element, ticker: string) {
+  const entries = Array.from(
+    list.querySelectorAll('[class*="suggestionEntry"], li, [role="option"]'),
+  );
+  if (entries.length === 0) {
+    return undefined;
+  }
+  const material = materialsStore.getByTicker(ticker);
+  const localizedName = material ? getMaterialName(material) : undefined;
+  const localized = localizedName ? normalizeSuggestionText(localizedName) : undefined;
+  const tk = normalizeSuggestionText(ticker);
+  const texts = entries.map(x => ({ entry: x, text: suggestionText(x) }));
+  return (
+    texts.find(x => x.text === tk)?.entry ??
+    texts.find(x => x.text.split(' ')[0] === tk)?.entry ??
+    texts.find(x => containsToken(x.text, tk))?.entry ??
+    (localized
+      ? (texts.find(x => x.text === localized)?.entry ??
+        texts.find(x => x.text.includes(localized))?.entry)
+      : undefined)
+  );
+}
+
+function findSuggestionsList(input: HTMLInputElement, ticker: string) {
+  return suggestionListCandidates(input).find(x => findSuggestionEntry(x, ticker) !== undefined);
+}
+
 interface MtraSetupState {
-  suggestionsContainer: HTMLElement;
+  input: HTMLInputElement;
+  suggestionsContainer: HTMLElement | undefined;
   suggestionsList: Element;
 }
 
 /** 在 MTRA 缓冲区中键入 ticker 并等待建议列表出现（带超时）。 */
-async function setupMtraBuffer(tile: PrunTile, ticker: string) {
-  await clickElement(tile.anchor as HTMLElement);
+async function setupMtraBuffer(anchor: HTMLElement, ticker: string): Promise<MtraSetupState> {
+  await clickElement(anchor);
   window.getSelection()?.removeAllRanges();
 
-  const container = await withTimeout($(tile.anchor, C.MaterialSelector.container), MTRA_TIMEOUT);
-  const input = (await withTimeout($(container, 'input'), MTRA_TIMEOUT)) as HTMLInputElement;
-  const suggestionsContainer = await withTimeout(
-    $(container, C.MaterialSelector.suggestionsContainer),
-    MTRA_TIMEOUT,
-  );
+  const input = await waitForMaterialInput(anchor);
 
   let suggestionsList: Element | undefined;
-  for (let attempt = 0; attempt < 15; attempt++) {
+  for (let attempt = 0; attempt < 15 && !suggestionsList; attempt++) {
     await clickElement(input);
     focusElement(input);
     input.focus();
@@ -100,54 +200,62 @@ async function setupMtraBuffer(tile: PrunTile, ticker: string) {
     // 自适应等待：直到建议列表渲染出该 ticker 的条目（每 25ms 检查，单次最多 150ms），
     // 比固定 150ms 睡眠更快；以条目出现而非列表容器出现为完成信号，避免读到旧条目。
     for (let i = 0; i < 6; i++) {
-      const list = _$(container, C.MaterialSelector.suggestionsList);
-      if (
-        list &&
-        _$$(list, C.MaterialSelector.suggestionEntry).some(
-          x => _$(x, C.ColoredIcon.label)?.textContent === ticker,
-        )
-      ) {
-        suggestionsList = list;
+      suggestionsList = findSuggestionsList(input, ticker);
+      if (suggestionsList) {
         break;
       }
-      await new Promise(r => setTimeout(r, 25));
-    }
-    if (suggestionsList) {
-      break;
+      await sleep(25);
     }
   }
   if (!suggestionsList) {
-    throw new Error('MTRA_NO_SUGGESTIONS');
+    const hasList = document.querySelector(SUGGESTIONS_LIST_SELECTOR) !== null;
+    throw new Error(hasList ? 'MTRA_NO_SUGGESTIONS' : 'MTRA_TIMEOUT');
   }
 
-  return { container, input, suggestionsContainer, suggestionsList } as MtraSetupState;
+  const suggestionsContainer =
+    suggestionsList.closest<HTMLElement>(SUGGESTIONS_CONTAINER_SELECTOR) ?? undefined;
+  return { input, suggestionsContainer, suggestionsList };
 }
 
 /** 等待数量滑块（rc-slider-mark-text）异步渲染后返回最大可转移量。 */
-export async function waitSliderMaxAmount(tile: PrunTile): Promise<number> {
+export async function waitSliderMaxAmount(anchor: HTMLElement): Promise<number> {
   // 数量滑块的刻度在选择材料后异步渲染。clickElement 只 await sleep(0)，
   // 刻度可能尚未挂载，此时 _$$(...) 返回空数组，Math.max(...[]) = -Infinity，
   // 会把 "-Infinity" 写入数量输入框并提交。因此带超时重试等待刻度，并过滤掉非有限值。
   let sliderNumbers: number[] = [];
   for (let attempt = 0; attempt < 15; attempt++) {
-    sliderNumbers = _$$(tile.anchor, 'rc-slider-mark-text')
+    sliderNumbers = _$$(anchor, 'rc-slider-mark-text')
       .map(x => Number(x.textContent ?? 0))
       .filter(n => Number.isFinite(n));
     if (sliderNumbers.length > 0) {
       break;
     }
     // 25ms 轮询（刻度通常在一个渲染周期内出现），比固定 100ms 快得多。
-    await new Promise(r => setTimeout(r, 25));
+    await sleep(25);
   }
   return sliderNumbers.length > 0 ? Math.max(...sliderNumbers) : 0;
 }
 
-function findAmountInput(tile: PrunTile) {
-  return _$$(tile.anchor, 'input')[1] as HTMLInputElement | undefined;
+function findAmountInput(anchor: HTMLElement, materialInput: HTMLInputElement) {
+  const inputs = _$$(anchor, 'input') as HTMLInputElement[];
+  const isMaterialLike = (x: HTMLInputElement) =>
+    x === materialInput ||
+    x.getAttribute('aria-autocomplete') !== null ||
+    x.getAttribute('role') === 'combobox' ||
+    x.closest('[role="combobox"]') !== null;
+  return (
+    inputs.find(x => !isMaterialLike(x) && (x.type === 'text' || x.type === 'number')) ??
+    inputs.find(x => !isMaterialLike(x))
+  );
 }
 
 export type MtraPrepareError =
-  'MTRA_TIMEOUT' | 'MTRA_NO_SUGGESTIONS' | 'MTRA_SLIDER_EMPTY' | 'MTRA_NO_AMOUNT_INPUT';
+  | 'MTRA_TIMEOUT'
+  | 'MTRA_NO_INPUT'
+  | 'MTRA_NO_SUGGESTIONS'
+  | 'MTRA_SLIDER_EMPTY'
+  | 'MTRA_NO_AMOUNT_INPUT'
+  | 'MTRA_SELECT_FAILED';
 
 export interface MtraPreparation {
   maxAmount: number;
@@ -160,18 +268,20 @@ export interface MtraPreparation {
  * 键入阶段带超时重试；返回错误码而非抛出，由调用方决定跳过或失败。
  */
 export async function prepareMtraWindow(
-  tile: PrunTile,
+  anchor: HTMLElement,
   ticker: string,
   onRetry?: (retry: number) => void,
 ): Promise<MtraPreparation | MtraPrepareError> {
   let state: MtraSetupState | undefined;
+  let lastError: MtraPrepareError = 'MTRA_TIMEOUT';
   for (let retry = 0; retry < MTRA_MAX_RETRIES; retry++) {
     try {
-      state = await setupMtraBuffer(tile, ticker);
+      state = await setupMtraBuffer(anchor, ticker);
       break;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '';
-      if (msg === 'MTRA_TIMEOUT' || msg === 'MTRA_NO_SUGGESTIONS') {
+      if (msg === 'MTRA_TIMEOUT' || msg === 'MTRA_NO_INPUT' || msg === 'MTRA_NO_SUGGESTIONS') {
+        lastError = msg;
         onRetry?.(retry);
         continue;
       }
@@ -179,32 +289,68 @@ export async function prepareMtraWindow(
     }
   }
   if (!state) {
-    return 'MTRA_TIMEOUT';
+    return lastError;
   }
 
-  const { suggestionsContainer, suggestionsList } = state;
-  suggestionsContainer.style.display = 'none';
-  const match = _$$(suggestionsList, C.MaterialSelector.suggestionEntry).find(
-    x => _$(x, C.ColoredIcon.label)?.textContent === ticker,
-  );
-  if (!match) {
-    suggestionsContainer.style.display = '';
+  const { input, suggestionsContainer, suggestionsList } = state;
+  const entry = findSuggestionEntry(suggestionsList, ticker);
+  if (!entry) {
     return 'MTRA_NO_SUGGESTIONS';
   }
+  if (
+    !(await selectSuggestion(input, suggestionsList, entry as HTMLElement, suggestionsContainer))
+  ) {
+    return 'MTRA_SELECT_FAILED';
+  }
 
-  await clickElement(match);
-  suggestionsContainer.style.display = '';
-
-  const maxAmount = await waitSliderMaxAmount(tile);
+  const maxAmount = await waitSliderMaxAmount(anchor);
   if (maxAmount === 0) {
     return 'MTRA_SLIDER_EMPTY';
   }
-  const amountInput = findAmountInput(tile);
+  const amountInput = findAmountInput(anchor, input);
   if (!amountInput) {
     return 'MTRA_NO_AMOUNT_INPUT';
   }
-  const transferButton = await $(tile.anchor, C.Button.btn);
+  const transferButton = await $(anchor, C.Button.btn);
   return { maxAmount, amountInput, transferButton };
+}
+
+/**
+ * 选中建议条目。react-autowhatever 只认原生 click（完整鼠标序列会只高亮不选中），
+ * 因此先原生 click，未提交再退回 clickElement；以列表卸载或输入值被替换为提交信号。
+ */
+async function selectSuggestion(
+  input: HTMLInputElement,
+  list: Element,
+  entry: HTMLElement,
+  suggestionsContainer: HTMLElement | undefined,
+) {
+  const typedValue = input.value;
+  const committed = () => !list.isConnected || input.value !== typedValue;
+  if (suggestionsContainer) {
+    suggestionsContainer.style.display = 'none';
+  }
+  try {
+    entry.click();
+    for (let i = 0; i < 8; i++) {
+      if (committed()) {
+        return true;
+      }
+      await sleep(25);
+    }
+    await clickElement(entry);
+    for (let i = 0; i < 8; i++) {
+      if (committed()) {
+        return true;
+      }
+      await sleep(25);
+    }
+    return false;
+  } finally {
+    if (suggestionsContainer) {
+      suggestionsContainer.style.display = '';
+    }
+  }
 }
 
 /** 按滑块上限钳制转移量；超出时记 warning，无可转移量时返回 0。 */
