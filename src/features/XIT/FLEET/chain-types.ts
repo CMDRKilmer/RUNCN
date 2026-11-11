@@ -41,7 +41,7 @@ export interface ChainStopPlan {
   naturalId: string;
   planetName: string;
   days: number;
-  // 主界面「购买」开关：false 的基地账单只从出发地仓库装船，不在 CX 下单。
+  // 环线基地的采购配置，关闭时从出发地仓库取货。
   cxBuy: boolean;
   // 卸货（船→基地）：CX 采购的非链物资。
   unloadCx: Record<string, number>;

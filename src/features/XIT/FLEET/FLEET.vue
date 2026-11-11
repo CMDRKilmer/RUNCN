@@ -21,7 +21,6 @@ import { getBaseStorageAnalysis } from '@src/core/storage-analysis';
 import type { BaseStorageAnalysis } from '@src/core/storage-analysis';
 import { comparePlanets } from '@src/core/game-lookups';
 import { useTileState } from '@src/store/user-data-tiles';
-import { normalizeDispatchBaseConfigs } from '@src/store/user-data-migrations';
 import { getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { countDays } from '@src/features/XIT/BURN/utils';
 import { setBufferSize, showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -72,6 +71,15 @@ const viewMode = useTileState<ViewMode>('viewMode', 'plan');
 
 // Plan mode state
 const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfigs', {});
+const savedPlanCxBuy = useTileState<boolean | undefined>('planCxBuy', undefined);
+const planCxBuy = computed({
+  get: () =>
+    savedPlanCxBuy.value ??
+    Object.values(baseConfigs.value).every(config => config.cxBuy !== false),
+  set: enabled => {
+    savedPlanCxBuy.value = enabled;
+  },
+});
 const baseOrder = useTileState<string[]>('baseOrder', []);
 // 默认按列头排序；用户拖过行之后只认手动顺序，再点列头又回到自动排序。
 // 没有这个开关时 baseOrder（拖拽 / 飞船分组写入）会永久覆盖列排序。
@@ -114,6 +122,10 @@ function createBaseConfig(naturalId: string): DispatchBaseConfig {
     includeConsumables: true,
     cxBuy: true,
   };
+}
+
+function withAllResupplyMaterials(config: DispatchBaseConfig): DispatchBaseConfig {
+  return { ...config, consumablesOnly: true, includeConsumables: true };
 }
 
 function burnDaysRemaining(siteId: string) {
@@ -166,8 +178,7 @@ const baseAnalyses = computed<Map<string, BaseStorageAnalysis> | undefined>(() =
 });
 
 // Fill in configs for bases that do not have one yet.
-// Legacy config shapes are normalized by the user data migrations,
-// and on import by importDispatchConfig.
+// User data migrations normalize legacy configs.
 watchEffect(() => {
   const list = bases.value;
   if (!list) {
@@ -278,7 +289,7 @@ const billByBase = computed(() => {
     if (!config.resupply && !config.repair) {
       continue;
     }
-    const bill = combinedBaseBill(base.naturalId, config, base.site);
+    const bill = combinedBaseBill(base.naturalId, withAllResupplyMaterials(config), base.site);
     if (bill) {
       map.set(base.naturalId, bill);
     }
@@ -432,7 +443,7 @@ const includedBases = computed(() => {
       naturalId: base.naturalId,
       planetName: base.planetName,
       site: base.site,
-      config,
+      config: { ...config, cxBuy: planCxBuy.value },
       dispatchShip,
     });
   }
@@ -447,7 +458,7 @@ function fitShip(shipId: string) {
 
   const sharingBases = rows.value.map(x => ({
     naturalId: x.base.naturalId,
-    config: x.config!,
+    config: withAllResupplyMaterials(x.config!),
     site: x.base.site,
   }));
 
@@ -456,9 +467,9 @@ function fitShip(shipId: string) {
     return false;
   }
 
-  for (const base of sharingBases) {
-    if (base.config.ship === shipId && base.config.resupply) {
-      base.config.days = days;
+  for (const { config } of rows.value) {
+    if (config.ship === shipId && config.resupply) {
+      config.days = days;
     }
   }
   return true;
@@ -525,16 +536,9 @@ function execute() {
 
 function reset() {
   baseConfigs.value = {};
+  planCxBuy.value = true;
   baseOrder.value = [];
   manualOrder.value = false;
-}
-
-const dispatchConfigType = 'rp-dispatch-config';
-
-interface DispatchConfigPayload {
-  baseConfigs?: Record<string, DispatchBaseConfig>;
-  baseOrder?: string[];
-  exchangeFilter?: string;
 }
 
 const notice = ref<string | undefined>(undefined);
@@ -548,74 +552,7 @@ function setNotice(text: string) {
   }, 3000);
 }
 
-function collectDispatchConfig(): DispatchConfigPayload {
-  return {
-    baseConfigs: JSON.parse(JSON.stringify(baseConfigs.value)),
-    baseOrder: [...baseOrder.value],
-    exchangeFilter: exchangeFilter.value,
-  };
-}
-
 onUnmounted(() => clearTimeout(noticeTimer));
-
-async function exportDispatchConfig() {
-  const json = JSON.stringify({ type: dispatchConfigType, data: collectDispatchConfig() });
-  try {
-    await navigator.clipboard.writeText(json);
-  } catch {
-    setNotice('复制失败');
-    return;
-  }
-  setNotice('配置已复制到剪贴板');
-}
-
-function extractDispatchConfig(parsed: unknown): DispatchConfigPayload | undefined {
-  if (!parsed || typeof parsed !== 'object') {
-    return undefined;
-  }
-  const root = parsed as Record<string, unknown>;
-  if (root.type === dispatchConfigType && root.data && typeof root.data === 'object') {
-    return root.data as DispatchConfigPayload;
-  }
-  if (root.type === 'rp-user-data' && root.data && typeof root.data === 'object') {
-    const userData = root.data as { tileState?: Record<string, unknown> };
-    for (const state of Object.values(userData.tileState ?? {})) {
-      if (state && typeof state === 'object' && 'baseConfigs' in state) {
-        return state as DispatchConfigPayload;
-      }
-    }
-  }
-  return undefined;
-}
-
-async function importDispatchConfig() {
-  let clipText: string;
-  try {
-    clipText = await navigator.clipboard.readText();
-  } catch {
-    setNotice('无法读取剪贴板');
-    return;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(clipText);
-  } catch {
-    setNotice('剪贴板内容不是有效的 JSON');
-    return;
-  }
-  const config = extractDispatchConfig(parsed);
-  if (!config) {
-    setNotice('剪贴板内容不是 FLEET 配置');
-    return;
-  }
-  const configs = config.baseConfigs ?? {};
-  normalizeDispatchBaseConfigs(configs);
-  baseConfigs.value = configs;
-  baseOrder.value = config.baseOrder ?? [];
-  manualOrder.value = (config.baseOrder?.length ?? 0) > 0;
-  exchangeFilter.value = config.exchangeFilter;
-  setNotice('配置已导入');
-}
 </script>
 
 <template>
@@ -659,8 +596,6 @@ async function importDispatchConfig() {
               {{ '' }}
             </PrunButton>
           </div>
-          <PrunButton dark @click="exportDispatchConfig">导出配置</PrunButton>
-          <PrunButton dark @click="importDispatchConfig">导入配置</PrunButton>
           <span v-if="notice" :class="$style.notice">{{ notice }}</span>
           <div :class="$style.spacer" />
           <PrunButton dark @click="reset">重置</PrunButton>
@@ -685,6 +620,7 @@ async function importDispatchConfig() {
           {{ option.label }}
         </RadioItem>
         <div :class="$style.separator" />
+        <RadioItem v-model="planCxBuy" horizontal>CX 购买</RadioItem>
         <!-- 自动发船 / 到港卸货 属同一组，中间不放分隔线，
              只沿用 .filterRow 的 3px gap，与第一行同组选项一致。 -->
         <RadioItem v-model="autoLaunch" horizontal>自动发船</RadioItem>
@@ -723,8 +659,6 @@ async function importDispatchConfig() {
                 <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">维护</th>
                 <th v-if="showRepair" :class="[$style.narrowCol, $style.centered]">提前</th>
                 <th :class="[$style.narrowCol, $style.centered]">装载</th>
-                <th :class="[$style.narrowCol, $style.centered]">物资</th>
-                <th :class="[$style.narrowCol, $style.centered]">CX</th>
                 <th v-if="showFill" :class="[$style.narrowCol, $style.centered]">填满</th>
                 <th v-if="showInv" :class="$style.invHeaderCol">库存</th>
                 <th v-if="showWar" :class="$style.warHeaderCol">仓储</th>

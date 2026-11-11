@@ -426,15 +426,6 @@ const barAlarmReason = computed(() =>
       ]">
       {{ loadText }}
     </td>
-    <td :class="$style.selectCell">
-      <div :class="$style.selectWrap">
-        <RadioItem v-model="config.consumablesOnly" horizontal>消耗品</RadioItem>
-        <RadioItem v-model="config.includeConsumables" horizontal>原料</RadioItem>
-      </div>
-    </td>
-    <td :class="$style.advToggleCell">
-      <RadioItem v-model="config.cxBuy" horizontal>购买</RadioItem>
-    </td>
     <td v-if="showFill" :class="$style.statusCell">
       <div :class="[$style.statusContent, fillBgClass]">
         <span :class="$style.statusNum">{{ fillText }}</span>
@@ -642,26 +633,6 @@ const barAlarmReason = computed(() =>
   border-color: rgb(var(--rp-accent-rgb));
   box-shadow: inset 0 0 0 1px rgb(var(--rp-accent-rgb));
   background: rgb(30, 38, 44);
-}
-
-.selectCell {
-  width: 0;
-  white-space: nowrap;
-  padding: 0 2px;
-  line-height: 22px;
-  vertical-align: middle;
-}
-
-.selectWrap {
-  display: flex;
-}
-
-.advToggleCell {
-  width: 0;
-  white-space: nowrap;
-  padding: 0 2px;
-  vertical-align: middle;
-  text-align: center;
 }
 
 .invCell {
