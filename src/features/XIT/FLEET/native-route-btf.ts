@@ -1,236 +1,232 @@
-import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
-import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
-import { getPrunId } from '@src/infrastructure/prun-ui/attributes';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
-import { closePrunWindow } from '@src/infrastructure/prun-ui/utils/close-prun-window';
-import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
+import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import {
-  findFormSlider,
-  getSliderRange,
-  getSliderValue,
-  setSliderValue,
-} from '@src/infrastructure/prun-ui/utils/set-slider-value';
-import { changeInputValue } from '@src/utils/dom';
-import { sleep } from '@src/utils/sleep';
+  calculateTestFlight,
+  encodeAddress,
+  resolveEntity,
+} from '@src/infrastructure/prun-api/data/flight-test-collector';
+import {
+  ensureShipBlueprint,
+  shipFuelRemainingFor,
+  shipPerformanceFor,
+} from '@src/features/XIT/FTC/ftc-compute';
 import {
   autoFuelGrid,
   findBalanceOption,
   type FuelTradeoff,
 } from '@src/features/XIT/FTC/fuel-model';
 import { summarizeNativeFlightPlan } from '@src/features/XIT/FTC/route-planner';
+import { sleep } from '@src/utils/sleep';
 import type { ShipChainPlan } from './chain-allocation';
-import type { NativeWaypoint } from './native-route-plan';
+import { legLoadWeight, type NativeWaypoint } from './native-route-plan';
+import { recordTransitSpeedSample } from './transit-speed-samples';
 
-const fuelPercents = [1, ...autoFuelGrid().map(fuel => Math.round(fuel * 100))];
+// 从游戏滑块的最小档 5% 扫到 100%（1% 会被服务器拒绝，白跑一趟）。
+const fuelPercents = autoFuelGrid().map(fuel => Math.round(fuel * 100));
+// 试飞固定 50% 反应堆使用量（与旧 BTF 面板口径一致）。
+const REACTOR_USAGE = 0.5;
+const REACTOR_PERCENT = 50;
+// 服务器限速礼貌间隔（与 transit-f-scan 的批量采集一致）。
+const REQUEST_INTERVAL_MS = 250;
 
-async function waitForBtf<T>(read: () => T | undefined, signal: AbortSignal, message: string) {
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline) {
-    signal.throwIfAborted();
-    const value = read();
-    if (value !== undefined) {
-      return value;
+// 试飞档位从省油往费油递进：越往后「省下的时间」越少、「多烧的油」越多。
+// 时间改善已很小且燃料开始大幅上涨时，拐点必然更靠省油侧，不必再试更高档。
+const MIN_SCAN_SAMPLES = 4;
+const MIN_TIME_GAIN = 0.02;
+const MIN_FUEL_RISE = 0.05;
+
+function scanSaturated(samples: readonly FuelTradeoff[]) {
+  if (samples.length < MIN_SCAN_SAMPLES) {
+    return false;
+  }
+  const previous = samples[samples.length - 2]!;
+  const current = samples[samples.length - 1]!;
+  if (!(previous.totalHours > 0)) {
+    return false;
+  }
+  const timeGain = (previous.totalHours - current.totalHours) / previous.totalHours;
+  const previousFuel = previous.stlFuel + previous.ftlFuel;
+  const currentFuel = current.stlFuel + current.ftlFuel;
+  const fuelRise = previousFuel > 0 ? (currentFuel - previousFuel) / previousFuel : 0;
+  return timeGain < MIN_TIME_GAIN && fuelRise > MIN_FUEL_RISE;
+}
+
+// 性价比拐点（与 FTC 面板同口径），但燃料在各档位上完全没差别时取最快——
+// 那种情况下时间更短的方案严格占优，`findBalanceOption` 的退化分支会退到最省油端，
+// 写出「又慢又不省」的 5%（用户实测报障）。
+function chooseSample(samples: readonly FuelTradeoff[]) {
+  if (samples.length === 0) {
+    return undefined;
+  }
+  const fuels = samples.map(x => x.stlFuel + x.ftlFuel);
+  const fuelSpan = Math.max(...fuels) - Math.min(...fuels);
+  if (!(fuelSpan > 1e-9)) {
+    return samples.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
+  }
+  return findBalanceOption([...samples]) ?? samples[0];
+}
+
+// 把试飞响应里的 TRANSIT 段转成 FTC 转移速度查询表的样本（q, aEff, v）：
+// 远端表只覆盖少数 aEff 行，采到该船自己的 aEff 行后，同船后续的 FTC 计算就不再判「超出可靠范围」。
+// 质量口径与 computeFtcPlan 一致（extraMassT 直接加到 ship.mass 上）。
+function recordTransitSpeedSamples(
+  performance: ReturnType<typeof shipPerformanceFor>,
+  ship: PrunApi.Ship,
+  payload: number,
+  tank: number,
+  fuelPercent: number,
+  plan: PrunApi.FlightPlan,
+) {
+  const engine = performance.stlEngineOption;
+  if (engine === undefined || !(tank > 0)) {
+    return;
+  }
+  const mass = (ship.mass > 0 ? ship.mass : ship.operatingEmptyMass) + payload;
+  if (!(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
+    return;
+  }
+  const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
+  const q = 0.98 * tank * Math.min(fuelPercent / 100, 0.5);
+  for (const segment of plan.segments) {
+    if (segment.type !== 'TRANSIT' || segment.stlDistance === null) {
+      continue;
     }
-    await sleep(60);
-  }
-  throw new Error(message);
-}
-
-function sliderFor(
-  anchor: Element,
-  field: 'fuelUsage' | 'reactorUsage' | 'payload',
-  labels: string[],
-) {
-  const localized = getI18nValue(`BlueprintTestFlight.label.${field}`);
-  return findFormSlider(anchor, localized === undefined ? labels : [localized, ...labels]);
-}
-
-function currentPlan(anchor: Element, previousId?: string) {
-  const table = _$(anchor, C.MissionPlan.table);
-  const id = (table instanceof HTMLElement ? getPrunId(table) : null) ?? previousId;
-  return id === undefined ? undefined : flightPlansStore.getById(id);
-}
-
-async function waitForPlan(
-  anchor: Element,
-  previous: PrunApi.FlightPlan | undefined,
-  from: string,
-  to: string,
-  signal: AbortSignal,
-  allowEmptyFailure = false,
-) {
-  let seen: PrunApi.FlightPlan | undefined;
-  let since = 0;
-  const settleMs = allowEmptyFailure ? 300 : 1000;
-  return await waitForBtf(
-    () => {
-      const plan = currentPlan(anchor, previous?.missionId);
-      if (plan !== seen) {
-        seen = plan;
-        since = Date.now();
-      }
-      if (plan === undefined || plan === previous || Date.now() - since < settleMs) {
-        return undefined;
-      }
-      const origin = getEntityNaturalIdFromAddress(plan.segments[0]?.origin);
-      const destination = getEntityNaturalIdFromAddress(plan.segments.at(-1)?.destination);
-      const matches =
-        origin?.toUpperCase() === from.toUpperCase() &&
-        destination?.toUpperCase() === to.toUpperCase();
-      return matches || (allowEmptyFailure && plan.status !== 'OK' && plan.segments.length === 0)
-        ? plan
-        : undefined;
-    },
-    signal,
-    `BTF 未返回 ${from} → ${to} 的新试飞结果。`,
-  );
-}
-
-async function selectBtfAddress(field: Element, location: string, signal: AbortSignal) {
-  signal.throwIfAborted();
-  const input = _$(field, C.AddressSelector.input);
-  if (input instanceof HTMLInputElement && input.value !== '') {
-    changeInputValue(input, '');
-    await sleep(0);
-  }
-  signal.throwIfAborted();
-  if (!(await selectAddress(field, location, { allowPartial: false }))) {
-    throw new Error(`BTF 无法选择 ${location}。`);
+    const seconds = (segment.arrival.timestamp - segment.departure.timestamp) / 1000;
+    // 太短的段相对噪声大（秒级抖动就有百分之几误差），不进表。
+    if (!(seconds >= 60) || !(segment.stlDistance > 1000)) {
+      continue;
+    }
+    recordTransitSpeedSample(engine, q, aEff, segment.stlDistance / seconds);
   }
 }
 
-async function setBtfValue(
-  anchor: Element,
-  slider: Element,
-  value: number,
-  current: PrunApi.FlightPlan,
-  from: string,
-  to: string,
-  signal: AbortSignal,
-) {
-  signal.throwIfAborted();
-  if (getSliderValue(slider) === value) {
-    return current;
-  }
-  if (!(await setSliderValue(slider, value, { exactMaximum: true }))) {
-    throw new Error(`BTF 无法将 ${from} → ${to} 的滑块设为 ${value}。`);
-  }
-  return await waitForPlan(anchor, current, from, to, signal, true);
+export interface BtfLegFuel {
+  // 实测平衡点的燃料消耗百分比。
+  fuel: number;
+  // 试飞时实际使用的反应堆使用量。
+  reactor?: number;
 }
 
+export interface BtfFuelResult {
+  // 段序号（1 起）→ 实测档位。
+  legs: Map<number, BtfLegFuel>;
+  // 单段失败原因。
+  warnings: string[];
+}
+
+// 缺服务器原生记录的航段改用 BTF 实测：直接走 socket 发 SHIP_FLIGHT_CALCULATE_TEST_FLIGHT
+// （与 BTF 面板同一个服务器计算），不开窗口、不碰滑块——载重/燃料/反应堆都是请求参数。
+// 每档一次请求，边际收益耗尽即停；响应里的 SHIP_FLIGHT_MISSION 还会自动写入原生 STL 段记录。
 export async function measureNativeRouteFuel(
   candidate: ShipChainPlan,
   waypoints: readonly NativeWaypoint[],
+  legs: readonly number[],
   signal: AbortSignal,
   onProgress: (status: string) => void,
-) {
-  const blueprint = candidate.ship.ship.blueprintNaturalId;
-  if (!blueprint.trim()) {
-    throw new Error('所选船只缺少对应的蓝图 ID。');
-  }
+): Promise<BtfFuelResult> {
+  const ship = candidate.ship.ship;
   signal.throwIfAborted();
-  const command = `BTF ${blueprint}`;
-  const window = await showBuffer(command, { force: true });
-  try {
-    const anchor = await waitForBtf(
-      () => {
-        const panel = _$(window, C.TileFrame.anchor);
-        const active = _$(window, C.TileFrame.cmd)?.textContent?.trim();
-        return active === command &&
-          panel !== undefined &&
-          _$$(panel, C.AddressSelector.container).length === 2
-          ? panel
-          : undefined;
-      },
-      signal,
-      `找不到蓝图 ${blueprint} 的 BTF 地址选择器。`,
-    );
-    const [origin, destination] = _$$(anchor, C.AddressSelector.container);
-    const fuelPercentsByLeg: number[] = [];
-    for (let index = 1; index < waypoints.length; index++) {
-      const from = waypoints[index - 1]!.location;
-      const to = waypoints[index]!.location;
-      const previous = currentPlan(anchor);
-      onProgress(`BTF ${blueprint} · ${index}/${waypoints.length - 1} · ${from} → ${to}`);
-      await selectBtfAddress(origin!, from, signal);
-      await selectBtfAddress(destination!, to, signal);
-      let plan = await waitForPlan(anchor, previous, from, to, signal);
+  await ensureShipBlueprint(ship);
+  const blueprint = blueprintsStore.getByNaturalId(ship.blueprintNaturalId);
+  if (blueprint === undefined) {
+    throw new Error(`未获取到蓝图 ${ship.blueprintNaturalId}，无法试飞。`);
+  }
+  // 试飞的油量基准用「罐容量」而不是当前余量：航线在每一站都补满油（REFUEL 步骤），
+  // 实际每段都是满罐起飞；用余量会让高档位试飞因油不够直接失败，把平衡点压到低档。
+  const performance = shipPerformanceFor(ship);
+  const fuelNow = shipFuelRemainingFor(ship);
+  const stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlCap : (performance.stlFuelCapacity ?? 0);
+  const ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : fuelNow.ftlRemaining;
+  const legCount = waypoints.length - 1;
+  const codes = new Map<string, string>();
+  const measured = new Map<number, BtfLegFuel>();
+  const warnings: string[] = [];
 
-      const payload = sliderFor(anchor, 'payload', [
-        'Inventory',
-        'Payload',
-        '库存',
-        '载荷',
-        '载重',
-      ]);
-      if (payload === undefined) {
-        throw new Error('找不到 BTF 的载重滑块。');
-      }
-      const plannedWeight =
-        index === 1
-          ? candidate.plan.loadOnDeparture.weight
-          : index === waypoints.length - 1
-            ? candidate.plan.loadOnReturn.weight
-            : candidate.plan.stops[index - 2]!.loadOnDeparture.weight;
-      const weight = Math.ceil((candidate.ship.cargoStore?.weightLoad ?? 0) + plannedWeight);
-      const payloadRange = getSliderRange(payload);
-      if (
-        !Number.isFinite(weight) ||
-        payloadRange === undefined ||
-        weight < payloadRange.min ||
-        weight > payloadRange.max
-      ) {
-        throw new Error(`${from} → ${to} 的计划载重 ${weight}t 超出蓝图试飞范围。`);
-      }
-      plan = await setBtfValue(anchor, payload, weight, plan, from, to, signal);
+  const addressCode = async (location: string) => {
+    const key = location.trim().toUpperCase();
+    const cached = codes.get(key);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const address = await resolveEntity(location);
+    const code = address === undefined ? undefined : encodeAddress(address);
+    if (code === undefined) {
+      throw new Error(`无法解析 ${location} 的地址。`);
+    }
+    codes.set(key, code);
+    return code;
+  };
 
-      const reactor = sliderFor(anchor, 'reactorUsage', ['Reactor usage', '反应堆使用量']);
-      const reactorRange = reactor === undefined ? undefined : getSliderRange(reactor);
-      if (
-        reactor !== undefined &&
-        reactorRange !== undefined &&
-        !reactor.classList.contains('rc-slider-disabled')
-      ) {
-        const value = Math.max(reactorRange.min, Math.min(50, reactorRange.max));
-        plan = await setBtfValue(anchor, reactor, value, plan, from, to, signal);
-      }
-      const reactorPercent = reactor === undefined ? 50 : (getSliderValue(reactor) ?? 50);
+  for (const index of legs) {
+    const from = waypoints[index - 1]!.location;
+    const to = waypoints[index]!.location;
+    try {
+      signal.throwIfAborted();
+      const origin = await addressCode(from);
+      const destination = await addressCode(to);
+      // 载重按该段离站时的计划舱载（`loadOnDeparture` 已经含了船上现有货物），
+      // 和 FTC 的 extraMassT 同口径；再加一次当前舱载会重复计算。
+      const payload = Math.ceil(legLoadWeight(candidate.plan, index, legCount));
       const samples: FuelTradeoff[] = [];
+      let timeouts = 0;
+      let rejected = 0;
       for (const percent of fuelPercents) {
-        if (!anchor.isConnected || _$(window, C.TileFrame.cmd)?.textContent?.trim() !== command) {
-          throw new Error('BTF 窗口已关闭或切换。');
-        }
-        const fuel = sliderFor(anchor, 'fuelUsage', ['Fuel usage', '燃料消耗']);
-        if (fuel === undefined) {
-          throw new Error('找不到 BTF 的燃料消耗滑块。');
-        }
+        signal.throwIfAborted();
         onProgress(
-          `BTF ${blueprint} · ${index}/${waypoints.length - 1} · ${from} → ${to} · ${percent}%`,
+          `BTF ${ship.blueprintNaturalId} · ${index}/${legCount} · ${from} → ${to} · ${percent}%`,
         );
-        plan = await setBtfValue(anchor, fuel, percent, plan, from, to, signal);
-        if (plan.status !== 'OK') {
+        const plan = await calculateTestFlight(origin, destination, blueprint.id, 15000, {
+          fuelUsageFactor: percent / 100,
+          payload,
+          condition: ship.condition,
+          stlFuel,
+          ftlFuel,
+          reactorUsageFactor: REACTOR_USAGE,
+          landing: true,
+          // 与游戏自己写入航点时的默认偏好一致（实采 SHIP_ROUTES_EDIT_WAYPOINT：
+          // ftlPreference LEAST_JUMPS、useGateways true）——试飞要走和航线一样的路线。
+          preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+        });
+        if (plan === undefined) {
+          timeouts++;
           continue;
         }
-        const measured = summarizeNativeFlightPlan(plan);
-        if (measured.totalSeconds > 0) {
-          samples.push({
-            fuel: percent,
-            reactor: reactorPercent,
-            totalHours: measured.totalSeconds / 3600,
-            stlFuel: measured.stlFuel,
-            ftlFuel: measured.ftlFuel,
-          });
+        if (plan.status === 'OK') {
+          const summary = summarizeNativeFlightPlan(plan);
+          recordTransitSpeedSamples(performance, ship, payload, stlFuel, percent, plan);
+          if (summary.totalSeconds > 0) {
+            samples.push({
+              fuel: percent,
+              reactor: REACTOR_PERCENT,
+              totalHours: summary.totalSeconds / 3600,
+              stlFuel: summary.stlFuel,
+              ftlFuel: summary.ftlFuel,
+            });
+            if (scanSaturated(samples)) {
+              break;
+            }
+          }
+        } else {
+          rejected++;
         }
+        await sleep(REQUEST_INTERVAL_MS);
       }
-      const best = findBalanceOption(samples);
+      if (timeouts > 0) {
+        warnings.push(`${from} → ${to}：${timeouts} 档试飞无响应（已跳过）。`);
+      }
+      if (rejected > 0) {
+        warnings.push(`${from} → ${to}：${rejected} 档试飞被服务器拒绝（不影响已测档位）。`);
+      }
+      const best = chooseSample(samples);
       if (best === undefined) {
-        throw new Error(`${from} → ${to} 的 BTF 试飞没有可用方案。`);
+        throw new Error('试飞没有可用方案。');
       }
-      fuelPercentsByLeg.push(best.fuel);
+      measured.set(index, { fuel: best.fuel, reactor: REACTOR_PERCENT });
+    } catch (err) {
+      if (signal.aborted) {
+        throw err;
+      }
+      warnings.push(`${from} → ${to}：${err instanceof Error ? err.message : String(err)}`);
     }
-    return fuelPercentsByLeg;
-  } finally {
-    closePrunWindow(window);
   }
+  return { legs: measured, warnings };
 }

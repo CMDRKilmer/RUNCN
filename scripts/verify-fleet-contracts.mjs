@@ -18,7 +18,8 @@ const { planFastestChainSegments, splitChainPlanAcrossShips } =
   await import('../src/features/XIT/FLEET/chain-allocation.ts');
 const { buildChainActionPackages, chainPurchasePackage } =
   await import('../src/features/XIT/FLEET/chain-actions.ts');
-const { buildNativeWaypoints } = await import('../src/features/XIT/FLEET/native-route-plan.ts');
+const { buildNativeWaypoints, legLoadWeight } =
+  await import('../src/features/XIT/FLEET/native-route-plan.ts');
 const { completeActionPackage } = await import('../src/features/XIT/FLEET/action-completion.ts');
 const { collectPendingChainSteps } = await import('../src/features/XIT/FLEET/chain-recovery.ts');
 const { normalizeChainRun } = await import('../src/features/XIT/FLEET/chain-run.ts');
@@ -128,6 +129,21 @@ await check('native RT keeps warehouse departure and return as separate waypoint
   );
   assert.deepEqual(procurement.actions[0].cxInvReserve, { RAT: 4 });
   assert.deepEqual(procurement.groups[0].materials, { RAT: 10 });
+});
+await check('native RT legs use the load carried after each stop', () => {
+  const plan = {
+    loadOnDeparture: { weight: 12 },
+    loadOnReturn: { weight: 7 },
+    stops: [
+      { naturalId: 'A', loadOnDeparture: { weight: 9 } },
+      { naturalId: 'B', loadOnDeparture: { weight: 5 } },
+    ],
+  };
+  // 航点 = 出发地 + 2 站 + 归航 ⇒ 3 段：出发装载 / 首站离站 / 归航舱载。
+  assert.deepEqual(
+    [1, 2, 3].map(index => legLoadWeight(plan, index, 3)),
+    [12, 9, 7],
+  );
 });
 await check('market cap changes every downstream bill and cargo snapshot', () => {
   fixture.supply['RAT.AI1'] = 10;

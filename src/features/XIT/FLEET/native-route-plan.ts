@@ -12,7 +12,8 @@ export interface NativeWaypoint {
   steps: NativeRouteStep[];
 }
 
-export function isWaypointFuelPercent(value: unknown): value is number {
+// 航点的燃料消耗与反应堆使用量都是 1–100% 的整数档。
+export function isWaypointPercent(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;
 }
 
@@ -48,6 +49,18 @@ export function buildNativeWaypoints(plan: ChainPlan) {
     }
   }
   return waypoints;
+}
+
+// 第 index 段（1 起，共 legCount 段）离站时的计划舱载（t）：出发地装载 / 各站离站舱载 /
+// 归航舱载。FTC 模型按它补质量（规划期飞船通常还没装货）。
+export function legLoadWeight(plan: ChainPlan, index: number, legCount: number) {
+  if (index === 1) {
+    return plan.loadOnDeparture.weight;
+  }
+  if (index === legCount) {
+    return plan.loadOnReturn.weight;
+  }
+  return plan.stops[index - 2]?.loadOnDeparture.weight ?? 0;
 }
 
 function materialSteps(kind: 'load' | 'unload', bill: Record<string, number>): NativeRouteStep[] {

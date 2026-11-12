@@ -15,34 +15,52 @@ import {
   isNativeRouteOpen,
   NativeStepButtonUnavailable,
   nativeRouteRepeats,
+  nameNativeRoute,
   openNativeRoute,
   openNativeStep,
   openNativeWaypointEditor,
   openRouteList,
+  parkWindow,
   prepareWaypoint,
   saveNativeStep,
   saveNativeWaypointFuel,
+  unparkWindow,
 } from './native-route-editor';
-import { measureNativeRouteFuel } from './native-route-btf';
+import { computeNativeRouteFuel } from './native-route-fuel';
+import { recordNativeRoute } from './native-route-registry';
+import { writeNativeRouteBySocket } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
-  isWaypointFuelPercent,
+  isWaypointPercent,
   type NativeRouteStep,
   type NativeWaypoint,
   type RouteTank,
 } from './native-route-plan';
 import { stagedDispatch } from './staged';
 
-const { candidate, initialWaypoints } = defineProps<{
+const {
+  candidate,
+  initialWaypoints,
+  chainName = '',
+} = defineProps<{
   candidate: ShipChainPlan;
   initialWaypoints: NativeWaypoint[];
+  // 产业链名称：写入原生 RT 的航线名，同时记录到 FLEET 展示。
+  chainName?: string;
 }>();
 const emit = defineEmits<{ close: [] }>();
 
 const tanks = ref<RouteTank[]>([]);
 const fuelUsagePercents = ref(initialWaypoints.map(() => DEFAULT_WAYPOINT_FUEL_PERCENT));
-const fuelUsageValid = computed(() => fuelUsagePercents.value.every(isWaypointFuelPercent));
-const btfStatus = ref<string>();
+// 空串 = 该航点不写反应堆使用量（无自然跃迁或 BTF 未设置），保持游戏原值。
+const reactorUsagePercents = ref<(number | '')[]>(initialWaypoints.map(() => ''));
+const fuelUsageValid = computed(() => fuelUsagePercents.value.every(isWaypointPercent));
+const reactorUsageValid = computed(() =>
+  reactorUsagePercents.value.every(x => x === '' || isWaypointPercent(x)),
+);
+const usageValid = computed(() => fuelUsageValid.value && reactorUsageValid.value);
+const fuelStatus = ref<string>();
+const fuelWarnings = ref<string[]>([]);
 const waypoints = computed(() =>
   initialWaypoints.map((stop, index) =>
     index === 0
@@ -56,6 +74,8 @@ const waypoints = computed(() =>
 const purchase = chainPurchasePackage(candidate.ship, candidate.plan);
 const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ?? {}).length > 0);
 const routeId = ref<string>();
+// 游戏内航线号（RT-XXXX-NNNN）：打开窗口用它，`routeId` 是服务端哈希。
+const routeNaturalId = ref<string>();
 const busy = ref(false);
 const autoFilling = ref(false);
 const error = ref<string>();
@@ -68,6 +88,7 @@ const step = computed(() => waypoint.value?.steps[stepIndex.value]);
 
 type Progress =
   | { phase: 'scan-fuel' }
+  | { phase: 'write' }
   | { phase: 'open' }
   | { phase: 'create'; list: Awaited<ReturnType<typeof openRouteList>> }
   | { phase: 'open-route' }
@@ -85,8 +106,11 @@ type WaypointTarget = Awaited<ReturnType<typeof addWaypoint>>;
 const progress = shallowRef<Progress>({ phase: 'scan-fuel' });
 let tile: Awaited<ReturnType<typeof openNativeRoute>> | undefined;
 let nativeStepClick: AbortController | undefined;
-let btfScan: AbortController | undefined;
+let fuelScan: AbortController | undefined;
+let writeTask: AbortController | undefined;
 let disposed = false;
+// 自动填写时移出视线的原生窗口（结束后恢复原位，便于玩家核对结果）。
+const parked = new Set<Element>();
 const waitingForNativeStep = ref(false);
 const nativeStepLabels = { load: '装载', unload: '卸船', refuel: '加油' };
 
@@ -94,10 +118,51 @@ function cancelNativeStepWait() {
   nativeStepClick?.abort();
 }
 
+function parkForAutoFill(window: Element | undefined) {
+  if (window === undefined) {
+    return;
+  }
+  parkWindow(window);
+  parked.add(window);
+}
+
+function restoreParkedWindows() {
+  for (const window of parked) {
+    unparkWindow(window);
+  }
+  parked.clear();
+}
+
+// 记录本次创建的航线，供 FLEET 只读展示（socket 与界面两条路径共用）。
+// naturalId 才是 `RT <id>` 打开窗口用的航线号，routeId 是服务端哈希 id。
+function recordRoute(routeId: string, naturalId: string) {
+  const name = chainName.trim();
+  recordNativeRoute({
+    routeId,
+    naturalId,
+    name: name === '' ? naturalId : name,
+    shipId: candidate.ship.ship.id,
+    shipLabel: candidate.ship.ship.name ?? candidate.ship.ship.registration,
+    chainName: name,
+    createdAt: Date.now(),
+    waypoints: waypoints.value.map((waypoint, index) => {
+      const reactor = reactorUsagePercents.value[index];
+      return {
+        location: waypoint.location,
+        fuelPercent: fuelUsagePercents.value[index] ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
+        reactorPercent: reactor === undefined || reactor === '' ? undefined : reactor,
+        steps: waypoint.steps,
+      };
+    }),
+  });
+}
+
 function stopAutoFill() {
   autoFilling.value = false;
   cancelNativeStepWait();
-  btfScan?.abort();
+  fuelScan?.abort();
+  writeTask?.abort();
+  restoreParkedWindows();
 }
 
 onBeforeUnmount(() => {
@@ -108,7 +173,10 @@ onBeforeUnmount(() => {
 const retryAction = computed(() => {
   const phase = progress.value.phase;
   if (phase === 'scan-fuel') {
-    return '重试 BTF 测燃料';
+    return '重试计算燃料消耗';
+  }
+  if (phase === 'write') {
+    return '重试 socket 写入';
   }
   if (phase === 'waypoint-fuel') {
     return '重试填写燃料消耗';
@@ -138,7 +206,9 @@ function describe(item: NativeRouteStep) {
 const actionLabel = computed(() => {
   switch (progress.value.phase) {
     case 'scan-fuel':
-      return 'BTF 测燃料';
+      return '计算燃料消耗';
+    case 'write':
+      return '写入原生 RT';
     case 'open':
       return '打开原生 RT';
     case 'create':
@@ -187,7 +257,7 @@ async function advance(automatic = false) {
     disposed ||
     busy.value ||
     !actionLabel.value ||
-    !fuelUsageValid.value ||
+    !usageValid.value ||
     (error.value !== undefined && retryAction.value === undefined)
   ) {
     return;
@@ -197,6 +267,9 @@ async function advance(automatic = false) {
   canRetryStep.value = false;
   busy.value = true;
   autoFilling.value = automatic;
+  if (automatic && tile !== undefined) {
+    parkForAutoFill(tile.window);
+  }
   try {
     let previous: Progress;
     do {
@@ -216,6 +289,7 @@ async function advance(automatic = false) {
     nativeStepClick = undefined;
     autoFilling.value = false;
     busy.value = false;
+    restoreParkedWindows();
   }
 }
 
@@ -223,33 +297,83 @@ async function advanceOnce(retrying: boolean) {
   const state = progress.value;
   if (state.phase === 'scan-fuel') {
     const controller = new AbortController();
-    btfScan = controller;
-    btfStatus.value = `正在打开 BTF ${candidate.ship.ship.blueprintNaturalId}`;
+    fuelScan = controller;
+    fuelWarnings.value = [];
+    fuelStatus.value = `正在计算 ${candidate.ship.ship.registration} 的各段燃料消耗`;
     try {
-      const results = await measureNativeRouteFuel(
+      const results = await computeNativeRouteFuel(
         candidate,
         waypoints.value,
         controller.signal,
         status => {
-          btfStatus.value = status;
+          fuelStatus.value = status;
         },
       );
       if (!controller.signal.aborted) {
-        fuelUsagePercents.value = [fuelUsagePercents.value[0]!, ...results];
-        progress.value = { phase: 'open' };
+        fuelUsagePercents.value = results.legs.map(x => x.fuelPercent);
+        reactorUsagePercents.value = results.legs.map(x => x.reactorPercent ?? '');
+        fuelWarnings.value = results.warnings;
+        progress.value = { phase: 'write' };
       }
     } catch (err) {
       if (!controller.signal.aborted) {
         throw err;
       }
     } finally {
-      btfScan = undefined;
-      btfStatus.value = undefined;
+      fuelScan = undefined;
+      fuelStatus.value = undefined;
+    }
+    return;
+  }
+  if (state.phase === 'write') {
+    const controller = new AbortController();
+    writeTask = controller;
+    fuelStatus.value = '正在通过 socket 写入原生 RT';
+    try {
+      const legs = waypoints.value.map((_, index) => {
+        const reactor = reactorUsagePercents.value[index];
+        return {
+          fuelPercent: fuelUsagePercents.value[index] ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
+          reactorPercent: reactor === undefined || reactor === '' ? undefined : reactor,
+        };
+      });
+      const result = await writeNativeRouteBySocket(
+        { waypoints: waypoints.value, legs, name: chainName },
+        controller.signal,
+        status => {
+          fuelStatus.value = status;
+        },
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      routeId.value = result.routeId;
+      routeNaturalId.value = result.naturalId;
+      fuelWarnings.value = [...fuelWarnings.value, ...result.warnings];
+      recordRoute(result.routeId, result.naturalId);
+      progress.value = { phase: 'done' };
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw err;
+      }
+      // socket 写入失败（游戏未连接/接口变化）：退回界面填写路径。
+      fuelWarnings.value = [
+        ...fuelWarnings.value,
+        `socket 写入失败：${err instanceof Error ? err.message : String(err)}。改用界面填写（可能残留未完成的航线）。`,
+      ];
+      progress.value = { phase: 'open' };
+    } finally {
+      writeTask = undefined;
+      fuelStatus.value = undefined;
     }
     return;
   }
   if (state.phase === 'open') {
-    progress.value = { phase: 'create', list: await openRouteList(retrying) };
+    const list = await openRouteList(retrying);
+    if (autoFilling.value) {
+      parkForAutoFill(list.window);
+    }
+    progress.value = { phase: 'create', list };
     return;
   }
   if (state.phase === 'create') {
@@ -257,11 +381,23 @@ async function advanceOnce(retrying: boolean) {
       throw new Error('该船仍有旧环线在执行，请在归航后切换。');
     }
     routeId.value = await createNativeRoute(state.list);
+    routeNaturalId.value = routeId.value;
     progress.value = { phase: 'open-route' };
     return;
   }
   if (state.phase === 'open-route' && routeId.value !== undefined) {
     tile = await openNativeRoute(routeId.value);
+    if (autoFilling.value) {
+      parkForAutoFill(tile.window);
+    }
+    const name = chainName.trim();
+    if (name !== '' && !(await nameNativeRoute(tile, name))) {
+      fuelWarnings.value = [
+        ...fuelWarnings.value,
+        `未能自动把航线改名为「${name}」，请在原生 RT 里手动改名。`,
+      ];
+    }
+    recordRoute(routeId.value, routeId.value);
     progress.value = { phase: 'select' };
     return;
   }
@@ -286,17 +422,22 @@ async function advanceOnce(retrying: boolean) {
   }
   if (state.phase === 'waypoint-fuel' || state.phase === 'save-waypoint-fuel') {
     const percent = fuelUsagePercents.value[waypointIndex.value];
-    if (!isWaypointFuelPercent(percent)) {
+    if (!isWaypointPercent(percent)) {
       throw new Error('燃料消耗必须为 1–100% 的整数。');
+    }
+    const reactor = reactorUsagePercents.value[waypointIndex.value];
+    const reactorPercent = reactor === '' ? undefined : reactor;
+    if (reactorPercent !== undefined && !isWaypointPercent(reactorPercent)) {
+      throw new Error('反应堆使用量必须为 1–100% 的整数。');
     }
     if (state.phase === 'waypoint-fuel') {
       const editor = state.editor ?? (await openNativeWaypointEditor(tile, state.target));
       progress.value = { ...state, editor };
-      await fillNativeWaypointFuel(tile, editor, percent);
+      await fillNativeWaypointFuel(tile, editor, percent, reactorPercent);
       progress.value = { phase: 'save-waypoint-fuel', target: state.target, editor };
       return;
     }
-    await saveNativeWaypointFuel(tile, state.editor, percent);
+    await saveNativeWaypointFuel(tile, state.editor, percent, reactorPercent);
     if (stop.steps.length === 0) {
       nextWaypoint();
     } else {
@@ -339,7 +480,8 @@ async function openPurchase() {
 }
 
 async function showRoute() {
-  await showBuffer(routeId.value === undefined ? 'RT' : `RT ${routeId.value}`);
+  const id = routeNaturalId.value ?? routeId.value;
+  await showBuffer(id === undefined ? 'RT' : `RT ${id}`);
 }
 </script>
 
@@ -357,7 +499,10 @@ async function showRoute() {
         FTL</label
       >
     </div>
-    <p>燃料消耗按飞往各航点的航段试飞。创建航线前可以修改百分比。</p>
+    <p
+      >燃料消耗与反应堆使用量按飞往各航点的航段计算：优先用 FTC 模型；缺服务器原生记录的航段改用 BTF
+      试飞。创建航线前可以修改百分比。</p
+    >
     <ol :class="$style.stops">
       <li v-for="(stop, i) in waypoints" :key="i">
         <strong>{{ stop.location }}</strong>
@@ -371,23 +516,43 @@ async function showRoute() {
             max="100"
             step="1"
             :disabled="busy || routeId !== undefined"
+            :title="`燃料消耗 ${fuelUsagePercents[i]}%`"
             :aria-label="`${stop.location} 燃料消耗百分比`" />%
+        </label>
+        <label>
+          · 反应堆
+          <input
+            v-model.number="reactorUsagePercents[i]"
+            :class="$style.fuelInput"
+            type="number"
+            min="1"
+            max="100"
+            step="1"
+            placeholder="—"
+            :disabled="busy || routeId !== undefined"
+            :title="`反应堆使用量 ${reactorUsagePercents[i]}%`"
+            :aria-label="`${stop.location} 反应堆使用量百分比`" />%
         </label>
         <span v-if="stop.steps.length > 0"> · {{ stop.steps.map(describe).join('、') }}</span>
       </li>
     </ol>
+    <ul v-if="fuelWarnings.length > 0" :class="$style.warnings" role="status">
+      <li v-for="warning in fuelWarnings" :key="warning">{{ warning }}</li>
+    </ul>
     <p v-if="routeId"
       >航线 {{ routeId }} · {{ Math.min(waypointIndex + 1, waypoints.length) }}/{{
         waypoints.length
       }}
       站</p
     >
-    <p v-if="!fuelUsageValid" role="alert">各航点的燃料消耗必须为 1–100% 的整数。</p>
+    <p v-if="!usageValid" role="alert"
+      >燃料消耗必须为 1–100% 的整数，反应堆使用量留空或填 1–100% 的整数。</p
+    >
     <p v-else-if="error" role="alert">
       {{ error }}
       <template v-if="!retryAction">请打开原生 RT 核对已写入的内容，再手动补齐。</template>
     </p>
-    <p v-else-if="btfStatus" role="status">{{ btfStatus }}</p>
+    <p v-else-if="fuelStatus" role="status">{{ fuelStatus }}</p>
     <p v-else-if="waitingForNativeStep && step" role="status">
       在原生 RT 将鼠标移到航点 {{ waypoint?.location }}。向导会自动点「{{
         nativeStepLabels[step.kind]
@@ -404,12 +569,12 @@ async function showRoute() {
         v-if="actionLabel && (!error || retryAction) && !autoFilling"
         primary
         :disabled="busy || !fuelUsageValid"
-        data-tooltip="BTF 试飞后连续创建航点、保存燃料消耗并写入装卸步骤。"
+        data-tooltip="按计算出的燃料消耗与反应堆使用量连续创建航点、保存档位并写入装卸步骤。"
         @click="advance(true)"
         >{{ routeId ? '继续自动填写' : '自动填写' }}</PrunButton
       >
       <PrunButton v-if="autoFilling" dark @click="stopAutoFill">停止自动填写</PrunButton>
-      <PrunButton v-else-if="btfStatus" dark @click="stopAutoFill">停止 BTF 试飞</PrunButton>
+      <PrunButton v-else-if="fuelStatus" dark @click="stopAutoFill">停止计算燃料消耗</PrunButton>
       <PrunButton
         v-if="actionLabel && (!error || retryAction) && !autoFilling"
         dark
@@ -455,7 +620,22 @@ async function showRoute() {
   line-height: 1.6;
 }
 
+.warnings {
+  padding-left: 24px;
+  line-height: 1.6;
+}
+
+/* 数字输入的 spin 按钮会占掉内容宽度，5ch 时「100」会被裁成「10」——隐藏 spin 并留足宽度。 */
 .fuelInput {
-  width: 5ch;
+  width: 6ch;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.fuelInput::-webkit-inner-spin-button,
+.fuelInput::-webkit-outer-spin-button {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
 }
 </style>

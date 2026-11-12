@@ -100,10 +100,12 @@ export function calculateTestFlight(
   overrides?: {
     fuelUsageFactor?: number;
     stlFuel?: number;
+    ftlFuel?: number;
     payload?: number;
     condition?: number;
     reactorUsageFactor?: number;
     landing?: boolean;
+    preferences?: { ftlPreference: string; useGateways: boolean };
   },
 ): Promise<PrunApi.FlightPlan | undefined> {
   const missionId = crypto.randomUUID();

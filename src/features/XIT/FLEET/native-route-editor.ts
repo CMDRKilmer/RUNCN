@@ -4,10 +4,11 @@ import {
   findFormSlider,
   getSliderValue,
   setSliderValue,
+  sliderValueFromPercent,
 } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { changeInputValue, changeSelectIndex, clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
-import { isWaypointFuelPercent, type NativeRouteStep } from './native-route-plan';
+import { isWaypointPercent, type NativeRouteStep } from './native-route-plan';
 
 const routeIdPattern = /^RT-[A-Z0-9]+-\d+$/i;
 const chineseLabels: Record<string, readonly string[]> = {
@@ -24,6 +25,7 @@ const chineseLabels: Record<string, readonly string[]> = {
   'EDIT REFUEL STEP': ['编辑加油步骤', '编辑补充燃料步骤'],
   'EDIT WAYPOINT': ['编辑路径点', '编辑航点'],
   'FUEL USAGE': ['燃料消耗'],
+  'REACTOR USAGE': ['反应堆使用量'],
   SAVE: ['保存'],
   LOOP: ['循环'],
   MINIMUM: ['至少', '最小', '最小值', '最低'],
@@ -46,9 +48,36 @@ async function waitForRt<T>(read: () => T | undefined, message: string): Promise
     if (result !== undefined) {
       return result;
     }
-    await sleep(50);
+    // 20ms 轮询：原生 RT 的更新多数是服务器往返（数百 ms），再快也只是空转；
+    // 但比 50ms 少等一档，长航线累计可观。
+    await sleep(20);
   } while (Date.now() < deadline);
   throw new Error(message);
+}
+
+// 自动填写期间把原生窗口移出视线（transform 不影响布局，也不影响
+// getBoundingClientRect —— 滑块写入仍按矩形坐标计算）。停止/结束时恢复。
+// 用属性 + `!important` 样式表而不是内联 style：游戏窗口重排时会重写内联 style，
+// 内联写法会被冲掉。
+const PARK_ATTRIBUTE = 'data-rprun-parked';
+let parkStyle: HTMLStyleElement | undefined;
+
+export function parkWindow(window: Element) {
+  if (!(window instanceof HTMLElement)) {
+    return;
+  }
+  if (parkStyle === undefined) {
+    parkStyle = document.createElement('style');
+    parkStyle.textContent = `[${PARK_ATTRIBUTE}] { transform: translate(-200vw, -200vh) !important; }`;
+    document.head.appendChild(parkStyle);
+  }
+  window.setAttribute(PARK_ATTRIBUTE, '');
+}
+
+export function unparkWindow(window: Element) {
+  if (window instanceof HTMLElement) {
+    window.removeAttribute(PARK_ATTRIBUTE);
+  }
 }
 
 function normalizeLabel(text: string | null | undefined) {
@@ -220,6 +249,47 @@ export async function openNativeRoute(id: string) {
 
 export function isNativeRouteOpen(tile: RtTile, id: string) {
   return findRtTile(tile.window, `RT ${id}`)?.anchor === tile.anchor;
+}
+
+// 航线名（产业链名称）。游戏没有单独的改名按钮：点标题区会切换成输入框，
+// 没有输入框出现时返回 false，由调用方提示玩家手动改名。
+export async function nameNativeRoute(tile: RtTile, name: string) {
+  const target = name.trim();
+  if (target === '') {
+    return false;
+  }
+  const header = _$(tile.anchor, '[class*="Route__name"]');
+  if (header === undefined) {
+    return false;
+  }
+  if (normalizeLabel(header.textContent) === normalizeLabel(target)) {
+    return true;
+  }
+  await clickElement(header instanceof HTMLElement ? header : undefined);
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    const input = Array.from(tile.anchor.querySelectorAll('input')).find(
+      x => x.getClientRects().length > 0 && x.type !== 'search',
+    );
+    if (input !== undefined) {
+      changeInputValue(input, target);
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Enter',
+          code: 'Enter',
+          keyCode: 13,
+          which: 13,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      input.blur();
+      await dismissSuccess(tile);
+      return normalizeLabel(header.textContent) === normalizeLabel(target);
+    }
+    await sleep(20);
+  }
+  return false;
 }
 
 export async function prepareWaypoint(tile: RtTile, location: string) {
@@ -425,23 +495,73 @@ function waypointFuelSlider(editor: HTMLElement) {
   return findFormSlider(editor, labelVariants('FUEL USAGE'));
 }
 
-export async function fillNativeWaypointFuel(tile: RtTile, editor: HTMLElement, percent: number) {
-  if (editorWithTitle(tile, waypointEditorTitle) !== editor || !isWaypointFuelPercent(percent)) {
+// 反应堆使用量滑块只在部分航点编辑器里出现（系内/纯网关航段不适用时游戏可能不渲染），
+// 找不到就只写燃料消耗。
+function waypointReactorSlider(editor: HTMLElement) {
+  return findFormSlider(editor, labelVariants('REACTOR USAGE'));
+}
+
+export async function fillNativeWaypointFuel(
+  tile: RtTile,
+  editor: HTMLElement,
+  percent: number,
+  reactorPercent?: number,
+) {
+  if (editorWithTitle(tile, waypointEditorTitle) !== editor || !isWaypointPercent(percent)) {
     throw new Error('航点编辑器已变化，或燃料消耗超出 1–100%。');
   }
+  if (reactorPercent !== undefined && !isWaypointPercent(reactorPercent)) {
+    throw new Error('反应堆使用量必须为 1–100% 的整数。');
+  }
   const slider = await waitForRt(() => waypointFuelSlider(editor), '找不到航点的燃料消耗滑块。');
+  const fuelTarget = sliderValueFromPercent(slider, percent);
   if (
-    getSliderValue(slider) !== percent &&
-    !(await setSliderValue(slider, percent, { exactMaximum: true }))
+    getSliderValue(slider) !== fuelTarget &&
+    !(await setSliderValue(slider, fuelTarget, { exactMaximum: true }))
   ) {
     throw new Error(`燃料消耗未能设置为 ${percent}%。`);
   }
+  if (reactorPercent === undefined) {
+    return;
+  }
+  const reactor = await waitForRt(
+    () => waypointReactorSlider(editor),
+    '找不到航点的反应堆使用量滑块。',
+  );
+  const target = sliderValueFromPercent(reactor, reactorPercent);
+  if (
+    getSliderValue(reactor) !== target &&
+    !(await setSliderValue(reactor, target, { exactMaximum: true }))
+  ) {
+    throw new Error(`反应堆使用量未能设置为 ${reactorPercent}%。`);
+  }
 }
 
-export async function saveNativeWaypointFuel(tile: RtTile, editor: HTMLElement, percent: number) {
+export async function saveNativeWaypointFuel(
+  tile: RtTile,
+  editor: HTMLElement,
+  percent: number,
+  reactorPercent?: number,
+) {
   const slider = waypointFuelSlider(editor);
-  if (slider === undefined || getSliderValue(slider) !== percent) {
+  const fuelCurrent = slider === undefined ? undefined : getSliderValue(slider);
+  if (
+    slider === undefined ||
+    fuelCurrent === undefined ||
+    Math.abs(fuelCurrent - sliderValueFromPercent(slider, percent)) >= 0.01
+  ) {
     throw new Error(`保存前的燃料消耗与计划的 ${percent}% 不一致。`);
+  }
+  if (reactorPercent !== undefined) {
+    const reactor = waypointReactorSlider(editor);
+    const current = reactor === undefined ? undefined : getSliderValue(reactor);
+    if (
+      reactor === undefined ||
+      current === undefined ||
+      Math.abs(current - sliderValueFromPercent(reactor, reactorPercent)) >= 0.01
+    ) {
+      throw new Error(`保存前的反应堆使用量与计划的 ${reactorPercent}% 不一致。`);
+    }
   }
   await saveNativeEditor(tile, editor, () => editorWithTitle(tile, waypointEditorTitle));
 }
@@ -492,17 +612,33 @@ async function saveNativeEditor(
 }
 
 async function dismissSuccess(tile: RtTile) {
-  // RT updates the editor and the action overlay in separate renders.
-  await sleep(150);
-  await waitForRt(
-    () => (_$(tile.frame, C.ActionFeedback.progress) === undefined ? true : undefined),
-    '原生 RT 仍在处理上一次操作，请核对结果。',
-  );
-  const error = _$(tile.frame, C.ActionFeedback.error);
-  if (error !== undefined) {
-    throw new Error(error.textContent?.trim() || '游戏拒绝了 RT 写入。');
+  // 服务器反馈是异步的：成功提示会一直停留到被点掉，失败提示常驻。
+  // 旧实现固定 sleep(150) 再轮询「处理中是否消失」，每个动作白等一档；
+  // 这里直接等成功/失败出现，并给「本次根本没有反馈」的情形留一段短防抖。
+  const deadline = Date.now() + 8000;
+  let idleSince: number | undefined;
+  while (Date.now() < deadline) {
+    const error = _$(tile.frame, C.ActionFeedback.error);
+    if (error !== undefined) {
+      throw new Error(error.textContent?.trim() || '游戏拒绝了 RT 写入。');
+    }
+    const success = _$(tile.frame, C.ActionFeedback.success);
+    const progress = _$(tile.frame, C.ActionFeedback.progress);
+    if (success !== undefined && progress === undefined) {
+      await clickElement(success);
+      return;
+    }
+    if (success === undefined && progress === undefined) {
+      idleSince ??= Date.now();
+      if (Date.now() - idleSince >= 250) {
+        return;
+      }
+    } else {
+      idleSince = undefined;
+    }
+    await sleep(20);
   }
-  await clickElement(_$(tile.frame, C.ActionFeedback.success));
+  throw new Error('原生 RT 仍在处理上一次操作，请核对结果。');
 }
 
 async function chooseOption(editor: HTMLElement, option: string) {
