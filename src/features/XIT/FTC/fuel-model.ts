@@ -776,6 +776,15 @@ const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
 };
 const DEFAULT_STL_TRANSIT_SPEED = STL_TRANSIT_SPEED.STL_ENGINE_STANDARD;
 const STL_DEPARTURE_F_SAT_COEF = 10.96; // 离港 f 饱和系数：f_cap = 系数×流量（OOG LCB 0.0075→0.0822 实测）
+
+// 离港段燃料在 f_cap = 系数×STL 流量处饱和：超过它离港只多烧油、不再加速。
+// 燃油档位的实际上限用它——玩家要的「省油」手感基本就是这个点（节油 8%、标准 16% 一类）。
+export function stlDepartureFuelCapPercent(flowRate: number | undefined): number | undefined {
+  if (flowRate === undefined || !(flowRate > 0)) {
+    return undefined;
+  }
+  return Math.min(100, Math.max(1, Math.round(STL_DEPARTURE_F_SAT_COEF * flowRate * 100)));
+}
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_DIST_C = 0.47; // 着陆燃料系数：fuel = C×√(R_km × P^-0.2)（WCB 实测 7 点 ±0.7u）
 const STL_LANDING_P_EXP = 0.2; // 气压缩短着陆段指数（着陆距离 = 0.66×R×P^-0.2）
