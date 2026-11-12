@@ -1219,6 +1219,53 @@ export function findBalanceOption<T extends FuelTradeoff>(options: T[]): T | und
 
 /** 邻档对比的默认半径（档 = autoFuelGrid 的步长 0.05，即前后各 5 档 = 最优 ±0.25）。 */
 export const NEARBY_FUEL_SPAN = 5;
+
+// 最优性价比：沿着燃料档往上走，每 +1 个百分点燃料换回的时间（小时/百分点）跌破
+// 首档的一半就停——临近饱和段速度提升很小、燃料却继续涨，正是该停的位置。
+export const MARGINAL_RETENTION = 0.5;
+
+export function pickBestValueOption<T extends FuelTradeoff>(
+  options: T[],
+  maxFuel?: number,
+): T | undefined {
+  const sorted = options
+    .filter(o => maxFuel === undefined || o.fuel <= maxFuel)
+    .slice()
+    .sort((a, b) => a.fuel - b.fuel);
+  if (sorted.length === 0) {
+    return undefined;
+  }
+  const fuels = sorted.map(totalFuelOf);
+  // 燃料完全无差别（短途、由固定起降段主导）：时间更短的方案严格占优。
+  if (!(Math.max(...fuels) - Math.min(...fuels) > 1e-9)) {
+    return sorted.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
+  }
+  let best = sorted[0]!;
+  let firstRate: number | undefined;
+  for (let i = 1; i < sorted.length; i++) {
+    const previous = sorted[i - 1]!;
+    const current = sorted[i]!;
+    const deltaFuel = current.fuel - previous.fuel;
+    const deltaHours = previous.totalHours - current.totalHours;
+    if (!(deltaFuel > 0)) {
+      continue;
+    }
+    const rate = deltaHours / deltaFuel;
+    if (firstRate === undefined) {
+      if (!(rate > 0)) {
+        return findBalanceOption(sorted) ?? best;
+      }
+      firstRate = rate;
+      best = current;
+      continue;
+    }
+    if (!(rate > 0) || rate < firstRate * MARGINAL_RETENTION) {
+      break;
+    }
+    best = current;
+  }
+  return best;
+}
 // 邻档对比：以最优方案为中心，取**同一反应堆使用量**下燃料滑块前后各 span 档的方案。
 // 复用 scanFuelOptions 已算出的全部组合，不重算。
 //

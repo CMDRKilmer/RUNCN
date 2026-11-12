@@ -19,6 +19,7 @@ import {
   autoFuelGrid,
   autoReactorGrid,
   findBalanceOption,
+  pickBestValueOption,
   nearbyFuelOptions,
   missingModelInputs,
   conditionFactor,
@@ -384,6 +385,9 @@ export interface FtcComputeInput {
   // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
   // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
   estimateGeometry?: boolean;
+  // 选点口径：true = 最优性价比（`pickBestValueOption`：多烧的燃料换回的时间跌破首档一半即停），
+  // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优（FTC 面板口径）。
+  valueOptimal?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
@@ -555,8 +559,14 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   }
   // 平衡点：设了时间价值（₳/小时）时按总成本（燃料费 + 时间价值）最优，
   // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
+  // 原生 RT 生成另走「最优性价比」：边际时间收益跌破首档一半即停。
   const tv = input.timeValue ?? 0;
-  const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
+  const best =
+    input.valueOptimal === true
+      ? (pickBestValueOption(options) ?? options[0])
+      : tv > 0
+        ? options[0]
+        : (findBalanceOption(options) ?? options[0]);
   // 共享给 SFC 自动设置：按**航线**（船 + 起终点 + 网关标志）写入本次计算的最优燃料滑块 /
   // 反应堆使用量。按航线键控后，同船换新目的地时读不到上一条航线的值（读不到 = 不改滑块），
   // 不会再出现「上一条航线的参数落到新航线」；多船 SFC 面板同时打开时各写各自的键，

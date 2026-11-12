@@ -71,6 +71,7 @@ export async function computeNativeRouteFuel(
       from,
       to,
       browse: false,
+      valueOptimal: true,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
@@ -164,6 +165,7 @@ async function estimateLegs(
       from,
       to,
       browse: false,
+      valueOptimal: true,
       estimateGeometry: true,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });

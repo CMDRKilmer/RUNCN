@@ -11,7 +11,8 @@ import {
 } from '@src/features/XIT/FTC/ftc-compute';
 import {
   autoFuelGrid,
-  findBalanceOption,
+  pickBestValueOption,
+  stlDepartureFuelCapPercent,
   type FuelTradeoff,
 } from '@src/features/XIT/FTC/fuel-model';
 import { summarizeNativeFlightPlan } from '@src/features/XIT/FTC/route-planner';
@@ -28,41 +29,12 @@ const REACTOR_PERCENT = 50;
 // 服务器限速礼貌间隔（与 transit-f-scan 的批量采集一致）。
 const REQUEST_INTERVAL_MS = 250;
 
-// 试飞档位从省油往费油递进：越往后「省下的时间」越少、「多烧的油」越多。
-// 时间改善已很小且燃料开始大幅上涨时，拐点必然更靠省油侧，不必再试更高档。
-const MIN_SCAN_SAMPLES = 4;
-const MIN_TIME_GAIN = 0.02;
-const MIN_FUEL_RISE = 0.05;
+// 性价比选点：扫完整档位（5%–100%）后逐档比较「多烧的燃料换回多少时间」，
+// 边际收益跌破首档一半就停（`pickBestValueOption`）——临近饱和段速度提升很小、
+// 燃料却继续涨，扫完才能看清整条曲线，所以这里不做提前停止。
 
-function scanSaturated(samples: readonly FuelTradeoff[]) {
-  if (samples.length < MIN_SCAN_SAMPLES) {
-    return false;
-  }
-  const previous = samples[samples.length - 2]!;
-  const current = samples[samples.length - 1]!;
-  if (!(previous.totalHours > 0)) {
-    return false;
-  }
-  const timeGain = (previous.totalHours - current.totalHours) / previous.totalHours;
-  const previousFuel = previous.stlFuel + previous.ftlFuel;
-  const currentFuel = current.stlFuel + current.ftlFuel;
-  const fuelRise = previousFuel > 0 ? (currentFuel - previousFuel) / previousFuel : 0;
-  return timeGain < MIN_TIME_GAIN && fuelRise > MIN_FUEL_RISE;
-}
-
-// 性价比拐点（与 FTC 面板同口径），但燃料在各档位上完全没差别时取最快——
-// 那种情况下时间更短的方案严格占优，`findBalanceOption` 的退化分支会退到最省油端，
-// 写出「又慢又不省」的 5%（用户实测报障）。
-function chooseSample(samples: readonly FuelTradeoff[]) {
-  if (samples.length === 0) {
-    return undefined;
-  }
-  const fuels = samples.map(x => x.stlFuel + x.ftlFuel);
-  const fuelSpan = Math.max(...fuels) - Math.min(...fuels);
-  if (!(fuelSpan > 1e-9)) {
-    return samples.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
-  }
-  return findBalanceOption([...samples]) ?? samples[0];
+function chooseSample(samples: readonly FuelTradeoff[], maxFuel: number | undefined) {
+  return pickBestValueOption([...samples], maxFuel);
 }
 
 // 把试飞响应里的 TRANSIT 段转成 FTC 转移速度查询表的样本（q, aEff, v）：
@@ -136,6 +108,8 @@ export async function measureNativeRouteFuel(
   const fuelNow = shipFuelRemainingFor(ship);
   const stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlCap : (performance.stlFuelCapacity ?? 0);
   const ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : fuelNow.ftlRemaining;
+  // 档位上限：离港燃料饱和点（10.96×STL 流量），超过它只会多烧油。
+  const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
   const legCount = waypoints.length - 1;
   const codes = new Map<string, string>();
   const measured = new Map<number, BtfLegFuel>();
@@ -201,9 +175,6 @@ export async function measureNativeRouteFuel(
               stlFuel: summary.stlFuel,
               ftlFuel: summary.ftlFuel,
             });
-            if (scanSaturated(samples)) {
-              break;
-            }
           }
         } else {
           rejected++;
@@ -216,7 +187,7 @@ export async function measureNativeRouteFuel(
       if (rejected > 0) {
         warnings.push(`${from} → ${to}：${rejected} 档试飞被服务器拒绝（不影响已测档位）。`);
       }
-      const best = chooseSample(samples);
+      const best = chooseSample(samples, capPercent);
       if (best === undefined) {
         throw new Error('试飞没有可用方案。');
       }
