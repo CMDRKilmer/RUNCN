@@ -1026,13 +1026,18 @@ export function autoReactorGrid(ship: ShipPerformance): number[] {
 }
 
 // 方案燃料总量（STL + FTL）。
-function totalFuelOf(o: FuelOption): number {
+export type FuelTradeoff = Pick<
+  FuelOption,
+  'fuel' | 'reactor' | 'stlFuel' | 'ftlFuel' | 'totalHours'
+>;
+
+function totalFuelOf(o: FuelTradeoff): number {
   return o.stlFuel + o.ftlFuel;
 }
 
 // Pareto 前沿（时间 ↦ 燃料双目标）：返回不被其它方案在时间与燃料上都严格支配的方案，
 // 按时间升序（首项最快/最费油，末项最慢/最省油）。
-export function paretoFrontier(options: FuelOption[]): FuelOption[] {
+export function paretoFrontier<T extends FuelTradeoff>(options: T[]): T[] {
   return options
     .filter(
       o =>
@@ -1055,8 +1060,8 @@ const BALANCE_TIE_EPS = 1e-9;
 // 最省油方案：燃料总量最小；并列时取反应堆使用量最小；再并列取燃料滑块最小。
 // 退化情形（燃料或时间在所有候选方案中无差异）的兜底——此时「折衷」无意义，
 // 只能退到最省油端，绝不能退到最快端（f = 1 拉满）。
-function cheapestFuelOption(options: FuelOption[]): FuelOption | undefined {
-  let best: FuelOption | undefined;
+function cheapestFuelOption<T extends FuelTradeoff>(options: T[]): T | undefined {
+  let best: T | undefined;
   for (const o of options) {
     if (best === undefined) {
       best = o;
@@ -1100,7 +1105,7 @@ function cheapestFuelOption(options: FuelOption[]): FuelOption | undefined {
 // 因此：燃料或时间任一维度无差异时绝不返回最快方案，而是返回最省油方案。
 // 反过来**不允许**用「极小 span 归一化」（旧代码的 Math.max(1e-9, span)）把无意义的
 // 浮点噪声放大成满量程——那正是本 bug 的放大机制。
-export function findBalanceOption(options: FuelOption[]): FuelOption | undefined {
+export function findBalanceOption<T extends FuelTradeoff>(options: T[]): T | undefined {
   const pareto = paretoFrontier(options);
   if (pareto.length === 0) {
     return undefined;

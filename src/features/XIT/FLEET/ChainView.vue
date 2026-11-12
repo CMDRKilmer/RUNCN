@@ -30,6 +30,8 @@ import { userData } from '@src/store/user-data';
 
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
+import NativeRouteDialog from './NativeRouteDialog.vue';
+import { buildNativeWaypoints } from './native-route-plan';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -197,6 +199,24 @@ const executeTooltip = computed(() => {
 });
 
 const executeNotice = ref<string | undefined>(undefined);
+
+function openNativeRoutePlan(event: MouseEvent) {
+  const candidate = shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
+  if (
+    candidate === undefined ||
+    activeRuns.value.some(run => run.shipId === candidate.ship.ship.id)
+  ) {
+    executeNotice.value = '请先选择一艘未运行旧环线的船。';
+    return;
+  }
+  try {
+    const waypoints = buildNativeWaypoints(candidate.plan);
+    executeNotice.value = undefined;
+    showTileOverlay(event, NativeRouteDialog, { candidate, initialWaypoints: waypoints });
+  } catch (err) {
+    executeNotice.value = err instanceof Error ? err.message : String(err);
+  }
+}
 // 状态检查结果提示：环线运行中网页关闭导致到港触发器错过时，提示自动恢复情况。
 
 // 执行时的计划快照：环线执行中船离港后 shipPlans 为空，
@@ -801,6 +821,12 @@ function flightTotalText(shipId: string): string {
         {{ syncStateText }}
       </span>
       <div :class="$style.spacer" />
+      <PrunButton
+        dark
+        :disabled="selectedShips.length !== 1 || shipPlans.length !== 1 || loading"
+        @click="openNativeRoutePlan">
+        生成原生 RT
+      </PrunButton>
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
       </Tooltip>

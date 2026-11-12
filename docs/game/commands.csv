@@ -102,6 +102,8 @@ PROD,Display one or all of your production lines.,,Base
 PRODCO,Queue a new production order for a production line.,Base,
 PRODQ,Order queue of a production line.,Production Line,
 RSB,Has a list of recommended starter buildings for your selected starting package.,,
+RT,Lists or edits shipping routes.,,Route ID
+RTE,Shows shipping route execution.,,Ship Transponder
 SFC,Ship flight controls.,Ship Transponder,
 SHP,Ship detail information,Ship Transponder,
 SHPF,Ship fuel tanks.,Ship Transponder,

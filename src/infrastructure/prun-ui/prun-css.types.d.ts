@@ -1864,6 +1864,11 @@ declare global {
       container: string;
       info: string;
     };
+    Waypoint: {
+      commandsSteps: string;
+      destination: string;
+      waypoint: string;
+    };
     Window: {
       body: string;
       button: string;

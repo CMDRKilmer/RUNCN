@@ -16,7 +16,9 @@ const { executeChainPlans, clearShipChainPlan } =
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
 const { planFastestChainSegments, splitChainPlanAcrossShips } =
   await import('../src/features/XIT/FLEET/chain-allocation.ts');
-const { buildChainActionPackages } = await import('../src/features/XIT/FLEET/chain-actions.ts');
+const { buildChainActionPackages, chainPurchasePackage } =
+  await import('../src/features/XIT/FLEET/chain-actions.ts');
+const { buildNativeWaypoints } = await import('../src/features/XIT/FLEET/native-route-plan.ts');
 const { completeActionPackage } = await import('../src/features/XIT/FLEET/action-completion.ts');
 const { collectPendingChainSteps } = await import('../src/features/XIT/FLEET/chain-recovery.ts');
 const { normalizeChainRun } = await import('../src/features/XIT/FLEET/chain-run.ts');
@@ -79,6 +81,53 @@ const ship = (id, items = []) => ({
     weightLoad: 0,
     volumeLoad: 0,
   },
+});
+await check('native RT keeps warehouse departure and return as separate waypoints', () => {
+  const plan = {
+    originNaturalId: 'CX',
+    cxBill: { RAT: 14 },
+    purchaseBill: { RAT: 10 },
+    originPickup: { RAT: 4 },
+    finalUnload: { FE: 3 },
+    stops: [
+      {
+        naturalId: 'A',
+        unloadCx: {},
+        unloadChain: new Map(),
+        load: new Map([['RAT', { amount: 2 }]]),
+      },
+      {
+        naturalId: 'B',
+        unloadCx: { RAT: 14 },
+        unloadChain: new Map([['RAT', { amount: 2 }]]),
+        load: new Map([['FE', { amount: 3 }]]),
+      },
+    ],
+  };
+  assert.deepEqual(buildNativeWaypoints(plan), [
+    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
+    {
+      location: 'B',
+      steps: [
+        { kind: 'unload', ticker: 'RAT', amount: 16 },
+        { kind: 'load', ticker: 'FE', amount: 3 },
+      ],
+    },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
+  ]);
+  assert.deepEqual(buildNativeWaypoints({ ...plan, finalUnload: {} }).at(-1), {
+    location: 'CX',
+    steps: [],
+  });
+  assert.throws(() => buildNativeWaypoints({ ...plan, hasUnmetChainDemand: true }));
+  const procurement = chainPurchasePackage(ship('S'), plan);
+  assert.deepEqual(
+    procurement.actions.map(x => x.type),
+    ['CX Buy'],
+  );
+  assert.deepEqual(procurement.actions[0].cxInvReserve, { RAT: 4 });
+  assert.deepEqual(procurement.groups[0].materials, { RAT: 10 });
 });
 await check('market cap changes every downstream bill and cargo snapshot', () => {
   fixture.supply['RAT.AI1'] = 10;

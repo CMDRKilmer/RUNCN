@@ -1,5 +1,23 @@
 import { sleep } from '@src/utils/sleep';
 
+export function findFormSlider(form: Element, labels: readonly string[]) {
+  const expected = labels.map(label => label.trim().toUpperCase());
+  const matches = _$$(form, 'rc-slider').filter(slider => {
+    // BTF and RT use different hashes for the same FormComponent selectors.
+    const row = slider.closest(
+      '[class*="FormComponent__containerActive___"], [class*="FormComponent__containerPassive___"], [class*="FormComponent__containerActiveMobile___"], [class*="FormComponent__containerPassiveMobile___"]',
+    );
+    const label = row?.querySelector('label, [class*="FormComponent__label___"]')?.textContent;
+    return (
+      row != null &&
+      form.contains(row) &&
+      label != null &&
+      expected.includes(label.trim().toUpperCase())
+    );
+  });
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
 // 被 FTC 查询引擎等模块独占的 SFC 磁贴：sfc-auto-fuel-settings 跳过这些磁贴，
 // 避免两个模块同时对同一组滑块写入互相覆盖。
 const reservedTiles = new WeakSet<Element>();
@@ -78,7 +96,11 @@ async function clickSliderMax(slider: Element) {
 // 设置 rc-slider 滑块的值并校验写入结果（容差 0.01）。
 // 注意：滑块交互依赖 getBoundingClientRect，目标窗口不能处于 display:none
 // （矩形为 0 会导致百分比计算错误），查询引擎应把窗口移出屏幕而非隐藏。
-export async function setSliderValue(slider: Element, value: number): Promise<boolean> {
+export async function setSliderValue(
+  slider: Element,
+  value: number,
+  { exactMaximum = false } = {},
+): Promise<boolean> {
   if (slider.classList.contains('rc-slider-disabled')) {
     return false;
   }
@@ -87,16 +109,15 @@ export async function setSliderValue(slider: Element, value: number): Promise<bo
     return false;
   }
   // 最大值：直接点击轨道最右端，不依赖 lastMark，更稳健
-  if (value >= range.max) {
+  if (value >= range.max && !exactMaximum) {
     await clickSliderMax(slider);
   } else {
     await clickSliderTrack(slider, value, range);
   }
   // 等 React 重新渲染后校验写入结果，容差放宽到 0.01
   await sleep(0);
-  const handle = _$(slider, 'rc-slider-handle');
-  const current = Number(handle?.getAttribute('aria-valuenow'));
-  return Number.isFinite(current) && Math.abs(current - value) < 0.01;
+  const current = getSliderValue(slider);
+  return current !== undefined && Math.abs(current - value) < 0.01;
 }
 
 // 读取滑块当前值。
