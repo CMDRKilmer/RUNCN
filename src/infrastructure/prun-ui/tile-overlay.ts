@@ -5,6 +5,7 @@ export function showTileOverlay<T extends Component>(
   baseElementOrEvent: Element | Event,
   component: T,
   rootProps?: ExtractComponentProps<T>,
+  options?: { dismissible?: boolean },
 ) {
   const container = findMountContainer(baseElementOrEvent);
   if (!container) {
@@ -21,6 +22,7 @@ export function showTileOverlay<T extends Component>(
   const fragmentApp = createFragmentApp(Overlay, {
     child: component,
     props: rootProps,
+    dismissible: options?.dismissible ?? true,
     onClose: () => {
       fragmentApp.unmount();
       for (const child of children) {

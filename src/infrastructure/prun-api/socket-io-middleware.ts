@@ -1,6 +1,12 @@
 import { decodePayload, encodePayload, Packet as EIOPacket } from 'engine.io-parser';
 import { Decoder, Encoder, Packet as SIOPacket, PacketType } from 'socket.io-parser';
+import { ref } from 'vue';
 import { castArray } from '@src/utils/cast-array';
+
+// 开发用：录制游戏**发往服务器**的请求（客户端→服务器）。用于逆向新接口
+// （如原生 RT 的写入消息），正常玩法不开启。
+export const isRecordingClientMessages = ref(false);
+export const clientMessages = ref<unknown[]>([]);
 
 export type Middleware<T> = {
   onOpen: () => void;
@@ -79,6 +85,12 @@ export default function socketIOMiddleware<T>(middleware: Middleware<T>) {
             // 游戏持续发包，借此总能拿到当前活跃连接。
             return function (this: WebSocket, ...args: Parameters<WebSocket['send']>) {
               activeSocket = target;
+              if (isRecordingClientMessages.value) {
+                const message = decodeRequestMessage(args[0]);
+                if (message !== undefined) {
+                  clientMessages.value.push(message);
+                }
+              }
               return value.apply(target, args);
             };
           }
@@ -199,6 +211,27 @@ function decodeSIOPacket(data: unknown) {
   decoder.on('decoded', x => (decodedPacket = x));
   decoder.add(data);
   return decodedPacket;
+}
+
+// 客户端→服务器的请求体（event "message" 的第二参数），用于录制接口。
+function decodeRequestMessage(data: unknown) {
+  if (typeof data !== 'string') {
+    return undefined;
+  }
+  for (const packet of decodePayload(data)) {
+    if (packet.type !== 'message' || typeof packet.data !== 'string') {
+      continue;
+    }
+    const decoded = decodeSIOPacket(packet.data);
+    if (
+      decoded?.type === PacketType.EVENT &&
+      Array.isArray(decoded.data) &&
+      decoded.data[0] === 'message'
+    ) {
+      return decoded.data[1];
+    }
+  }
+  return undefined;
 }
 
 function encodeEIOPacket(packet: Arrayable<EIOPacket>) {
