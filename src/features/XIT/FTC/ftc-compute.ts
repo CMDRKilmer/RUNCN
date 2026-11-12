@@ -8,6 +8,7 @@ import { hasSystemData, exportStationOrbits, gameNow } from '@src/infrastructure
 import {
   planRoutes,
   routeMetrics,
+  estimateRouteStl,
   findNativeFlightPlan,
   summarizeNativeFlightPlan,
 } from './route-planner';
@@ -375,6 +376,14 @@ export interface FtcComputeInput {
   // 无法自动出发；星系数据未积累时用已有数据（**无回退**，几何缺失即判 incomplete
   // 不写滑块，等服务器下发该航线的原生 STL 段记录）。
   browse?: boolean;
+  // 规划期的额外载重（t）：飞船在规划时往往还没装货，而飞行质量决定时间（转移段速度
+  // 按 (参考质量/质量的 0.78 次方) 衰减）与着陆/起飞载重项，故按该段计划载重补进
+  // `ShipPerformance.mass`。缺省 0 = 用飞船当前质量。
+  extraMassT?: number;
+  // 缺服务器原生 STL 段记录时按公式估算起降几何（`route-planner.estimateRouteStl`）。
+  // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
+  // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
+  estimateGeometry?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
@@ -404,6 +413,8 @@ export interface FtcComputeOutput {
   // best 可采信且已写入共享参数；有值时 best 基于残缺输入（退化），**未**写入共享参数，
   // SFC 自动联动须跳过滑块写入。
   inputIncomplete?: string[];
+  // STL 起降几何来自公式估算（无服务器原生记录，仅 estimateGeometry 开启时可能为 true）。
+  estimatedGeometry?: true;
 }
 
 // 计算最优燃料方案并写入共享参数（ftc-fuel-settings），无需 FTC 面板打开。
@@ -427,6 +438,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
+  if (input.extraMassT !== undefined && input.extraMassT > 0) {
+    perf.mass += input.extraMassT;
+  }
   // 计算时自动浏览星系（可选）：起终点星系阻塞获取轨道/恒星质量数据，
   // 其余无轨道空间站星系后台渐进。SFC 联动（browse=false）跳过开窗，避免干扰。
   if (input.browse !== false) {
@@ -464,6 +478,18 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
         metrics.stlDistanceKm = predicted.distanceKm;
         metrics.transitKm = predicted.distanceKm;
       }
+    }
+  }
+  // 仍然没有几何（跨星系且服务器还没为这条航线下发原生 STL 段记录）：按公式估算起降距离。
+  // 只有显式 estimateGeometry 的调用方（原生 RT 生成）会走到这里 —— 面板/SFC 仍严格判缺。
+  let estimatedGeometry = false;
+  if (input.estimateGeometry === true && metrics.stlDistanceKm === undefined) {
+    const estimate = estimateRouteStl(route);
+    if (estimate.stlDistanceKm !== undefined) {
+      metrics.departKm = metrics.departKm ?? estimate.departKm;
+      metrics.approachKm = metrics.approachKm ?? estimate.approachKm;
+      metrics.stlDistanceKm = estimate.stlDistanceKm;
+      estimatedGeometry = true;
     }
   }
   const nativePlan = findNativeFlightPlan(
@@ -537,8 +563,10 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 互不覆盖。
   // ⚠️ 仅在输入完整时写入：残缺输入下 best 必然退化（f = 1 / 0.05 这类假值），
   // 写进去会覆盖面板刚算好的正确参数，正是「SFC 自动拉条 ≠ FTC 面板结果」的成因。
+  // 估算几何（estimateGeometry）同样不写入共享参数：SFC 联动只认服务器原生几何。
   const routeKey = ftcRouteKey(input.shipRegistration, from, to, input.useGateway === true);
-  if (inputIncomplete.length === 0) {
+  const shareable = inputIncomplete.length === 0 && !estimatedGeometry;
+  if (shareable) {
     setFtcFuelSlider(routeKey, best.fuel);
     setFtcReactorUsage(routeKey, best.reactor);
   }
@@ -548,7 +576,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   lastFtcCompute.value = {
     key: routeKey,
     at: Date.now(),
-    complete: inputIncomplete.length === 0,
+    complete: shareable,
   };
   // 服务器当前对该航线下发的原生 FlightPlan（用于面板并行展示实测总时长）。
   // 用反查后的实体键匹配（SFC 把空间站目的地规范化成所属星系 id，原生计划的目标端是
@@ -566,6 +594,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     nearby: nearbyFuelOptions(options, best),
     reactorRelevant,
     inputIncomplete: inputIncomplete.length > 0 ? inputIncomplete : undefined,
+    estimatedGeometry: estimatedGeometry ? true : undefined,
     landingRadius: landingEnv?.radiusKm,
     landingPressure: landingEnv?.pressure,
     departureRadius: departEnv?.radiusKm,

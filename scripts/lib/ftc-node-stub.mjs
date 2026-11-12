@@ -145,6 +145,13 @@ export const planRoutes = (from, to) => {
   return { natural: entry.route, gateway: undefined };
 };
 export const routeMetrics = route => route.metrics;
+// './route-planner' 的 estimateRouteStl：computeFtcPlan 的 estimateGeometry 门默认关闭，
+// 本脚本不覆盖估算路径；导出只为满足静态导入。
+export const estimateRouteStl = () => ({
+  departKm: undefined,
+  approachKm: undefined,
+  stlDistanceKm: undefined,
+});
 // './route-planner' 的 findNativeFlightPlan：编排层用它回传「服务器当前计划实测总时长」，
 // Node 替身没有 flightPlansStore → 恒 undefined（面板不显示该提示），与浏览器行为一致。
 export const findNativeFlightPlan = () => undefined;

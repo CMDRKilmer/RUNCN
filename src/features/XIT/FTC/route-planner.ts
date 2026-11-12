@@ -1,5 +1,9 @@
 import { routesStore } from '@src/infrastructure/fio/routes';
-import { stlSegmentsStore } from '@src/infrastructure/prun-api/data/system-bodies';
+import { gameNow, predictPosition } from '@src/infrastructure/fio/orbit';
+import {
+  stlSegmentsStore,
+  systemBodiesStore,
+} from '@src/infrastructure/prun-api/data/system-bodies';
 import { flightPlansStore } from '@src/infrastructure/prun-api/data/flight-plans';
 import {
   getEntityNaturalIdFromAddress,
@@ -388,6 +392,52 @@ export function routeMetrics(route: PlannedRoute): {
     toLookup: toRecordKey?.key,
     stationReverse: [fromRecordKey?.lookup, toRecordKey?.lookup].filter(x => x !== undefined),
   };
+}
+
+// ---- 无原生记录时的 STL 起降几何估算 ----
+// 供 `computeFtcPlan({ estimateGeometry: true })` 使用（原生抓不到记录时也要算得出）；
+// FTC 面板与 SFC 联动仍按 missingModelInputs 严格判缺，不消费这里的估算。
+// 跨星系自然段用内置实测中位数（2018 条离港 + 1082 条进近：离港 ≈70M、进近 ≈68M km）；
+// 网关/系内段用天体到本星系恒星的本地轨道距离（跳点在恒星连线方向，同一量级）。
+// ⚠️ 只有**时间**受影响：跨星系 STL 燃料是罐口径（0.49×罐×f），与距离无关。
+const STL_EST_DEPARTURE_KM = 70e6;
+const STL_EST_APPROACH_KM = 68e6;
+
+export function estimateRouteStl(route: PlannedRoute) {
+  const firstLeg = route.legs[0];
+  const lastLeg = route.legs[route.legs.length - 1];
+  const departKm =
+    firstLeg === undefined || firstLeg.viaGateway
+      ? bodyStarDistanceKm(route.fromBody)
+      : STL_EST_DEPARTURE_KM;
+  const approachKm =
+    lastLeg === undefined || lastLeg.viaGateway
+      ? bodyStarDistanceKm(route.toBody)
+      : STL_EST_APPROACH_KM;
+  return {
+    departKm,
+    approachKm,
+    stlDistanceKm:
+      departKm !== undefined && approachKm !== undefined ? departKm + approachKm : undefined,
+  };
+}
+
+// 天体到本星系恒星的本地轨道距离：优先服务器观测位置，缺观测时用离线轨道模型预测。
+function bodyStarDistanceKm(body: string | undefined) {
+  if (body === undefined) {
+    return undefined;
+  }
+  const system = resolveSystemId(body);
+  const star = system === undefined ? undefined : getStarPosition(system);
+  if (star === undefined) {
+    return undefined;
+  }
+  const position = systemBodiesStore.getPosition(body) ?? predictPosition(body, gameNow());
+  if (position === undefined) {
+    return undefined;
+  }
+  const distance = distance3d(position, star);
+  return Number.isFinite(distance) && distance > 0 ? distance : undefined;
 }
 
 // ---- 完整航线段展示（严格按游戏 SFC 飞行计划表格）----

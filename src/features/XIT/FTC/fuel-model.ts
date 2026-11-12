@@ -572,6 +572,10 @@ async function loadTransitSpeedTable(): Promise<void> {
     // 加载失败：保持空表 → 全部走旧式兜底
     transitTable = {};
   }
+  // 本地实测样本（BTF 试飞顺带采的）始终叠加在远端表上，避免被覆盖。
+  for (const [engine, pts] of Object.entries(localSamples)) {
+    transitTable[engine] = [...(transitTable[engine] ?? []), ...pts];
+  }
 }
 
 // 查询表插值。返回 undefined 表示表不可用（引擎未知/无点），调用方走旧式。
@@ -706,6 +710,60 @@ export function setTransitSpeedTableForTest(
   table: Record<string, readonly TransitTablePoint[]> | undefined,
 ): void {
   transitTable = table;
+}
+
+// ---- 本地实测样本（自动补表）----
+// 远端表的 aEff 覆盖极窄（节油/超推引擎只有单一 aEff 行），任何质量比不同的船都会触发
+// `stlTransitTableReliableFor` 判「超出可靠范围」→ FTC 整段跳过。这里允许把**我们自己
+// BTF 试飞**测到的 (q, aEff, v) 追加进表：每采一次就补齐该船自己那条 aEff 行，
+// 下一次 FTC 就能算（BTF 试飞本来就是因为 FTC 算不了才跑的，可自我修复）。
+const MAX_LOCAL_SAMPLES = 400;
+const localSamples: Record<string, TransitTablePoint[]> = {};
+
+export function transitSpeedSamplesSnapshot(): Record<string, [number, number, number][]> {
+  return Object.fromEntries(
+    Object.entries(localSamples).map(([engine, pts]) => [
+      engine,
+      pts.map(p => [p[0], p[1], p[2]] as [number, number, number]),
+    ]),
+  );
+}
+
+export function restoreTransitSpeedSamples(
+  table: Record<string, readonly TransitTablePoint[]> | undefined,
+): void {
+  if (table === undefined) {
+    return;
+  }
+  for (const [engine, pts] of Object.entries(table)) {
+    for (const [q, aEff, v] of pts) {
+      addTransitSpeedSample(engine, q, aEff, v);
+    }
+  }
+}
+
+// 追加一条实测样本；位置重复（log 距离 1% 内）时丢弃，返回是否真的加了。
+export function addTransitSpeedSample(engine: string, q: number, aEff: number, v: number): boolean {
+  if (!(q > 0) || !(aEff > 0) || !(v > 0)) {
+    return false;
+  }
+  transitTable ??= {};
+  const existing = [...(transitTable[engine] ?? []), ...(localSamples[engine] ?? [])];
+  const duplicate = existing.some(
+    ([pq, pa, pv]) =>
+      pv > 0 && Math.abs(Math.log(pq / q)) < 0.01 && Math.abs(Math.log(pa / aEff)) < 0.01,
+  );
+  if (duplicate) {
+    return false;
+  }
+  const point: TransitTablePoint = [q, aEff, v];
+  const local = localSamples[engine] ?? (localSamples[engine] = []);
+  local.push(point);
+  if (local.length > MAX_LOCAL_SAMPLES) {
+    local.shift();
+  }
+  transitTable[engine] = [...(transitTable[engine] ?? []), point];
+  return true;
 }
 
 void ensureTransitSpeedTable();
@@ -1152,7 +1210,6 @@ export function findBalanceOption<T extends FuelTradeoff>(options: T[]): T | und
 
 /** 邻档对比的默认半径（档 = autoFuelGrid 的步长 0.05，即前后各 5 档 = 最优 ±0.25）。 */
 export const NEARBY_FUEL_SPAN = 5;
-
 // 邻档对比：以最优方案为中心，取**同一反应堆使用量**下燃料滑块前后各 span 档的方案。
 // 复用 scanFuelOptions 已算出的全部组合，不重算。
 //
