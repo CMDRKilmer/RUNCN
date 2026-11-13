@@ -38,11 +38,16 @@ import {
   recordNativeRoute,
   removeNativeRoute,
   type NativeRouteRecord,
-  type NativeRouteWaypointRecord,
 } from './native-route-registry';
 import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
-import { mergeRouteRecord, matchRunningRoutes, type RunningRoutes } from './native-route-game';
+import {
+  mergeRouteRecord,
+  matchRunningRoutes,
+  routeProgressText,
+  routeStopStates,
+  type RunningRoutes,
+} from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -53,7 +58,6 @@ import {
   getEntityNaturalIdFromAddress,
   getSystemLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
-import { encodeAddress } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
@@ -350,69 +354,6 @@ async function refreshGameRoutes() {
   } finally {
     refreshingGameRoutes = false;
   }
-}
-
-function nativeRouteProgress(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
-  const states = nativeRouteStates(record, ship);
-  const index = states.findIndex(x => x === 'arrived' || x === 'transit');
-  const reached = states.filter(x => x === 'done').length;
-  const current = index < 0 ? Math.min(reached + 1, record.waypoints.length) : index + 1;
-  return `${current}/${record.waypoints.length}`;
-}
-
-// 用飞船的当前航班（或在港位置）匹配航点，得到逐站状态；与「运行中」表格同一套标记。
-// 游戏 UI 手动创建的航线只有编码地址，换不出 naturalId 时用编码地址直接比对航班。
-// 环线的首站与归航站是同一地点：先用「上一站 → 目的地」的连续航段定位，
-// 否则归航/回港时永远命中第 0 站，进度会重置成 1/N。
-function nativeRouteStates(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
-  const flight =
-    ship === undefined
-      ? undefined
-      : flightsStore.all.value?.find(x => x.shipId === ship.id && !x.aborted);
-  const address = ship?.address;
-  let index = -1;
-  if (flight !== undefined) {
-    index = record.waypoints.findIndex(
-      (waypoint, i) =>
-        i > 0 &&
-        waypointMatchesAddress(waypoint, flight.destination) &&
-        waypointMatchesAddress(record.waypoints[i - 1]!, flight.origin),
-    );
-    if (index < 0) {
-      index = record.waypoints.findIndex(x => waypointMatchesAddress(x, flight.destination));
-    }
-  } else if (address != null) {
-    index = record.waypoints.findIndex(x => waypointMatchesAddress(x, address));
-  }
-  return record.waypoints.map((_, i): StopState => {
-    if (index < 0) {
-      return 'pending';
-    }
-    if (i < index) {
-      return 'done';
-    }
-    if (i > index) {
-      return 'pending';
-    }
-    return flight === undefined ? 'arrived' : 'transit';
-  });
-}
-
-function waypointMatchesAddress(waypoint: NativeRouteWaypointRecord, address: PrunApi.Address) {
-  const naturalId = getEntityNaturalIdFromAddress(address);
-  if (
-    naturalId !== undefined &&
-    typeof waypoint.location === 'string' &&
-    waypoint.location.trim().toUpperCase() === naturalId.trim().toUpperCase()
-  ) {
-    return true;
-  }
-  const encoded = encodeAddress(address);
-  return (
-    encoded !== undefined &&
-    typeof waypoint.encoded === 'string' &&
-    waypoint.encoded.trim().toUpperCase() === encoded.trim().toUpperCase()
-  );
 }
 
 function openNativeRoute(record: NativeRouteRecord) {
@@ -1594,7 +1535,7 @@ function flightTotalText(shipId: string): string {
               }}
               <span :class="$style.running"
                 >（{{ entry.record.name || entry.record.naturalId }} ·
-                {{ nativeRouteProgress(entry.record, entry.ship) }}）</span
+                {{ routeProgressText(entry.record, entry.ship) }}）</span
               >
             </span>
             <div :class="$style.route">
@@ -1604,7 +1545,7 @@ function flightTotalText(shipId: string): string {
                 <span
                   :class="[
                     isNativeRouteEnd(entry.record, index) ? $style.routeOrigin : $style.routeNode,
-                    nativeRouteStates(entry.record, entry.ship)[index] === 'done'
+                    routeStopStates(entry.record, entry.ship)[index] === 'done'
                       ? $style.routeDone
                       : '',
                   ]"
@@ -1642,9 +1583,9 @@ function flightTotalText(shipId: string): string {
                   <span
                     :class="[
                       $style.marker,
-                      $style[markClassKey(nativeRouteStates(entry.record, entry.ship)[index])],
+                      $style[markClassKey(routeStopStates(entry.record, entry.ship)[index])],
                     ]"
-                    >{{ stopMarker(nativeRouteStates(entry.record, entry.ship)[index]) }}</span
+                    >{{ stopMarker(routeStopStates(entry.record, entry.ship)[index]) }}</span
                   >
                   {{ index }}
                 </td>

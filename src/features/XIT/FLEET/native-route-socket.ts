@@ -123,25 +123,22 @@ function sendRouteAction(
   messageType: string,
   payload: Record<string, unknown>,
   routeId?: string,
-  extraMatch?: ResponseMatcher,
+  matches?: ResponseMatcher,
 ) {
   return serialize(async () => {
     const response = await sendRouteRequest(messageType, payload, response => {
-      if (extraMatch !== undefined && !extraMatch(response)) {
+      // 变更类 action 只回单条 SHIP_ROUTES_ROUTE：游戏里其它窗口的列表响应（哪怕带着
+      // 本条航线）是**变更前**的状态，当成自己的响应会让后续步骤改错航点。
+      if (response.kind !== 'route') {
         return false;
       }
-      if (response.kind === 'route') {
-        // 请求指定了航线就必须是这条航线——否则后续航点/改名会写到别的航线上。
-        return routeId === undefined || response.route.id === routeId;
+      if (matches !== undefined && !matches(response)) {
+        return false;
       }
-      return routeId !== undefined && response.routes.some(x => x.id === routeId);
+      // 请求指定了航线就必须是这条航线——否则后续航点/改名会写到别的航线上。
+      return routeId === undefined || response.route.id === routeId;
     });
-    const route =
-      response.kind === 'route'
-        ? response.route
-        : routeId === undefined
-          ? undefined
-          : response.routes.find(x => x.id === routeId);
+    const route = response.kind === 'route' ? response.route : undefined;
     if (route === undefined) {
       throw new Error(`${messageType} 未返回航线数据`);
     }
@@ -339,11 +336,12 @@ async function writeRoute(
     signal.throwIfAborted();
     onProgress(`写入航点 ${index + 1}/${input.waypoints.length} · ${waypoint.location}`);
     const destination = await addressCode(waypoint.location);
+    const before = route.waypoints.length;
     route = await socketAddWaypoint(route.id, destination);
-    const added = route.waypoints.at(-1);
-    if (added === undefined) {
-      throw new Error(`航点 ${waypoint.location} 未返回 id。`);
+    if (route.waypoints.length <= before) {
+      throw new Error(`航点 ${waypoint.location} 未写入（响应里没有新航点）。`);
     }
+    const added = route.waypoints.at(-1)!;
     const leg = input.legs[index];
     if (leg !== undefined) {
       route = await socketEditWaypoint(

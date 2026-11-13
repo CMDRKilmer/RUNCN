@@ -404,6 +404,95 @@ function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypoint
   return changed;
 }
 
+export type RouteStopState = 'pending' | 'transit' | 'arrived' | 'done';
+
+// 已确定的航段位置（按 航线号|船 缓存）：到港后航班从 flightsStore 消失，而 A→B→A
+// 这类首末同址的航线会同时命中第 0 站与归航站——靠它把「归航已跑完」与「还没出发」分开。
+const resolvedStopIndexes = new Map<string, number>();
+
+function stopStateKey(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
+  const route = record.naturalId.trim().toUpperCase() || record.routeId;
+  return `${route}|${ship?.id ?? record.shipId}`;
+}
+
+function waypointMatchesAddress(waypoint: NativeRouteWaypointRecord, address: PrunApi.Address) {
+  const naturalId = getEntityNaturalIdFromAddress(address);
+  if (
+    naturalId !== undefined &&
+    typeof waypoint.location === 'string' &&
+    waypoint.location.trim().toUpperCase() === naturalId.trim().toUpperCase()
+  ) {
+    return true;
+  }
+  const encoded = encodeAddress(address);
+  return (
+    encoded !== undefined &&
+    typeof waypoint.encoded === 'string' &&
+    waypoint.encoded.trim().toUpperCase() === encoded.trim().toUpperCase()
+  );
+}
+
+// 用飞船的当前航班（或在港位置）匹配航点，得到逐站状态；与「运行中」表格同一套标记。
+// 游戏 UI 手动创建的航线只有编码地址，换不出 naturalId 时用编码地址直接比对航班。
+// 环线的首站与归航站是同一地点：先用「上一站 → 目的地」的连续航段定位，
+// 否则归航/回港时永远命中第 0 站，进度会重置成 1/N。
+export function routeStopStates(
+  record: NativeRouteRecord,
+  ship: PrunApi.Ship | undefined,
+): RouteStopState[] {
+  const flight =
+    ship === undefined
+      ? undefined
+      : flightsStore.all.value?.find(x => x.shipId === ship.id && !x.aborted);
+  const address = ship?.address;
+  const key = stopStateKey(record, ship);
+  let index = -1;
+  if (flight !== undefined) {
+    index = record.waypoints.findIndex(
+      (waypoint, i) =>
+        i > 0 &&
+        waypointMatchesAddress(waypoint, flight.destination) &&
+        waypointMatchesAddress(record.waypoints[i - 1]!, flight.origin),
+    );
+    if (index < 0) {
+      index = record.waypoints.findIndex(x => waypointMatchesAddress(x, flight.destination));
+    }
+    if (index >= 0) {
+      resolvedStopIndexes.set(key, index);
+    }
+  } else if (address != null) {
+    // 在港（航班已结束）：取「上一次确定位置之后」的第一个匹配点，归航完成后不会退回第 0 站。
+    const remembered = resolvedStopIndexes.get(key);
+    index = record.waypoints.findIndex(
+      (x, i) => (remembered === undefined || i >= remembered) && waypointMatchesAddress(x, address),
+    );
+    if (index < 0) {
+      index = record.waypoints.findIndex(x => waypointMatchesAddress(x, address));
+    }
+  }
+  return record.waypoints.map((_, i): RouteStopState => {
+    if (index < 0) {
+      return 'pending';
+    }
+    if (i < index) {
+      return 'done';
+    }
+    if (i > index) {
+      return 'pending';
+    }
+    return flight === undefined ? 'arrived' : 'transit';
+  });
+}
+
+// 「当前/总站数」进度文本：由逐站状态推出，与表格标记同一口径。
+export function routeProgressText(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
+  const states = routeStopStates(record, ship);
+  const index = states.findIndex(x => x === 'arrived' || x === 'transit');
+  const reached = states.filter(x => x === 'done').length;
+  const current = index < 0 ? Math.min(reached + 1, record.waypoints.length) : index + 1;
+  return `${current}/${record.waypoints.length}`;
+}
+
 function sameWaypoint(a: NativeRouteWaypointRecord, b: NativeRouteWaypointRecord) {
   if (typeof b.encoded === 'string') {
     return typeof a.encoded === 'string'

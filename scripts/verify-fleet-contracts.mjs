@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { register } from 'node:module';
 import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
-const { fixture, userData, sitesStore, shipsStore, transport, windows, estimation } =
+const { fixture, userData, sitesStore, shipsStore, flightsStore, transport, windows, estimation } =
   await import('./lib/fleet-stub.mjs');
 const { collectChainPlanningSnapshot } = await import('../src/features/XIT/FLEET/chain-data.ts');
 const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-core.ts');
@@ -31,7 +31,8 @@ globalThis.localStorage = {
   getItem: key => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 };
-const { mergeRouteRecord } = await import('../src/features/XIT/FLEET/native-route-game.ts');
+const { mergeRouteRecord, routeProgressText, routeStopStates } =
+  await import('../src/features/XIT/FLEET/native-route-game.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -56,6 +57,7 @@ async function check(name, fn) {
   estimation.result = null;
   shipsStore.fetched.value = true;
   sitesStore.all.value = [];
+  flightsStore.all.value = [];
   await fn();
   passes++;
   console.log(`PASS ${name}`);
@@ -1341,5 +1343,53 @@ await check(
     ]);
   },
 );
+
+// ---- 运行中进度：A→B→A 的首末同址航线 ----
+// 到港后航班从 flightsStore 消失，只看在港位置会把归航误判成「还没出发」。
+function nativeRouteProgressCase() {
+  const record = {
+    routeId: 'route-p',
+    naturalId: 'RT-A-P',
+    name: 'RT-A-P',
+    shipId: 'S',
+    shipLabel: 'S',
+    chainName: '',
+    createdAt: 1,
+    waypoints: ['A', 'B', 'A'].map(location => ({
+      location,
+      fuelPercent: 50,
+      steps: [],
+    })),
+  };
+  const ship = { id: 'S', address: { id: 'A' } };
+  const docked = at => ({ ...ship, address: { id: at } });
+  const flying = (origin, destination) => {
+    flightsStore.all.value = [
+      { shipId: 'S', origin: { id: origin }, destination: { id: destination }, aborted: false },
+    ];
+    return ship;
+  };
+  const arrive = () => {
+    flightsStore.all.value = [];
+  };
+  return { record, docked, flying, arrive };
+}
+
+await check('native RT progress: a fresh route at the origin shows stop 1', async () => {
+  const { record, docked } = nativeRouteProgressCase();
+  assert.deepEqual(routeStopStates(record, docked('A')), ['arrived', 'pending', 'pending']);
+  assert.equal(routeProgressText(record, docked('A')), '1/3');
+});
+
+await check('native RT progress: arrival at the origin keeps the return-leg position', async () => {
+  const { record, docked, flying, arrive } = nativeRouteProgressCase();
+  assert.deepEqual(routeStopStates(record, flying('A', 'B')), ['done', 'transit', 'pending']);
+  arrive();
+  assert.deepEqual(routeStopStates(record, docked('B')), ['done', 'arrived', 'pending']);
+  assert.deepEqual(routeStopStates(record, flying('B', 'A')), ['done', 'done', 'transit']);
+  arrive();
+  assert.deepEqual(routeStopStates(record, docked('A')), ['done', 'done', 'arrived']);
+  assert.equal(routeProgressText(record, docked('A')), '3/3');
+});
 
 console.log(`PASS ${passes}/${passes}`);

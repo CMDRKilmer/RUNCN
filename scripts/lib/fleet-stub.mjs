@@ -17,7 +17,7 @@ export const sitesStore = {
   getByPlanetNaturalId: id => sitesStore.all.value.find(x => x.siteId === id),
 };
 export const shipsStore = { all: ref([]), fetched: ref(true), getById: id => fixture.ships[id] };
-export const flightsStore = { getById: () => undefined };
+export const flightsStore = { all: ref([]), getById: () => undefined };
 export const stationsStore = { all: ref([]), getByNaturalId: () => undefined };
 export const starsStore = { all: ref([]) };
 export const warehousesStore = { all: ref([]) };
