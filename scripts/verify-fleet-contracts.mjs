@@ -1468,6 +1468,29 @@ await check('native RT listing: fetched definitions override unassigned local ro
   assert.equal(route2.record.waypoints[0].fuelPercent, 35);
 });
 
+await check('native RT listing: two ships on the same route get one card each', async () => {
+  const route = nativeRouteServer([
+    { location: 'A', fuelPercent: 50 },
+    { location: 'B', fuelPercent: 50 },
+  ]);
+  const rows = collectNativeRoutes(
+    listingRecords(),
+    {
+      entries: [
+        { route, shipId: 'S1' },
+        { route, shipId: 'S9' },
+      ],
+      unresolved: 0,
+    },
+    [route],
+  );
+  // 两艘船各一张卡；航线定义不再给这条航线补第三张「未分配」卡。
+  assert.deepEqual(
+    rows.map(x => `${x.record.naturalId}|${x.shipId}`),
+    ['RT-A-1|S1', 'RT-A-1|S9', 'RT-A-2|S2'],
+  );
+});
+
 await check('native RT listing: a deleted route leaves the cached definitions', async () => {
   const deleted = nativeRouteServer([
     { location: 'A', fuelPercent: 50 },

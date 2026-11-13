@@ -2,8 +2,10 @@
 //
 // 锁定的行为契约：
 //   ① 同一反应堆序列内逐档比较「每 +1 燃料换回多少时间」，边际收益跌破首档一半即停；
-//   ② 多反应堆（FTC 全网格）时**先按反应堆分组**、组内选点，再比较各序列候选——
-//      不允许把反应堆带来的时间差算进燃料边际收益（否则结果随输入顺序变化）；
+//   ② 多反应堆（FTC 全网格）时**先按反应堆分组**、组内选点，再按**实际时间与消耗**
+//      比较各序列候选（`findBalanceOption`：Pareto 折衷，燃料/时间无差异时退到最省油）——
+//      绝不返回「更慢又更费油」的劣解；自然跃迁航线上反应堆给的是常数时间，序列内
+//      「时间/燃料」比值会把它抵消掉，不能拿来跨反应堆比较；
 //   ③ 结果与输入顺序无关；
 //   ④ maxFuel 上限（离港饱和点）先过滤再选点；
 //   ⑤ 单序列（BTF 实测固定反应堆）结果与旧口径逐位一致。
@@ -55,19 +57,42 @@ check('① 单序列按边际收益停档', f => {
   expectOption(f, 'marginal', pickBestValueOption(seriesSlow), option(30, 0.3, 7));
 });
 
-check('② 跨反应堆只比较各序列候选', f => {
+check('② 跨反应堆不选「更慢又更费油」的劣解', f => {
   const grid = [...seriesSlow, ...seriesFast];
-  expectOption(f, 'grid', pickBestValueOption(grid), option(30, 0.3, 7));
+  // fast 序列在同样燃料下更快，slow 的候选被严格支配。
+  expectOption(f, 'grid', pickBestValueOption(grid), option(30, 1, 4));
 });
 
 check('③ 输入顺序不影响结果', f => {
-  const shuffled = [seriesFast[2], seriesSlow[0], seriesFast[0], seriesSlow[2], seriesFast[1], seriesSlow[1]];
-  expectOption(f, 'shuffled', pickBestValueOption(shuffled), option(30, 0.3, 7));
+  const shuffled = [
+    seriesFast[2],
+    seriesSlow[0],
+    seriesFast[0],
+    seriesSlow[2],
+    seriesFast[1],
+    seriesSlow[1],
+  ];
+  expectOption(f, 'shuffled', pickBestValueOption(shuffled), option(30, 1, 4));
+});
+
+check('③b 跨反应堆按实际油耗与时长折衷（与序列内比值无关）', f => {
+  // 序列 A 的边际比值更高，但它的候选更慢、更费油 —— 必须选 B。
+  const fuel = (stlFuel, ftlFuel) => stlFuel + ftlFuel;
+  const seriesA = [
+    { fuel: 5, reactor: 0.35, stlFuel: fuel(300, 0), ftlFuel: 0, totalHours: 13 },
+    { fuel: 10, reactor: 0.35, stlFuel: fuel(371.51, 0), ftlFuel: 0, totalHours: 11.97 },
+  ];
+  const seriesB = [
+    { fuel: 5, reactor: 0.45, stlFuel: fuel(205.87, 0), ftlFuel: 0, totalHours: 12.9 },
+    { fuel: 10, reactor: 0.45, stlFuel: fuel(205.87, 0), ftlFuel: 0, totalHours: 11.91 },
+  ];
+  expectOption(f, 'dominated', pickBestValueOption([...seriesA, ...seriesB]), seriesB[1]);
 });
 
 check('④ maxFuel 先过滤（饱和点封顶）', f => {
   const grid = [...seriesSlow, ...seriesFast];
-  expectOption(f, 'maxFuel=20', pickBestValueOption(grid, 20), option(20, 0.3, 8));
+  // 过滤后两个序列同燃料，fast 更快 → 严格占优。
+  expectOption(f, 'maxFuel=20', pickBestValueOption(grid, 20), option(20, 1, 5));
 });
 
 check('⑤ 单序列 5%–100% BTF 样本保持旧口径', f => {

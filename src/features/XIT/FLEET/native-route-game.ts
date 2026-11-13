@@ -423,20 +423,32 @@ export function collectNativeRoutes(
   definitions: readonly RouteData[] = [],
 ) {
   const rows: { record: NativeRouteRecord; shipId: string }[] = [];
-  const shown = new Set<string>();
-  const add = (record: NativeRouteRecord, shipId: string) => {
+  // 同一条航线可能同时被两艘船执行：执行行按「航线 + 船」去重，两艘船各占一张卡；
+  // 而定义行/本地行按航线去重，避免给执行中的航线再补一张「未分配」的重复卡。
+  const executing = new Set<string>();
+  const executingRows = new Set<string>();
+  for (const entry of running?.entries ?? []) {
+    const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
+    const record = mergeRouteRecord(entry.route, entry.shipId, local);
     const identity = routeIdentity(record.routeId, record.naturalId);
-    if (shown.has(identity)) {
+    const shipId = entry.shipId ?? record.shipId;
+    const key = `${identity}|${shipId}`;
+    if (executingRows.has(key)) {
+      continue;
+    }
+    executingRows.add(key);
+    executing.add(identity);
+    rows.push({ record, shipId });
+  }
+  const shown = new Set<string>();
+  const addUnassigned = (record: NativeRouteRecord, shipId: string) => {
+    const identity = routeIdentity(record.routeId, record.naturalId);
+    if (executing.has(identity) || shown.has(identity)) {
       return;
     }
     shown.add(identity);
     rows.push({ record, shipId });
   };
-  for (const entry of running?.entries ?? []) {
-    const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
-    const record = mergeRouteRecord(entry.route, entry.shipId, local);
-    add(record, entry.shipId ?? record.shipId);
-  }
   // 游戏里的全部航线定义：覆盖「还没分配船只 / 已经跑完」的航线（RTE 里看不到它们）。
   const ordered = definitions
     .map(definition => ({
@@ -446,12 +458,12 @@ export function collectNativeRoutes(
     .sort((a, b) => (b.local?.createdAt ?? 0) - (a.local?.createdAt ?? 0));
   for (const { definition, local } of ordered) {
     const record = mergeRouteRecord(definition, undefined, local);
-    add(record, local?.shipId ?? '');
+    addUnassigned(record, local?.shipId ?? '');
   }
   const sorted = Object.values(records).sort((a, b) => b.createdAt - a.createdAt);
   for (const record of sorted) {
     // 刷新失败（没拿到定义）时仍然把本地记录显示出来，游戏里已删除的由校准负责清理。
-    add(record, record.shipId);
+    addUnassigned(record, record.shipId);
   }
   return rows;
 }

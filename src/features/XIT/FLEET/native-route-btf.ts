@@ -64,8 +64,12 @@ function recordTransitSpeedSamples(
   const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
   const q = 0.98 * tank * Math.min(fuelPercent / 100, 0.5);
   // 服务器试飞的速度已经含船况惩罚；查询表存健康船速度（模型在算时长时才乘
-  // conditionFactor），否则后续估算会把船况惩罚重复计算两次。
+  // conditionFactor），所以这里要**除掉**惩罚还原成健康船速度 —— 乘以 cond 会让
+  // 后续估算把惩罚算两次（40% 船况的 2.78h 会被放大成 11h）。
   const cond = conditionFactor(ship.condition);
+  if (!(cond > 0)) {
+    return;
+  }
   for (const segment of plan.segments) {
     if (segment.type !== 'TRANSIT' || segment.stlDistance === null) {
       continue;
@@ -75,7 +79,7 @@ function recordTransitSpeedSamples(
     if (!(seconds >= 60) || !(segment.stlDistance > 1000)) {
       continue;
     }
-    recordTransitSpeedSample(engine, q, aEff, (segment.stlDistance / seconds) * cond);
+    recordTransitSpeedSample(engine, q, aEff, segment.stlDistance / seconds / cond);
   }
 }
 
