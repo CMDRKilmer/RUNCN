@@ -47,8 +47,10 @@ export async function computeNativeRouteFuel(
   const ftlCap = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : undefined;
   // 出发油量：有补油步骤时出发前会补满，否则用当前余量；后续航段按上一段实耗递减，
   // 只有真正存在补油步骤的航点才重置为罐容量（规划器只在出发地写补油）。
-  let stlFuel = fuelNow.stlRemaining > 0 ? fuelNow.stlRemaining : undefined;
-  let ftlFuel = fuelNow.ftlRemaining > 0 ? fuelNow.ftlRemaining : undefined;
+  // 油罐已读出（容量已知）时余量 0 就是真空罐，必须原样保留——改成 undefined 会被
+  // 下游当成「读不到」而回退成满罐；只有容量也读不到（store 未加载）才算未知。
+  let stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlRemaining : undefined;
+  let ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlRemaining : undefined;
   const refuels = (waypointIndex: number, tank: 'STL' | 'FTL') =>
     waypoints[waypointIndex]?.steps.some(x => x.kind === 'refuel' && x.tank === tank) ?? false;
   const applyRefuel = (waypointIndex: number) => {

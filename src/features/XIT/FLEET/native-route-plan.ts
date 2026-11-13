@@ -52,6 +52,30 @@ export function buildNativeWaypoints(plan: ChainPlan) {
   return waypoints;
 }
 
+// 改了 fromIndex 段的档位后，需要作废时长的航段下标：本段必然失效；中途不补油时
+// 后续段的出发余量随该段消耗一起变，也一并作废，直到受影响的油罐在某航点补满
+// （补满后出发余量与上游消耗脱钩）。燃料档只影响 STL 消耗、反应堆档只影响 FTL 消耗
+// （FTL 燃料 = 系数 × 反应堆档 × 距离）。
+export function hoursInvalidatedBySettingChange(
+  waypoints: readonly NativeWaypoint[],
+  fromIndex: number,
+  count: number,
+  tanksAffected: readonly RouteTank[],
+): number[] {
+  const stale: number[] = [];
+  const pending = new Set(tanksAffected);
+  for (let k = fromIndex; k < count && pending.size > 0; k++) {
+    stale.push(k);
+    // 航点 k 的补油步骤在飞往 k+1 之前执行。
+    for (const step of waypoints[k]?.steps ?? []) {
+      if (step.kind === 'refuel') {
+        pending.delete(step.tank);
+      }
+    }
+  }
+  return stale;
+}
+
 // 第 index 段（1 起，共 legCount 段）离站时的计划舱载（t）：出发地装载 / 各站离站舱载 /
 // 归航舱载。只含计划新增货物——船上现有货物不在规划里（它只压减可用舱容），
 // 需要完整离站重量时由调用方叠加 `cargoStore.weightLoad`。

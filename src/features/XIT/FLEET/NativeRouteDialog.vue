@@ -31,6 +31,7 @@ import { recordNativeRoute } from './native-route-registry';
 import { socketDeleteRoute, writeNativeRouteBySocket } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
+  hoursInvalidatedBySettingChange,
   isWaypointPercent,
   type NativeRouteStep,
   type NativeWaypoint,
@@ -89,8 +90,22 @@ watch(
       }
       const fuel = fuelUsagePercents.value[index];
       const reactor = reactorUsagePercents.value[index] ?? '';
-      if (fuel !== basis.fuel || reactor !== basis.reactor) {
-        legHours.value[index] = undefined;
+      // 改了档位：本段时长失效；中途不补油时后续段的出发余量也跟着变，时长一并作废，
+      // 直到对应油罐补满。燃料档只影响 STL 消耗，反应堆档只影响 FTL 消耗。
+      const tanksAffected: RouteTank[] = [];
+      if (fuel !== basis.fuel) {
+        tanksAffected.push('STL');
+      }
+      if (reactor !== basis.reactor) {
+        tanksAffected.push('FTL');
+      }
+      for (const k of hoursInvalidatedBySettingChange(
+        waypoints.value,
+        index,
+        legHours.value.length,
+        tanksAffected,
+      )) {
+        legHours.value[k] = undefined;
       }
     }
   },
