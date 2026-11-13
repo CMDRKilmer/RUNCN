@@ -1155,10 +1155,10 @@ function nativeRouteLocal(waypoints, hours) {
   };
 }
 
-function mergedHours(localStops, serverStops, hours) {
+function mergedHours(localStops, serverStops, hours, executingShipId = 'S') {
   const merged = mergeRouteRecord(
     nativeRouteServer(serverStops),
-    'S',
+    executingShipId,
     nativeRouteLocal(localStops, hours),
   );
   return merged.waypoints.map(x => x.flightHours);
@@ -1217,5 +1217,48 @@ await check(
     ]);
   },
 );
+
+await check('native RT merge: a different executing ship drops every estimate', async () => {
+  const stopsWithFuel = stops(25, 50, 50);
+  assert.deepEqual(mergedHours(stopsWithFuel, stopsWithFuel, [undefined, 10, 20], 'S2'), [
+    undefined,
+    undefined,
+    undefined,
+  ]);
+});
+
+const legStops = (locations, refuelAt = -1) =>
+  locations.map((location, index) => ({
+    location,
+    fuelPercent: 50,
+    ...(index === refuelAt ? { refuels: ['STL', 'FTL'] } : {}),
+  }));
+
+await check(
+  'native RT merge: an intermediate waypoint change drops every downstream estimate',
+  async () => {
+    assert.deepEqual(
+      mergedHours(legStops(['A', 'B', 'C', 'E']), legStops(['A', 'D', 'C', 'E']), [
+        undefined,
+        10,
+        20,
+        30,
+      ]),
+      [undefined, undefined, undefined, undefined],
+    );
+  },
+);
+
+await check('native RT merge: a refill stops waypoint-change invalidation', async () => {
+  assert.deepEqual(
+    mergedHours(legStops(['A', 'B', 'C', 'E'], 2), legStops(['A', 'D', 'C', 'E'], 2), [
+      undefined,
+      10,
+      20,
+      30,
+    ]),
+    [undefined, undefined, undefined, 30],
+  );
+});
 
 console.log(`PASS ${passes}/${passes}`);

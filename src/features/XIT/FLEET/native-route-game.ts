@@ -277,7 +277,11 @@ export function mergeRouteRecord(
   if (local === undefined) {
     return server;
   }
-  const stale = staleLegIndexes(local.waypoints, server.waypoints);
+  // 时长是按生成时那艘船的质量、引擎、状况与罐容量算的：航线改派给别的船后不再成立。
+  const sameShip = local.shipId === '' || server.shipId === '' || local.shipId === server.shipId;
+  const stale = sameShip
+    ? staleLegIndexes(local.waypoints, server.waypoints)
+    : new Set(server.waypoints.map((_, index) => index));
   const waypoints = server.waypoints.map((waypoint, index) => {
     const previous = local.waypoints[index];
     if (previous === undefined || !sameWaypoint(previous, waypoint)) {
@@ -326,19 +330,12 @@ function staleLegIndexes(
     const previous = local[index];
     const current = server[index];
     if (previous === undefined || current === undefined || !sameWaypoint(previous, current)) {
+      // 航点换了地方：飞到它的那段距离、跃迁方式都变了，消耗随之改变，之后的余量也跟着变——
+      // 下游一律作废（STL/FTL 都可能受影响），直到两个油罐都在某个航点补满。
+      // 首站是出发地，它变了意味着第 1 段换了起点。
+      invalidateFrom(Math.max(index, 1), ['STL', 'FTL']);
       stale.add(index);
       continue;
-    }
-    // 上一站换了地方：这一段已经不是从原出发地起飞。
-    const previousOrigin = local[index - 1];
-    const serverOrigin = server[index - 1];
-    if (
-      index > 0 &&
-      (previousOrigin === undefined ||
-        serverOrigin === undefined ||
-        !sameWaypoint(previousOrigin, serverOrigin))
-    ) {
-      stale.add(index);
     }
     // 起飞质量由上游装载/卸载步骤决定：货量改了，时长/燃料都不再成立。
     if (index > 0 && cargoSignature(local, index - 1) !== cargoSignature(server, index - 1)) {
