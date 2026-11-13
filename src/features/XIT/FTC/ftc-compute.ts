@@ -2,6 +2,7 @@ import { ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { testFlightMassT } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 import { hasSystemData, exportStationOrbits, gameNow } from '@src/infrastructure/fio/orbit';
@@ -451,8 +452,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
-  // 服务器原生计划按当前质量下发；记下补计划载重之前的质量，供转移速度样本换算。
-  const nativeTransitMassT = perf.mass;
+  // 补计划载重之前的质量 = 游戏按飞船当前状态下发的原生计划的飞行质量。
+  // 试飞计划不同：它按请求里的 payload 算，质量记在计划对象上（见 testFlightMassT）。
+  const currentMassT = perf.mass;
   if (input.stlFuelOverride !== undefined) {
     perf.stlRemaining = input.stlFuelOverride;
   }
@@ -568,7 +570,10 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       nativeTransitSeconds: nativeSummary?.transitSeconds,
       nativeTransitFuel: nativeSummary?.transitFuel,
       nativeStlTank: perf.stlRemaining ?? perf.stlFuelCapacity,
-      nativeTransitMassT,
+      // 样本质量必须取「测这份计划时的质量」：试飞样本已含计划载重，用飞船当前质量
+      // 会让模型再按 (当前质量/规划质量)^0.78 缩一遍，等于把货舱惩罚算两次。
+      nativeTransitMassT:
+        nativePlan === undefined ? currentMassT : (testFlightMassT(nativePlan) ?? currentMassT),
       nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,

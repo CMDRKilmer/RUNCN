@@ -17,6 +17,9 @@ const adapters = new Set([
   '@src/infrastructure/prun-api/data/ships',
   '@src/infrastructure/prun-api/data/flights',
   '@src/infrastructure/prun-api/data/stations',
+  '@src/infrastructure/prun-api/data/stars',
+  '@src/infrastructure/prun-api/data/warehouses',
+  '@src/infrastructure/prun-api/data/flight-test-collector',
   '@src/features/XIT/FLEET/utils',
   '@src/features/XIT/ACT/actions/utils',
   '@src/features/XIT/ACT/utils',
@@ -59,6 +62,9 @@ export function resolve(specifier, context, nextResolve) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
   }
   if (specifier.startsWith('./use-chain-') && !specifier.endsWith('.ts')) {
+    return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
+  }
+  if (specifier.startsWith('./native-route-') && !specifier.endsWith('.ts')) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
   }
   if (specifier === './utils' && context.parentURL.endsWith('chain-types.ts')) {

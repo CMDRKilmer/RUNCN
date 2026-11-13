@@ -7,7 +7,12 @@ import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { getStarNaturalId, starsStore } from '@src/infrastructure/prun-api/data/stars';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import type { NativeRouteRecord, NativeRouteWaypointRecord } from './native-route-registry';
-import { DEFAULT_WAYPOINT_FUEL_PERCENT, type NativeRouteStep } from './native-route-plan';
+import {
+  DEFAULT_WAYPOINT_FUEL_PERCENT,
+  hoursInvalidatedBySettingChange,
+  type NativeRouteStep,
+  type RouteTank,
+} from './native-route-plan';
 import type { RouteData, RouteStepData, RouteWaypointData } from './native-route-socket';
 import type { RouteExecutionRow } from './native-route-rte';
 
@@ -272,42 +277,22 @@ export function mergeRouteRecord(
   if (local === undefined) {
     return server;
   }
+  const stale = staleLegIndexes(local.waypoints, server.waypoints);
   const waypoints = server.waypoints.map((waypoint, index) => {
     const previous = local.waypoints[index];
     if (previous === undefined || !sameWaypoint(previous, waypoint)) {
       return waypoint;
     }
-    // 时长描述的是「上一站 → 本站」：上一站改了，本站的旧时长同样失效。
-    const previousOrigin = index === 0 ? undefined : local.waypoints[index - 1];
-    const serverOrigin = index === 0 ? undefined : server.waypoints[index - 1];
-    const sameOrigin =
-      index === 0 ||
-      (previousOrigin !== undefined &&
-        serverOrigin !== undefined &&
-        sameWaypoint(previousOrigin, serverOrigin));
     // 服务器目的地是暂时换不出名字的结构时，用本地同名航点的可读地址兜底。
     const location =
       waypoint.location === '未知航点' && typeof previous.location === 'string'
         ? previous.location
         : waypoint.location;
-    // 时长失效判定：燃料档位必比；反应堆只在本地确实记录过（自然跃迁）时才比——
-    // 系内/纯网关航段不写反应堆（写入时按默认 50%），不能因此判掉已算时长。
-    const sameReactor =
-      previous.reactorPercent === undefined || previous.reactorPercent === waypoint.reactorPercent;
-    // 起飞质量由上游装载/卸载步骤决定：货量改了，时长/燃料都不再成立。
-    const sameCargo =
-      index === 0 ||
-      cargoSignature(local.waypoints, index - 1) === cargoSignature(server.waypoints, index - 1);
-    if (
-      previous.flightHours === undefined ||
-      previous.fuelPercent !== waypoint.fuelPercent ||
-      !sameReactor ||
-      !sameOrigin ||
-      !sameCargo
-    ) {
+    const flightHours = stale.has(index) ? undefined : previous.flightHours;
+    if (flightHours === undefined) {
       return { ...waypoint, location };
     }
-    return { ...waypoint, location, flightHours: previous.flightHours };
+    return { ...waypoint, location, flightHours };
   });
   return {
     ...server,
@@ -319,6 +304,87 @@ export function mergeRouteRecord(
     createdAt: local.createdAt,
     waypoints,
   };
+}
+
+// 服务器航线（玩家可能改过）与本地记录的差异 → 需要作废预计时长的航段下标。
+// 时长描述的是「上一站 → 本站」：除了本段自身的档位、换站与上游装卸货量，**上游**的
+// 燃料/反应堆档位或补油步骤也会改变出发余量，受影响的下游段一并作废（直到油罐补满）。
+function staleLegIndexes(
+  local: readonly NativeRouteWaypointRecord[],
+  server: readonly NativeRouteWaypointRecord[],
+) {
+  const stale = new Set<number>();
+  const invalidateFrom = (index: number, tanks: readonly RouteTank[]) => {
+    if (tanks.length === 0) {
+      return;
+    }
+    for (const leg of hoursInvalidatedBySettingChange(server, index, server.length, tanks)) {
+      stale.add(leg);
+    }
+  };
+  for (let index = 0; index < server.length; index++) {
+    const previous = local[index];
+    const current = server[index];
+    if (previous === undefined || current === undefined || !sameWaypoint(previous, current)) {
+      stale.add(index);
+      continue;
+    }
+    // 上一站换了地方：这一段已经不是从原出发地起飞。
+    const previousOrigin = local[index - 1];
+    const serverOrigin = server[index - 1];
+    if (
+      index > 0 &&
+      (previousOrigin === undefined ||
+        serverOrigin === undefined ||
+        !sameWaypoint(previousOrigin, serverOrigin))
+    ) {
+      stale.add(index);
+    }
+    // 起飞质量由上游装载/卸载步骤决定：货量改了，时长/燃料都不再成立。
+    if (index > 0 && cargoSignature(local, index - 1) !== cargoSignature(server, index - 1)) {
+      stale.add(index);
+    }
+    // 燃料档位必比；反应堆只在本地确实记录过（自然跃迁）时才比——系内/纯网关航段不写
+    // 反应堆（写入时按默认 50%），不能因此判掉已算时长。
+    if (previous.fuelPercent !== current.fuelPercent) {
+      invalidateFrom(index, ['STL']);
+    }
+    if (
+      previous.reactorPercent !== undefined &&
+      previous.reactorPercent !== current.reactorPercent
+    ) {
+      invalidateFrom(index, ['FTL']);
+    }
+    // 补油步骤在本站执行（飞往下一站之前）：改的是下游各段的出发余量。
+    const changedTanks = changedRefuelTanks(previous, current);
+    if (changedTanks.length > 0) {
+      invalidateFrom(index + 1, changedTanks);
+    }
+  }
+  return stale;
+}
+
+function refuelTanks(waypoint: NativeRouteWaypointRecord) {
+  const tanks = new Set<RouteTank>();
+  for (const step of waypoint.steps) {
+    if (step.kind === 'refuel') {
+      tanks.add(step.tank);
+    }
+  }
+  return tanks;
+}
+
+// 该航点上增删的补油油罐：新增与移除都会改变下游出发余量。
+function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypointRecord) {
+  const before = refuelTanks(a);
+  const after = refuelTanks(b);
+  const changed: RouteTank[] = [];
+  for (const tank of new Set([...before, ...after])) {
+    if (before.has(tank) !== after.has(tank)) {
+      changed.push(tank);
+    }
+  }
+  return changed;
 }
 
 function sameWaypoint(a: NativeRouteWaypointRecord, b: NativeRouteWaypointRecord) {

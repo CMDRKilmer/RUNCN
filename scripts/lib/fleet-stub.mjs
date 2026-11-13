@@ -18,7 +18,12 @@ export const sitesStore = {
 };
 export const shipsStore = { all: ref([]), fetched: ref(true), getById: id => fixture.ships[id] };
 export const flightsStore = { getById: () => undefined };
-export const stationsStore = { getByNaturalId: () => undefined };
+export const stationsStore = { all: ref([]), getByNaturalId: () => undefined };
+export const starsStore = { all: ref([]) };
+export const warehousesStore = { all: ref([]) };
+export const getStarNaturalId = star => star.systemId;
+// 航点地址编码只在按航班推断航线时参与匹配；本套契约不覆盖那条路径。
+export const encodeAddress = () => undefined;
 export const storagesStore = { getByAddressableId: () => [], getById: id => fixture.stores[id] };
 export const productionStore = { getBySiteId: id => fixture.production[id] };
 export const materialsStore = {

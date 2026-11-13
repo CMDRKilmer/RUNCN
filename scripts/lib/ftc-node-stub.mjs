@@ -157,6 +157,9 @@ export const estimateRouteStl = () => ({
 export const findNativeFlightPlan = () => undefined;
 // 同上的「服务器计划实测总时长」摘要：无 flightPlansStore → 恒 undefined。
 export const summarizeNativeFlightPlan = () => undefined;
+// '@src/infrastructure/prun-api/data/flight-test-collector'：试飞计划的质量标记。
+// 这里没有试飞/原生计划路径（findNativeFlightPlan 恒 undefined），导出只为满足静态导入。
+export const testFlightMassT = () => undefined;
 
 // './transfer-geometry'：ftc-compute 在缺前向几何时调它补系内距离。本脚本只覆盖
 // 「残缺输入 → 不写滑块」的门控，不涉及几何预测 → 恒 undefined（与无轨道数据时一致），

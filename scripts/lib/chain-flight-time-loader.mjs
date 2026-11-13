@@ -60,6 +60,8 @@ const STUBBED = new Set([
   '@src/infrastructure/prun-api/data/stars',
   '@src/infrastructure/prun-api/data/stations',
   '@src/infrastructure/prun-api/data/flight-plans',
+  // ftc-compute 用它的试飞质量标记（本脚本无试飞路径，替身恒 undefined）。
+  '@src/infrastructure/prun-api/data/flight-test-collector',
   '@src/infrastructure/prun-ui/buffers',
   '@src/infrastructure/fio/orbit',
   '@src/infrastructure/fio/routes',

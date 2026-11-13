@@ -3,6 +3,7 @@ import {
   calculateTestFlight,
   encodeAddress,
   resolveEntity,
+  setTestFlightMass,
 } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import {
   ensureShipBlueprint,
@@ -37,14 +38,18 @@ function chooseSample(samples: readonly FuelTradeoff[], maxFuel: number | undefi
   return pickBestValueOption([...samples], maxFuel);
 }
 
+// 试飞计划的飞行质量：`ship.mass` 已含船上现有货物，只叠加**计划新增载重**；
+// payload 里为了让服务器算对试飞而加的现有货物不能重复算。
+function testFlightMass(ship: PrunApi.Ship, addedMass: number) {
+  return (ship.mass > 0 ? ship.mass : ship.operatingEmptyMass) + addedMass;
+}
+
 // 把试飞响应里的 TRANSIT 段转成 FTC 转移速度查询表的样本（q, aEff, v）：
 // 远端表只覆盖少数 aEff 行，采到该船自己的 aEff 行后，同船后续的 FTC 计算就不再判「超出可靠范围」。
-// 质量口径与 computeFtcPlan 一致：`perf.mass` 就是当前船质量（已含船上现有货物），
-// 这里只叠加**计划新增载重**；payload 里为了让服务器算对试飞而加的现有货物不能重复算。
 function recordTransitSpeedSamples(
   performance: ReturnType<typeof shipPerformanceFor>,
   ship: PrunApi.Ship,
-  addedMass: number,
+  mass: number,
   tank: number,
   fuelPercent: number,
   plan: PrunApi.FlightPlan,
@@ -53,7 +58,6 @@ function recordTransitSpeedSamples(
   if (engine === undefined || !(tank > 0)) {
     return;
   }
-  const mass = (ship.mass > 0 ? ship.mass : ship.operatingEmptyMass) + addedMass;
   if (!(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
     return;
   }
@@ -168,6 +172,8 @@ export async function measureNativeRouteFuel(
       // （现有货物只用来压减可用舱容），而服务器试飞只认 payload 参数。
       const plannedLoad = Math.ceil(legLoadWeight(candidate.plan, index, legCount));
       const payload = plannedLoad + (candidate.ship.cargoStore?.weightLoad ?? 0);
+      // 这份样本按多少质量测的：FTC 之后复用同一份计划时要按它换算，不能按飞船当前质量。
+      const sampleMassT = testFlightMass(ship, plannedLoad);
       const samples: FuelTradeoff[] = [];
       let timeouts = 0;
       let rejected = 0;
@@ -194,7 +200,8 @@ export async function measureNativeRouteFuel(
         }
         if (plan.status === 'OK') {
           const summary = summarizeNativeFlightPlan(plan);
-          recordTransitSpeedSamples(performance, ship, plannedLoad, stlFuel, percent, plan);
+          setTestFlightMass(plan, sampleMassT);
+          recordTransitSpeedSamples(performance, ship, sampleMassT, stlFuel, percent, plan);
           if (summary.totalSeconds > 0) {
             samples.push({
               fuel: percent,

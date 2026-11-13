@@ -1,6 +1,7 @@
-// Real FLEET planning, package generation, completion, recovery and sync regressions.
+// Real FLEET planning, package generation, completion, recovery, sync and native RT record regressions.
 // Usage: node scripts/verify-fleet-contracts.mjs. Exit 0 = PASS; assertions fail with exit 1.
 // Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
+// Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -30,6 +31,7 @@ globalThis.localStorage = {
   getItem: key => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 };
+const { mergeRouteRecord } = await import('../src/features/XIT/FLEET/native-route-game.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -1117,4 +1119,103 @@ await check('shared runtime survives the component scope that first opened it', 
   assert.equal(transport.pushes.filter(x => x.key === 'S').at(-1).doc.clearedFp, fp);
   runtime.chainSync.stop();
 });
+
+// 原生 RT：服务器航线（玩家可能改过）与本地记录合并时，只有输入完全一致才沿用预计时长。
+function nativeRouteServer(waypoints) {
+  return {
+    id: 'route-1',
+    naturalId: 'RT-A-1',
+    name: 'RT-A-1',
+    waypoints: waypoints.map((waypoint, index) => ({
+      id: `w${index}`,
+      destination: `S|PLA|STA,${waypoint.location}`,
+      landing: true,
+      fuelUsageFactor: waypoint.fuelPercent / 100,
+      reactorUsageFactor: 0.5,
+      steps: (waypoint.refuels ?? []).map(tank => ({ type: 'REFUEL', fuel: tank })),
+    })),
+  };
+}
+
+function nativeRouteLocal(waypoints, hours) {
+  return {
+    routeId: 'route-1',
+    naturalId: 'RT-A-1',
+    name: 'RT-A-1',
+    shipId: 'S',
+    shipLabel: 'S',
+    chainName: '',
+    createdAt: 1,
+    waypoints: waypoints.map((waypoint, index) => ({
+      location: waypoint.location,
+      fuelPercent: waypoint.fuelPercent,
+      steps: (waypoint.refuels ?? []).map(tank => ({ kind: 'refuel', tank })),
+      ...(hours[index] === undefined ? {} : { flightHours: hours[index] }),
+    })),
+  };
+}
+
+function mergedHours(localStops, serverStops, hours) {
+  const merged = mergeRouteRecord(
+    nativeRouteServer(serverStops),
+    'S',
+    nativeRouteLocal(localStops, hours),
+  );
+  return merged.waypoints.map(x => x.flightHours);
+}
+
+const stops = (...fuel) =>
+  fuel.map((fuelPercent, index) => ({ location: `B${index}`, fuelPercent }));
+
+await check('native RT merge: unchanged route keeps every estimate', async () => {
+  const stopsWithFuel = stops(25, 50, 50);
+  assert.deepEqual(mergedHours(stopsWithFuel, stopsWithFuel, [undefined, 10, 20]), [
+    undefined,
+    10,
+    20,
+  ]);
+});
+
+await check('native RT merge: upstream fuel change drops downstream estimates', async () => {
+  assert.deepEqual(mergedHours(stops(25, 50, 50), stops(25, 60, 50), [undefined, 10, 20]), [
+    undefined,
+    undefined,
+    undefined,
+  ]);
+});
+
+await check('native RT merge: refuel stops the invalidation at the refilled tank', async () => {
+  const localStops = [
+    { location: 'B0', fuelPercent: 25 },
+    { location: 'B1', fuelPercent: 50, refuels: ['STL'] },
+    { location: 'B2', fuelPercent: 50 },
+  ];
+  const serverStops = [
+    { location: 'B0', fuelPercent: 25 },
+    { location: 'B1', fuelPercent: 60, refuels: ['STL'] },
+    { location: 'B2', fuelPercent: 50 },
+  ];
+  assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10, 20]), [
+    undefined,
+    undefined,
+    20,
+  ]);
+});
+
+await check(
+  'native RT merge: adding an origin refuel drops every downstream estimate',
+  async () => {
+    const serverStops = [
+      { location: 'B0', fuelPercent: 25, refuels: ['STL'] },
+      { location: 'B1', fuelPercent: 50 },
+      { location: 'B2', fuelPercent: 50 },
+    ];
+    assert.deepEqual(mergedHours(stops(25, 50, 50), serverStops, [undefined, 10, 20]), [
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  },
+);
+
 console.log(`PASS ${passes}/${passes}`);

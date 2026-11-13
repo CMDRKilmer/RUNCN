@@ -318,6 +318,9 @@ async function refreshGameRoutes() {
   }
   refreshingGameRoutes = true;
   try {
+    // 响应反映的是发起请求那一刻的航线列表：期间向导可能刚建完一条航线，它的 id 不在
+    // 这份快照里，不能因此判定「游戏里已删除」。
+    const known = new Set(Object.keys(nativeRouteRecords.value));
     // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
     // 打乱按 FIFO 对位的响应匹配。
     const routes = await socketGetRoutes();
@@ -328,6 +331,9 @@ async function refreshGameRoutes() {
         x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId),
       );
       if (server === undefined) {
+        if (!known.has(record.routeId)) {
+          continue;
+        }
         removeNativeRoute(record.routeId);
         continue;
       }
