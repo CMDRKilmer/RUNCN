@@ -413,35 +413,45 @@ function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypoint
   return changed;
 }
 
-// 「运行中」要展示的航线：**所有创建过的原生 RT**（本地记录），RTE 里正在执行的那条
-// 用游戏里的定义覆盖同一条航线的卡片。返回顺序 = 执行中的在前，其余按创建时间倒序。
+// 「运行中」要展示的航线：**所有创建过的原生 RT**。顺序 = 执行中的在前，其余按创建时间
+// 倒序；每条航线只出现一次，航点/步骤/档位一律以**游戏里的定义**为准（玩家可能在原生 RT
+// 里改过，改完即使还没分配船只也要跟着变），本地记录只补仍然匹配的预计时长与船/产业链名。
+// `definitions` 来自 `SHIP_ROUTES_GET_ROUTES`（还没刷新时为空，此时先显示本地记录）。
 export function collectNativeRoutes(
   records: Readonly<Record<string, NativeRouteRecord>>,
   running: RunningRoutes | undefined,
+  definitions: readonly RouteData[] = [],
 ) {
   const rows: { record: NativeRouteRecord; shipId: string }[] = [];
-  const executing = new Set<string>();
-  const seen = new Set<string>();
+  const shown = new Set<string>();
+  const add = (record: NativeRouteRecord, shipId: string) => {
+    const identity = routeIdentity(record.routeId, record.naturalId);
+    if (shown.has(identity)) {
+      return;
+    }
+    shown.add(identity);
+    rows.push({ record, shipId });
+  };
   for (const entry of running?.entries ?? []) {
     const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
-    // 航点/步骤/档位以游戏里的航线为准（玩家可能改过），本地只补仍然匹配的估算值。
     const record = mergeRouteRecord(entry.route, entry.shipId, local);
-    const shipId = entry.shipId ?? record.shipId;
-    const key = `${record.routeId}|${shipId}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    executing.add(routeIdentity(record.routeId, record.naturalId));
-    rows.push({ record, shipId });
+    add(record, entry.shipId ?? record.shipId);
+  }
+  // 游戏里的全部航线定义：覆盖「还没分配船只 / 已经跑完」的航线（RTE 里看不到它们）。
+  const ordered = definitions
+    .map(definition => ({
+      definition,
+      local: findRouteRecord(records, definition.id, definition.naturalId),
+    }))
+    .sort((a, b) => (b.local?.createdAt ?? 0) - (a.local?.createdAt ?? 0));
+  for (const { definition, local } of ordered) {
+    const record = mergeRouteRecord(definition, undefined, local);
+    add(record, local?.shipId ?? '');
   }
   const sorted = Object.values(records).sort((a, b) => b.createdAt - a.createdAt);
   for (const record of sorted) {
-    // 同一条航线（同一 RT 号）已经在执行列表里了，不再重复成第二张卡。
-    if (executing.has(routeIdentity(record.routeId, record.naturalId))) {
-      continue;
-    }
-    rows.push({ record, shipId: record.shipId });
+    // 刷新失败（没拿到定义）时仍然把本地记录显示出来，游戏里已删除的由校准负责清理。
+    add(record, record.shipId);
   }
   return rows;
 }

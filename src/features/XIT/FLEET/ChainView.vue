@@ -39,7 +39,12 @@ import {
   removeNativeRoute,
   type NativeRouteRecord,
 } from './native-route-registry';
-import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
+import {
+  socketDeleteRoute,
+  socketGetRoutes,
+  hasPendingRouteRequest,
+  type RouteData,
+} from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
 import {
   collectNativeRoutes,
@@ -246,6 +251,8 @@ function openNativeRoutePlan() {
 // RTE 里「哪些船正在跑哪条航线」——只用来把执行中的卡片换成游戏里的定义，列表本身
 // 不依赖它：「运行中」列出全部创建过的原生 RT，点页签立刻有内容。
 const gameRunningRoutes = ref<RunningRoutes>();
+// `SHIP_ROUTES_GET_ROUTES` 拿到的全部航线定义：没在执行的航线也按游戏里的内容显示。
+const gameRouteDefinitions = ref<RouteData[]>([]);
 
 interface NativeRouteView {
   record: NativeRouteRecord;
@@ -260,7 +267,11 @@ function nativeRouteRowKey(entry: NativeRouteView) {
 }
 
 const nativeRoutes = computed<NativeRouteView[]>(() =>
-  collectNativeRoutes(nativeRouteRecords.value, gameRunningRoutes.value).map(row => {
+  collectNativeRoutes(
+    nativeRouteRecords.value,
+    gameRunningRoutes.value,
+    gameRouteDefinitions.value,
+  ).map(row => {
     const ship = shipsStore.getById(row.shipId);
     return {
       record: row.record,
@@ -308,6 +319,7 @@ async function refreshGameRoutes() {
         recordNativeRoute({ ...record, routeId: server.id });
       }
     }
+    gameRouteDefinitions.value = routes;
     gameRunningRoutes.value =
       executions === undefined ? undefined : matchRunningRoutes(routes, executions);
   } catch {

@@ -1,4 +1,4 @@
-import { persistedRef } from '@src/utils/persisted-ref';
+import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import type { NativeRouteStep } from './native-route-plan';
 
 // 向导创建过的原生 RT 航线（FLEET 里只读展示；游戏侧的真实内容以原生 RT 为准）。
@@ -31,7 +31,60 @@ export interface NativeRouteRecord {
   waypoints: NativeRouteWaypointRecord[];
 }
 
-const records = persistedRef<Record<string, NativeRouteRecord>>('rprun.fleet.native-route.v1', {});
+// 按**公司**分键：同一浏览器里换公司后，上一个公司的航线号属于另一个账号，
+// 校准会把它们当成「游戏里已删除」永久清掉（连带产业链名与预计时长）。
+const STORAGE_PREFIX = 'rprun.fleet.native-route.v2';
+// 旧版按浏览器全局存，没有公司维度：一次性归到当前公司，避免多公司互相删记录。
+const LEGACY_KEY = 'rprun.fleet.native-route.v1';
+
+const records = ref<Record<string, NativeRouteRecord>>({});
+// 当前读写用的 localStorage 键；公司未知（USER_DATA 未到）时为空 = 不读不写。
+let storageKey = '';
+
+function readStored(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? undefined : (JSON.parse(raw) as Record<string, NativeRouteRecord>);
+  } catch {
+    return undefined;
+  }
+}
+
+function loadCompany(companyId: string | undefined) {
+  if (companyId === undefined || companyId === '') {
+    return;
+  }
+  const key = `${STORAGE_PREFIX}.${companyId}`;
+  if (key === storageKey) {
+    return;
+  }
+  storageKey = key;
+  let stored = readStored(key);
+  if (stored === undefined) {
+    const legacy = readStored(LEGACY_KEY);
+    if (legacy !== undefined) {
+      stored = legacy;
+      try {
+        localStorage.removeItem(LEGACY_KEY);
+      } catch {
+        // 配额/权限问题忽略：下次仍会读旧键，行为等同迁移前。
+      }
+    }
+  }
+  records.value = stored ?? {};
+}
+
+watch(() => userDataStore.companyId, loadCompany, { immediate: true });
+watch(records, value => {
+  if (storageKey === '') {
+    return;
+  }
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value));
+  } catch {
+    // 写入失败只影响下次打开时的恢复，不影响当前会话。
+  }
+});
 
 export const nativeRouteRecords = records;
 

@@ -1447,6 +1447,22 @@ await check(
   },
 );
 
+await check('native RT listing: fetched definitions override unassigned local routes', async () => {
+  const rows = collectNativeRoutes(listingRecords(), undefined, [
+    nativeRouteServer([
+      { location: 'A', fuelPercent: 70 },
+      { location: 'B', fuelPercent: 70 },
+    ]),
+  ]);
+  // 游戏里有定义的两条航线都要出现（本地 route-1 + 只存在于游戏里的 route-1 definition 合并），
+  // 未在游戏里出现的本地记录（route-2）仍然保留。
+  assert.deepEqual(rows.map(x => x.record.naturalId).sort(), ['RT-A-1', 'RT-A-2']);
+  const route1 = rows.find(x => x.record.naturalId === 'RT-A-1');
+  assert.equal(route1.record.waypoints[0].fuelPercent, 70);
+  const route2 = rows.find(x => x.record.naturalId === 'RT-A-2');
+  assert.equal(route2.record.waypoints[0].fuelPercent, 35);
+});
+
 await check('native RT listing: an executing route wins over its local copy', async () => {
   const records = listingRecords();
   const running = {
