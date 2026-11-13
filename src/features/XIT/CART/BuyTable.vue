@@ -181,34 +181,11 @@ const splitMarketMode = computed({
 // 默认市场按「完整需求」算，不随抵扣结果变化，否则会形成
 // 「选市场 -> 扣库存 -> 改价格 -> 换最优市场」的循环依赖。
 const grossComponents = computed(() => computeComponents(grossNeeds.value, exchanges));
-// 仅「已勾选」物料参与「最便宜单交易所 / 最优混合」与 ACT 默认单市场计算，保证卡片
-// 和 ACT 用同一组物料算市场，避免出现「卡片标 NC1 最优、ACT 却在 AI1 买」的错位
-// （PR #60 审查 #222）。未勾选任何一项时退化为全部，避免购物车首次打开（默认全空）
-// 时比价栏空白。
-const marketNeeds = computed(() =>
-  selectedTickers.value.size > 0
-    ? grossNeeds.value.filter(n => selectedTickers.value.has(n.ticker))
-    : grossNeeds.value,
+// 仅「已勾选」物料参与比价与自动选市场；未勾选任何一项时退化为全部，避免购物车
+// 首次打开（默认全空）时比价栏空白（PR #60 审查 #222）。
+const marketSelection = computed(() =>
+  selectedTickers.value.size > 0 ? selectedTickers.value : undefined,
 );
-const marketTotals = computed(() =>
-  computeTotals(computeComponents(marketNeeds.value, exchanges), exchanges),
-);
-const cheapestSingleExchange = computed(() => marketTotals.value.cheapestSingle?.code);
-const chosenSingleExchange = computed(() =>
-  singleMarketMode.value ? forcedExchange.value || cheapestSingleExchange.value : undefined,
-);
-
-// 抵扣基准跟随当前指定的交易所（用户点卡片 = forcedExchange，默认 = 最优单市场）。
-// 盘口尚未推回来时最优市场为空，此时依次回退到购物车设定的常用交易所、
-// 再兜底第一个交易所，保证页面一打开就按仓库库存抵扣，不会先显示虚高的完整数量。
-const deductionExchange = computed(() => {
-  if (!tempMode.value) {
-    return '';
-  }
-  return (
-    forcedExchange.value || chosenSingleExchange.value || cart.value.exchange || exchanges[0].code
-  );
-});
 
 // ── 本地仓库库存抵扣 ────────────────────────────────────────────────
 // 数据全部来自游戏推送的 store，不连接 FIO；口径与 ACT 执行器一致。
@@ -226,13 +203,73 @@ const exchangeInventories = computed<Record<string, CbuyInventory>>(() => {
 });
 const inventoryReady = computed(() => !tempMode.value || isCbuyInventoryReady());
 
-// 每种物料的实际出库（买 / 转）交易所：单市场模式统一为 chosenSingleExchange；
-// 分市场模式取各物料的最优价交易所（computeComponents 的 bestExchange，仅由价格决定，
-// 与数量 / 是否勾选无关）。抵扣交易所必须和它一致，否则会出现「在 A 市场扣了库存、
-// 却从 B 市场买 / 转」的数量错配（PR #60 审查 #220）。
+// 每种物料在「该交易所自己的仓库库存」抵扣后的采购量。交易所卡片账单、
+// 「最便宜单交易所」与自动选定市场三者共用这一份数据：同一物料在 CI1 有库存、
+// 在 AI1 没有时，AI1 的账单里必须包含它，否则 AI1 会漏算这件而虚假地变成最便宜，
+// 用户选中后成本又跳回去（PR #60 审查）。
+// 非临时模式没有库存抵扣，返回空表让 computeTotals 走原逻辑。
+const needsByExchange = computed<Map<string, Map<string, number>>>(() => {
+  const map = new Map<string, Map<string, number>>();
+  if (!tempMode.value) {
+    return map;
+  }
+  for (const ex of exchanges) {
+    // 强制「全部从该市场出库」，得到这个市场自己的抵扣结果。
+    const rows = deductNeeds(
+      grossNeeds.value,
+      baseInventory.value,
+      exchangeInventories.value,
+      () => ex.code,
+    );
+    const byTicker = new Map<string, number>();
+    for (const row of rows) {
+      if (row.transfer > 0) {
+        byTicker.set(row.ticker, row.net);
+      }
+    }
+    map.set(ex.code, byTicker);
+  }
+  return map;
+});
+
+// 卡片账单 / 「最便宜单交易所」/ 自动选定市场必须同一口径：都用各交易所自己的
+// **净需求**（扣完基地与交易所仓库之后的采购量）。只按完整需求算总价，会出现
+// 「卡片标 CI1 零成本最优、自动选择却仍是 AI1，生成的 ACT 在 AI1 白买」的错位
+// （PR #60 审查）。为避免「选市场 -> 扣库存 -> 改价格 -> 换市场」的循环依赖，
+// 这里用 grossComponents 的物料全集与报价配 needsByExchange 的净数量计算，
+// 不读取 chosenSingleExchange。
+const totals = computed(() =>
+  computeTotals(grossComponents.value, exchanges, marketSelection.value, needsByExchange.value),
+);
+const cheapestSingleExchange = computed(() => totals.value.cheapestSingle?.code);
+const chosenSingleExchange = computed(() =>
+  singleMarketMode.value ? forcedExchange.value || cheapestSingleExchange.value : undefined,
+);
+
+// 抵扣基准跟随当前指定的交易所（用户点卡片 = forcedExchange，默认 = 最优单市场）。
+// 盘口尚未推回来时最优市场为空，此时依次回退到购物车设定的常用交易所、
+// 再兜底第一个交易所，保证页面一打开就按仓库库存抵扣，不会先显示虚高的完整数量。
+const deductionExchange = computed(() => {
+  if (!tempMode.value) {
+    return '';
+  }
+  return (
+    forcedExchange.value || chosenSingleExchange.value || cart.value.exchange || exchanges[0].code
+  );
+});
+
+// 每种物料的实际出库（买 / 转）交易所，是抵扣与 ACT 路由的唯一事实源：
+// - 单市场模式且已选出凑齐全部物品的市场：统一用该市场；
+// - 单市场模式但没有任何市场凑齐全部物品（cheapestSingle 为空）：按各物料最优价市场
+//   路由，与 ACT 的分市场兜底一致——否则会出现「在 CI1 扣了库存、却去 AI1 买并往
+//   AI1 转运」，CI1 的库存永远不动（PR #60 审查 #224）；
+// - 分市场模式：各物料最优价市场（computeComponents 的 bestExchange，仅由价格决定，
+//   与数量 / 是否勾选无关）。
+// 无报价时返回 undefined，由 deductNeeds 退到「仓库里真有该物料的交易所」（纯转移行）。
 function outboundExchange(ticker: string): string | undefined {
-  if (singleMarketMode.value) {
-    return chosenSingleExchange.value;
+  const single = chosenSingleExchange.value;
+  if (single) {
+    return single;
   }
   return grossComponents.value.find(c => c.ticker === ticker)?.bestExchange;
 }
@@ -270,35 +307,10 @@ const needs = computed(() =>
 const components = computed(() => computeComponents(needs.value, exchanges));
 // 卡片总价 / 缺报价数只统计真正要买的物料，库存已足的行不参与「凑齐」判断。
 const pricedComponents = computed(() => components.value.filter(c => c.amount > 0));
-// 每张交易所卡片必须用「该交易所自己的仓库库存」算净需求：
-// 同一物料在 CI1 有库存、在 AI1 没有时，AI1 的账单里必须包含它，
-// 否则 AI1 会漏算这件而虚假地变成最便宜，用户选中后成本又跳回去（PR #60 审查）。
-// 非临时模式没有库存抵扣，返回空表让 computeTotals 走原逻辑。
-const needsByExchange = computed<Map<string, Map<string, number>>>(() => {
-  const map = new Map<string, Map<string, number>>();
-  if (!tempMode.value) {
-    return map;
-  }
-  for (const ex of exchanges) {
-    // 强制「全部从该市场出库」，得到这个市场自己的抵扣结果。
-    const rows = deductNeeds(
-      grossNeeds.value,
-      baseInventory.value,
-      exchangeInventories.value,
-      () => ex.code,
-    );
-    const byTicker = new Map<string, number>();
-    for (const row of rows) {
-      if (row.transfer > 0) {
-        byTicker.set(row.ticker, row.net);
-      }
-    }
-    map.set(ex.code, byTicker);
-  }
-  return map;
-});
-const totals = computed(() =>
-  computeTotals(components.value, exchanges, selectedTickers.value, needsByExchange.value),
+// 「最优混合」总价 / 无报价数按各物料当前抵扣后的净量估算。逐市场账单与
+// 「最便宜单交易所」见上面的 totals（口径是各市场自己的净需求）。
+const mixedTotals = computed(() =>
+  computeTotals(components.value, exchanges, marketSelection.value),
 );
 
 const deductedCount = computed(() => deductions.value.filter(d => d.base + d.exchange > 0).length);
@@ -403,7 +415,6 @@ interface CbuyActGroup {
 
 const actGroups = computed<Map<string, CbuyActGroup>>(() => {
   const groups = new Map<string, CbuyActGroup>();
-  const single = singleMarketMode.value ? chosenSingleExchange.value : undefined;
   for (const c of components.value) {
     if (!selectedTickers.value.has(c.ticker)) {
       continue;
@@ -412,13 +423,13 @@ const actGroups = computed<Map<string, CbuyActGroup>>(() => {
     if (!d || d.transfer <= 0) {
       continue;
     }
-    // 买：必须能定价，所以用有报价的最优市场；纯转移（net=0）则只要能找到供货仓库
-    // 即可路由，不必等报价（交易所仓库里已有这件物料、但暂时没有实时卖单的场景），
-    // 否则整行会被 `code` 为空丢弃，导致生成的 ACT 里漏掉这批转运（PR #60 审查 #223）。
-    let code = single ?? c.bestExchange;
-    if (!code && d.net === 0) {
-      code = d.exchangeCode;
-    }
+    // 路由直接沿用抵扣阶段解出的交易所（outboundExchange -> deductNeeds 的 exchangeCode）：
+    // 「在哪扣就在哪买 / 在哪转」，两边共用同一个决策。此前这里独立取 c.bestExchange，
+    // 单市场兜底（没有任何市场凑齐全部物品）时会与抵扣选到不同市场——一边在 CI1 扣库存、
+    // 另一边去 AI1 买并把货转运到 AI1，CI1 的库存永远不动（PR #60 审查 #224）。
+    // 纯转移行（net=0）没有报价，exchangeCode 由 deductNeeds 退到「仓库里真有该物料的
+    // 交易所」，因此转运也不会被丢掉（PR #60 审查 #223）。
+    const code = d.exchangeCode;
     if (!code) {
       continue;
     }
@@ -844,8 +855,8 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <span v-if="selectedTickers.size > 0" :class="$style.summaryProfit">
             · 已选 <strong>{{ selectedTickers.size }}</strong> 种</span
           >
-          <span v-if="totals.mixedMissing > 0" :class="$style.summaryWarn">
-            · {{ totals.mixedMissing }} 种无报价</span
+          <span v-if="mixedTotals.mixedMissing > 0" :class="$style.summaryWarn">
+            · {{ mixedTotals.mixedMissing }} 种无报价</span
           >
         </span>
         <span :class="$style.summaryItem">
@@ -859,7 +870,7 @@ function isBest(component: { bestExchange?: string }, code: string) {
         </span>
         <span :class="[$style.summaryItem, $style.summaryProfit]">
           最优混合总价 ·
-          <strong>{{ fixed0(totals.mixedTotal) }}</strong>
+          <strong>{{ fixed0(mixedTotals.mixedTotal) }}</strong>
           <span :class="$style.summaryNote">（1:1 不含汇率）</span>
         </span>
         <span

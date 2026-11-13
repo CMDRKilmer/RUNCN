@@ -5,6 +5,9 @@ import { applyRawCssRule } from '@src/infrastructure/prun-ui/refined-prun-css';
 // 这里在 BS 磁贴级订阅上下文项，按命令文本打标，再由一条全局 CSS 规则隐藏。
 // 打标而非直接改 inline style：React 重绘替换节点后订阅会重新命中新节点，不会漏。
 // 规则由本功能 init() 注入，因此 XIT SET FEAT 里关闭本功能后两个命令键恢复显示。
+//
+// 放在 advanced/：本功能隐藏游戏原生信息，按 docs/contributing.md「移除、缩短或隐藏
+// 信息的功能放 advanced/」的要求归入高级模式（非 FULL 模式不加载，原生命令保留）。
 const MARK = 'data-rp-ui';
 const MARK_VALUE = 'bs-context-hidden';
 const HIDDEN_CMDS = new Set(['HQ', 'ARC']);

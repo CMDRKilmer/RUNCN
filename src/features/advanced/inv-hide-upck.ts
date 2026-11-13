@@ -5,6 +5,9 @@ import { applyRawCssRule } from '@src/infrastructure/prun-ui/refined-prun-css';
 // 再由一条全局 CSS 规则隐藏。打标而非直接改 inline style：React 重绘替换
 // 节点后订阅会重新命中新节点，不会漏；CSS 规则不带主题前缀，因此原样主题
 // 与其它主题行为一致。
+//
+// 放在 advanced/：本功能隐藏游戏原生信息，按 docs/contributing.md「移除、缩短或隐藏
+// 信息的功能放 advanced/」的要求归入高级模式（非 FULL 模式不加载，原生命令保留）。
 const MARK = 'data-rp-ui';
 const MARK_VALUE = 'inv-upck-hidden';
 

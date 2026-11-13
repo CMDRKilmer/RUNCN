@@ -15,3 +15,18 @@ export const cxobStore = {
 export function isFiniteOrder() {
   return false;
 }
+
+// cbuy-inventory.ts 在模块顶层 import 这三个 store（只在函数体内调用），
+// 其 deductNeeds 是纯函数、不读它们；这里仅为让模块能加载。
+const emptyStore = {
+  fetched: { value: false },
+  all: { value: [] },
+  getNaturalIdFromCode: () => undefined,
+  getByEntityNaturalId: () => undefined,
+  getById: () => undefined,
+  getByAddressableId: () => undefined,
+};
+
+export const exchangesStore = emptyStore;
+export const warehousesStore = emptyStore;
+export const storagesStore = emptyStore;
