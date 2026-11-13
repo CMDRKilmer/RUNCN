@@ -370,6 +370,15 @@ function staleLegIndexes(
     ) {
       invalidateFrom(index, ['STL', 'FTL']);
     }
+    // 着陆改成了飞掠（或反之）：这一段落地的时间/燃料变了，从本站起飞的那段也跟着变。
+    if (
+      previous.landing !== undefined &&
+      current.landing !== undefined &&
+      previous.landing !== current.landing
+    ) {
+      stale.add(index);
+      invalidateFrom(index + 1, ['STL', 'FTL']);
+    }
     // 补油步骤在本站执行（飞往下一站之前）：改的是下游各段的出发余量。
     const changedTanks = changedRefuelTanks(previous, current);
     if (changedTanks.length > 0) {
@@ -539,6 +548,7 @@ function toWaypoint(waypoint: RouteWaypointData): NativeRouteWaypointRecord {
     reactorPercent: percentOf(waypoint.reactorUsageFactor),
     // 走网关还是自然跃迁决定实际航线：时长按它算出来的，改了就作废。
     useGateways: waypoint.preferences?.useGateways,
+    landing: waypoint.landing,
     steps: (waypoint.steps ?? [])
       .map(toStep)
       .filter((step): step is NativeRouteStep => step !== undefined),

@@ -20,6 +20,13 @@ export function isWaypointPercent(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;
 }
 
+// 把 0–1 的系数换成游戏写入用的整数百分比，并保证不低于最小值——**向上**取整：
+// 蓝图下限 0.653 若四舍五入成 65%，写进航线的就低于下限，自然跃迁段会飞不动。
+export function percentAtLeast(value: number, minimum = 0) {
+  const percent = Math.ceil(Math.max(value, minimum) * 100 - 1e-9);
+  return Math.min(100, Math.max(1, percent));
+}
+
 export function buildNativeWaypoints(plan: ChainPlan) {
   if (plan.stops.length === 0 || plan.overCapacity || plan.hasUnmetChainDemand === true) {
     throw new Error('环线缺少可执行站点、超出舱容或有未满足的产业链需求。');

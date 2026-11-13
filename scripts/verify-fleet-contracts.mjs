@@ -1135,7 +1135,7 @@ function nativeRouteServer(waypoints) {
     waypoints: waypoints.map((waypoint, index) => ({
       id: `w${index}`,
       destination: `S|PLA|STA,${waypoint.location}`,
-      landing: true,
+      landing: waypoint.landing ?? true,
       fuelUsageFactor: waypoint.fuelPercent / 100,
       reactorUsageFactor: 0.5,
       preferences: {
@@ -1165,6 +1165,7 @@ function nativeRouteLocal(waypoints, hours) {
       location: waypoint.location,
       fuelPercent: waypoint.fuelPercent,
       useGateways: waypoint.useGateways ?? true,
+      landing: waypoint.landing ?? true,
       steps: refuelsOf(waypoint).map(step => ({
         kind: 'refuel',
         tank: step.tank,
@@ -1316,6 +1317,24 @@ await check('native RT merge: a fixed-amount refill is not an invalidation bound
     { location: 'C', fuelPercent: 50 },
   ];
   const serverStops = localStops.map(x => ({ ...x, fuelPercent: 60 }));
+  assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10, 20]), [
+    undefined,
+    undefined,
+    undefined,
+  ]);
+});
+
+await check('native RT merge: a landing-mode change drops the adjacent legs', async () => {
+  const localStops = [
+    { location: 'A', fuelPercent: 25 },
+    { location: 'B', fuelPercent: 50 },
+    { location: 'C', fuelPercent: 50 },
+  ];
+  const serverStops = [
+    { location: 'A', fuelPercent: 25 },
+    { location: 'B', fuelPercent: 50, landing: false },
+    { location: 'C', fuelPercent: 50 },
+  ];
   assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10, 20]), [
     undefined,
     undefined,

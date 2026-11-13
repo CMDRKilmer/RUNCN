@@ -16,7 +16,7 @@ import { register } from 'node:module';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
 const { stubSetFuel, ftcCalls, btfCalls } = await import('./lib/native-route-fuel-stub.mjs');
 const { computeNativeRouteFuel } = await import('../src/features/XIT/FLEET/native-route-fuel.ts');
-const { hoursInvalidatedBySettingChange } =
+const { hoursInvalidatedBySettingChange, percentAtLeast } =
   await import('../src/features/XIT/FLEET/native-route-plan.ts');
 
 const summary = { pass: 0, fail: 0 };
@@ -142,6 +142,14 @@ await check('改档作废：反应堆档只认 FTL 补油（STL 补油不停）'
 
 await check('改档作废：末段没有下游，只清本段', async failures => {
   expectEqual(failures, 'stale', [3], hoursInvalidatedBySettingChange(fourStops, 3, 4, ['STL']));
+});
+
+await check('写入档位向上取整：蓝图下限 0.653 不会写成 65%', async failures => {
+  expectEqual(failures, '0.653 → ', 66, percentAtLeast(0.653, 0.653));
+  expectEqual(failures, '0.65 → ', 65, percentAtLeast(0.65, 0));
+  expectEqual(failures, '0.5 但下限 0.653 → ', 66, percentAtLeast(0.5, 0.653));
+  expectEqual(failures, '下限 0.5（默认反应堆 50%）→ ', 50, percentAtLeast(0.5, 0.5));
+  expectEqual(failures, '超过 1 → ', 100, percentAtLeast(1.2, 0));
 });
 
 console.log(`PASS ${summary.pass}/${summary.pass + summary.fail}`);

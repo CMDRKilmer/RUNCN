@@ -9,6 +9,7 @@ import { measureNativeRouteFuel } from './native-route-btf';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
   legLoadWeight,
+  percentAtLeast,
   type NativeWaypoint,
 } from './native-route-plan';
 
@@ -105,7 +106,10 @@ export async function computeNativeRouteFuel(
   ) => {
     const selected = clampPercent(option.fuel * 100);
     const capped = capPercent === undefined ? selected : Math.min(selected, capPercent);
-    const reactorPercent = reactorRelevant ? clampPercent(option.reactor * 100) : undefined;
+    // 写入用的整数百分比必须仍然满足蓝图下限（向下取整会写出跑不动的档位）。
+    const reactorPercent = reactorRelevant
+      ? percentAtLeast(option.reactor, performance.minReactorUsage ?? 0)
+      : undefined;
     if (capped === selected) {
       return {
         fuelPercent: selected,
@@ -125,7 +129,8 @@ export async function computeNativeRouteFuel(
       publish: false,
       useGateway: true,
       fixedFuel: capped / 100,
-      fixedReactor: reactorRelevant ? option.reactor : undefined,
+      // 用**写入的那个档位**重算，避免重算结果与实际航线不一致。
+      fixedReactor: reactorPercent === undefined ? undefined : reactorPercent / 100,
       stlFuelOverride: stlFuel,
       // 来自公式兜底的段没有原生几何：重算必须保持估算模式，否则会被判输入残缺。
       estimateGeometry: estimatedGeometry || undefined,

@@ -763,16 +763,15 @@ const visibleTables = computed<ChainTableRow[]>(() =>
   chainTab.value === 'plan' ? planTables.value : runningTables.value,
 );
 
-// 「运行中」页里原生 RT 也占一张卡：切过去时用游戏里的航线列表校准本地记录。
-watch(
-  () => chainTab.value,
-  tab => {
-    if (tab === 'running') {
-      void refreshGameRoutes();
-    }
-  },
-  { immediate: true },
-);
+// 「运行中」页里原生 RT 也占一张卡：玩家点页签时用游戏里的航线列表校准本地记录。
+// 只在点击里发起——磁贴恢复成上次的「运行中」页时不能自动发请求 / 开隐藏窗口
+// （contributing.md：服务端通信必须由玩家点击触发）。
+function selectChainTab(tab: 'plan' | 'running') {
+  chainTab.value = tab;
+  if (tab === 'running') {
+    void refreshGameRoutes();
+  }
+}
 // 记录变化（向导新增、删除按钮）后跟游戏列表校准；校准失败就退回本地记录显示。
 watch(
   () => Object.keys(nativeRouteRecords.value).sort().join(','),
@@ -1193,7 +1192,11 @@ function flightTotalText(shipId: string): string {
     <div :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
-          <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
+          <div
+            v-for="t in chainTabs"
+            :key="t.id"
+            :class="C.Tabs.header"
+            @click="selectChainTab(t.id)">
             <a
               :class="[
                 chainTab === t.id ? C.Tabs.tabActive : '',

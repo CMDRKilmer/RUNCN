@@ -20,7 +20,7 @@ import {
 import { summarizeNativeFlightPlan } from '@src/features/XIT/FTC/route-planner';
 import { sleep } from '@src/utils/sleep';
 import type { ShipChainPlan } from './chain-allocation';
-import { legLoadWeight, type NativeWaypoint } from './native-route-plan';
+import { legLoadWeight, percentAtLeast, type NativeWaypoint } from './native-route-plan';
 import { recordTransitSpeedSample } from './transit-speed-samples';
 
 // 从游戏滑块的最小档 5% 扫到 100%（1% 会被服务器拒绝，白跑一趟）。
@@ -134,11 +134,9 @@ export async function measureNativeRouteFuel(
         ? fuelNow.ftlCap
         : fuelNow.ftlRemaining;
   // 反应堆使用量：默认 50%，但不能低于蓝图下限（高下限船会直接拒绝低反应堆的计划）。
-  const reactorUsage = Math.min(
-    1,
-    Math.max(DEFAULT_REACTOR_USAGE, performance.minReactorUsage ?? 0),
-  );
-  const reactorPercent = Math.round(reactorUsage * 100);
+  // 试飞与写入必须用**同一个**百分比：向下取整会让写进航线的档位低于下限。
+  const reactorPercent = percentAtLeast(DEFAULT_REACTOR_USAGE, performance.minReactorUsage ?? 0);
+  const reactorUsage = reactorPercent / 100;
   // 档位上限：离港燃料饱和点（10.96×STL 流量），超过它只会多烧油。
   const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
   const legCount = waypoints.length - 1;

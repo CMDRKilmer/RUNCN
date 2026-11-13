@@ -10,6 +10,8 @@ export interface NativeRouteWaypointRecord {
   reactorPercent?: number;
   // 该航点的「使用跃迁点」偏好：时长是按对应航线（网关 / 自然）算的。
   useGateways?: boolean;
+  // 该航点是否着陆：着陆/起飞的时间与燃料都不同，时长按它算。
+  landing?: boolean;
   // 飞到该航点的预计飞行时长（小时）：FTC 模型选点或 BTF 试飞实测时顺带记下。
   flightHours?: number;
   steps: NativeRouteStep[];
