@@ -356,6 +356,15 @@ ESLint does not read `.gitignore`, so every non-source directory that can exist 
 
 Both are ignored now, so `pnpm run lint` is clean locally (~40 s). CI was never affected — a fresh checkout has neither directory, which is why the failure looked local-only. When adding a gitignored directory that can hold `.js/.ts/.mjs/.vue`, add it to `ignores` in the same commit instead of working around it by linting single files. Note `scripts/*.mjs` are excluded from eslint entirely (they are only type/format checked via prettier).
 
+### `pnpm prettier` Is Not a Whole-Repo Gate Here
+
+`pnpm prettier` formats everything outside `.prettierignore`. In a maintainer working tree that misses on two counts:
+
+- it aborts with exit code 2 on non-UTF-8 scratch files under `.tmp/` (e.g. a PowerShell-redirected `pr-comments.json` written as UTF-16), so the run is not a usable check;
+- it rewrites ~19 unrelated files (`scripts/*.mjs`, `src/refined-prun.css`, `.vscode/settings.json`) that nobody asked to touch.
+
+Format only what you changed: `pnpm exec prettier --write <paths>` (or `--check`). `.tmp/` belongs in `.prettierignore` for the same reason it is in ESLint's `ignores`.
+
 ### Windows-created Files Are CRLF
 
 Files created on Windows (e.g. by an agent's file tool) default to CRLF line endings, but the repo is LF. ESLint then reports hundreds of `prettier/prettier` "Delete `␍`" warnings on every line of the new file — this is a line-ending issue, not a formatting one. Run `prettier --write <file>` on the new files (fixes line endings + formatting in one pass) and re-lint before considering it done.
@@ -366,6 +375,7 @@ Files created on Windows (e.g. by an agent's file tool) default to CRLF line end
 
 - Prefer driving the **real** module: a Node loader hook (`scripts/lib/*-loader.mjs`) redirects only browser-side deps (`vue`, `@src/*`) to stubs while the logic under test (routing, model, orchestration) keeps its real implementation. Never re-implement the logic inside the stub — the test would then prove nothing about production.
 - If the logic lives in a file that cannot load in Node (Vue/DOM features), extract the pure part into its own module and drive that (e.g. `sfc-route-push-gate.ts` for the SFC push gate). Non-feature helper files living next to features are fine — see `src/features/basic/parse-safe-image.ts`.
+- Loaders fail loudly on an unmapped `@src/*` import (`chain-flight-time-loader` and `fleet-loader` both did when `ftc-compute` gained `flight-test-collector`). That is the design: add the new dependency to the loader's `STUBBED`/`REAL` map in the same commit, and give the stub every member the module reads — store stubs need `all` (a `ref`) as well as `getById`, otherwise the case dies on `undefined.value`.
 - A stub that turns a code path into a no-op makes every assertion about that path near-vacuous. Give the stub an observable difference instead (e.g. `showBuffer` records calls and `hasSystemData` only flips true after it) and assert the difference.
 - **Write expected constants as literals in the assertion, never `import` the production constant of the same name** (e.g. `1234`, `0.42`). If the constant is wrong, an assertion that imports it drifts along with it and stays green — the test then proves nothing about the number it claims to lock. Production constants are for driving the code under test, not for spelling out expectations.
 - Each check prepares its own state (fixtures, store contents, timers). A check leaning on the previous check's leftovers silently drifts when run alone or reordered.
