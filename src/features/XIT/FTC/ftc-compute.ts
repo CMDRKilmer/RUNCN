@@ -2,7 +2,7 @@ import { ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
-import { testFlightMassT } from '@src/infrastructure/prun-api/data/flight-test-collector';
+import { testFlightSample } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 import { hasSystemData, exportStationOrbits, gameNow } from '@src/infrastructure/fio/orbit';
@@ -456,8 +456,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
-  // 补计划载重之前的质量 = 游戏按飞船当前状态下发的原生计划的飞行质量。
-  // 试飞计划不同：它按请求里的 payload 算，质量记在计划对象上（见 testFlightMassT）。
+  // 试飞计划不同：它按请求参数算，测量条件（质量/出发油量）记在计划对象上。
   const currentMassT = perf.mass;
   // 原生 TRANSIT 样本是按飞船**当前**油量下发的：这个余量是反推样本档位的基准，
   // 不能被下面的规划 override 顶掉（否则样本速度会按错的档位重标定）。
@@ -526,6 +525,8 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   );
   const nativeSummary =
     nativePlan !== undefined ? summarizeNativeFlightPlan(nativePlan) : undefined;
+  // 试飞样本的测量条件（质量 / 出发油量）；游戏按当前状态下发的原生计划没有标记。
+  const testFlight = nativePlan === undefined ? undefined : testFlightSample(nativePlan);
   // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
   // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -576,12 +577,11 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       nativeTransitDistanceKm: nativeSummary?.transitDistanceKm,
       nativeTransitSeconds: nativeSummary?.transitSeconds,
       nativeTransitFuel: nativeSummary?.transitFuel,
-      // 样本侧的出发油量（不是候选侧的 override，见上面的 sampleStlTank）。
-      nativeStlTank: sampleStlTank,
-      // 样本质量必须取「测这份计划时的质量」：试飞样本已含计划载重，用飞船当前质量
-      // 会让模型再按 (当前质量/规划质量)^0.78 缩一遍，等于把货舱惩罚算两次。
-      nativeTransitMassT:
-        nativePlan === undefined ? currentMassT : (testFlightMassT(nativePlan) ?? currentMassT),
+      // 样本侧的出发油量：试飞按请求里的 stlFuel 算，原生计划按当前余量下发。
+      nativeStlTank: testFlight?.stlFuel ?? sampleStlTank,
+      // 样本质量同理取「测这份计划时的质量」：用当前质量会让模型按 (当前/规划) 再缩一遍，
+      // 等于把货舱惩罚算两次。
+      nativeTransitMassT: testFlight?.massT ?? currentMassT,
       nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,

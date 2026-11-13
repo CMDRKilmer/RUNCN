@@ -3,7 +3,7 @@ import {
   calculateTestFlight,
   encodeAddress,
   resolveEntity,
-  setTestFlightMass,
+  setTestFlightSample,
 } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import {
   ensureShipBlueprint,
@@ -202,7 +202,7 @@ export async function measureNativeRouteFuel(
         }
         if (plan.status === 'OK') {
           const summary = summarizeNativeFlightPlan(plan);
-          setTestFlightMass(plan, sampleMassT);
+          setTestFlightSample(plan, { massT: sampleMassT, stlFuel });
           recordTransitSpeedSamples(performance, ship, sampleMassT, stlFuel, percent, plan);
           if (summary.totalSeconds > 0) {
             samples.push({

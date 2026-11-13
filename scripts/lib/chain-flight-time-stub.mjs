@@ -254,4 +254,4 @@ export function setFtcReactorUsage(routeKey, value) {
 
 // flight-test-collector：试飞计划的质量标记。本脚本没有试飞路径（findNativeFlightPlan 恒 undefined），
 // 导出只为满足 ftc-compute 的静态导入。
-export const testFlightMassT = () => undefined;
+export const testFlightSample = () => undefined;

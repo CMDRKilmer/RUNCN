@@ -501,6 +501,47 @@ await checkAsync('原生样本的出发油量不受规划 override 影响', asyn
   );
 });
 
+// 试飞样本按**请求里的出发油量**算（向导可能传罐容量或规划余量）：标记了测量条件的样本
+// 不能用实时余量再换算一次。
+await checkAsync('试飞样本按它自己的出发油量校准', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  const setLive = amount =>
+    stub.stubSetStores([
+      { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount } }] },
+    ]);
+  setLive(1500);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 200e6, departKm: 70e6, approachKm: 68e6 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  const sample = { transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 };
+  const run = async live => {
+    setLive(live);
+    stub.stubSetNativePlan(sample);
+    // 样本是在 3500 油量下测的（向导按罐容量试飞）。
+    stub.stubSetTestFlightSample({ massT: stub.STUB_SHIP.mass, stlFuel: 3500 });
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 3500,
+    });
+    return out.best?.totalHours;
+  };
+  const live1500 = await run(1500);
+  const live3500 = await run(3500);
+  stub.stubSetTestFlightSample(undefined);
+  expectExact(f, '标记了测量条件的样本与实时余量无关', live1500, live3500);
+});
+
 // 假设性计算（原生 RT 向导：规划载重 + 未来出发油量 + 固定封顶档）即使输入完整也不能
 // 发布给 SFC：同键写入会覆盖玩家当前航班正在用的参数。
 await checkAsync('门控：publish = false → 输入完整也不写滑块、不发完成信号', async f => {

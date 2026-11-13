@@ -140,21 +140,26 @@ export function calculateTestFlight(
   });
 }
 
-// 试飞计划的飞行质量（t）：服务器按请求里的 payload 计算，和飞船当前质量不是一回事。
-// 响应对象同时进入 `flightPlansStore`，FTC 复用它的转移速度样本时必须知道这份样本是按
-// 多少质量测的，否则会按「飞船当前质量」再缩放一遍载重惩罚（同一份货算两次）。
-const testFlightMasses = new WeakMap<PrunApi.FlightPlan, number>();
+// 试飞计划是按**请求参数**算的，和飞船当前状态不是一回事：飞行质量（payload）与出发
+// 油量（stlFuel）都可能不同于实时余额。响应对象同时进入 `flightPlansStore`，FTC 复用它的
+// 转移速度样本时必须按「测这份样本时的条件」换算，否则会按实时状态再缩放一遍。
+export interface TestFlightSample {
+  massT: number;
+  stlFuel: number;
+}
 
-// 记录试飞计划对应的飞行质量。调用方知道 payload 与当时的船质量才算得出来。
-export function setTestFlightMass(plan: PrunApi.FlightPlan, massT: number) {
-  if (massT > 0) {
-    testFlightMasses.set(plan, massT);
+const testFlightSamples = new WeakMap<PrunApi.FlightPlan, TestFlightSample>();
+
+// 记录试飞计划对应的测量条件。调用方知道 payload 与试飞时的出发油量才算得出来。
+export function setTestFlightSample(plan: PrunApi.FlightPlan, sample: TestFlightSample) {
+  if (sample.massT > 0) {
+    testFlightSamples.set(plan, sample);
   }
 }
 
-// 试飞计划的飞行质量；游戏按飞船当前状态下发的原生计划没有这条记录（= undefined）。
-export function testFlightMassT(plan: PrunApi.FlightPlan) {
-  return testFlightMasses.get(plan);
+// 试飞计划的测量条件；游戏按飞船当前状态下发的原生计划没有这条记录（= undefined）。
+export function testFlightSample(plan: PrunApi.FlightPlan) {
+  return testFlightSamples.get(plan);
 }
 
 // 把地址编码为飞行计划请求的 origin/destination："{systemId}|PLA|STA,{bodyId}"。
