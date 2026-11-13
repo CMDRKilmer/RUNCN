@@ -290,6 +290,20 @@ Releases are cut by CI (`.github/workflows/release.yml`); never tag or zip by ha
 
 Before beginning new feature work, run `gh pr list --state open` (or equivalent) to see what's already in flight. Code search and the working tree reflect only `main` (or the current branch); unmerged feature branches are invisible to the search agent and to file reads. Duplicating an already-developed feature wastes effort and produces conflicting PRs.
 
+### PR Review Threads
+
+The Codex summary comment's `has_unresolved_findings` tracks GitHub **thread resolution state**, not code state — a fixed finding with an un-resolved thread still counts. The authoritative list is GraphQL, not the REST comments list (which can lag a push):
+
+```bash
+gh api graphql -f query='query { repository(owner:"CMDRKilmer", name:"RUNCN") { pullRequest(number:N) { reviewThreads(first:100) { nodes { id isResolved path comments(first:1) { nodes { databaseId } } } } } } }'
+```
+
+Reply to a thread with `gh api repos/.../pulls/N/comments -F in_reply_to=<databaseId> -f body=...` — `-F` is required (`-f` sends a string and the API 422s). Resolve with the `resolveReviewThread(threadId:)` mutation. Fix commits should follow the existing `fix(<scope>): 处理 PR #N 第 X 轮 review 发现` style and be pushed to the PR branch.
+
+### Git Identity in the Sandbox
+
+The sandbox has no git identity configured. Never run `git config`; pass identity per command instead: `git -c user.name="CMDRkilmer" -c user.email="kilsama@outlook.com" commit ...`.
+
 ### Import Sorting
 
 Don't enable auto-import-sorting in your editor. It creates merge conflicts when the same file is touched in two branches. Import sorting should be project-wide (via eslint/prettier), not per-editor.
