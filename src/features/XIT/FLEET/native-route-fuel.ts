@@ -51,6 +51,8 @@ export async function computeNativeRouteFuel(
       for (const leg of legs) {
         if (leg.fuelPercent > capPercent) {
           leg.fuelPercent = capPercent;
+          // 时长是按原（更快）档位算的，封顶后不再成立：清掉，避免显示与实写档位不符的预计值。
+          leg.hours = undefined;
           clamped++;
         }
       }
@@ -74,6 +76,8 @@ export async function computeNativeRouteFuel(
       to,
       browse: false,
       valueOptimal: true,
+      // 与写入航点的偏好一致（socketEditWaypoint 写 useGateways: true，BTF 也开网关）
+      useGateway: true,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
@@ -170,6 +174,7 @@ async function estimateLegs(
       to,
       browse: false,
       valueOptimal: true,
+      useGateway: true,
       estimateGeometry: true,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });

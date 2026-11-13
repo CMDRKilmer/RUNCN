@@ -53,7 +53,9 @@ export function buildNativeWaypoints(plan: ChainPlan) {
 }
 
 // 第 index 段（1 起，共 legCount 段）离站时的计划舱载（t）：出发地装载 / 各站离站舱载 /
-// 归航舱载。FTC 模型按它补质量（规划期飞船通常还没装货）。
+// 归航舱载。只含计划新增货物——船上现有货物不在规划里（它只压减可用舱容），
+// 需要完整离站重量时由调用方叠加 `cargoStore.weightLoad`。
+// FTC 模型按它补质量（规划期飞船通常还没装货）。
 export function legLoadWeight(plan: ChainPlan, index: number, legCount: number) {
   if (index === 1) {
     return plan.loadOnDeparture.weight;

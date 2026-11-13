@@ -35,8 +35,10 @@ import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
 import { buildNativeWaypoints } from './native-route-plan';
 import {
   nativeRouteRecords,
+  recordNativeRoute,
   removeNativeRoute,
   type NativeRouteRecord,
+  type NativeRouteWaypointRecord,
 } from './native-route-registry';
 import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
@@ -225,6 +227,7 @@ function openNativeRoutePlan() {
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {
+      sessionId: Date.now(),
       candidate,
       waypoints,
       chainName: chainGroup.value ?? '',
@@ -319,10 +322,18 @@ async function refreshGameRoutes() {
     const routes = await socketGetRoutes();
     // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
     const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
-    const ids = new Set(routes.map(route => route.id));
     for (const record of Object.values(nativeRouteRecords.value)) {
-      if (!ids.has(record.routeId)) {
+      const server = routes.find(
+        x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId),
+      );
+      if (server === undefined) {
         removeNativeRoute(record.routeId);
+        continue;
+      }
+      // 界面路径创建时只有 RT 号：校准后换成服务端哈希 id，删除与配对都用它。
+      if (server.id !== record.routeId) {
+        removeNativeRoute(record.routeId);
+        recordNativeRoute({ ...record, routeId: server.id });
       }
     }
     gameRunningRoutes.value =
@@ -344,38 +355,28 @@ function nativeRouteProgress(record: NativeRouteRecord, ship: PrunApi.Ship | und
 
 // 用飞船的当前航班（或在港位置）匹配航点，得到逐站状态；与「运行中」表格同一套标记。
 // 游戏 UI 手动创建的航线只有编码地址，换不出 naturalId 时用编码地址直接比对航班。
+// 环线的首站与归航站是同一地点：先用「上一站 → 目的地」的连续航段定位，
+// 否则归航/回港时永远命中第 0 站，进度会重置成 1/N。
 function nativeRouteStates(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
   const flight =
     ship === undefined
       ? undefined
       : flightsStore.all.value?.find(x => x.shipId === ship.id && !x.aborted);
-  const target =
-    flight !== undefined
-      ? getEntityNaturalIdFromAddress(flight.destination)
-      : getEntityNaturalIdFromAddress(ship?.address ?? undefined);
-  const encodedTarget =
-    flight !== undefined
-      ? encodeAddress(flight.destination)
-      : ship?.address != null
-        ? encodeAddress(ship.address)
-        : undefined;
-  const index =
-    target === undefined && encodedTarget === undefined
-      ? -1
-      : record.waypoints.findIndex(x => {
-          if (
-            target !== undefined &&
-            typeof x.location === 'string' &&
-            x.location.trim().toUpperCase() === target.trim().toUpperCase()
-          ) {
-            return true;
-          }
-          return (
-            typeof x.encoded === 'string' &&
-            encodedTarget !== undefined &&
-            x.encoded.trim().toUpperCase() === encodedTarget.trim().toUpperCase()
-          );
-        });
+  const address = ship?.address;
+  let index = -1;
+  if (flight !== undefined) {
+    index = record.waypoints.findIndex(
+      (waypoint, i) =>
+        i > 0 &&
+        waypointMatchesAddress(waypoint, flight.destination) &&
+        waypointMatchesAddress(record.waypoints[i - 1]!, flight.origin),
+    );
+    if (index < 0) {
+      index = record.waypoints.findIndex(x => waypointMatchesAddress(x, flight.destination));
+    }
+  } else if (address != null) {
+    index = record.waypoints.findIndex(x => waypointMatchesAddress(x, address));
+  }
   return record.waypoints.map((_, i): StopState => {
     if (index < 0) {
       return 'pending';
@@ -390,8 +391,46 @@ function nativeRouteStates(record: NativeRouteRecord, ship: PrunApi.Ship | undef
   });
 }
 
+function waypointMatchesAddress(waypoint: NativeRouteWaypointRecord, address: PrunApi.Address) {
+  const naturalId = getEntityNaturalIdFromAddress(address);
+  if (
+    naturalId !== undefined &&
+    typeof waypoint.location === 'string' &&
+    waypoint.location.trim().toUpperCase() === naturalId.trim().toUpperCase()
+  ) {
+    return true;
+  }
+  const encoded = encodeAddress(address);
+  return (
+    encoded !== undefined &&
+    typeof waypoint.encoded === 'string' &&
+    waypoint.encoded.trim().toUpperCase() === encoded.trim().toUpperCase()
+  );
+}
+
 function openNativeRoute(record: NativeRouteRecord) {
   void showBuffer(`RT ${record.naturalId}`);
+}
+
+function sameNaturalId(a: string | undefined, b: string | undefined) {
+  return (
+    typeof a === 'string' &&
+    typeof b === 'string' &&
+    a.trim().toUpperCase() === b.trim().toUpperCase()
+  );
+}
+
+// 界面路径创建的记录没有服务端哈希 id：用游戏航线列表按 RT 号反查。
+async function resolveServerRouteId(record: NativeRouteRecord) {
+  try {
+    const routes = await socketGetRoutes();
+    return (
+      routes.find(x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId))
+        ?.id ?? record.routeId
+    );
+  } catch {
+    return record.routeId;
+  }
 }
 
 // 与环线的「清理计划」一致：确认后在游戏里删除航线，并把记录从「运行中」移除。
@@ -406,7 +445,9 @@ function onDeleteNativeRouteClick(e: Event, record: NativeRouteRecord) {
 
 async function deleteNativeRoute(record: NativeRouteRecord) {
   try {
-    await socketDeleteRoute(record.routeId);
+    // 界面路径创建的记录只有 RT 号：先换成服务端 id，否则删除会打错对象。
+    const routeId = await resolveServerRouteId(record);
+    await socketDeleteRoute(routeId);
     // 一条船同时只能跑一条航线，同船同产业链的旧记录都只是历史——一起清掉，
     // 否则删掉最新那条后，上一轮的记录会冒出来继续显示在「运行中」。
     for (const other of Object.values(nativeRouteRecords.value)) {
@@ -423,7 +464,9 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
     if (running !== undefined) {
       gameRunningRoutes.value = {
         ...running,
-        entries: running.entries.filter(x => x.route.id !== record.routeId),
+        entries: running.entries.filter(
+          x => x.route.id !== record.routeId && !sameNaturalId(x.route.naturalId, record.naturalId),
+        ),
       };
     }
     statusCheckNotice.value = `已删除原生 RT ${record.naturalId}。`;

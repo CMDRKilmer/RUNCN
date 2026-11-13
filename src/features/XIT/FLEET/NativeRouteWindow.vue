@@ -16,7 +16,7 @@ function onStarted() {
   </div>
   <NativeRouteDialog
     v-else
-    :key="stagedNativeRoute.candidate.ship.ship.id"
+    :key="stagedNativeRoute.sessionId"
     :candidate="stagedNativeRoute.candidate"
     :initial-waypoints="stagedNativeRoute.waypoints"
     :chain-name="stagedNativeRoute.chainName"

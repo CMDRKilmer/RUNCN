@@ -11,6 +11,7 @@ import {
 } from '@src/features/XIT/FTC/ftc-compute';
 import {
   autoFuelGrid,
+  conditionFactor,
   pickBestValueOption,
   stlDepartureFuelCapPercent,
   type FuelTradeoff,
@@ -23,9 +24,8 @@ import { recordTransitSpeedSample } from './transit-speed-samples';
 
 // 从游戏滑块的最小档 5% 扫到 100%（1% 会被服务器拒绝，白跑一趟）。
 const fuelPercents = autoFuelGrid().map(fuel => Math.round(fuel * 100));
-// 试飞固定 50% 反应堆使用量（与旧 BTF 面板口径一致）。
-const REACTOR_USAGE = 0.5;
-const REACTOR_PERCENT = 50;
+// 试飞默认 50% 反应堆使用量（与旧 BTF 面板口径一致）；蓝图下限更高时用下限。
+const DEFAULT_REACTOR_USAGE = 0.5;
 // 服务器限速礼貌间隔（与 transit-f-scan 的批量采集一致）。
 const REQUEST_INTERVAL_MS = 250;
 
@@ -58,6 +58,9 @@ function recordTransitSpeedSamples(
   }
   const aEff = (ship.acceleration * ship.operatingEmptyMass) / mass;
   const q = 0.98 * tank * Math.min(fuelPercent / 100, 0.5);
+  // 服务器试飞的速度已经含船况惩罚；查询表存健康船速度（模型在算时长时才乘
+  // conditionFactor），否则后续估算会把船况惩罚重复计算两次。
+  const cond = conditionFactor(ship.condition);
   for (const segment of plan.segments) {
     if (segment.type !== 'TRANSIT' || segment.stlDistance === null) {
       continue;
@@ -67,7 +70,7 @@ function recordTransitSpeedSamples(
     if (!(seconds >= 60) || !(segment.stlDistance > 1000)) {
       continue;
     }
-    recordTransitSpeedSample(engine, q, aEff, segment.stlDistance / seconds);
+    recordTransitSpeedSample(engine, q, aEff, (segment.stlDistance / seconds) * cond);
   }
 }
 
@@ -110,6 +113,12 @@ export async function measureNativeRouteFuel(
   const fuelNow = shipFuelRemainingFor(ship);
   const stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlCap : (performance.stlFuelCapacity ?? 0);
   const ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : fuelNow.ftlRemaining;
+  // 反应堆使用量：默认 50%，但不能低于蓝图下限（高下限船会直接拒绝低反应堆的计划）。
+  const reactorUsage = Math.min(
+    1,
+    Math.max(DEFAULT_REACTOR_USAGE, performance.minReactorUsage ?? 0),
+  );
+  const reactorPercent = Math.round(reactorUsage * 100);
   // 档位上限：离港燃料饱和点（10.96×STL 流量），超过它只会多烧油。
   const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
   const legCount = waypoints.length - 1;
@@ -139,9 +148,12 @@ export async function measureNativeRouteFuel(
       signal.throwIfAborted();
       const origin = await addressCode(from);
       const destination = await addressCode(to);
-      // 载重按该段离站时的计划舱载（`loadOnDeparture` 已经含了船上现有货物），
-      // 和 FTC 的 extraMassT 同口径；再加一次当前舱载会重复计算。
-      const payload = Math.ceil(legLoadWeight(candidate.plan, index, legCount));
+      // 载重 = 计划舱载 + 船上现有货物：规划器的 loadOnDeparture 从空舱起算
+      // （现有货物只用来压减可用舱容），而服务器试飞只认 payload 参数。
+      const payload = Math.ceil(
+        legLoadWeight(candidate.plan, index, legCount) +
+          (candidate.ship.cargoStore?.weightLoad ?? 0),
+      );
       const samples: FuelTradeoff[] = [];
       let timeouts = 0;
       let rejected = 0;
@@ -156,7 +168,7 @@ export async function measureNativeRouteFuel(
           condition: ship.condition,
           stlFuel,
           ftlFuel,
-          reactorUsageFactor: REACTOR_USAGE,
+          reactorUsageFactor: reactorUsage,
           landing: true,
           // 与游戏自己写入航点时的默认偏好一致（实采 SHIP_ROUTES_EDIT_WAYPOINT：
           // ftlPreference LEAST_JUMPS、useGateways true）——试飞要走和航线一样的路线。
@@ -172,7 +184,7 @@ export async function measureNativeRouteFuel(
           if (summary.totalSeconds > 0) {
             samples.push({
               fuel: percent,
-              reactor: REACTOR_PERCENT,
+              reactor: reactorPercent,
               totalHours: summary.totalSeconds / 3600,
               stlFuel: summary.stlFuel,
               ftlFuel: summary.ftlFuel,
@@ -193,7 +205,7 @@ export async function measureNativeRouteFuel(
       if (best === undefined) {
         throw new Error('试飞没有可用方案。');
       }
-      measured.set(index, { fuel: best.fuel, reactor: REACTOR_PERCENT, hours: best.totalHours });
+      measured.set(index, { fuel: best.fuel, reactor: reactorPercent, hours: best.totalHours });
     } catch (err) {
       if (signal.aborted) {
         throw err;

@@ -1228,19 +1228,55 @@ export function pickBestValueOption<T extends FuelTradeoff>(
   options: T[],
   maxFuel?: number,
 ): T | undefined {
-  const sorted = options
-    .filter(o => maxFuel === undefined || o.fuel <= maxFuel)
-    .slice()
-    .sort((a, b) => a.fuel - b.fuel);
-  if (sorted.length === 0) {
+  const candidates = options.filter(o => maxFuel === undefined || o.fuel <= maxFuel);
+  if (candidates.length === 0) {
     return undefined;
   }
+  // 反应堆使用量与燃料档位正交（只影响 FTL 速度/充能），必须按反应堆分组后
+  // 在**同一序列内**比较「多烧 1% 燃料换回多少时间」；跨反应堆混排会把反应堆
+  // 带来的时间差算进燃料边际收益，结果随输入顺序变化（同一航线可算出 10%/30%
+  // 或 20%/100% 两种结论）。
+  const series = new Map<number, T[]>();
+  for (const option of candidates) {
+    const key = Math.round(option.reactor * 1000);
+    const list = series.get(key);
+    if (list === undefined) {
+      series.set(key, [option]);
+    } else {
+      list.push(option);
+    }
+  }
+  const picks: { option: T; rate: number }[] = [];
+  for (const list of series.values()) {
+    const pick = pickSeriesValue(list);
+    if (pick !== undefined) {
+      picks.push(pick);
+    }
+  }
+  if (picks.length === 0) {
+    return undefined;
+  }
+  // BTF 实测样本只有一种反应堆：序列内结果就是最终结果（与旧口径逐位一致）。
+  if (picks.length === 1) {
+    return picks[0]!.option;
+  }
+  // 跨反应堆：比较各序列「相对最省油档的总时间收益 / 总燃料增量」，取最高。
+  return picks.reduce((a, b) => (b.rate > a.rate ? b : a)).option;
+}
+
+// 固定反应堆序列内的性价比拐点：返回选中档位与它相对序列最省油档的平均收益。
+function pickSeriesValue<T extends FuelTradeoff>(
+  options: T[],
+): { option: T; rate: number } | undefined {
+  const sorted = options.slice().sort((a, b) => a.fuel - b.fuel);
+  const first = sorted[0]!;
   const fuels = sorted.map(totalFuelOf);
   // 燃料完全无差别（短途、由固定起降段主导）：时间更短的方案严格占优。
   if (!(Math.max(...fuels) - Math.min(...fuels) > 1e-9)) {
-    return sorted.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
+    const fastest = sorted.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
+    return { option: fastest, rate: 0 };
   }
-  let best = sorted[0]!;
+  let best = first;
   let firstRate: number | undefined;
   for (let i = 1; i < sorted.length; i++) {
     const previous = sorted[i - 1]!;
@@ -1253,7 +1289,8 @@ export function pickBestValueOption<T extends FuelTradeoff>(
     const rate = deltaHours / deltaFuel;
     if (firstRate === undefined) {
       if (!(rate > 0)) {
-        return findBalanceOption(sorted) ?? best;
+        const balance = findBalanceOption(sorted) ?? best;
+        return { option: balance, rate: valueRate(first, balance) };
       }
       firstRate = rate;
       best = current;
@@ -1264,7 +1301,15 @@ export function pickBestValueOption<T extends FuelTradeoff>(
     }
     best = current;
   }
-  return best;
+  return { option: best, rate: valueRate(first, best) };
+}
+
+function valueRate<T extends FuelTradeoff>(first: T, option: T) {
+  const deltaFuel = option.fuel - first.fuel;
+  if (!(deltaFuel > 0)) {
+    return 0;
+  }
+  return (first.totalHours - option.totalHours) / deltaFuel;
 }
 // 邻档对比：以最优方案为中心，取**同一反应堆使用量**下燃料滑块前后各 span 档的方案。
 // 复用 scanFuelOptions 已算出的全部组合，不重算。

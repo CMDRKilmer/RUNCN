@@ -43,9 +43,17 @@ export interface RouteData {
 const ROUTE_TIMEOUT_MS = 15000;
 // 服务端不回 actionId，只能按「一次请求一份响应」的顺序匹配（所有请求串行 await）。
 // 变更类请求回 SHIP_ROUTES_ROUTE（单条），删除等回 SHIP_ROUTES_ROUTES（列表）。
+// 游戏里其它窗口也可能同时发航线请求，因此每个请求带匹配谓词：响应与请求的
+// 类型/航线 id 对不上就跳过，不会把别的航线的响应当成自己的。
 type RouteResponse = { kind: 'route'; route: RouteData } | { kind: 'routes'; routes: RouteData[] };
+type ResponseMatcher = (response: RouteResponse) => boolean;
 
-const pending = new Set<(response: RouteResponse) => void>();
+interface PendingRequest {
+  match: ResponseMatcher;
+  resolve: (response: RouteResponse) => void;
+}
+
+const pending = new Set<PendingRequest>();
 
 onApiMessageForce({
   SHIP_ROUTES_ROUTE(data: RouteData) {
@@ -57,10 +65,13 @@ onApiMessageForce({
 });
 
 function dispatchRouteResponse(response: RouteResponse) {
-  const [resolve] = pending;
-  if (resolve !== undefined) {
-    pending.delete(resolve);
-    resolve(response);
+  for (const request of pending) {
+    if (!request.match(response)) {
+      continue;
+    }
+    pending.delete(request);
+    request.resolve(response);
+    return;
   }
 }
 
@@ -74,19 +85,25 @@ function serialize<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
-// 发一条航线请求，等第一条响应（不解释内容）。
-function sendRouteRequest(messageType: string, payload: Record<string, unknown>) {
+// 发一条航线请求，等第一条**匹配**的响应（不解释内容）。
+function sendRouteRequest(
+  messageType: string,
+  payload: Record<string, unknown>,
+  match: ResponseMatcher = () => true,
+) {
   return new Promise<RouteResponse>((resolve, reject) => {
-    const done = (response: RouteResponse) => {
-      clearTimeout(timer);
-      pending.delete(done);
-      resolve(response);
+    const request: PendingRequest = {
+      match,
+      resolve: response => {
+        clearTimeout(timer);
+        resolve(response);
+      },
     };
     const timer = setTimeout(() => {
-      pending.delete(done);
+      pending.delete(request);
       reject(new Error(`${messageType} 无响应`));
     }, ROUTE_TIMEOUT_MS);
-    pending.add(done);
+    pending.add(request);
     const sent = sendServerMessage({
       messageType,
       payload: { ...payload, actionId: crypto.randomUUID() },
@@ -94,7 +111,7 @@ function sendRouteRequest(messageType: string, payload: Record<string, unknown>)
     });
     if (!sent) {
       clearTimeout(timer);
-      pending.delete(done);
+      pending.delete(request);
       reject(new Error('游戏 socket 未就绪，请刷新页面后重试'));
     }
   });
@@ -102,7 +119,13 @@ function sendRouteRequest(messageType: string, payload: Record<string, unknown>)
 
 function sendRouteAction(messageType: string, payload: Record<string, unknown>, routeId?: string) {
   return serialize(async () => {
-    const response = await sendRouteRequest(messageType, payload);
+    const response = await sendRouteRequest(messageType, payload, response => {
+      if (response.kind === 'route') {
+        // 请求指定了航线就必须是这条航线——否则后续航点/改名会写到别的航线上。
+        return routeId === undefined || response.route.id === routeId;
+      }
+      return routeId !== undefined && response.routes.some(x => x.id === routeId);
+    });
     const route =
       response.kind === 'route'
         ? response.route
@@ -130,15 +153,20 @@ export function hasPendingRouteRequest() {
 // 拉取游戏里现有的航线：用来丢弃本地记录里已被删掉的航线（包括在游戏 UI 里删的）。
 export async function socketGetRoutes() {
   return await serialize(async () => {
-    const response = await sendRouteRequest('SHIP_ROUTES_GET_ROUTES', {});
-    return response.kind === 'routes' ? response.routes : [response.route];
+    // 只接受列表响应：单条 SHIP_ROUTES_ROUTE 可能来自游戏里其它窗口。
+    const response = await sendRouteRequest('SHIP_ROUTES_GET_ROUTES', {}, x => x.kind === 'routes');
+    return response.kind === 'routes' ? response.routes : [];
   });
 }
 
 // 删除航线：响应是航线列表（SHIP_ROUTES_ROUTES），列表里已无该 routeId 才算删掉。
 export async function socketDeleteRoute(routeId: string) {
   await serialize(async () => {
-    const response = await sendRouteRequest('SHIP_ROUTES_DELETE_ROUTE', { routeId });
+    const response = await sendRouteRequest(
+      'SHIP_ROUTES_DELETE_ROUTE',
+      { routeId },
+      x => x.kind === 'routes',
+    );
     if (response.kind === 'routes' && response.routes.some(x => x.id === routeId)) {
       throw new Error('服务端仍返回该航线，删除未生效');
     }
@@ -244,11 +272,13 @@ export interface SocketWriteResult {
 }
 
 // 一次性写完：建航线 → 逐站加航点/写档位/加步骤/写数量 → 改名。
-// 全部走 socket，不开窗口、不点 UI。
+// 全部走 socket，不开窗口、不点 UI。onCreated 在航线创建后立即回调，
+// 中止写入时调用方可根据它删除半成品，避免下次重试再建一条重复航线。
 export async function writeNativeRouteBySocket(
   input: SocketWriteInput,
   signal: AbortSignal,
   onProgress: (status: string) => void,
+  onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
   const codes = new Map<string, string>();
   const addressCode = async (location: string) => {
@@ -269,7 +299,7 @@ export async function writeNativeRouteBySocket(
   onProgress('创建航线');
   activeSessions++;
   try {
-    return await writeRoute(input, signal, onProgress, addressCode);
+    return await writeRoute(input, signal, onProgress, addressCode, onCreated);
   } finally {
     activeSessions--;
   }
@@ -280,9 +310,11 @@ async function writeRoute(
   signal: AbortSignal,
   onProgress: (status: string) => void,
   addressCode: (location: string) => Promise<string>,
+  onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
   const warnings: string[] = [];
   const created = await socketCreateRoute();
+  onCreated?.(created.id, created.naturalId);
   let route = created;
   for (const [index, waypoint] of input.waypoints.entries()) {
     signal.throwIfAborted();

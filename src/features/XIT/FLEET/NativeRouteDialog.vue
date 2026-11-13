@@ -28,7 +28,7 @@ import {
 } from './native-route-editor';
 import { computeNativeRouteFuel } from './native-route-fuel';
 import { recordNativeRoute } from './native-route-registry';
-import { writeNativeRouteBySocket } from './native-route-socket';
+import { socketDeleteRoute, writeNativeRouteBySocket } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
   isWaypointPercent,
@@ -83,6 +83,8 @@ const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ??
 const routeId = ref<string>();
 // 游戏内航线号（RT-XXXX-NNNN）：打开窗口用它，`routeId` 是服务端哈希。
 const routeNaturalId = ref<string>();
+// socket 写入中途停止时已创建的服务端 id：重试前先删掉，避免出现两条航线。
+const partialRouteId = ref<string>();
 const busy = ref(false);
 const autoFilling = ref(false);
 const error = ref<string>();
@@ -176,6 +178,11 @@ function stopAutoFill() {
 onBeforeUnmount(() => {
   disposed = true;
   stopAutoFill();
+  // 半成品航线不留给玩家自己排查：关向导时尽力删掉。删除失败（已无 socket）就保留。
+  if (partialRouteId.value !== undefined) {
+    void socketDeleteRoute(partialRouteId.value).catch(() => undefined);
+    partialRouteId.value = undefined;
+  }
 });
 
 // FLEET「生成原生 RT」默认自动跑：先算燃料（FTC/BTF），随后直写航线，不需要再点按钮。
@@ -282,6 +289,12 @@ function nextWaypoint() {
   }
 }
 
+function isAbortError(err: unknown) {
+  return (
+    typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'AbortError'
+  );
+}
+
 function checkLoop() {
   repeats.value = tile === undefined ? undefined : nativeRouteRepeats(tile);
 }
@@ -322,6 +335,10 @@ async function advance(automatic = false) {
       progress.value !== previous
     );
   } catch (err) {
+    // 玩家主动停止（abort）不是错误：保持当前阶段，可以直接点「继续」。
+    if (isAbortError(err)) {
+      return;
+    }
     error.value = err instanceof Error ? err.message : String(err);
     canRetryStep.value = err instanceof NativeStepButtonUnavailable;
   } finally {
@@ -370,6 +387,15 @@ async function advanceOnce(retrying: boolean) {
     writeTask = controller;
     fuelStatus.value = '正在通过 socket 写入原生 RT';
     try {
+      // 上一轮在创建航线后被打断：先删掉半成品，再从头写，否则重试会多出一条航线。
+      if (partialRouteId.value !== undefined) {
+        try {
+          await socketDeleteRoute(partialRouteId.value);
+        } catch {
+          // 已删除、或游戏里仍有船在用：保留 id，下一次重试再试。
+        }
+        partialRouteId.value = undefined;
+      }
       const legs = waypoints.value.map((_, index) => {
         const reactor = reactorUsagePercents.value[index];
         return {
@@ -383,10 +409,14 @@ async function advanceOnce(retrying: boolean) {
         status => {
           fuelStatus.value = status;
         },
+        id => {
+          partialRouteId.value = id;
+        },
       );
       if (controller.signal.aborted) {
         return;
       }
+      partialRouteId.value = undefined;
       routeId.value = result.routeId;
       routeNaturalId.value = result.naturalId;
       fuelWarnings.value = [...fuelWarnings.value, ...result.warnings];
