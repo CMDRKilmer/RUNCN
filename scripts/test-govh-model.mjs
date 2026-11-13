@@ -15,6 +15,10 @@ import {
   applyCapping,
   solve,
 } from '../src/features/XIT/GOVH/govh-model.ts';
+import {
+  parseReportAge,
+  reportCacheRemainingMs,
+} from '../src/features/XIT/GOVH/govh-report-age.ts';
 
 let pass = 0;
 const check = (name, fn) => {
@@ -446,8 +450,14 @@ check('容量表：每级容量都是正整数，且物料必须在该建筑的�
     assert.ok(building, `${ticker} 不在 UPKEEP_BUILDINGS`);
     for (const [material, per] of Object.entries(materials)) {
       assert.ok(building.materials.includes(material), `${ticker}.${material} 不在物料清单`);
-      assert.ok(Number.isInteger(per.reserve) && per.reserve > 0, `${ticker}.${material} reserve=${per.reserve}`);
-      assert.ok(Number.isInteger(per.next) && per.next > 0, `${ticker}.${material} next=${per.next}`);
+      assert.ok(
+        Number.isInteger(per.reserve) && per.reserve > 0,
+        `${ticker}.${material} reserve=${per.reserve}`,
+      );
+      assert.ok(
+        Number.isInteger(per.next) && per.next > 0,
+        `${ticker}.${material} next=${per.next}`,
+      );
       assert.ok(per.next <= per.reserve, `${ticker}.${material} next > reserve`);
     }
   }
@@ -633,6 +643,91 @@ check('基建存量：同一物料在不同建筑分别扣除', () => {
   // SST L2 满仓 700；PAR L1 满仓 300 + 50 = 350。
   assert.equal(sst.netFillAmount, 400);
   assert.equal(par.netFillAmount, 250);
+});
+
+check('汇总重量 / 体积：缺报价的物料照样计入货运量（只有金额算不出来）', () => {
+  const prices = { ...baseInput().prices };
+  delete prices.DW;
+  const r = solve({
+    ...baseInput(),
+    selected: new Set(['SST.DW']),
+    prices,
+    materialsInfo: { DW: { weight: 1, volume: 2 } },
+  });
+  const option = r.options.find(o => o.key === 'SST.DW');
+  assert.ok(option.netFillAmount > 0, '待补量应大于 0');
+  // 缺价只影响金额，不能把货运量一起吞掉（PR #60 审查）。
+  assert.equal(r.summary.missingPrices, 1);
+  assert.equal(r.summary.weight, option.netFillAmount);
+  assert.equal(r.summary.volume, option.netFillAmount * 2);
+  assert.equal(r.summary.fillCost, 0);
+});
+
+// ── 报告年龄 / 周期缓存剩余时长 ─────────────────────────────────────
+// POPR 的「6天 23小时前」只精确到小时，缓存必须按年龄区间上界失效，
+// 否则会在 rollover 后仍返回上一期的人口 / 满足度（PR #60 审查）。
+const HOUR = 3600_000;
+const DAY = 24 * HOUR;
+
+check('报告年龄：中文「5天 13小时前」解析为 5天13小时，精度 1 小时', () => {
+  const age = parseReportAge('报告#43/5天 13小时前');
+  assert.ok(age !== undefined);
+  assert.equal(age.ageMs, 5 * DAY + 13 * HOUR);
+  assert.equal(age.precisionMs, HOUR);
+});
+
+check('报告年龄：周期内正常的剩余时长 = 7天 − 年龄 − 精度', () => {
+  const age = parseReportAge('报告#43/5天 13小时前');
+  assert.equal(reportCacheRemainingMs(age), 7 * DAY - (5 * DAY + 13 * HOUR) - HOUR);
+});
+
+check('报告年龄：「6天 23小时前」不缓存（剩余已不足一个精度，随时可能换期）', () => {
+  const age = parseReportAge('报告#43/6天 23小时前');
+  assert.ok(age !== undefined);
+  // 旧口径会算出还剩 1 小时，把上一期数据带进新周期。
+  assert.equal(reportCacheRemainingMs(age), 0);
+  assert.ok(reportCacheRemainingMs(age) <= 0);
+});
+
+check('报告年龄：「6天前」（只到天）按整天精度扣，剩余为 0 不缓存', () => {
+  const age = parseReportAge('报告#43/6天前');
+  assert.ok(age !== undefined);
+  assert.equal(age.ageMs, 6 * DAY);
+  assert.equal(age.precisionMs, DAY);
+  assert.equal(reportCacheRemainingMs(age), 0);
+});
+
+check('报告年龄：分钟级标签按分钟精度扣', () => {
+  const age = parseReportAge('报告#43/30分钟前');
+  assert.ok(age !== undefined);
+  assert.equal(age.ageMs, 30 * 60_000);
+  assert.equal(age.precisionMs, 60_000);
+  assert.equal(reportCacheRemainingMs(age), 7 * DAY - 31 * 60_000);
+});
+
+check('报告年龄：英文「2d 5h ago」同样解析', () => {
+  const age = parseReportAge('Report #43 / 2d 5h ago');
+  assert.ok(age !== undefined);
+  assert.equal(age.ageMs, 2 * DAY + 5 * HOUR);
+  assert.equal(age.precisionMs, HOUR);
+});
+
+check('报告年龄：解析不出来（「刚刚」）返回 undefined，调用方因此不写缓存', () => {
+  assert.equal(parseReportAge('刚刚'), undefined);
+  assert.equal(parseReportAge(undefined), undefined);
+});
+
+check('报告年龄：任何解析成功的标签，剩余时长都不超过「7天 − 年龄」', () => {
+  for (const label of [
+    '报告#43/0分钟前',
+    '报告#43/3小时前',
+    '报告#43/1天 2小时前',
+    '报告#43/6天 23小时前',
+  ]) {
+    const age = parseReportAge(label);
+    assert.ok(age !== undefined, label);
+    assert.ok(reportCacheRemainingMs(age) <= 7 * DAY - age.ageMs, `${label} 剩余时长超过年龄上界`);
+  }
 });
 
 console.log(`\n${pass} 项通过`);

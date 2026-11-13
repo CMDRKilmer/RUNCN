@@ -31,6 +31,7 @@ import {
   type Need,
   type WorkforceLevel,
 } from './govh-model';
+import { parseReportAge, reportCacheRemainingMs, type ReportAge } from './govh-report-age';
 
 // 中英双语表头标签：游戏语言可能是中文或英文，表头文本用任一命中即可。
 const LEVEL_HEADERS: Record<WorkforceLevel, string[]> = {
@@ -378,36 +379,11 @@ function parseReportLabel(window: HTMLElement): string | undefined {
 // 五类人口 / 五类幸福度 / 六类需求满足度在一个报告周期内是固定值（周期 7 天整），
 // 只有跨周期才会变。每颗星球的周期起止时刻不同，所以缓存按星球独立，并用 POPR
 // 顶部「报告#43/5天 13小时前」的生成时长反推本期结束时刻：
-//   本期结束 = 现在 + (7 天 − 报告距今天数)
+//   本期结束 = 现在 + (7 天 − 报告年龄 − 该标签的取整精度)
 // 同一周期内再进面板直接复用，不再开 POPR 窗口；跨周期自动失效并重读。
-const REPORT_CYCLE_MS = 7 * 24 * 60 * 60 * 1000;
+// 报告年龄解析与「剩余可用时长」都在 govh-report-age.ts（纯函数，可单测）：
+// 标签只到小时，剩余时长按年龄区间上界算，宁可早失效也不跨周期复用。
 const POPR_CACHE_PREFIX = 'rprun.govh.popr.v1.';
-
-// 「报告#43/5天 13小时前」「报告#43/3小时前」「报告#43/12分钟前」→ 毫秒。
-// 解析不出来（如「刚刚」）就返回 undefined，此时不写缓存，保持每次重读。
-function parseReportAgeMs(label: string | undefined): number | undefined {
-  if (label === undefined) {
-    return undefined;
-  }
-  const text = label.replace(/\s+/g, ' ');
-  const cnDay = /(\d+)\s*天\s*(\d+)\s*小时/.exec(text);
-  if (cnDay) {
-    return (Number(cnDay[1]) * 24 + Number(cnDay[2])) * 3600_000;
-  }
-  const enDay = /(\d+)\s*d(?:ays?)?\s*(\d+)\s*h/i.exec(text);
-  if (enDay) {
-    return (Number(enDay[1]) * 24 + Number(enDay[2])) * 3600_000;
-  }
-  const hour = /(\d+)\s*(?:小时|h)/i.exec(text);
-  if (hour) {
-    return Number(hour[1]) * 3600_000;
-  }
-  const minute = /(\d+)\s*(?:分钟|min)/i.exec(text);
-  if (minute) {
-    return Number(minute[1]) * 60_000;
-  }
-  return undefined;
-}
 
 function readPoprCycleCache(planet: string): GovhSnapshot | undefined {
   try {
@@ -436,13 +412,14 @@ function readPoprCycleCache(planet: string): GovhSnapshot | undefined {
 function writePoprCycleCache(
   planet: string,
   snapshot: GovhSnapshot,
-  ageMs: number | undefined,
+  age: ReportAge | undefined,
 ): void {
-  if (ageMs === undefined || ageMs < 0) {
+  if (age === undefined || age.ageMs < 0) {
     return;
   }
-  const remaining = REPORT_CYCLE_MS - ageMs;
-  // 报告年龄超过一个周期说明解析到的是历史文本，宁可不缓存。
+  // 按年龄区间上界算剩余：取整精度内任何一刻都可能已经 rollover。
+  const remaining = reportCacheRemainingMs(age);
+  // 剩余不足一个取整精度（或已过期）说明马上要换周期，宁可不缓存。
   if (remaining <= 0) {
     return;
   }
@@ -950,7 +927,7 @@ async function readGovernanceSnapshotLocked(
   // POPR 结果，不再开窗；跨周期缓存自动失效。「刷新数据」按钮（force）强制重读。
   let popr = force ? undefined : readPoprCycleCache(target);
   if (!popr) {
-    const read = await withBuffer<{ snapshot: GovhSnapshot; ageMs: number | undefined }>(
+    const read = await withBuffer<{ snapshot: GovhSnapshot; age: ReportAge | undefined }>(
       `POPR ${target}`,
       POPR_TIMEOUT,
       window => {
@@ -958,7 +935,7 @@ async function readGovernanceSnapshotLocked(
         if (!snapshot) {
           return undefined;
         }
-        return { snapshot, ageMs: parseReportAgeMs(snapshot.reportLabel) };
+        return { snapshot, age: parseReportAge(snapshot.reportLabel) };
       },
     );
     if (!read) {
@@ -966,7 +943,7 @@ async function readGovernanceSnapshotLocked(
       return undefined;
     }
     popr = read.snapshot;
-    writePoprCycleCache(target, popr, read.ageMs);
+    writePoprCycleCache(target, popr, read.age);
   }
   const lr = await readLr(target);
   const infra = lr?.infra;

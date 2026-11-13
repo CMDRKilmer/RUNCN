@@ -270,8 +270,35 @@ const needs = computed(() =>
 const components = computed(() => computeComponents(needs.value, exchanges));
 // 卡片总价 / 缺报价数只统计真正要买的物料，库存已足的行不参与「凑齐」判断。
 const pricedComponents = computed(() => components.value.filter(c => c.amount > 0));
+// 每张交易所卡片必须用「该交易所自己的仓库库存」算净需求：
+// 同一物料在 CI1 有库存、在 AI1 没有时，AI1 的账单里必须包含它，
+// 否则 AI1 会漏算这件而虚假地变成最便宜，用户选中后成本又跳回去（PR #60 审查）。
+// 非临时模式没有库存抵扣，返回空表让 computeTotals 走原逻辑。
+const needsByExchange = computed<Map<string, Map<string, number>>>(() => {
+  const map = new Map<string, Map<string, number>>();
+  if (!tempMode.value) {
+    return map;
+  }
+  for (const ex of exchanges) {
+    // 强制「全部从该市场出库」，得到这个市场自己的抵扣结果。
+    const rows = deductNeeds(
+      grossNeeds.value,
+      baseInventory.value,
+      exchangeInventories.value,
+      () => ex.code,
+    );
+    const byTicker = new Map<string, number>();
+    for (const row of rows) {
+      if (row.transfer > 0) {
+        byTicker.set(row.ticker, row.net);
+      }
+    }
+    map.set(ex.code, byTicker);
+  }
+  return map;
+});
 const totals = computed(() =>
-  computeTotals(pricedComponents.value, exchanges, selectedTickers.value),
+  computeTotals(components.value, exchanges, selectedTickers.value, needsByExchange.value),
 );
 
 const deductedCount = computed(() => deductions.value.filter(d => d.base + d.exchange > 0).length);

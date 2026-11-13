@@ -865,6 +865,13 @@ export function solve(input: GovhInput): GovhResult {
     if (!option.selected) {
       continue;
     }
+    // 重量 / 体积只取决于待补量与物料尺寸，与有没有报价无关：
+    // 缺价物料同样要装船，不能因为算不出金额就把货运量记成 0（PR #60 审查）。
+    const info = input.materialsInfo?.[option.ticker];
+    if (info !== undefined) {
+      weight += info.weight * option.netFillAmount;
+      volume += info.volume * option.netFillAmount;
+    }
     if (option.price === undefined) {
       // 已填满的物料不需要报价（待补量为 0），不算缺价。
       if (option.netFillAmount > 0) {
@@ -873,11 +880,6 @@ export function solve(input: GovhInput): GovhResult {
       continue;
     }
     fillCost += option.netFillCost;
-    const info = input.materialsInfo?.[option.ticker];
-    if (info) {
-      weight += info.weight * option.netFillAmount;
-      volume += info.volume * option.netFillAmount;
-    }
   }
 
   const achievable = allTargetsMet(needed, provided, effectiveTarget, lifeBaseline);
