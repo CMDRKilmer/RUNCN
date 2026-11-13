@@ -42,7 +42,7 @@ import {
 import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
 import {
-  mergeRouteRecord,
+  collectNativeRoutes,
   matchRunningRoutes,
   routeProgressText,
   routeStopStates,
@@ -243,8 +243,8 @@ function openNativeRoutePlan() {
   }
 }
 
-// 「运行中」只显示游戏 RTE 里确实有船在执行的航线（含在游戏 UI 手动创建的）。
-// RTE 读不到时退回本地记录（向导创建过的），保持旧行为。
+// RTE 里「哪些船正在跑哪条航线」——只用来把执行中的卡片换成游戏里的定义，列表本身
+// 不依赖它：「运行中」列出全部创建过的原生 RT，点页签立刻有内容。
 const gameRunningRoutes = ref<RunningRoutes>();
 
 interface NativeRouteView {
@@ -254,61 +254,22 @@ interface NativeRouteView {
   capacity: { weight: number; volume: number };
 }
 
-function findNativeRouteRecord(routeId: string, naturalId: string | undefined) {
-  const key = typeof naturalId === 'string' ? naturalId.trim().toUpperCase() : '';
-  return Object.values(nativeRouteRecords.value).find(
-    x => x.routeId === routeId || x.naturalId.trim().toUpperCase() === key,
-  );
+// 同一条航线可能同时被两艘船执行：key 必须带上船，否则 Vue 会报重复 key。
+function nativeRouteRowKey(entry: NativeRouteView) {
+  return `${entry.record.routeId}|${entry.ship?.id ?? entry.record.shipId}`;
 }
 
-const nativeRoutes = computed<NativeRouteView[]>(() => {
-  const running = gameRunningRoutes.value;
-  // unresolved > 0 且一条都没对上：RTE 窗口结构变了，回退本地记录而不是清空。
-  if (running !== undefined && (running.entries.length > 0 || running.unresolved === 0)) {
-    const rows: NativeRouteView[] = [];
-    const seen = new Set<string>();
-    for (const entry of running.entries) {
-      const local = findNativeRouteRecord(entry.route.id, entry.route.naturalId);
-      // 航点/步骤/档位以游戏里的航线为准（玩家可能改过），本地只补仍然匹配的估算值。
-      const record = mergeRouteRecord(entry.route, entry.shipId, local);
-      const shipId = entry.shipId ?? record.shipId;
-      const key = `${entry.route.id}|${shipId}`;
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      const ship = shipsStore.getById(shipId);
-      rows.push({
-        record,
-        ship,
-        loads: nativeRouteLoads(record),
-        capacity: nativeRouteCapacity(ship),
-      });
-    }
-    return rows;
-  }
-  const group = chainGroup.value?.trim().toLowerCase();
-  const seen = new Set<string>();
-  const rows: NativeRouteView[] = [];
-  const sorted = Object.values(nativeRouteRecords.value).sort((a, b) => b.createdAt - a.createdAt);
-  for (const record of sorted) {
-    if (group !== undefined && record.chainName.trim().toLowerCase() !== group) {
-      continue;
-    }
-    if (record.shipId !== '' && seen.has(record.shipId)) {
-      continue;
-    }
-    seen.add(record.shipId);
-    const ship = shipsStore.getById(record.shipId);
-    rows.push({
-      record,
+const nativeRoutes = computed<NativeRouteView[]>(() =>
+  collectNativeRoutes(nativeRouteRecords.value, gameRunningRoutes.value).map(row => {
+    const ship = shipsStore.getById(row.shipId);
+    return {
+      record: row.record,
       ship,
-      loads: nativeRouteLoads(record),
+      loads: nativeRouteLoads(row.record),
       capacity: nativeRouteCapacity(ship),
-    });
-  }
-  return rows;
-});
+    };
+  }),
+);
 
 // 用游戏里的真实航线列表校准本地记录：游戏里已经没有的航线（在游戏 UI 里删掉、没写成、
 // 早期版本残留）直接丢弃，不再出现在「运行中」。同时读一次原生 RTE，拿到
@@ -1188,7 +1149,8 @@ function flightTotalText(shipId: string): string {
     <div v-if="statusCheckNotice" :class="$style.notice">{{ statusCheckNotice }}</div>
     <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
-    <!-- 规划中 / 运行中 分页：页签始终可见，运行中页进入时会自行发现游戏里正在执行的航线。 -->
+    <!-- 规划中 / 运行中 分页：页签始终可见；运行中页列出所有创建过的原生 RT
+         （点页签时再向游戏校准航线定义与执行状态）。 -->
     <div :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
@@ -1530,7 +1492,7 @@ function flightTotalText(shipId: string): string {
 
       <!-- 原生 RT（socket 写入）：与「运行中」同一套表格样式，含逐站进度 -->
       <template v-if="chainTab === 'running'">
-        <div v-for="entry in nativeRoutes" :key="entry.record.routeId" :class="$style.shipPlan">
+        <div v-for="entry in nativeRoutes" :key="nativeRouteRowKey(entry)" :class="$style.shipPlan">
           <div :class="$style.shipHeader">
             <span>
               {{
@@ -1687,7 +1649,7 @@ function flightTotalText(shipId: string): string {
         </div>
       </template>
       <div v-else-if="visibleTables.length === 0 && nativeRoutes.length === 0" :class="$style.hint">
-        当前没有运行中的环线。
+        当前没有运行中的环线，也没有已创建的原生 RT。
       </div>
     </div>
   </div>

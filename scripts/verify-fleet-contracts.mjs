@@ -31,7 +31,7 @@ globalThis.localStorage = {
   getItem: key => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 };
-const { mergeRouteRecord, routeProgressText, routeStopStates } =
+const { collectNativeRoutes, mergeRouteRecord, routeProgressText, routeStopStates } =
   await import('../src/features/XIT/FLEET/native-route-game.ts');
 let passes = 0;
 async function check(name, fn) {
@@ -1409,6 +1409,71 @@ await check('native RT progress: arrival at the origin keeps the return-leg posi
   arrive();
   assert.deepEqual(routeStopStates(record, docked('A')), ['done', 'done', 'arrived']);
   assert.equal(routeProgressText(record, docked('A')), '3/3');
+});
+
+// ---- 「运行中」列表：所有创建过的航线都要出现 ----
+function listingRecords() {
+  const make = (routeId, naturalId, shipId, createdAt, fuelPercent) => ({
+    routeId,
+    naturalId,
+    name: naturalId,
+    shipId,
+    shipLabel: shipId,
+    chainName: '',
+    createdAt,
+    waypoints: [
+      { location: 'A', fuelPercent, steps: [] },
+      { location: 'B', fuelPercent, steps: [] },
+    ],
+  });
+  return {
+    'route-1': make('route-1', 'RT-A-1', 'S', 1, 25),
+    'route-2': make('route-2', 'RT-A-2', 'S2', 2, 35),
+  };
+}
+
+await check(
+  'native RT listing: every created route is listed without a running snapshot',
+  async () => {
+    const rows = collectNativeRoutes(listingRecords(), undefined);
+    assert.deepEqual(
+      rows.map(x => x.record.naturalId),
+      ['RT-A-2', 'RT-A-1'],
+    );
+    assert.deepEqual(
+      rows.map(x => x.record.waypoints[0].fuelPercent),
+      [35, 25],
+    );
+  },
+);
+
+await check('native RT listing: an executing route wins over its local copy', async () => {
+  const records = listingRecords();
+  const running = {
+    entries: [
+      {
+        route: {
+          id: 'route-1',
+          naturalId: 'RT-A-1',
+          name: 'RT-A-1',
+          waypoints: nativeRouteServer([
+            { location: 'A', fuelPercent: 60 },
+            { location: 'B', fuelPercent: 60 },
+          ]).waypoints,
+        },
+        shipId: 'S',
+      },
+    ],
+    unresolved: 0,
+  };
+  const rows = collectNativeRoutes(records, running);
+  assert.deepEqual(
+    rows.map(x => x.record.naturalId),
+    ['RT-A-1', 'RT-A-2'],
+  );
+  // 执行中的卡片用游戏里的档位，本地那条仍保留自己的值。
+  assert.equal(rows[0].record.waypoints[0].fuelPercent, 60);
+  assert.equal(rows[1].record.waypoints[0].fuelPercent, 35);
 });
 
 console.log(`PASS ${passes}/${passes}`);

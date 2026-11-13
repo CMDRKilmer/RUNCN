@@ -413,6 +413,55 @@ function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypoint
   return changed;
 }
 
+// 「运行中」要展示的航线：**所有创建过的原生 RT**（本地记录），RTE 里正在执行的那条
+// 用游戏里的定义覆盖同一条航线的卡片。返回顺序 = 执行中的在前，其余按创建时间倒序。
+export function collectNativeRoutes(
+  records: Readonly<Record<string, NativeRouteRecord>>,
+  running: RunningRoutes | undefined,
+) {
+  const rows: { record: NativeRouteRecord; shipId: string }[] = [];
+  const executing = new Set<string>();
+  const seen = new Set<string>();
+  for (const entry of running?.entries ?? []) {
+    const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
+    // 航点/步骤/档位以游戏里的航线为准（玩家可能改过），本地只补仍然匹配的估算值。
+    const record = mergeRouteRecord(entry.route, entry.shipId, local);
+    const shipId = entry.shipId ?? record.shipId;
+    const key = `${record.routeId}|${shipId}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    executing.add(routeIdentity(record.routeId, record.naturalId));
+    rows.push({ record, shipId });
+  }
+  const sorted = Object.values(records).sort((a, b) => b.createdAt - a.createdAt);
+  for (const record of sorted) {
+    // 同一条航线（同一 RT 号）已经在执行列表里了，不再重复成第二张卡。
+    if (executing.has(routeIdentity(record.routeId, record.naturalId))) {
+      continue;
+    }
+    rows.push({ record, shipId: record.shipId });
+  }
+  return rows;
+}
+
+// 航线身份：RT 号才是玩家认得的标识；本地 UI 路径记录只有 RT 号时 routeId 就是它。
+function routeIdentity(routeId: string, naturalId: string) {
+  return naturalId.trim().toUpperCase() || routeId;
+}
+
+function findRouteRecord(
+  records: Readonly<Record<string, NativeRouteRecord>>,
+  routeId: string,
+  naturalId: string | undefined,
+) {
+  const key = typeof naturalId === 'string' ? naturalId.trim().toUpperCase() : '';
+  return Object.values(records).find(
+    x => x.routeId === routeId || x.naturalId.trim().toUpperCase() === key,
+  );
+}
+
 export type RouteStopState = 'pending' | 'transit' | 'arrived' | 'done';
 
 // 已确定的航段位置（按 航线号|船 缓存）：到港后航班从 flightsStore 消失，而 A→B→A
