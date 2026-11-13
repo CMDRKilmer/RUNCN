@@ -776,16 +776,18 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
   white-space: nowrap;
 }
 
+/* 阈值状态色：逾期红 / 即将到期橙 / 正常绿。走皮肤 token（每套主题各给自己的
+   强调色），字面色值会被引擎按皮肤色相重映射成淡色，浅底上看不出差别（R45）。 */
 .red {
-  color: #d9534f;
+  color: var(--rp-skin-danger, #9c3b3b);
 }
 
 .amber {
-  color: #f7a600;
+  color: var(--rp-skin-warning, #c2410c);
 }
 
 .green {
-  color: #5cb85c;
+  color: var(--rp-skin-success, #2f6b48);
 }
 
 /* ── 列表 ── */

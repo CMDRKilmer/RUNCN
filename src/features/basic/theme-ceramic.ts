@@ -102,6 +102,15 @@ export function buildCeramicSkin(): Skin {
       '--rp-skin-action-fuel': 'var(--rp-cc-cat-5-text)',
       // 缺料/危险语义红（R27）：BRA「所需材料」不足的数量角标。
       '--rp-skin-danger': 'var(--rp-cc-status-danger-text)',
+      // 「临近阈值」告警色（R45）：只换字色、不加底色。取主题自己的强调色
+      // `--rp-cc-warn-accent`，而不是状态色板里的 warning——星海的链接本身就是
+      // 金色，状态 warning 的琥珀与它几乎同色，分不出来。
+      '--rp-skin-warning': 'var(--rp-cc-warn-accent)',
+      // 「正常 / 达标」绿：REPD 阈值状态文字等语义色（R45）用它，token 主题
+      // 此前没有该别名，只能落到字面值而被重映射成淡绿。
+      '--rp-skin-success': 'var(--rp-cc-status-success-text)',
+      '--rp-skin-success-bg': 'var(--rp-cc-status-success-bg)',
+      '--rp-skin-success-border': 'var(--rp-cc-status-success-border)',
       '--rp-skin-action-done': 'var(--rp-cc-cat-6-text)',
       // SFC 燃料条专用全深度色：直接取 cat-1 / cat-2 图表实色，
       // 与 R33 的 --rp-cc-progress-*（减半浅色，供 FLT 大燃料条）分离。

@@ -46,7 +46,7 @@ const deadlineStyle = computed(() => {
         v-if="dependencyInfo.blocked > 0"
         style="
           font-size: calc(10px + 1px * var(--rp-font-enlargement));
-          color: #f0ad4e;
+          color: var(--rp-skin-warning, #c2410c);
           margin-left: 4px;
         ">
         ⟶{{ dependencyInfo.blocked }}
@@ -55,7 +55,7 @@ const deadlineStyle = computed(() => {
         v-if="dependencyInfo.blocking > 0"
         style="
           font-size: calc(10px + 1px * var(--rp-font-enlargement));
-          color: #d9534f;
+          color: var(--rp-skin-danger, #9c3b3b);
           margin-left: 4px;
         ">
         ⟵{{ dependencyInfo.blocking }}

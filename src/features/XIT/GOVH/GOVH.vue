@@ -1892,7 +1892,7 @@ onUnmounted(() => {
   padding: 5px 8px;
   border: 1px solid rgb(247, 166, 0);
   background: rgba(247, 166, 0, 0.1);
-  color: rgb(230, 180, 60);
+  color: var(--rp-skin-warning, #c2410c);
   font-size: 11px;
   border-radius: 2px;
   margin: 6px 0;

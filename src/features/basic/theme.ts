@@ -114,6 +114,11 @@ const SKINS: Record<string, Skin> = {
       '--rp-skin-action-fuel': '#9b4741',
       // 缺料/危险语义红：BRA「所需材料」不足的数量角标用它（见 R27）。
       '--rp-skin-danger': '#9c3b3b',
+      // 「临近阈值」琥珀：FLT 舰名 0.80–0.83 耐久告警用它。必须给深琥珀——
+      // 组件里写字面色值（如 #f0ad4e）会被引擎按皮肤色相重映射成淡黄，在暖白底上
+      // 对比只有约 1.9:1，根本看不出变色（见 R45）。
+      // 浅色明亮：冷白底 + 深蓝灰链接（#33566f），告警用橙红拉开冷暖与色相。
+      '--rp-skin-warning': '#c2410c',
       // CXOS「已成交」专用：与「买入」的墨绿、已挂单的深蓝都拉开色相，
       // 避免状态文字与买卖方向混成同一种颜色。
       '--rp-skin-action-done': '#5b4a8a',
@@ -219,6 +224,9 @@ const SKINS: Record<string, Skin> = {
       '--rp-skin-action-fuel': '#9b4741',
       // 缺料/危险语义红：取自本主题 palette.red.text（见 R27）。
       '--rp-skin-danger': '#9b4741',
+      // 「临近阈值」琥珀：同 light 皮肤，深琥珀保证米纸底上仍能看出变色（见 R45）。
+      // 暖米纸整屏偏暖棕，橙色会被基色吞掉，改用冷玫红拉开。
+      '--rp-skin-warning': '#a4305c',
       '--rp-skin-action-done': '#5e4a7a',
       // CXPO「买入」语义绿按钮（约原生按钮 1/3 色深）：浅底 + 深语义字。
       '--rp-skin-success': '#4a7048',

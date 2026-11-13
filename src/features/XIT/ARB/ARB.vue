@@ -838,7 +838,8 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .warningAge {
-  color: rgb(194, 120, 70);
+  /* 数据时效提示：走皮肤告警色，字面色值会被引擎重映射成淡色（R45）。 */
+  color: var(--rp-skin-warning, #c2410c);
   font-weight: normal;
 }
 

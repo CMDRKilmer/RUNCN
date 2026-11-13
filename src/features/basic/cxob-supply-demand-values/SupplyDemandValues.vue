@@ -47,6 +47,6 @@ function sumOrders(orders: PrunApi.CXBrokerOrder[]) {
   top: 0;
   right: 0;
   padding: 2px 8px 0 8px;
-  color: #d9534f;
+  color: var(--rp-skin-danger, #9c3b3b);
 }
 </style>

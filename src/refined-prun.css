@@ -140,7 +140,7 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='S
   height: auto !important;
   min-height: 0;
   margin: 0 4px 0 0 !important;
-  padding: 4px 2px !important;
+  padding: 4px 4px 4px 0 !important;
   border: 1px solid rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-line-alpha)) !important;
   border-radius: 3px;
   background-color: rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-bg-alpha)) !important;
@@ -156,6 +156,11 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='S
 
 html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container']::after {
   content: attr(data-label);
+  /* 竖排下 em 框居中不等于墨迹居中：中文竖排时字形在 1em 行盒内整体右偏约 2px
+     （实测色框 20px、文字 12px 时左空 6 / 右空 3）。这里用不对称内边距（左 0 右 4）
+     把居中的行盒整体左移 2px，墨迹因此落在色框正中；左右内边距之和仍与对称版相等，
+     色框宽度不变。 */
+  margin: auto;
   color: var(--rp-skin-ink, #26333d) !important;
   -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
   font-size: 12px !important;
@@ -803,6 +808,8 @@ html[data-rp-theme='ceramic-colorful'] {
   --rp-cc-text-inverse: #fffdf8;
   --rp-cc-text-link: #1f5a7a;
   --rp-cc-text-disabled: #737a72;
+  /* 「临近阈值」告警字色（R45）：本主题链接是深蓝，告警用深橙拉开冷暖。 */
+  --rp-cc-warn-accent: #b45309;
 
   /* 边框 / 焦点 */
   --rp-cc-border-subtle: #e4dccb;
@@ -958,6 +965,9 @@ html[data-rp-theme='nebula'] {
   --rp-cc-text-inverse: #0d1626;
   --rp-cc-text-link: #4fc3f0;
   --rp-cc-text-disabled: #45566a;
+  /* 「临近阈值」告警字色（R45）：船名等元素在本主题实际渲染成金色（#f5d27a），
+     状态 warning 的琥珀与它几乎同色，故改用更红更亮的橙。 */
+  --rp-cc-warn-accent: #ff7a45;
 
   /* 边框 / 焦点 */
   --rp-cc-border-subtle: #16263a;
