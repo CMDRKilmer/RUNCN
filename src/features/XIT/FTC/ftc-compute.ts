@@ -383,7 +383,13 @@ export interface FtcComputeInput {
   extraMassT?: number;
   // 规划出发时的 STL 罐余量（u）：航线在出发地补满时传罐容量。模型默认用当前余量
   // （`ShipPerformance.stlRemaining`），不覆盖会把「尚未补油」的船算慢/算费。
+  // 显式 0 必须保留（前一段把油烧完），不能回退成罐容量假装满油。
   stlFuelOverride?: number;
+  // 只评估指定燃料档位（0–1）：原生 RT 生成把最优档按离港饱和点封顶后，用它重算
+  // 该档位的实际消耗与时长。
+  fixedFuel?: number;
+  // 与 fixedFuel 配套：固定反应堆档（写入航点时实际使用的档位），避免重算换档。
+  fixedReactor?: number;
   // 缺服务器原生 STL 段记录时按公式估算起降几何（`route-planner.estimateRouteStl`）。
   // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
   // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
@@ -448,7 +454,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 服务器原生计划按当前质量下发；记下补计划载重之前的质量，供转移速度样本换算。
   const nativeTransitMassT = perf.mass;
   if (input.stlFuelOverride !== undefined) {
-    perf.stlRemaining = input.stlFuelOverride > 0 ? input.stlFuelOverride : undefined;
+    perf.stlRemaining = input.stlFuelOverride;
   }
   if (input.extraMassT !== undefined && input.extraMassT > 0) {
     perf.mass += input.extraMassT;
@@ -523,9 +529,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 也不要用残缺输入得出的假值覆盖掉面板已经算好的参数。
   const inputIncomplete = missingModelInputs(perf, metrics);
   await ensureTransitSpeedTable();
+  const fuelGrid = input.fixedFuel !== undefined ? [input.fixedFuel] : autoFuelGrid();
   if (metrics.transitKm !== undefined && metrics.transitKm > 0) {
-    const grid = autoFuelGrid();
-    if (grid.some(f => !stlTransitTableReliableFor(perf, f))) {
+    if (fuelGrid.some(f => !stlTransitTableReliableFor(perf, f))) {
       inputIncomplete.push('转移速度查询表超出可靠范围');
     }
   }
@@ -542,8 +548,12 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   const options = scanFuelOptions(
     perf,
     metrics,
-    autoFuelGrid(),
-    reactorRelevant ? autoReactorGrid(perf) : [1],
+    fuelGrid,
+    input.fixedReactor !== undefined
+      ? [input.fixedReactor]
+      : reactorRelevant
+        ? autoReactorGrid(perf)
+        : [1],
     {
       stlPrice: input.stlPrice ?? 0,
       ftlPrice: input.ftlPrice ?? 0,

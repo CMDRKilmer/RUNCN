@@ -93,6 +93,55 @@ export async function computeNativeRouteFuel(
     }
     return { legs, warnings };
   };
+  // 选中档位按离港饱和点封顶；若被封顶，按**实际写入的档位**重算消耗与时长，
+  // 否则后续航段会按更费油的旧档位扣油，越算越紧。
+  const applyDepartureCap = async (
+    index: number,
+    option: { fuel: number; reactor: number; totalHours: number; stlFuel: number; ftlFuel: number },
+    reactorRelevant: boolean,
+  ) => {
+    const selected = clampPercent(option.fuel * 100);
+    const capped = capPercent === undefined ? selected : Math.min(selected, capPercent);
+    const reactorPercent = reactorRelevant ? clampPercent(option.reactor * 100) : undefined;
+    if (capped === selected) {
+      return {
+        fuelPercent: selected,
+        reactorPercent,
+        hours: option.totalHours as number | undefined,
+        stlFuel: option.stlFuel,
+        ftlFuel: option.ftlFuel,
+      };
+    }
+    const recalculated = await computeFtcPlan({
+      shipRegistration: registration,
+      from: waypoints[index - 1]!.location,
+      to: waypoints[index]!.location,
+      browse: false,
+      valueOptimal: true,
+      useGateway: true,
+      fixedFuel: capped / 100,
+      fixedReactor: reactorRelevant ? option.reactor : undefined,
+      stlFuelOverride: stlFuel,
+      extraMassT: legLoadWeight(candidate.plan, index, legCount),
+    });
+    if (recalculated.ok && recalculated.best !== undefined) {
+      return {
+        fuelPercent: capped,
+        reactorPercent,
+        hours: recalculated.best.totalHours,
+        stlFuel: recalculated.best.stlFuel,
+        ftlFuel: recalculated.best.ftlFuel,
+      };
+    }
+    // 重算失败：保守按原（更费油）消耗续算，封顶后的时长不再展示。
+    return {
+      fuelPercent: capped,
+      reactorPercent,
+      hours: undefined as number | undefined,
+      stlFuel: option.stlFuel,
+      ftlFuel: option.ftlFuel,
+    };
+  };
   for (let index = 1; index <= legCount; index++) {
     signal.throwIfAborted();
     const from = waypoints[index - 1]!.location;
@@ -112,14 +161,13 @@ export async function computeNativeRouteFuel(
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
+      const chosen = await applyDepartureCap(index, result.best, result.reactorRelevant === true);
       legs[index] = {
-        fuelPercent: clampPercent(result.best.fuel * 100),
-        reactorPercent: result.reactorRelevant
-          ? clampPercent(result.best.reactor * 100)
-          : undefined,
-        hours: result.best.totalHours,
+        fuelPercent: chosen.fuelPercent,
+        reactorPercent: chosen.reactorPercent,
+        hours: chosen.hours,
       };
-      consume(result.best);
+      consume(chosen);
       continue;
     }
     warnings.push(`FTC 跳过 ${from} → ${to}：${skipReason(result)}`);
@@ -165,14 +213,17 @@ export async function computeNativeRouteFuel(
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (estimate.ok && estimate.best !== undefined && estimate.inputIncomplete === undefined) {
+      const chosen = await applyDepartureCap(
+        index,
+        estimate.best,
+        estimate.reactorRelevant === true,
+      );
       legs[index] = {
-        fuelPercent: clampPercent(estimate.best.fuel * 100),
-        reactorPercent: estimate.reactorRelevant
-          ? clampPercent(estimate.best.reactor * 100)
-          : undefined,
-        hours: estimate.best.totalHours,
+        fuelPercent: chosen.fuelPercent,
+        reactorPercent: chosen.reactorPercent,
+        hours: chosen.hours,
       };
-      consume(estimate.best);
+      consume(chosen);
       warnings.push(
         `${from} → ${to}：试飞没得到结果，起降距离按公式估算补算（时间近似）。` +
           '在 SFC 为这段生成一次飞行计划（或试飞一次）即可转为原生几何。',

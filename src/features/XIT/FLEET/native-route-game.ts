@@ -290,8 +290,10 @@ export function mergeRouteRecord(
       waypoint.location === '未知航点' && typeof previous.location === 'string'
         ? previous.location
         : waypoint.location;
-    // 档位变了时长就不成立：燃料/反应堆档位与上一站都仍一致时才沿用。
-    const sameReactor = (previous.reactorPercent ?? null) === (waypoint.reactorPercent ?? null);
+    // 时长失效判定：燃料档位必比；反应堆只在本地确实记录过（自然跃迁）时才比——
+    // 系内/纯网关航段不写反应堆（写入时按默认 50%），不能因此判掉已算时长。
+    const sameReactor =
+      previous.reactorPercent === undefined || previous.reactorPercent === waypoint.reactorPercent;
     if (
       previous.flightHours === undefined ||
       previous.fuelPercent !== waypoint.fuelPercent ||
