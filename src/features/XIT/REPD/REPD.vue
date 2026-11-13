@@ -9,6 +9,7 @@ import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import { setRepairQuote } from '@src/features/XIT/CART/repair-quote';
+import { repairBuildingsByType } from '@src/features/basic/bra-repair-execute';
 import {
   calculateBillAtOffset,
   calculateRepairBoard,
@@ -22,6 +23,7 @@ import type {
 } from '@src/features/XIT/REPD/entries';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
+import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed1, formatCurrency, percent1 } from '@src/utils/format';
 import { sumBy } from '@src/utils/sum-by';
@@ -142,6 +144,8 @@ function typeStatus(type: RepairBoardType) {
 // 默认勾「逾期 + 即将到期」的类型（与左侧三色判定同一口径），未到期的不选；
 // 切换基地时按新基地状态重置，之后用户手动改动一直保持到下次切换。
 const selectedTypes = ref<Set<string>>(new Set());
+const repairing = ref(false);
+const repairMessage = ref<string | undefined>(undefined);
 
 function defaultSelectedTypes(base: RepairBoardBase | undefined): Set<string> {
   if (!base) {
@@ -158,6 +162,8 @@ watch(
   () => selected.value?.siteId,
   siteId => {
     selectedTypes.value = defaultSelectedTypes(siteId ? selected.value : undefined);
+    // 切换基地后，上一次维修的反馈文案不再适用，清空避免误导。
+    repairMessage.value = undefined;
   },
   { immediate: true },
 );
@@ -285,6 +291,85 @@ function onCompare() {
   });
   showBuffer('XIT CBUY REPD');
 }
+
+// ── 一键维修已选类型：复用 BRA 的逐栋维修执行，作用于明细里勾选的类型 ──
+// 按钮固定在购物清单上方、高度恒定，不随勾选 / 反馈变化把购物清单挤下去。
+async function onRepairSelected() {
+  const base = selected.value;
+  if (!base || repairing.value || selectedTypes.value.size === 0) {
+    return;
+  }
+  repairing.value = true;
+  repairMessage.value = undefined;
+  try {
+    const result = await repairBuildingsByType(base.siteId, selectedTypes.value);
+    repairMessage.value = result.message;
+  } finally {
+    repairing.value = false;
+  }
+}
+
+// 维修前的仓库材料校验：算出勾选类型的完整维修账单（不扣库存），与基地仓库现有库存比对。
+// 充足则提示绿色「仓库充足」；有缺口则列出缺料（提示先走「比价购买」补货）。
+// 这层只是提示——真正执行时仍由游戏原生维修按钮的 disabled 状态决定每栋能否修，
+// 缺料的栋会被游戏跳过，不会卡死或报错。
+const baseInventory = computed<Record<string, number>>(() => {
+  const base = selected.value;
+  const inv: Record<string, number> = {};
+  if (!base) {
+    return inv;
+  }
+  for (const store of storagesStore.all.value ?? []) {
+    if (store.addressableId !== base.siteId) {
+      continue;
+    }
+    for (const item of store.items) {
+      if (item.type !== 'INVENTORY' || !item.quantity) {
+        continue;
+      }
+      const ticker = item.quantity.material?.ticker;
+      if (ticker) {
+        inv[ticker] = (inv[ticker] ?? 0) + item.quantity.amount;
+      }
+    }
+  }
+  return inv;
+});
+
+// 维修材料清单（外显）：勾选类型的完整维修账单（不扣库存）逐材料列出
+// 需求总量、基地仓库现有量、缺口。缺口 > 0 黄色、否则绿色；按缺口从大到小排序。
+const repairMaterials = computed<{ ticker: string; need: number; have: number; missing: number }[]>(
+  () => {
+    const base = selected.value;
+    if (!base || selectedTypes.value.size === 0) {
+      return [];
+    }
+    const full = calculateBillAtOffset(
+      base.siteId,
+      offsetDays.value,
+      false,
+      timestampEachMinute.value,
+      selectedTypes.value,
+    );
+    if (!full) {
+      return [];
+    }
+    const inv = baseInventory.value;
+    return full.load
+      .map(x => {
+        const have = inv[x.material.ticker] ?? 0;
+        return {
+          ticker: x.material.ticker,
+          need: x.amount,
+          have,
+          missing: Math.max(0, x.amount - have),
+        };
+      })
+      .sort((a, b) =>
+        b.missing - a.missing !== 0 ? b.missing - a.missing : a.ticker.localeCompare(b.ticker),
+      );
+  },
+);
 </script>
 
 <template>
@@ -457,33 +542,65 @@ function onCompare() {
             </tbody>
           </table>
         </div>
-        <div :class="$style.meta">
-          已选 {{ selectedTypes.size }} / {{ selected.types.length }} 类 · 「最优」按类型单独计算
+        <div :class="$style.repairBar" data-rp-repd-repair>
+          <PrunButton
+            dark
+            inline
+            :disabled="!selectedTypes.size || repairing"
+            data-rp-repd-repair-btn
+            @click="onRepairSelected">
+            {{ repairing ? '维修中…' : '维修已选类型' }}
+          </PrunButton>
+          <span :class="$style.repairMsg" data-rp-repd-repair-msg>{{ repairMessage }}</span>
         </div>
-        <div :class="$style.meta">
-          等待 {{ formatCost(selected.waitingPerDay) }}/天 · 状况
-          {{ percent1(selected.condition) }}
+        <div :class="$style.repairTableWrap" data-rp-repd-matlist>
+          <table :class="[$style.compact, $style.repairTable]">
+            <thead>
+              <tr>
+                <th>材料</th>
+                <th :class="$style.numeric">需求</th>
+                <th :class="$style.numeric">现有</th>
+                <th :class="$style.numeric">缺口</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="m in repairMaterials" :key="m.ticker">
+                <td :class="$style.matTicker">{{ m.ticker }}</td>
+                <td :class="$style.numeric">{{ fixed0(m.need) }}</td>
+                <td :class="[$style.numeric, $style.matHave]">{{ fixed0(m.have) }}</td>
+                <td :class="[$style.numeric, m.missing > 0 ? $style.matMiss : $style.matOk]">
+                  {{ m.missing > 0 ? fixed0(m.missing) : '充足' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
-        <div :class="$style.offsetRow">
-          <span :class="$style.offsetLabel">偏移</span>
-          <button
-            v-for="day in offsetOptions"
-            :key="day"
-            type="button"
-            :class="[$style.offsetBtn, offsetDays === day && $style.offsetActive]"
-            @click="offsetDays = day">
-            {{ day === 0 ? '今天' : `+${day}` }}
-          </button>
-        </div>
-        <div :class="$style.meta">
-          {{ offsetDays === 0 ? '今天抵达' : `+${offsetDays} 天后抵达` }} ·
-          {{ fixed1(offsetBill?.weight ?? 0) }}t · {{ fixed1(offsetBill?.volume ?? 0) }}m³ ·
-          {{ formatCost(offsetBill?.cost) }}
-          <template v-if="offsetDelta !== undefined && offsetDelta !== 0">
-            （<span :class="offsetDelta > 0 ? $style.amber : $style.green">
-              {{ offsetDelta > 0 ? '+' : '' }}{{ formatCurrency(offsetDelta) }} </span
-            >）
-          </template>
+        <div :class="$style.bottomGroup" data-rp-repd-bottom>
+          <div :class="$style.offsetRow">
+            <span :class="$style.offsetLabel">偏移</span>
+            <button
+              v-for="day in offsetOptions"
+              :key="day"
+              type="button"
+              :class="[$style.offsetBtn, offsetDays === day && $style.offsetActive]"
+              @click="offsetDays = day">
+              {{ day === 0 ? '今天' : `+${day}` }}
+            </button>
+            <span :class="$style.waitInline">
+              等待 {{ formatCost(selected.waitingPerDay) }}/天 · 状况
+              {{ percent1(selected.condition) }}
+            </span>
+          </div>
+          <div :class="$style.meta">
+            {{ offsetDays === 0 ? '今天抵达' : `+${offsetDays} 天后抵达` }} ·
+            {{ fixed1(offsetBill?.weight ?? 0) }}t · {{ fixed1(offsetBill?.volume ?? 0) }}m³ ·
+            {{ formatCost(offsetBill?.cost) }}
+            <template v-if="offsetDelta !== undefined && offsetDelta !== 0">
+              （<span :class="offsetDelta > 0 ? $style.amber : $style.green">
+                {{ offsetDelta > 0 ? '+' : '' }}{{ formatCurrency(offsetDelta) }} </span
+              >）
+            </template>
+          </div>
         </div>
       </div>
       <div v-if="selected" :class="[$style.panel, $style.cart]">
@@ -692,6 +809,9 @@ function onCompare() {
 
 .cart {
   flex: 1 1 0;
+  margin-top: 0.5rem;
+  border-top: 1px solid #2b485a;
+  padding-top: 0.25rem;
 }
 
 .panelTitle {
@@ -727,6 +847,15 @@ function onCompare() {
   font-size: 1em;
   color: #8a9aa8;
   margin-right: 2px;
+}
+
+/* 「等待」合并到偏移行右侧：向左自动撑开，与偏移按钮拉开间距。 */
+.waitInline {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 1em;
+  color: #8a9aa8;
+  white-space: nowrap;
 }
 
 .offsetBtn {
@@ -799,6 +928,80 @@ function onCompare() {
   top: 0;
   z-index: 1;
   background-color: #23282b;
+}
+
+.repairBar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 4px;
+}
+
+.repairBar :global(button) {
+  font-size: 14px;
+}
+
+.repairMsg {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 1em;
+  color: #8a9aa8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 缺料表格：逐材料明细行（材料/需求/现有/缺口）。宽度随窗体流体变化
+   （100% 填满面板，材料列吸收剩余空间）；高度固定预留区 84~168px，
+   多材料在框内滚动，不与下方信息组抢高度。 */
+.repairTableWrap {
+  flex: 0 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 84px;
+  max-height: 168px;
+  overflow: auto;
+  padding: 0 4px 2px;
+  font-size: 1em;
+}
+
+.repairTable {
+  width: 100%;
+  table-layout: auto;
+}
+
+.repairTable :global(td),
+.repairTable :global(th) {
+  font-variant-numeric: tabular-nums;
+}
+
+.matTicker {
+  color: #c9d4dd;
+  font-weight: bold;
+  width: 100%;
+}
+
+.matHave {
+  color: #8a9aa8;
+}
+
+.matMiss {
+  color: #f7a600;
+}
+
+.matOk {
+  color: #5cb85c;
+}
+
+/* 偏移行 + 今天抵达 + 下方购物清单：一个信息组，整体下移约 2 行、
+   顶边框标记组起点，组内的偏移/今天抵达与购物清单一起随布局下移。 */
+.bottomGroup {
+  flex: 0 0 auto;
+  margin-top: 2.5em;
+  padding-top: 2px;
+  border-top: 1px solid #2b485a;
 }
 
 .empty {

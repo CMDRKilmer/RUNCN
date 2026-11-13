@@ -166,6 +166,20 @@ const missingText = computed(() => {
   return items.join('、') + more;
 });
 
+// 选中态只做文字警告：BRA 面板下方的游戏原生「维修」按阈值修全部建筑，
+// 与本工具条的选中范围无关。不拦截、不重写该按钮的点击行为。
+const armedWarning = computed(() => {
+  const ticker = armedTicker.value;
+  if (!ticker) {
+    return undefined;
+  }
+  const count = groups.value.find(group => group.ticker === ticker)?.count ?? 0;
+  return {
+    text: `注意：已选 ${ticker} ×${count}，下方游戏原生「维修」仍会修全基地！只修这一类请再点上方红色的「确认维修 ${count} 栋」。`,
+    title: 'BRA 面板下方是游戏原生「维修」按钮，按阈值修全部建筑；本工具条的选中范围不会影响它。',
+  };
+});
+
 function refresh() {
   site.value = resolveSite();
   const result = collect();
@@ -350,7 +364,7 @@ onBeforeUnmount(() => {
         ]"
         :disabled="busyTicker !== undefined"
         :aria-pressed="armedTicker === group.ticker"
-        :title="`${group.ticker} · 共 ${group.count} 栋待维修，逐个点击游戏原生「维修」按钮（再点一次确认）`"
+        :title="`${group.ticker} · 共 ${group.count} 栋待维修，逐个点击游戏原生「维修」按钮（再点一次确认）。注意：BRA 面板下方的游戏原生「维修」按钮会按阈值修全部建筑，与本工具条的选中范围无关`"
         @click="onClick(group)">
         <template v-if="busyTicker === group.ticker">维修中…</template>
         <template v-else-if="armedTicker === group.ticker">
@@ -358,6 +372,9 @@ onBeforeUnmount(() => {
         </template>
         <template v-else>{{ group.ticker }} ×{{ group.count }}</template>
       </button>
+      <span v-if="armedWarning" :class="$style.hint" :title="armedWarning.title">
+        {{ armedWarning.text }}
+      </span>
       <span v-if="message" :class="$style.hint">{{ message }}</span>
       <span
         v-else-if="missing.length > 0"
