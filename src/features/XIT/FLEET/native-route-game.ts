@@ -456,6 +456,16 @@ export function collectNativeRoutes(
   return rows;
 }
 
+// 删掉一条航线后，缓存的航线定义里也要把它摘掉——否则「运行中」还会显示这张卡，
+// 而游戏 UI 手动创建的航线没有本地记录，记录变化 watcher 也不会再触发刷新。
+export function withoutRouteDefinition(
+  definitions: readonly RouteData[],
+  routeId: string,
+  naturalId: string,
+) {
+  return definitions.filter(x => x.id !== routeId && !same(x.naturalId, naturalId));
+}
+
 // 航线身份：RT 号才是玩家认得的标识；本地 UI 路径记录只有 RT 号时 routeId 就是它。
 function routeIdentity(routeId: string, naturalId: string) {
   return naturalId.trim().toUpperCase() || routeId;

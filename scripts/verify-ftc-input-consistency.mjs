@@ -447,6 +447,60 @@ await checkAsync('门控：跨星系几何完整（有罐容量）→ 不报缺�
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
 });
 
+// 原生 TRANSIT 样本按「测它时的出发油量」反推档位：规划的 stlFuelOverride 只能改候选侧，
+// 不能顶掉样本侧，否则同一份样本会被按另一个档位重标定，时长随规划油量漂。
+await checkAsync('原生样本的出发油量不受规划 override 影响', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 200e6, departKm: 70e6, approachKm: 68e6 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 规划 override 固定 3500，只改「飞船当前余量」，并对比「有样本 / 无样本」两次：
+  // 有样本时余量必须参与样本档位反推（时长不同），无样本时时长与余量无关（相等）。
+  const run = async (currentFuel, summary) => {
+    stub.stubSetStores([
+      {
+        id: 'stl',
+        weightCapacity: 3500,
+        items: [{ type: 'INVENTORY', quantity: { amount: currentFuel } }],
+      },
+    ]);
+    stub.stubSetNativePlan(summary);
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 3500,
+    });
+    return out.best?.totalHours;
+  };
+  const sample = { transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 };
+  const sampleAt1500 = await run(1500, sample);
+  const sampleAt3500 = await run(3500, sample);
+  const bareAt1500 = await run(1500, undefined);
+  const bareAt3500 = await run(3500, undefined);
+  expectExact(f, '无样本：时长与当前余量无关', bareAt1500, bareAt3500);
+  // 非空断言：有样本时当前余量必须改变结果，否则说明用的是规划 override（bug）。
+  expectCondition(
+    f,
+    '有样本：样本档位按当前余量反推',
+    sampleAt1500 !== undefined && sampleAt3500 !== undefined && sampleAt1500 !== sampleAt3500,
+    '不同时长',
+    `${sampleAt1500} vs ${sampleAt3500}`,
+  );
+});
+
 // 假设性计算（原生 RT 向导：规划载重 + 未来出发油量 + 固定封顶档）即使输入完整也不能
 // 发布给 SFC：同键写入会覆盖玩家当前航班正在用的参数。
 await checkAsync('门控：publish = false → 输入完整也不写滑块、不发完成信号', async f => {

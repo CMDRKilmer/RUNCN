@@ -31,8 +31,13 @@ globalThis.localStorage = {
   getItem: key => storage.get(key) ?? null,
   setItem: (key, value) => storage.set(key, value),
 };
-const { collectNativeRoutes, mergeRouteRecord, routeProgressText, routeStopStates } =
-  await import('../src/features/XIT/FLEET/native-route-game.ts');
+const {
+  collectNativeRoutes,
+  mergeRouteRecord,
+  routeProgressText,
+  routeStopStates,
+  withoutRouteDefinition,
+} = await import('../src/features/XIT/FLEET/native-route-game.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -1461,6 +1466,30 @@ await check('native RT listing: fetched definitions override unassigned local ro
   assert.equal(route1.record.waypoints[0].fuelPercent, 70);
   const route2 = rows.find(x => x.record.naturalId === 'RT-A-2');
   assert.equal(route2.record.waypoints[0].fuelPercent, 35);
+});
+
+await check('native RT listing: a deleted route leaves the cached definitions', async () => {
+  const deleted = nativeRouteServer([
+    { location: 'A', fuelPercent: 50 },
+    { location: 'B', fuelPercent: 50 },
+  ]);
+  const kept = {
+    ...nativeRouteServer([
+      { location: 'A', fuelPercent: 50 },
+      { location: 'B', fuelPercent: 50 },
+    ]),
+    id: 'route-9',
+    naturalId: 'RT-A-9',
+  };
+  const definitions = withoutRouteDefinition([deleted, kept], 'route-1', 'RT-A-1');
+  assert.deepEqual(
+    definitions.map(x => x.id),
+    ['route-9'],
+  );
+  assert.deepEqual(
+    collectNativeRoutes({}, undefined, definitions).map(x => x.record.naturalId),
+    ['RT-A-9'],
+  );
 });
 
 await check('native RT listing: an executing route wins over its local copy', async () => {

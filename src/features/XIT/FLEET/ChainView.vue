@@ -51,6 +51,7 @@ import {
   matchRunningRoutes,
   routeProgressText,
   routeStopStates,
+  withoutRouteDefinition,
   type RunningRoutes,
 } from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
@@ -380,7 +381,13 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
         removeNativeRoute(other.routeId);
       }
     }
-    // 游戏 UI 手动创建的航线没有本地记录：直接把它从运行列表里摘掉，不必等下一次校准。
+    // 游戏 UI 手动创建的航线没有本地记录：直接把它从缓存的航线定义与执行列表里摘掉，
+    // 不必等下一次校准（否则列表会一直显示这张已删除的卡）。
+    gameRouteDefinitions.value = withoutRouteDefinition(
+      gameRouteDefinitions.value,
+      record.routeId,
+      record.naturalId,
+    );
     const running = gameRunningRoutes.value;
     if (running !== undefined) {
       gameRunningRoutes.value = {

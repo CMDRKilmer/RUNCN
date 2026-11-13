@@ -459,6 +459,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 补计划载重之前的质量 = 游戏按飞船当前状态下发的原生计划的飞行质量。
   // 试飞计划不同：它按请求里的 payload 算，质量记在计划对象上（见 testFlightMassT）。
   const currentMassT = perf.mass;
+  // 原生 TRANSIT 样本是按飞船**当前**油量下发的：这个余量是反推样本档位的基准，
+  // 不能被下面的规划 override 顶掉（否则样本速度会按错的档位重标定）。
+  const sampleStlTank = perf.stlRemaining ?? perf.stlFuelCapacity;
   if (input.stlFuelOverride !== undefined) {
     perf.stlRemaining = input.stlFuelOverride;
   }
@@ -573,7 +576,8 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       nativeTransitDistanceKm: nativeSummary?.transitDistanceKm,
       nativeTransitSeconds: nativeSummary?.transitSeconds,
       nativeTransitFuel: nativeSummary?.transitFuel,
-      nativeStlTank: perf.stlRemaining ?? perf.stlFuelCapacity,
+      // 样本侧的出发油量（不是候选侧的 override，见上面的 sampleStlTank）。
+      nativeStlTank: sampleStlTank,
       // 样本质量必须取「测这份计划时的质量」：试飞样本已含计划载重，用飞船当前质量
       // 会让模型再按 (当前质量/规划质量)^0.78 缩一遍，等于把货舱惩罚算两次。
       nativeTransitMassT:

@@ -154,9 +154,14 @@ export const estimateRouteStl = () => ({
 });
 // './route-planner' 的 findNativeFlightPlan：编排层用它回传「服务器当前计划实测总时长」，
 // Node 替身没有 flightPlansStore → 恒 undefined（面板不显示该提示），与浏览器行为一致。
-export const findNativeFlightPlan = () => undefined;
-// 同上的「服务器计划实测总时长」摘要：无 flightPlansStore → 恒 undefined。
-export const summarizeNativeFlightPlan = () => undefined;
+// './route-planner' 的 findNativeFlightPlan：缺省没有原生计划（面板不显示实测总时长）；
+// 用例用 stubSetNativePlan 注入一份「服务器已下发」的摘要，覆盖原生样本校准分支。
+let nativePlanFixture = null;
+export function stubSetNativePlan(summary) {
+  nativePlanFixture = summary === undefined ? null : { summary };
+}
+export const findNativeFlightPlan = () => nativePlanFixture;
+export const summarizeNativeFlightPlan = plan => plan?.summary;
 // '@src/infrastructure/prun-api/data/flight-test-collector'：试飞计划的质量标记。
 // 这里没有试飞/原生计划路径（findNativeFlightPlan 恒 undefined），导出只为满足静态导入。
 export const testFlightMassT = () => undefined;
