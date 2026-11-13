@@ -61,6 +61,28 @@ const fuelUsagePercents = ref(initialWaypoints.map(() => DEFAULT_WAYPOINT_FUEL_P
 const reactorUsagePercents = ref<(number | '')[]>(initialWaypoints.map(() => ''));
 // 与航点等长：飞到该航点的预计飞行时长（小时），由 FTC/BTF 计算时顺带带回。
 const legHours = ref<(number | undefined)[]>([]);
+// 计算时长时对应的档位快照：玩家手改任一档位后，该段时长失效。
+const legHoursBasis = ref<{ fuel: number | undefined; reactor: number | '' }[]>([]);
+watch(
+  [fuelUsagePercents, reactorUsagePercents],
+  () => {
+    if (legHours.value.length === 0) {
+      return;
+    }
+    for (let index = 0; index < legHours.value.length; index++) {
+      const basis = legHoursBasis.value[index];
+      if (basis === undefined) {
+        continue;
+      }
+      const fuel = fuelUsagePercents.value[index];
+      const reactor = reactorUsagePercents.value[index] ?? '';
+      if (fuel !== basis.fuel || reactor !== basis.reactor) {
+        legHours.value[index] = undefined;
+      }
+    }
+  },
+  { deep: true },
+);
 const fuelUsageValid = computed(() => fuelUsagePercents.value.every(isWaypointPercent));
 const reactorUsageValid = computed(() =>
   reactorUsagePercents.value.every(x => x === '' || isWaypointPercent(x)),
@@ -369,6 +391,10 @@ async function advanceOnce(retrying: boolean) {
         fuelUsagePercents.value = results.legs.map(x => x.fuelPercent);
         reactorUsagePercents.value = results.legs.map(x => x.reactorPercent ?? '');
         legHours.value = results.legs.map(x => x.hours);
+        legHoursBasis.value = results.legs.map((x, index) => ({
+          fuel: x.fuelPercent,
+          reactor: reactorUsagePercents.value[index] ?? '',
+        }));
         fuelWarnings.value = results.warnings;
         progress.value = { phase: 'write' };
       }

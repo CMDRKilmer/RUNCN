@@ -445,6 +445,8 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
+  // 服务器原生计划按当前质量下发；记下补计划载重之前的质量，供转移速度样本换算。
+  const nativeTransitMassT = perf.mass;
   if (input.stlFuelOverride !== undefined) {
     perf.stlRemaining = input.stlFuelOverride > 0 ? input.stlFuelOverride : undefined;
   }
@@ -556,6 +558,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       nativeTransitSeconds: nativeSummary?.transitSeconds,
       nativeTransitFuel: nativeSummary?.transitFuel,
       nativeStlTank: perf.stlRemaining ?? perf.stlFuelCapacity,
+      nativeTransitMassT,
       nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,

@@ -871,6 +871,9 @@ export interface ModelSettings {
   nativeTransitSeconds?: number;
   nativeTransitFuel?: number;
   nativeStlTank?: number;
+  // 原生 TRANSIT 样本是服务器按「当前质量」算的（含当时货物/油量）。规划额外载重
+  // 改变质量时，用同一质量幂律把测到的速度换算到目标质量，否则时长与载重无关。
+  nativeTransitMassT?: number;
   // 原生 LANDING 段耗时；着陆不是 TRANSIT，不能并入转移速度。
   nativeLandingSeconds?: number;
 }
@@ -926,13 +929,22 @@ export function computeFuelOption(
     const nativeSeconds = settings.nativeTransitSeconds;
     const nativeTank = settings.nativeStlTank;
     const nativeFuel = settings.nativeTransitFuel;
-    const nativeSpeed =
+    const nativeSpeedRaw =
       nativeDistance !== undefined &&
       nativeDistance > 0 &&
       nativeSeconds !== undefined &&
       nativeSeconds > 0
         ? (nativeDistance / nativeSeconds) * cond
         : undefined;
+    // 服务器样本是按样本质量测的：按 (样本质量/当前质量)^0.78 换算到本次规划质量。
+    const nativeSpeed =
+      nativeSpeedRaw !== undefined &&
+      settings.nativeTransitMassT !== undefined &&
+      settings.nativeTransitMassT > 0 &&
+      ship.mass > 0
+        ? nativeSpeedRaw *
+          Math.pow(settings.nativeTransitMassT / ship.mass, STL_INTRA_TRANSIT_MASS_EXP)
+        : nativeSpeedRaw;
     const nativeFuelSlider =
       nativeFuel !== undefined && nativeFuel > 0 && nativeTank !== undefined && nativeTank > 0
         ? Math.min(

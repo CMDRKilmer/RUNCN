@@ -484,15 +484,22 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
 interface NativeRouteLoad {
   onArrival: { weight: number; volume: number };
   onDeparture: { weight: number; volume: number };
+  // 出现「按容量装载/卸全部」步骤后，具体吨位无法由计划推算，后续行只显示未知。
+  uncertain?: boolean;
 }
 
 function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
   const state = { weight: 0, volume: 0 };
   const loads: NativeRouteLoad[] = [];
+  let uncertain = false;
   for (const waypoint of record.waypoints) {
     const onArrival = { ...state };
     for (const step of waypoint.steps) {
       if (step.kind === 'refuel') {
+        continue;
+      }
+      if (step.capacity) {
+        uncertain = true;
         continue;
       }
       const wv = matWeightVolume(step.ticker, step.amount);
@@ -500,7 +507,7 @@ function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
       state.weight += sign * wv.weight;
       state.volume += sign * wv.volume;
     }
-    loads.push({ onArrival, onDeparture: { ...state } });
+    loads.push({ onArrival, onDeparture: { ...state }, uncertain: uncertain || undefined });
   }
   return loads;
 }
@@ -1687,8 +1694,17 @@ function flightTotalText(shipId: string): string {
                 </td>
                 <td :class="$style.narrowCol">
                   <template v-if="entry.loads[index]">
-                    <div>{{ formatLoadCell(entry.loads[index]!.onDeparture, entry.capacity) }}</div>
-                    <div :class="$style.loadSub">{{ formatLoadChange(entry.loads[index]!) }}</div>
+                    <div
+                      v-if="entry.loads[index]!.uncertain"
+                      data-tooltip="该航段含「按容量装载」或「卸全部」步骤，载重无法精确计算"
+                      >—</div
+                    >
+                    <template v-else>
+                      <div>{{
+                        formatLoadCell(entry.loads[index]!.onDeparture, entry.capacity)
+                      }}</div>
+                      <div :class="$style.loadSub">{{ formatLoadChange(entry.loads[index]!) }}</div>
+                    </template>
                   </template>
                   <span v-else>—</span>
                 </td>
