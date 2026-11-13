@@ -99,6 +99,7 @@ export async function computeNativeRouteFuel(
     index: number,
     option: { fuel: number; reactor: number; totalHours: number; stlFuel: number; ftlFuel: number },
     reactorRelevant: boolean,
+    estimatedGeometry: boolean,
   ) => {
     const selected = clampPercent(option.fuel * 100);
     const capped = capPercent === undefined ? selected : Math.min(selected, capPercent);
@@ -122,9 +123,15 @@ export async function computeNativeRouteFuel(
       fixedFuel: capped / 100,
       fixedReactor: reactorRelevant ? option.reactor : undefined,
       stlFuelOverride: stlFuel,
+      // 来自公式兜底的段没有原生几何：重算必须保持估算模式，否则会被判输入残缺。
+      estimateGeometry: estimatedGeometry || undefined,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
-    if (recalculated.ok && recalculated.best !== undefined) {
+    if (
+      recalculated.ok &&
+      recalculated.best !== undefined &&
+      recalculated.inputIncomplete === undefined
+    ) {
       return {
         fuelPercent: capped,
         reactorPercent,
@@ -161,7 +168,12 @@ export async function computeNativeRouteFuel(
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
-      const chosen = await applyDepartureCap(index, result.best, result.reactorRelevant === true);
+      const chosen = await applyDepartureCap(
+        index,
+        result.best,
+        result.reactorRelevant === true,
+        false,
+      );
       legs[index] = {
         fuelPercent: chosen.fuelPercent,
         reactorPercent: chosen.reactorPercent,
@@ -217,6 +229,7 @@ export async function computeNativeRouteFuel(
         index,
         estimate.best,
         estimate.reactorRelevant === true,
+        true,
       );
       legs[index] = {
         fuelPercent: chosen.fuelPercent,

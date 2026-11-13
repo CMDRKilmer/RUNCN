@@ -38,6 +38,9 @@ import {
 } from './native-route-plan';
 import { stagedDispatch } from './staged';
 
+// 清理上一次未完成航线失败时抛出：绝不能继续写新航线，否则旧航线会变成无人认领的残留。
+class PartialRouteCleanupError extends Error {}
+
 const {
   candidate,
   initialWaypoints,
@@ -417,8 +420,12 @@ async function advanceOnce(retrying: boolean) {
       if (partialRouteId.value !== undefined) {
         try {
           await socketDeleteRoute(partialRouteId.value);
-        } catch {
-          // 已删除、或游戏里仍有船在用：保留 id，下一次重试再试。
+        } catch (err) {
+          throw new PartialRouteCleanupError(
+            `上次未完成的航线 ${partialRouteId.value} 删除失败` +
+              `（${err instanceof Error ? err.message : String(err)}）。请先在原生 RT 手动删除或稍后重试；` +
+              '为避免出现重复航线，本次不会继续创建。',
+          );
         }
         partialRouteId.value = undefined;
       }
@@ -455,6 +462,10 @@ async function advanceOnce(retrying: boolean) {
       progress.value = { phase: 'done' };
     } catch (err) {
       if (controller.signal.aborted) {
+        throw err;
+      }
+      // 半成品未清理成功：保留 id、停在 write 阶段，不要回退界面路径再建一条。
+      if (err instanceof PartialRouteCleanupError) {
         throw err;
       }
       // socket 写入失败（游戏未连接/接口变化）：退回界面填写路径。
