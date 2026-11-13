@@ -294,11 +294,16 @@ export function mergeRouteRecord(
     // 系内/纯网关航段不写反应堆（写入时按默认 50%），不能因此判掉已算时长。
     const sameReactor =
       previous.reactorPercent === undefined || previous.reactorPercent === waypoint.reactorPercent;
+    // 起飞质量由上游装载/卸载步骤决定：货量改了，时长/燃料都不再成立。
+    const sameCargo =
+      index === 0 ||
+      cargoSignature(local.waypoints, index - 1) === cargoSignature(server.waypoints, index - 1);
     if (
       previous.flightHours === undefined ||
       previous.fuelPercent !== waypoint.fuelPercent ||
       !sameReactor ||
-      !sameOrigin
+      !sameOrigin ||
+      !sameCargo
     ) {
       return { ...waypoint, location };
     }
@@ -335,6 +340,22 @@ function sameLocation(a: string, b: string) {
     typeof b === 'string' &&
     a.trim().toUpperCase() === b.trim().toUpperCase()
   );
+}
+
+// 截至 departureIndex 的装载/卸载步骤摘要（ticker + 数量/容量标记）。
+// 起飞质量直接影响转移段速度与起降燃料，上游货量变了就要作废下游时长。
+function cargoSignature(waypoints: readonly NativeRouteWaypointRecord[], departureIndex: number) {
+  const parts: string[] = [];
+  for (let index = 0; index <= departureIndex; index++) {
+    for (const step of waypoints[index]?.steps ?? []) {
+      if (step.kind === 'refuel') {
+        continue;
+      }
+      const amount = step.capacity ? 'cap' : step.amount;
+      parts.push(`${index}:${step.kind}:${step.ticker}:${amount}`);
+    }
+  }
+  return parts.join('|');
 }
 
 function toWaypoint(waypoint: RouteWaypointData): NativeRouteWaypointRecord {

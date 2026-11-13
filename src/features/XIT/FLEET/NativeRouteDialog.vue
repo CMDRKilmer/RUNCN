@@ -67,6 +67,16 @@ const legHours = ref<(number | undefined)[]>([]);
 // 计算时长时对应的档位快照：玩家手改任一档位后，该段时长失效。
 const legHoursBasis = ref<{ fuel: number | undefined; reactor: number | '' }[]>([]);
 watch(
+  tanks,
+  () => {
+    // 补油选择改变会让「满罐起飞」的假设失效：之前算的时长全部作废。
+    legHours.value = [];
+    legHoursBasis.value = [];
+  },
+  { deep: true },
+);
+
+watch(
   [fuelUsagePercents, reactorUsagePercents],
   () => {
     if (legHours.value.length === 0) {
@@ -603,12 +613,20 @@ async function showRoute() {
     <p>单趟归航。备货和核对燃料后，在原生 RT 手动分配船只。分配即开始执行。</p>
     <div v-if="routeId === undefined" :class="$style.controls">
       <label
-        ><input v-model="tanks" type="checkbox" value="STL" :disabled="busy" /> 出发地补满
-        STL</label
+        ><input
+          v-model="tanks"
+          type="checkbox"
+          value="STL"
+          :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
+        出发地补满 STL</label
       >
       <label
-        ><input v-model="tanks" type="checkbox" value="FTL" :disabled="busy" /> 出发地补满
-        FTL</label
+        ><input
+          v-model="tanks"
+          type="checkbox"
+          value="FTL"
+          :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
+        出发地补满 FTL</label
       >
     </div>
     <p
