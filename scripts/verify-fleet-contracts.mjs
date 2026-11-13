@@ -1121,6 +1121,10 @@ await check('shared runtime survives the component scope that first opened it', 
 });
 
 // 原生 RT：服务器航线（玩家可能改过）与本地记录合并时，只有输入完全一致才沿用预计时长。
+// refuels 项可以是油罐名（补满），也可以是 { tank, limited }（游戏里改成固定数量）。
+const refuelsOf = waypoint =>
+  (waypoint.refuels ?? []).map(x => (typeof x === 'string' ? { tank: x } : x));
+
 function nativeRouteServer(waypoints) {
   return {
     id: 'route-1',
@@ -1132,7 +1136,12 @@ function nativeRouteServer(waypoints) {
       landing: true,
       fuelUsageFactor: waypoint.fuelPercent / 100,
       reactorUsageFactor: 0.5,
-      steps: (waypoint.refuels ?? []).map(tank => ({ type: 'REFUEL', fuel: tank })),
+      steps: refuelsOf(waypoint).map(step => ({
+        type: 'REFUEL',
+        fuel: step.tank,
+        minimum: { type: 'CAPACITY', units: 0 },
+        maximum: { type: step.limited ? 'ABSOLUTE' : 'CAPACITY', units: step.limited ? 1 : 0 },
+      })),
     })),
   };
 }
@@ -1149,7 +1158,11 @@ function nativeRouteLocal(waypoints, hours) {
     waypoints: waypoints.map((waypoint, index) => ({
       location: waypoint.location,
       fuelPercent: waypoint.fuelPercent,
-      steps: (waypoint.refuels ?? []).map(tank => ({ kind: 'refuel', tank })),
+      steps: refuelsOf(waypoint).map(step => ({
+        kind: 'refuel',
+        tank: step.tank,
+        ...(step.limited ? { limited: true } : {}),
+      })),
       ...(hours[index] === undefined ? {} : { flightHours: hours[index] }),
     })),
   };
@@ -1259,6 +1272,48 @@ await check('native RT merge: a refill stops waypoint-change invalidation', asyn
     ]),
     [undefined, undefined, undefined, 30],
   );
+});
+
+await check('native RT merge: a moved refuel waypoint still drops its outgoing leg', async () => {
+  // B/D 两个油罐都补满，但从它起飞的那一段已经换了起点，旧时长不能用。
+  assert.deepEqual(
+    mergedHours(legStops(['A', 'B', 'C', 'E'], 1), legStops(['A', 'D', 'C', 'E'], 1), [
+      undefined,
+      10,
+      20,
+      30,
+    ]),
+    [undefined, undefined, undefined, undefined],
+  );
+});
+
+await check(
+  'native RT merge: a refill switched to a fixed amount drops downstream estimates',
+  async () => {
+    const localStops = [
+      { location: 'A', fuelPercent: 25, refuels: ['STL'] },
+      { location: 'B', fuelPercent: 50 },
+    ];
+    const serverStops = [
+      { location: 'A', fuelPercent: 25, refuels: [{ tank: 'STL', limited: true }] },
+      { location: 'B', fuelPercent: 50 },
+    ];
+    assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10]), [undefined, undefined]);
+  },
+);
+
+await check('native RT merge: a fixed-amount refill is not an invalidation boundary', async () => {
+  const localStops = [
+    { location: 'A', fuelPercent: 25, refuels: [{ tank: 'STL', limited: true }] },
+    { location: 'B', fuelPercent: 50 },
+    { location: 'C', fuelPercent: 50 },
+  ];
+  const serverStops = localStops.map(x => ({ ...x, fuelPercent: 60 }));
+  assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10, 20]), [
+    undefined,
+    undefined,
+    undefined,
+  ]);
 });
 
 console.log(`PASS ${passes}/${passes}`);

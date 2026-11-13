@@ -318,11 +318,19 @@ function staleLegIndexes(
   server: readonly NativeRouteWaypointRecord[],
 ) {
   const stale = new Set<number>();
+  // 只有「补满」能切断下游作废：固定数量的补油（`limited`）充多少上游就决定多少。
+  const refills = (step: NativeRouteStep) => step.kind === 'refuel' && step.limited !== true;
   const invalidateFrom = (index: number, tanks: readonly RouteTank[]) => {
     if (tanks.length === 0) {
       return;
     }
-    for (const leg of hoursInvalidatedBySettingChange(server, index, server.length, tanks)) {
+    for (const leg of hoursInvalidatedBySettingChange(
+      server,
+      index,
+      server.length,
+      tanks,
+      refills,
+    )) {
       stale.add(leg);
     }
   };
@@ -330,11 +338,13 @@ function staleLegIndexes(
     const previous = local[index];
     const current = server[index];
     if (previous === undefined || current === undefined || !sameWaypoint(previous, current)) {
-      // 航点换了地方：飞到它的那段距离、跃迁方式都变了，消耗随之改变，之后的余量也跟着变——
-      // 下游一律作废（STL/FTL 都可能受影响），直到两个油罐都在某个航点补满。
-      // 首站是出发地，它变了意味着第 1 段换了起点。
-      invalidateFrom(Math.max(index, 1), ['STL', 'FTL']);
-      stale.add(index);
+      // 航点换了地方：飞到它的那段距离、跃迁方式都变了，消耗随之改变，之后的余量也跟着变。
+      // 两段都要清——本段（飞到它）即使本站补满也不成立；从它起飞的下游段则一路作废到
+      // 两个油罐都补满（首站是出发地，它换了等于第 1 段换起点）。
+      if (index > 0) {
+        stale.add(index);
+      }
+      invalidateFrom(index + 1, ['STL', 'FTL']);
       continue;
     }
     // 起飞质量由上游装载/卸载步骤决定：货量改了，时长/燃料都不再成立。
@@ -361,23 +371,25 @@ function staleLegIndexes(
   return stale;
 }
 
-function refuelTanks(waypoint: NativeRouteWaypointRecord) {
-  const tanks = new Set<RouteTank>();
+// 该航点补油步骤的签名（油罐 + 是否固定数量）：补满与定量的出发余量不同，
+// 玩家把游戏里的「补满」改成定量也必须算作变化。
+function refuelSignature(waypoint: NativeRouteWaypointRecord) {
+  const signature = new Map<RouteTank, boolean>();
   for (const step of waypoint.steps) {
     if (step.kind === 'refuel') {
-      tanks.add(step.tank);
+      signature.set(step.tank, step.limited === true);
     }
   }
-  return tanks;
+  return signature;
 }
 
-// 该航点上增删的补油油罐：新增与移除都会改变下游出发余量。
+// 该航点上变化的补油油罐：增删步骤、改定量/补满都会改变下游出发余量。
 function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypointRecord) {
-  const before = refuelTanks(a);
-  const after = refuelTanks(b);
+  const before = refuelSignature(a);
+  const after = refuelSignature(b);
   const changed: RouteTank[] = [];
-  for (const tank of new Set([...before, ...after])) {
-    if (before.has(tank) !== after.has(tank)) {
+  for (const tank of new Set([...before.keys(), ...after.keys()])) {
+    if (before.get(tank) !== after.get(tank)) {
       changed.push(tank);
     }
   }
@@ -443,7 +455,14 @@ function percentOf(factor: number | undefined) {
 
 function toStep(step: RouteStepData): NativeRouteStep | undefined {
   if (step.type === 'REFUEL') {
-    return { kind: 'refuel', tank: step.fuel === 'FTL' ? 'FTL' : 'STL' };
+    // 补满（CAPACITY）是默认；玩家改成固定数量后出发油量与上游消耗有关，必须记下来。
+    // 上限缺失时按「非补满」处理：宁可多作废时长，也不要把不保证满罐当成边界。
+    const limited = step.maximum?.type !== 'CAPACITY';
+    return {
+      kind: 'refuel',
+      tank: step.fuel === 'FTL' ? 'FTL' : 'STL',
+      limited: limited ? true : undefined,
+    };
   }
   if (step.type !== 'LOAD' && step.type !== 'UNLOAD') {
     return undefined;

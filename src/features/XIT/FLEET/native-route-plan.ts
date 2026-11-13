@@ -6,7 +6,9 @@ export type RouteTank = 'STL' | 'FTL';
 
 export type NativeRouteStep =
   | { kind: 'load' | 'unload'; ticker: string; amount: number; capacity?: true }
-  | { kind: 'refuel'; tank: RouteTank };
+  // `limited` = 游戏里把补油量改成了固定数量（`minimum/maximum: ABSOLUTE`）。缺省表示补满
+  // （`CAPACITY`，RPrun 写入的就是这个），也只有补满才能当作「出发油量与上游无关」的边界。
+  | { kind: 'refuel'; tank: RouteTank; limited?: true };
 
 export interface NativeWaypoint {
   location: string;
@@ -61,6 +63,7 @@ export function hoursInvalidatedBySettingChange(
   fromIndex: number,
   count: number,
   tanksAffected: readonly RouteTank[],
+  refills: (step: NativeRouteStep) => boolean = step => step.kind === 'refuel',
 ): number[] {
   const stale: number[] = [];
   const pending = new Set(tanksAffected);
@@ -68,7 +71,7 @@ export function hoursInvalidatedBySettingChange(
     stale.push(k);
     // 航点 k 的补油步骤在飞往 k+1 之前执行。
     for (const step of waypoints[k]?.steps ?? []) {
-      if (step.kind === 'refuel') {
+      if (step.kind === 'refuel' && refills(step)) {
         pending.delete(step.tank);
       }
     }
