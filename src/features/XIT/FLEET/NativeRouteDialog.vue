@@ -210,6 +210,8 @@ function recordRoute(routeId: string, naturalId: string) {
         location: waypoint.location,
         fuelPercent: fuelUsagePercents.value[index] ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
         reactorPercent: reactor === undefined || reactor === '' ? undefined : reactor,
+        // 两条路径都按「使用跃迁点」计算与写入（socket 与试飞同口径）。
+        useGateways: true,
         flightHours: legHours.value[index],
         steps: waypoint.steps,
       };

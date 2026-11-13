@@ -121,6 +121,8 @@ export async function computeNativeRouteFuel(
       to: waypoints[index]!.location,
       browse: false,
       valueOptimal: true,
+      // 假设性计算（规划载重 + 未来出发油量 + 固定封顶档）：不发布给 SFC。
+      publish: false,
       useGateway: true,
       fixedFuel: capped / 100,
       fixedReactor: reactorRelevant ? option.reactor : undefined,
@@ -164,6 +166,8 @@ export async function computeNativeRouteFuel(
       to,
       browse: false,
       valueOptimal: true,
+      // 假设性计算（规划载重 + 未来出发油量）：不发布给 SFC。
+      publish: false,
       // 与写入航点的偏好一致（socketEditWaypoint 写 useGateways: true，BTF 也开网关）
       useGateway: true,
       stlFuelOverride: stlFuel,
@@ -221,6 +225,8 @@ export async function computeNativeRouteFuel(
       to,
       browse: false,
       valueOptimal: true,
+      // 假设性计算（规划载重 + 估算几何）：不发布给 SFC。
+      publish: false,
       useGateway: true,
       estimateGeometry: true,
       stlFuelOverride: stlFuel,

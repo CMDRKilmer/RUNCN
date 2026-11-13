@@ -1136,6 +1136,10 @@ function nativeRouteServer(waypoints) {
       landing: true,
       fuelUsageFactor: waypoint.fuelPercent / 100,
       reactorUsageFactor: 0.5,
+      preferences: {
+        ftlPreference: 'LEAST_JUMPS',
+        useGateways: waypoint.useGateways ?? true,
+      },
       steps: refuelsOf(waypoint).map(step => ({
         type: 'REFUEL',
         fuel: step.tank,
@@ -1158,6 +1162,7 @@ function nativeRouteLocal(waypoints, hours) {
     waypoints: waypoints.map((waypoint, index) => ({
       location: waypoint.location,
       fuelPercent: waypoint.fuelPercent,
+      useGateways: waypoint.useGateways ?? true,
       steps: refuelsOf(waypoint).map(step => ({
         kind: 'refuel',
         tank: step.tank,
@@ -1315,5 +1320,26 @@ await check('native RT merge: a fixed-amount refill is not an invalidation bound
     undefined,
   ]);
 });
+
+await check(
+  'native RT merge: a routing preference change drops the leg and downstream',
+  async () => {
+    const localStops = [
+      { location: 'A', fuelPercent: 25 },
+      { location: 'B', fuelPercent: 50 },
+      { location: 'C', fuelPercent: 50 },
+    ];
+    const serverStops = [
+      { location: 'A', fuelPercent: 25 },
+      { location: 'B', fuelPercent: 50, useGateways: false },
+      { location: 'C', fuelPercent: 50 },
+    ];
+    assert.deepEqual(mergedHours(localStops, serverStops, [undefined, 10, 20]), [
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  },
+);
 
 console.log(`PASS ${passes}/${passes}`);

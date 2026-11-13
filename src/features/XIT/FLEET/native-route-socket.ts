@@ -30,6 +30,8 @@ export interface RouteWaypointData {
   landing: boolean;
   fuelUsageFactor: number;
   reactorUsageFactor: number;
+  // 航线偏好：`useGateways` 决定走网关还是自然跃迁，直接改变距离、时长与消耗。
+  preferences?: { ftlPreference?: string; useGateways?: boolean };
   steps: RouteStepData[];
 }
 
@@ -117,9 +119,17 @@ function sendRouteRequest(
   });
 }
 
-function sendRouteAction(messageType: string, payload: Record<string, unknown>, routeId?: string) {
+function sendRouteAction(
+  messageType: string,
+  payload: Record<string, unknown>,
+  routeId?: string,
+  extraMatch?: ResponseMatcher,
+) {
   return serialize(async () => {
     const response = await sendRouteRequest(messageType, payload, response => {
+      if (extraMatch !== undefined && !extraMatch(response)) {
+        return false;
+      }
       if (response.kind === 'route') {
         // 请求指定了航线就必须是这条航线——否则后续航点/改名会写到别的航线上。
         return routeId === undefined || response.route.id === routeId;
@@ -139,8 +149,17 @@ function sendRouteAction(messageType: string, payload: Record<string, unknown>, 
   });
 }
 
+// 建航线请求的响应里没有可对位的 id，而游戏里其它窗口的航线变更同样回单条
+// SHIP_ROUTES_ROUTE。先记下现有航线 id，只接受**不在快照里**的那一条：否则会把别人的
+// 航线当成本次新建，后续航点/改名都写到它上面，取消时还会按 partialRouteId 删掉它。
 export async function socketCreateRoute() {
-  return await sendRouteAction('SHIP_ROUTES_CREATE_ROUTE', {});
+  const existing = new Set((await socketGetRoutes()).map(x => x.id));
+  return await sendRouteAction(
+    'SHIP_ROUTES_CREATE_ROUTE',
+    {},
+    undefined,
+    response => response.kind === 'route' && !existing.has(response.route.id),
+  );
 }
 
 // 写航线期间禁止其它模块插入航线类请求（串行队列已经兜住，这里是额外的显示层守卫）。

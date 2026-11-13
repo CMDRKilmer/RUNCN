@@ -362,6 +362,14 @@ function staleLegIndexes(
     ) {
       invalidateFrom(index, ['FTL']);
     }
+    // 走网关还是自然跃迁换了一条路：距离、时长与消耗都不同（本地没记录过就是未知，不判定）。
+    if (
+      previous.useGateways !== undefined &&
+      current.useGateways !== undefined &&
+      previous.useGateways !== current.useGateways
+    ) {
+      invalidateFrom(index, ['STL', 'FTL']);
+    }
     // 补油步骤在本站执行（飞往下一站之前）：改的是下游各段的出发余量。
     const changedTanks = changedRefuelTanks(previous, current);
     if (changedTanks.length > 0) {
@@ -440,6 +448,8 @@ function toWaypoint(waypoint: RouteWaypointData): NativeRouteWaypointRecord {
     encoded: target.encoded,
     fuelPercent: percentOf(waypoint.fuelUsageFactor) ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
     reactorPercent: percentOf(waypoint.reactorUsageFactor),
+    // 走网关还是自然跃迁决定实际航线：时长按它算出来的，改了就作废。
+    useGateways: waypoint.preferences?.useGateways,
     steps: (waypoint.steps ?? [])
       .map(toStep)
       .filter((step): step is NativeRouteStep => step !== undefined),

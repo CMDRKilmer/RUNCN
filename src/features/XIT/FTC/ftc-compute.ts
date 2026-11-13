@@ -398,6 +398,10 @@ export interface FtcComputeInput {
   // 选点口径：true = 最优性价比（`pickBestValueOption`：多烧的燃料换回的时间跌破首档一半即停），
   // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优（FTC 面板口径）。
   valueOptimal?: boolean;
+  // 是否把结果发布给 SFC（共享滑块参数 + lastFtcCompute 完成信号）。原生 RT 向导是
+  // **假设性**计算——规划载重、未来出发油量、固定封顶档都不代表当前 SFC 航班，
+  // 同键写入会覆盖玩家正在用的实时参数，所以传 false。缺省 true。
+  publish?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
@@ -598,8 +602,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // ⚠️ 仅在输入完整时写入：残缺输入下 best 必然退化（f = 1 / 0.05 这类假值），
   // 写进去会覆盖面板刚算好的正确参数，正是「SFC 自动拉条 ≠ FTC 面板结果」的成因。
   // 估算几何（estimateGeometry）同样不写入共享参数：SFC 联动只认服务器原生几何。
+  // 假设性计算（publish = false）也不发布：它描述的不是当前 SFC 航班。
   const routeKey = ftcRouteKey(input.shipRegistration, from, to, input.useGateway === true);
-  const shareable = inputIncomplete.length === 0 && !estimatedGeometry;
+  const shareable = inputIncomplete.length === 0 && !estimatedGeometry && input.publish !== false;
   if (shareable) {
     setFtcFuelSlider(routeKey, best.fuel);
     setFtcReactorUsage(routeKey, best.reactor);
@@ -607,11 +612,14 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 记录本次计算的航线，供 OPEN_SFC 等动作等待（每段飞行前先算好最优燃油）。
   // key 与上面的滑块参数键**同一个字符串**（等待方按 key 匹配 + 按同一键读滑块值）；
   // complete=false：输入残缺、参数未写入滑块，等待方直接沿用当前设置。
-  lastFtcCompute.value = {
-    key: routeKey,
-    at: Date.now(),
-    complete: shareable,
-  };
+  // 假设性计算不写这个信号：等待方会把它当成「当前航班的参数已就绪」。
+  if (input.publish !== false) {
+    lastFtcCompute.value = {
+      key: routeKey,
+      at: Date.now(),
+      complete: shareable,
+    };
+  }
   // 服务器当前对该航线下发的原生 FlightPlan（用于面板并行展示实测总时长）。
   // 用反查后的实体键匹配（SFC 把空间站目的地规范化成所属星系 id，原生计划的目标端是
   // 不可变实体 id，与 metrics.fromLookup/toLookup 一致）；查不到即 undefined，面板不显示。

@@ -360,9 +360,8 @@ globalThis.config = { url: { planetEnv: 'https://stub.invalid/planet-env.json' }
 globalThis.fetch = async () => ({ json: async () => ({}) });
 
 const stub = await import('./lib/ftc-node-stub.mjs');
-const { computeFtcPlan, shipPerformanceFor, shipFuelRemainingFor } = await import(
-  '../src/features/XIT/FTC/ftc-compute.ts'
-);
+const { computeFtcPlan, shipPerformanceFor, shipFuelRemainingFor } =
+  await import('../src/features/XIT/FTC/ftc-compute.ts');
 
 const stubRoute = (metrics, stlFuelCapacity = SHIP.stlFuelCapacity) => {
   stub.stubSetShip(stub.STUB_SHIP);
@@ -446,6 +445,24 @@ await checkAsync('门控：跨星系几何完整（有罐容量）→ 不报缺�
   const out = await runCompute();
   expectExact(f, 'inputIncomplete', out.inputIncomplete, undefined);
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
+});
+
+// 假设性计算（原生 RT 向导：规划载重 + 未来出发油量 + 固定封顶档）即使输入完整也不能
+// 发布给 SFC：同键写入会覆盖玩家当前航班正在用的参数。
+await checkAsync('门控：publish = false → 输入完整也不写滑块、不发完成信号', async f => {
+  stubRoute(stub.stubMetrics());
+  const out = await computeFtcPlan({
+    shipRegistration: 'STUB-01',
+    from: 'zv-307a',
+    to: 'ANT',
+    browse: false,
+    publish: false,
+  });
+  expectExact(f, 'inputIncomplete', out.inputIncomplete, undefined);
+  expectExact(f, 'ok', out.ok, true);
+  expectExact(f, '滑块写入次数', stub.sliderWrites.length, 0);
+  expectExact(f, '反应堆写入次数', stub.reactorWrites.length, 0);
+  expectExact(f, 'best 仍然返回', out.best?.fuel, 0.15);
 });
 
 // ---- ⑤ 油罐查表口径：必须按 **store id** 查（getById）----
