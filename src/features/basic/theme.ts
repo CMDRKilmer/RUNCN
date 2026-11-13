@@ -42,6 +42,11 @@ export interface Skin {
   hueBands?: Record<string, FamilyColors>;
   // 加在中性灰上的轻微 RGB 偏移，让整套皮肤带一点冷/暖倾向。
   neutralShift: [number, number, number];
+  // 深色主题标记：中性色文字的映射方向。浅色主题要把游戏/插件遗留的浅灰文字
+  // 反成深色（否则浅底上看不清）；深色主题必须相反——中性文字一律映射为浅色，
+  // 否则 #C8D0D6 这类文字会被反成 #292823 压在深底上完全不可读。由画布亮度
+  // 自动判定（见 theme-ceramic.ts 的 buildCeramicSkin），未设置时按浅色主题处理。
+  darkText?: boolean;
   // 期限/告警语义色：这类底色承载「还剩几天 / 该修了」的信息，不能和装饰性
   // 橙黄一起收敛成石板蓝。用低饱和的柔和黄/红 + 深色字 + 左侧细色条，
   // 既能在浅底上一眼分辨，又不会把界面重新铺满彩色。
@@ -680,23 +685,46 @@ function mapColor(token: string, role: Role, index: number, skin: Skin): string 
   if (isNeutral(rgba)) {
     const v = (r + g + b) / 3;
     let out: number;
-    switch (role) {
-      case 'text':
-        // 深色界面里极暗的文字是叠在彩色块上的，保持深色而不是反成白字。
-        out = v < 40 ? 30 : (255 - v) * 0.82;
-        break;
-      case 'background':
-        out = 252 - v * 0.3;
-        break;
-      case 'border':
-        out = 236 - v * 0.45;
-        break;
-      case 'gradient':
-        out = 246 - v * 0.34 - (index % 2) * 8;
-        break;
-      default:
-        out = 236 - v * 0.4;
-        break;
+    if (skin.darkText) {
+      // 深色主题：把中性色的亮度方向整体翻转——文字→浅、背景→深、边线→中灰。
+      // 这等价于把「浅色游戏界面」反成「深色界面」，插件里 #111111 这类深底
+      // 不会被翻成浅底、#C8D0D6 这类浅字也不会被翻成深字，从而全站可读。
+      switch (role) {
+        case 'text':
+          out = 205;
+          break;
+        case 'background':
+          out = 14 + v * 0.11;
+          break;
+        case 'border':
+          out = 45 + v * 0.28;
+          break;
+        case 'gradient':
+          out = 14 + v * 0.11 - (index % 2) * 5;
+          break;
+        default:
+          out = 45 + v * 0.28;
+          break;
+      }
+    } else {
+      // 浅色主题（ceramic 等）：维持原有反转逻辑，行为完全不变。
+      switch (role) {
+        case 'text':
+          out = v < 40 ? 30 : (255 - v) * 0.82;
+          break;
+        case 'background':
+          out = 252 - v * 0.3;
+          break;
+        case 'border':
+          out = 236 - v * 0.45;
+          break;
+        case 'gradient':
+          out = 246 - v * 0.34 - (index % 2) * 8;
+          break;
+        default:
+          out = 236 - v * 0.4;
+          break;
+      }
     }
     const gray = clamp(out);
     const [sr, sg, sb] = skin.neutralShift;

@@ -29,6 +29,17 @@ function hexToTriple(hex: string): string {
   return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(', ');
 }
 
+// 画布是否足够暗，用来判定「深色主题」——决定中性色文字的映射方向（见 theme.ts）。
+function isDarkColor(hex: string): boolean {
+  const m = hex.match(/^#([\da-f]{6})$/i);
+  if (!m) {
+    return false;
+  }
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+  // 相对亮度近似；< 90 视为深色主题（ceramic 的暖白画布远高于此）。
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 90;
+}
+
 function band(index: number) {
   const prefix = `--rp-cc-cat-${index}-`;
   return {
@@ -57,7 +68,11 @@ export function ceramicHueBands() {
 
 export function buildCeramicSkin(): Skin {
   const accent = token('--rp-cc-accent-line');
+  const canvas = token('--rp-cc-canvas');
+  const isDark = isDarkColor(canvas);
   return {
+    // 深色主题判定（画布亮度），决定中性色映射方向；浅色主题为 false，行为不变。
+    darkText: isDark,
     // 别名指回语义 token：现有组件和 CONTROL_CSS 里的 --rp-skin-* 无需改动。
     vars: {
       '--rp-skin-bg': 'var(--rp-cc-canvas)',
@@ -105,7 +120,10 @@ export function buildCeramicSkin(): Skin {
       green: band(2),
     },
     hueBands: ceramicHueBands(),
-    neutralShift: [2, 1, -4],
+    // 中性灰偏移：浅色主题暖调 [2,1,-4]（暖纸）；深色主题改冷蓝 [-4,0,10]，
+    // 否则所有中性底/边框都会被偏成棕色（引擎按中性色重映射，如侧栏 #14130e、
+    // FB 面板 #12110c、表格空行线），与深空冷底完全不搭。
+    neutralShift: isDark ? [-4, 0, 10] : [2, 1, -4],
     status: {
       warning: {
         background: token('--rp-cc-status-warning-bg'),

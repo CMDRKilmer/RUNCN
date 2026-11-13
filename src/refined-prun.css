@@ -934,3 +934,277 @@ html[data-rp-theme='ceramic-colorful'] body {
   background-color: var(--rp-cc-canvas);
   color: var(--rp-cc-text-primary);
 }
+
+/* ── 星海霓虹（nebula）：token 模式，深空星海科幻配色 ──────────────────
+   近黑深蓝底 + 半透明玻璃面板；青蓝霓虹（#35c4e8）作为唯一主强调色贯穿
+   选中态/主按钮/边框发光；金/绿/红/紫/青绿/玫红/蓝/黄八类功能彩色各司其职、
+   同类同色。所有颜色字面量只在此精确块内（R01）。变量名与 ceramic 完全一致，
+   由 buildComponentCss('nebula') 与 buildCeramicSkin() 复用（框架 §5.2）。 */
+html[data-rp-theme='nebula'] {
+  color-scheme: dark;
+
+  /* 背景 */
+  --rp-cc-canvas: #070b14;
+  --rp-cc-surface: #0d1626;
+  --rp-cc-surface-alt: #11213a;
+  --rp-cc-overlay: rgba(5, 8, 16, 0.62);
+  --rp-cc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.62);
+
+  /* 文字 */
+  --rp-cc-text-primary: #dce8f5;
+  --rp-cc-text-secondary: #9fb2c8;
+  --rp-cc-text-muted: #6b7f96;
+  --rp-cc-text-inverse: #0d1626;
+  --rp-cc-text-link: #4fc3f0;
+  --rp-cc-text-disabled: #45566a;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #16263a;
+  --rp-cc-border-default: #2a4a66;
+  --rp-cc-border-strong: #3a6a92;
+  --rp-cc-border-focus: #35c4e8;
+  --rp-cc-ring: #35c4e8;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 1px;
+  --rp-cc-ring-halo: rgba(53, 196, 232, 0.35);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #1d6fb0;
+  --rp-cc-btn-primary-text: #eafaff;
+  --rp-cc-btn-primary-border: #35c4e8;
+  --rp-cc-btn-primary-hover: #2690d8;
+  --rp-cc-btn-primary-active: #155a92;
+  --rp-cc-btn-secondary-bg: #12233d;
+  --rp-cc-btn-secondary-text: #9fd0f0;
+  --rp-cc-btn-secondary-border: #2a4a66;
+  --rp-cc-btn-secondary-hover: #19314f;
+  --rp-cc-btn-secondary-active: #0e1c30;
+  --rp-cc-btn-danger-bg: #b8403f;
+  --rp-cc-btn-danger-text: #fff0ef;
+  --rp-cc-btn-danger-border: #e85a5a;
+  --rp-cc-btn-danger-hover: #d44a49;
+  --rp-cc-btn-danger-active: #9e3332;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #6fd0e8;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: rgba(53, 196, 232, 0.12);
+  --rp-cc-btn-ghost-active: rgba(53, 196, 232, 0.2);
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #4fc3f0;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: rgba(79, 195, 240, 0.12);
+  --rp-cc-btn-link-active: rgba(79, 195, 240, 0.2);
+  --rp-cc-btn-disabled-bg: #0f1a2c;
+  --rp-cc-btn-disabled-text: #45566a;
+  --rp-cc-btn-disabled-border: #1e3048;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #0e1a2e;
+  --rp-cc-control-alt-bg: #11213a;
+  --rp-cc-control-text: #cfe0f0;
+  --rp-cc-control-placeholder: #6b7f96;
+  --rp-cc-control-border: #2a4a66;
+  --rp-cc-control-border-strong: #3a6a92;
+  --rp-cc-control-focus: #35c4e8;
+  --rp-cc-control-checked: #35c4e8;
+  --rp-cc-control-track: #1a2a40;
+  --rp-cc-control-thumb: #35c4e8;
+  --rp-cc-control-disabled-bg: #0a1322;
+  --rp-cc-control-disabled-text: #45566a;
+  --rp-cc-tooltip-bg: #0d1626;
+  --rp-cc-tooltip-text: #dce8f5;
+  --rp-cc-tooltip-border: #2a4a66;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #11213a;
+  --rp-cc-table-head-text: #bcd2ea;
+  --rp-cc-table-row: #0d1626;
+  --rp-cc-table-row-alt: #0f1a2e;
+  --rp-cc-table-row-hover: #14304d;
+  --rp-cc-table-row-selected: #1d4a6e;
+  --rp-cc-table-border: #1e3048;
+  --rp-cc-table-text: #cfe0f0;
+
+  /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: rgba(78, 217, 138, 0.14);
+  --rp-cc-status-success-text: #6fe0a0;
+  --rp-cc-status-success-border: #2f9e6a;
+  --rp-cc-status-warning-bg: rgba(232, 161, 60, 0.14);
+  --rp-cc-status-warning-text: #e8b563;
+  --rp-cc-status-warning-border: #b87a28;
+  --rp-cc-status-danger-bg: rgba(232, 90, 90, 0.14);
+  --rp-cc-status-danger-text: #f08a8a;
+  --rp-cc-status-danger-border: #b84040;
+  --rp-cc-status-info-bg: rgba(79, 195, 240, 0.14);
+  --rp-cc-status-info-text: #7fd0f0;
+  --rp-cc-status-info-border: #2a7a9e;
+
+  /* 分类 1..8 / 图表同序号同色：暗彩底 + 亮彩字 + 彩描边 + 实色图形 */
+  --rp-cc-cat-1-bg: rgba(53, 196, 232, 0.16);
+  --rp-cc-cat-1-text: #7fe0f5;
+  --rp-cc-cat-1-border: #35c4e8;
+  --rp-cc-cat-1-chart: #35c4e8;
+  --rp-cc-cat-2-bg: rgba(45, 212, 191, 0.16);
+  --rp-cc-cat-2-text: #6fe6d4;
+  --rp-cc-cat-2-border: #2dd4bf;
+  --rp-cc-cat-2-chart: #2dd4bf;
+  --rp-cc-cat-3-bg: rgba(58, 123, 216, 0.16);
+  --rp-cc-cat-3-text: #7fa8ee;
+  --rp-cc-cat-3-border: #3a7bd8;
+  --rp-cc-cat-3-chart: #3a7bd8;
+  --rp-cc-cat-4-bg: rgba(155, 107, 255, 0.16);
+  --rp-cc-cat-4-text: #b794ff;
+  --rp-cc-cat-4-border: #9b6bff;
+  --rp-cc-cat-4-chart: #9b6bff;
+  --rp-cc-cat-5-bg: rgba(255, 77, 110, 0.16);
+  --rp-cc-cat-5-text: #ff8aa3;
+  --rp-cc-cat-5-border: #ff4d6e;
+  --rp-cc-cat-5-chart: #ff4d6e;
+  --rp-cc-cat-6-bg: rgba(232, 163, 61, 0.16);
+  --rp-cc-cat-6-text: #f0bd7a;
+  --rp-cc-cat-6-border: #e8a33d;
+  --rp-cc-cat-6-chart: #e8a33d;
+  --rp-cc-cat-7-bg: rgba(245, 197, 66, 0.16);
+  --rp-cc-cat-7-text: #f5d27a;
+  --rp-cc-cat-7-border: #f5c542;
+  --rp-cc-cat-7-chart: #f5c542;
+  --rp-cc-cat-8-bg: rgba(78, 217, 138, 0.16);
+  --rp-cc-cat-8-text: #7fe6a8;
+  --rp-cc-cat-8-border: #4ed98a;
+  --rp-cc-cat-8-chart: #4ed98a;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色加深得到，专用于 <progress> 容量条 */
+  --rp-cc-progress-primary: #1d7fa8;
+  --rp-cc-progress-secondary: #1d7a6e;
+  --rp-cc-chart-grid: #1e3048;
+  --rp-cc-chart-axis: #6b7f96;
+  --rp-cc-chart-label: #9fb2c8;
+  --rp-cc-accent-line: #35c4e8;
+}
+
+/* ── nebula 专属覆盖：游戏原生浅色容器/文字染深，使首个深色主题真正可读 ──
+   现有组件映射只覆盖 Window/TileFrame(table)/button/form 等已知类；顶部菜单栏
+   Head__container、状态栏 HeadItem、提醒面板 AlertListItem、窗口头/开关
+   TileFrame__header/TileFrame__controls、侧栏 Frame__*、财务/流动资产面板、
+   右键菜单 ContextControls、Tile 等仍是游戏原生浅底+原生深色字。浅色主题靠
+   「深字配浅底」侥幸可读；nebula 作为首个深色主题必须把这批区域也染深。
+   游戏对这些类普遍用 !important，故统一用三重 [data-rp-theme] 把特异性抬到
+   (0,3,x) 稳压；仅作用于 nebula，不动其它主题。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(
+  [class*='Head__container'],
+  [class*='Head__contextAndScreens'],
+  [class*='HeadItem__container'],
+  [class*='ScreenControls'],
+  [class*='AlertListItem__container'],
+  [class*='AlertListItem__content'],
+  [class*='TileFrame__header'],
+  [class*='TileFrame__controls'],
+  [class*='Tile__tile'],
+  [class*='Frame__uiToggles'],
+  [class*='Frame__toggle'],
+  [class*='Frame__title'],
+  [class*='FinanceOverviewPanel__header'],
+  [class*='FinanceOverviewPanel__label'],
+  [class*='FinanceOverviewPanel__row'],
+  [class*='LiquidAssetsPanel__row'],
+  [class*='LiquidAssetsPanel__number'],
+  [class*='ContextControls__container'],
+  [class*='ContextControls__item'],
+  [class*='ContextControls__cmd'],
+  [class*='GridItemView__container'],
+  [class*='ServerNotifications__container'],
+  [class*='MainState__container'],
+  [class*='Frame__foot'],
+  [class*='StaticInput__static'],
+  [class*='MenuHeadItem__menu'],
+  [class*='MenuHeadItem__selector']
+) {
+  background-color: var(--rp-cc-surface) !important;
+  color: var(--rp-cc-text-primary) !important;
+}
+/* 顶栏/侧栏的「小字变体」（NewsHeadItem__count 等计数、License 编码、Help 进度、
+   提醒计数、屏幕名）直接改成浅色：不依赖后代匹配，直接命中类名，避免被游戏
+   更具体的深色字规则压住。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(
+  [class*='HeadItem__label'],
+  [class*='NewsHeadItem__'],
+  [class*='LicenseHeadItem__'],
+  [class*='HelpHeadItem__'],
+  [class*='AlertsHeadItem__'],
+  [class*='ScreenControls__currentScreenName'],
+  [class*='Frame__title'],
+  [class*='Frame__toggleLabel']
+) {
+  color: var(--rp-cc-text-primary) !important;
+}
+/* Tile 内容区基色：游戏给 .TileFrame__body 设了 color:#3A3934 !important，导致
+   所有「无自身颜色」的文字（物品名、货舱指针等）都继承成深色压深底。用更高
+   特异性把基色改成浅色。带自身 color 规则的元素（ColoredValue 语义色、状态色等）
+   是后代规则、压过继承，故不受影响。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(
+  [class*='TileFrame__body'],
+  [class*='TileControls__control'],
+  [class*='TileContextHelp'],
+  [class*='MaterialIcon__neutral'],
+  [class*='AdminMaterialItemView__name'],
+  [class*='ShipStore__pointer'],
+  [class*='ShipStore__store'],
+  [class*='ShipPool__shipLabel'],
+  [class*='PlanetRow__shipLabel'],
+  [class*='closeAllBtn']
+) {
+  color: var(--rp-cc-text-primary) !important;
+}
+/* 上述容器内游戏原生的「深色字」类（colors__*/type__*/fonts__*/HeadItem 文本/
+   侧栏标题与开关文字/提醒时间）强制改为浅色，否则深字压在刚染深的深底上仍不可见。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(
+  [class*='Head__container'],
+  [class*='HeadItem__container'],
+  [class*='ScreenControls'],
+  [class*='AlertListItem__container'],
+  [class*='AlertListItem__content'],
+  [class*='FinanceOverviewPanel'],
+  [class*='LiquidAssetsPanel'],
+  [class*='ContextControls'],
+  [class*='Frame__sidebar']
+) :is([class*='colors__text'], [class*='type__type'], [class*='fonts__font'],
+       [class*='HeadItem__'], [class*='AlertListItem__time'], [class*='ScreenControls__'],
+       [class*='Frame__title'], [class*='Frame__toggleLabel']) {
+  color: var(--rp-cc-text-primary) !important;
+}
+/* 链接 / ColoredValue / 通知标签：保留各自语义色，仅把游戏原生不透明浅底变透明，
+   露出其下已被染深的窗口/面板深底。三重 [data-rp-theme] 把特异性抬到 (0,3,1)，
+   压过游戏带 !important 的同类规则。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is([class*='Link__link'], a[href],
+  [class*='ColoredValue'], [class*='notification-type-label']) {
+  background-color: transparent !important;
+}
+/* 表格单元格：游戏原生斑马纹规则是
+   `table tbody td:nth-child(2n+1) { background:#f2f1ec !important }`，特异性 (0,1,3)。
+   仅写 :is(td,th) 只有 (0,1,2)，同 !important 时被它压掉、td 仍是浅底。
+   这里用三重 [data-rp-theme] 把特异性抬到 (0,3,2) 稳压它，同时保留透明，
+   让表格自身的深色底与 TR 上的斑马纹/选中行透出来。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(td, th) {
+  background-color: transparent !important;
+}
+/* 表格线：引擎把游戏原生「暖米色」表格边框按色相重映射成 cat-7 金 #f5c542，
+   深色主题下会形成刺眼的亮金网格（GOVH / FLEET 等左栏表格最明显）。把所有
+   表格系元素的边框统一收敛成低调深色线。分类表头的彩色边界用 box-shadow
+   表达（见组件 CSS），不是 border，故不受本条影响。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(td, th, tr, tbody, thead, tfoot, table) {
+  border-color: var(--rp-cc-border-subtle) !important;
+}
+/* FLEET XIT（ShipPool 船池 / PlanetRow 行星行）：横向行分隔线会一直画到右侧
+   空白区，每行都留一条线、显得碎。去掉横向行线（保留纵向拖放列），空白区更干净。 */
+html[data-rp-theme='nebula'][data-rp-theme][data-rp-theme] :is(
+  [class*='rp-ShipPool'], [class*='rp-PlanetRow'], [class*='rp-grip']
+) :is(tr, td, th, tbody, thead, tfoot) {
+  border-top-color: transparent !important;
+  border-bottom-color: transparent !important;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='nebula'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}
