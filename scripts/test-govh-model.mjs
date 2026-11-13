@@ -6,6 +6,8 @@ import {
   INFRA_NEEDS,
   LEVELS,
   UPKEEP_BUILDINGS,
+  FACILITY_CAPACITY,
+  facilityCapacity,
   HAPPINESS_WEIGHTS,
   TIERS,
   computeNeeded,
@@ -45,7 +47,7 @@ check('固化表：14 座建筑，顺序首 SST 末 UNI', () => {
 
 check('固化表：每座建筑每种物料贡献 1/n', () => {
   for (const b of UPKEEP_BUILDINGS) {
-    const n = Object.keys(b.upkeep).length;
+    const n = b.materials.length;
     const total = Object.values(b.needs).reduce((a, x) => a + (x ?? 0), 0);
     assert.ok(total > 0, `${b.ticker} 无需求贡献`);
     assert.ok(n >= 3, `${b.ticker} 物料数 ${n}`);
@@ -144,7 +146,7 @@ const baseInput = () => ({
   },
   levels: { SST: 2, INF: 1, PAR: 1, ART: 1, LIB: 1 },
   prices: Object.fromEntries(
-    [...new Set(UPKEEP_BUILDINGS.flatMap(b => Object.keys(b.upkeep)))].map(t => [t, 100]),
+    [...new Set(UPKEEP_BUILDINGS.flatMap(b => b.materials))].map(t => [t, 100]),
   ),
 });
 
@@ -160,12 +162,23 @@ check('solve：VH-192b 类样例能给出推荐集合且待补成本约为 30 �
       `选中项 ${key} 不存在`,
     );
   }
-  // 无存量时净待补成本 ≈ 日成本 × 30（同价 100）。
-  // 满仓量是整数（小数日耗按游戏显示取整），因此允许一天成本的取整误差。
+  // 待补成本 = Σ 选中项净待补成本，且必须等于「待补量 × 单价」之和（不再有日成本口径）。
+  let expected = 0;
+  for (const key of r.selected) {
+    const option = r.options.find(o => o.key === key);
+    expected += option.netFillAmount * option.price;
+    assert.ok(option.capacityKnown, `${key} 容量未知`);
+  }
   assert.ok(
-    Math.abs(r.summary.fillCost - r.summary.dailyCost * 30) <= r.summary.dailyCost,
-    `fill=${r.summary.fillCost} daily=${r.summary.dailyCost}`,
+    Math.abs(r.summary.fillCost - expected) < 1e-6,
+    `fill=${r.summary.fillCost} expected=${expected}`,
   );
+  // 模型层面已无任何「日耗 / 日成本」字段。
+  for (const option of r.options) {
+    assert.equal(option.qtyPerDay, undefined);
+    assert.equal(option.dailyCost, undefined);
+  }
+  assert.equal(r.summary.dailyCost, undefined);
   // 面板「提供量」列读的是封顶前原始提供量，必须为有限的非负数。
   for (const need of NEEDS) {
     assert.ok(Number.isFinite(r.needs[need].provided), `needs.${need}.provided 非有限数`);
@@ -174,7 +187,7 @@ check('solve：VH-192b 类样例能给出推荐集合且待补成本约为 30 �
   // 维生基线来自 POPR（此样例为 100%），100% 目标必须可达。
   assert.equal(r.summary.achievable, true, `100% 不可达：${r.summary.limitingNeed}`);
   console.log(
-    `   推荐 ${r.selected.size}/${r.options.length} 项，日成本 ${r.summary.dailyCost.toFixed(0)}，填充 ${r.summary.fillCost.toFixed(0)}`,
+    `   推荐 ${r.selected.size}/${r.options.length} 项，待补成本 ${r.summary.fillCost.toFixed(0)}`,
   );
 });
 
@@ -288,7 +301,8 @@ check('solve：已填满的设施存量自动计入提供量，但不进入待�
     ...baseInput(),
     selected: new Set(),
     facilityStocks: {
-      SST: { DW: { nextConsumption: 600, reserve: 0 } },
+      // 安全站 L2 满仓 700（储备 600 + 即时仓 100），两格都填满即无需采购。
+      SST: { DW: { nextConsumption: 700, reserve: 0 } },
     },
   });
   const option = r.options.find(o => o.key === 'SST.DW');
@@ -344,7 +358,7 @@ check('solve：显式选择优先于求解', () => {
 
 check('solve：无报价物料 efficiency=-1 但仍出现在全部选项', () => {
   const prices = Object.fromEntries(
-    [...new Set(UPKEEP_BUILDINGS.flatMap(b => Object.keys(b.upkeep)))].map(t => [t, undefined]),
+    [...new Set(UPKEEP_BUILDINGS.flatMap(b => b.materials))].map(t => [t, undefined]),
   );
   const r = solve({ ...baseInput(), prices });
   assert.ok(r.options.length > 0);
@@ -364,17 +378,18 @@ check('TIERS 分层正确', () => {
   );
 });
 
-check('满仓量：无 POPID 容量时退回 30 天毛量（取整）', () => {
+check('满仓量：POPID 没给容量时用容量表按等级推算（SST.DW L2 → 700）', () => {
   const r = solve({ ...baseInput(), selected: new Set(['SST.DW']) });
   const option = r.options.find(o => o.key === 'SST.DW');
-  assert.equal(option.grossFillAmount, 600);
+  assert.ok(option.capacityKnown);
+  assert.equal(option.grossFillAmount, 700);
   assert.equal(option.stockTotal, 0);
-  assert.equal(option.netFillAmount, 600);
-  assert.equal(option.netFillCost, 60000);
-  assert.ok(option.calculation.includes('待补 600'));
+  assert.equal(option.netFillAmount, 700);
+  assert.equal(option.netFillCost, 70000);
+  assert.ok(option.calculation.includes('待补 700'));
 });
 
-check('满仓量：取 POPID「下一次消耗 + 储备」两格容量，不再自算日耗 × 30', () => {
+check('满仓量：取 POPID「下一次消耗 + 储备」两格容量，实测优先于容量表', () => {
   const r = solve({
     ...baseInput(),
     selected: new Set(['SST.DW']),
@@ -388,12 +403,168 @@ check('满仓量：取 POPID「下一次消耗 + 储备」两格容量，不再�
   assert.equal(option.netFillAmount, 700);
 });
 
-check('满仓量：小数日耗不再产生小数点（6.67 × 30 = 200.1 → 200）', () => {
+check('满仓量：容量表给出的值全是整数，算式里不出现小数点', () => {
+  // INF.TUB L1：储备 200 + 即时仓 100 = 300，全部整数（旧口径按日耗 × 30 会得 200.1）。
   const r = solve({ ...baseInput(), selected: new Set(['INF.TUB']) });
   const option = r.options.find(o => o.key === 'INF.TUB');
-  assert.equal(option.grossFillAmount, 200);
+  assert.equal(option.grossFillAmount, 300);
   assert.ok(Number.isInteger(option.grossFillAmount), String(option.grossFillAmount));
   assert.ok(!option.calculationCompact.includes('.'), option.calculationCompact);
+});
+
+// ── 每级容量表（离线推算满仓量）────────────────────────────────────────
+// 公式：储备 = 每级 reserve × 建成等级；下一次消耗 = 每级 next × 运行等级。
+// 下面两个用例直接锚定 2026-11-13 的实测值，改表必须同时改这里。
+check('容量表：VH-192b SST L2（建成=运行）→ 储备 600 / 下一次消耗 100', () => {
+  assert.deepEqual(facilityCapacity('SST', 'DW', 2, 2), { reserve: 600, next: 100 });
+});
+
+check('容量表：QQ-001a SST 建成 10 / 运行 7 → 储备 3000 / 下一次消耗 350', () => {
+  // 两格不同等级：储备按建成 10 级，下一次消耗按运行 7 级（不是 10 级应有的 500）。
+  assert.deepEqual(facilityCapacity('SST', 'DW', 10, 7), { reserve: 3000, next: 350 });
+  assert.deepEqual(facilityCapacity('SST', 'SUN', 10, 7), { reserve: 600, next: 210 });
+});
+
+check('容量表：QQ-001a INF 建成 9 / 运行 5 → 储备 2700 / 下一次消耗 250', () => {
+  assert.deepEqual(facilityCapacity('INF', 'OFF', 9, 5), { reserve: 2700, next: 250 });
+  assert.deepEqual(facilityCapacity('INF', 'TUB', 9, 5), { reserve: 1800, next: 500 });
+});
+
+check('容量表：运行等级缺省时按建成等级算', () => {
+  assert.deepEqual(facilityCapacity('SST', 'DW', 3), { reserve: 900, next: 150 });
+});
+
+check('容量表：表外建筑 / 物料返回 undefined（回退 POPID 实测）', () => {
+  assert.equal(facilityCapacity('EMC', 'PK', 2, 2), undefined);
+  assert.equal(facilityCapacity('SST', 'XXX', 2, 2), undefined);
+  assert.equal(facilityCapacity('SST', 'DW', 0, 0), undefined);
+});
+
+check('容量表：每级容量都是正整数，且物料必须在该建筑的物料清单里', () => {
+  for (const [ticker, materials] of Object.entries(FACILITY_CAPACITY)) {
+    const building = UPKEEP_BUILDINGS.find(b => b.ticker === ticker);
+    assert.ok(building, `${ticker} 不在 UPKEEP_BUILDINGS`);
+    for (const [material, per] of Object.entries(materials)) {
+      assert.ok(building.materials.includes(material), `${ticker}.${material} 不在物料清单`);
+      assert.ok(Number.isInteger(per.reserve) && per.reserve > 0, `${ticker}.${material} reserve=${per.reserve}`);
+      assert.ok(Number.isInteger(per.next) && per.next > 0, `${ticker}.${material} next=${per.next}`);
+      assert.ok(per.next <= per.reserve, `${ticker}.${material} next > reserve`);
+    }
+  }
+});
+
+check('容量表：10 级满级时储备 = 每级 × 10，全程线性', () => {
+  for (const [ticker, materials] of Object.entries(FACILITY_CAPACITY)) {
+    for (const [material, per] of Object.entries(materials)) {
+      const ten = facilityCapacity(ticker, material, 10, 10);
+      assert.equal(ten.reserve, per.reserve * 10);
+      assert.equal(ten.next, per.next * 10);
+    }
+  }
+});
+
+check('建筑表只列物料清单，不含任何消耗速率', () => {
+  for (const building of UPKEEP_BUILDINGS) {
+    assert.equal(building.upkeep, undefined, `${building.ticker} 仍有 upkeep 数值表`);
+    assert.ok(Array.isArray(building.materials) && building.materials.length > 0);
+    for (const material of building.materials) {
+      assert.equal(typeof material, 'string', `${building.ticker} 物料不是 ticker 字符串`);
+      assert.ok(/^[A-Z0-9]{2,4}$/.test(material), `${building.ticker}.${material} 不像 ticker`);
+    }
+  }
+});
+
+check('容量未知的物料：capacityKnown=false、待补与性价比全部不可用', () => {
+  // EMC 没有容量表样本（POPID max 缺失时无从推算），当作容量未知处理。
+  const r = solve({
+    ...baseInput(),
+    levels: { ...baseInput().levels, EMC: 2 },
+    selected: new Set(['EMC.PK']),
+    prices: { ...baseInput().prices, PK: 500 },
+  });
+  const option = r.options.find(o => o.key === 'EMC.PK');
+  assert.equal(option.capacityKnown, false);
+  assert.equal(option.grossFillAmount, 0);
+  assert.equal(option.netFillAmount, 0);
+  assert.equal(option.netFillCost, 0);
+  assert.equal(option.efficiency, -1);
+  // 也不该被自动推荐选上（没容量就没法算待补）。
+  const auto = solve({
+    ...baseInput(),
+    levels: { ...baseInput().levels, EMC: 2 },
+  });
+  assert.ok(!auto.selected.has('EMC.PK'), '容量未知的物料被自动推荐了');
+});
+
+check('补满范围：next 档只补即时仓（SST.DW L2 → 待补 100，不是 700）', () => {
+  const stocks = {
+    SST: { DW: { nextConsumption: 0, reserve: 0, nextCapacity: 100, reserveCapacity: 600 } },
+  };
+  const both = solve({ ...baseInput(), selected: new Set(['SST.DW']), facilityStocks: stocks });
+  const next = solve({
+    ...baseInput(),
+    selected: new Set(['SST.DW']),
+    facilityStocks: stocks,
+    fillScope: 'next',
+  });
+  assert.equal(both.options.find(o => o.key === 'SST.DW').netFillAmount, 700);
+  const option = next.options.find(o => o.key === 'SST.DW');
+  assert.equal(option.grossFillAmount, 100);
+  assert.equal(option.netFillAmount, 100);
+  assert.ok(option.calculation.includes('即时仓 100'));
+});
+
+check('补满范围：next 档只抵扣即时仓存量，不把储备仓的料算进抵扣', () => {
+  const stocks = {
+    SST: { DW: { nextConsumption: 0, reserve: 600, nextCapacity: 100, reserveCapacity: 600 } },
+  };
+  const next = solve({
+    ...baseInput(),
+    selected: new Set(['SST.DW']),
+    facilityStocks: stocks,
+    fillScope: 'next',
+  });
+  const option = next.options.find(o => o.key === 'SST.DW');
+  // 储备仓已满不影响即时仓：即时仓仍是 0/100，待补 100。
+  assert.equal(option.netFillAmount, 100);
+  assert.ok(option.calculationCompact.startsWith('100−0='), option.calculationCompact);
+
+  const both = solve({ ...baseInput(), selected: new Set(['SST.DW']), facilityStocks: stocks });
+  assert.equal(both.options.find(o => o.key === 'SST.DW').netFillAmount, 100);
+});
+
+check('补满范围：next 档已备一半时待补 = 差额', () => {
+  const next = solve({
+    ...baseInput(),
+    selected: new Set(['SST.DW']),
+    facilityStocks: {
+      SST: { DW: { nextConsumption: 40, reserve: 0, nextCapacity: 100, reserveCapacity: 600 } },
+    },
+    fillScope: 'next',
+  });
+  const option = next.options.find(o => o.key === 'SST.DW');
+  assert.equal(option.netFillAmount, 60);
+  assert.equal(option.netFillCost, 60 * 100);
+});
+
+check('容量表：表算容量直接进 solve 时与实测口径一致（SST.DW 满仓 700）', () => {
+  const cap = facilityCapacity('SST', 'DW', 2, 2);
+  const r = solve({
+    ...baseInput(),
+    selected: new Set(['SST.DW']),
+    facilityStocks: {
+      SST: {
+        DW: {
+          nextConsumption: 0,
+          reserve: 0,
+          nextCapacity: cap.next,
+          reserveCapacity: cap.reserve,
+        },
+      },
+    },
+  });
+  const option = r.options.find(o => o.key === 'SST.DW');
+  assert.equal(option.grossFillAmount, 700);
 });
 
 check('基建存量：扣除“下一次消耗 + 储备”后得到净待补量', () => {
@@ -403,13 +574,14 @@ check('基建存量：扣除“下一次消耗 + 储备”后得到净待补量'
     facilityStocks: { SST: { DW: { nextConsumption: 100, reserve: 200 } } },
   });
   const option = r.options.find(o => o.key === 'SST.DW');
-  assert.equal(option.grossFillAmount, 600);
+  // 容量来自容量表：SST L2 储备 300×2 = 600、即时仓 50×2 = 100，满仓 700。
+  assert.equal(option.grossFillAmount, 700);
   assert.equal(option.stockNextConsumption, 100);
   assert.equal(option.stockReserve, 200);
   assert.equal(option.stockTotal, 300);
-  assert.equal(option.netFillAmount, 300);
-  assert.equal(option.netFillCost, 30000);
-  assert.equal(r.summary.fillCost, 30000);
+  assert.equal(option.netFillAmount, 400);
+  assert.equal(option.netFillCost, 40000);
+  assert.equal(r.summary.fillCost, 40000);
 });
 
 check('基建存量：计算过程列写明毛量、两项存量与待补量', () => {
@@ -419,7 +591,7 @@ check('基建存量：计算过程列写明毛量、两项存量与待补量', (
     facilityStocks: { SST: { DW: { nextConsumption: 100, reserve: 200 } } },
   });
   const calculation = r.options.find(o => o.key === 'SST.DW').calculation;
-  for (const part of ['满仓量 600', '下一次消耗 100', '储备 200', '待补 300']) {
+  for (const part of ['满仓量 700', '下一次消耗 100', '储备 200', '待补 400']) {
     assert.ok(calculation.includes(part), `计算过程缺少「${part}」：${calculation}`);
   }
 });
@@ -443,8 +615,8 @@ check('基建存量：汇总重量 / 体积按净待补量计算', () => {
     facilityStocks: { SST: { DW: { nextConsumption: 100, reserve: 200 } } },
     materialsInfo: { DW: { weight: 1, volume: 2 } },
   });
-  assert.equal(r.summary.weight, 300);
-  assert.equal(r.summary.volume, 600);
+  assert.equal(r.summary.weight, 400);
+  assert.equal(r.summary.volume, 800);
 });
 
 check('基建存量：同一物料在不同建筑分别扣除', () => {
@@ -458,8 +630,9 @@ check('基建存量：同一物料在不同建筑分别扣除', () => {
   });
   const sst = r.options.find(o => o.key === 'SST.DW');
   const par = r.options.find(o => o.key === 'PAR.DW');
-  assert.equal(sst.netFillAmount, 300);
-  assert.equal(par.netFillAmount, 200);
+  // SST L2 满仓 700；PAR L1 满仓 300 + 50 = 350。
+  assert.equal(sst.netFillAmount, 400);
+  assert.equal(par.netFillAmount, 250);
 });
 
 console.log(`\n${pass} 项通过`);

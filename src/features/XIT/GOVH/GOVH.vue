@@ -41,6 +41,7 @@ import {
   type Need,
   type InfraNeed,
   type LifeSupportAssumption,
+  type FillScope,
   type SupplyOption,
 } from './govh-model';
 
@@ -57,6 +58,10 @@ const planetInput = useTileState('govh-planet', '');
 // full 档保留为可切换对照（确认住房即将补齐时再切）；曾手动切过档的用户沿用其 localStorage 选择。
 // current 档说明压到 ≤30 汉字，直接指顶部「预计补齐 100%」按钮，不再重复有效目标 / 二次采购 / 30 天。
 const lifeAssumption = useTileState<LifeSupportAssumption>('govh-life-assumption', 'current');
+// 补满范围：默认「即时仓 + 储备仓」（两格都填满，一次到位）。
+// 「只补即时仓」用于精打细算：只把「下一次消耗」补够，储备仓留空，等消耗后自然补位。
+// 切换只影响待补量与待补成本口径，不影响需求满足度求解。
+const fillScope = useTileState<FillScope>('govh-fill-scope', 'both');
 // 命令参数 `XIT GOVH VH-192b` 预填星球（保留玩家输入的大小写）。
 if (parameters[0] && parameters[0].trim() !== '') {
   planetInput.value = parameters[0].trim();
@@ -378,7 +383,7 @@ const tickers = computed(() => {
   const set = new Set<string>();
   for (const building of UPKEEP_BUILDINGS) {
     if ((snapshot.value.levels[building.ticker] ?? 0) > 0) {
-      for (const ticker of Object.keys(building.upkeep)) {
+      for (const ticker of building.materials) {
         set.add(ticker);
       }
     }
@@ -420,8 +425,11 @@ const solveBase = computed(() => {
     currentFulfillment: snap.fulfillment,
     currentHappiness: snap.happiness,
     // LR「人口」标签给出上一周期实际运行等级；目标降级 / 断供时它小于已建造等级，
-    // 按建成等级算会高估 provided 与日耗。LR 不可用时回退已建造等级（旧行为）。
+    // 按建成等级算会高估 provided。LR 不可用时回退已建造等级（旧行为）。
+    // 容量推算另走 builtLevels / effectiveLevels：储备按建成等级、即时仓按运行等级。
     levels: snap.effectiveLevels ?? snap.levels,
+    builtLevels: snap.levels,
+    effectiveLevels: snap.effectiveLevels,
     facilityStocks: snap.facilityStocks,
     prices: prices.value,
     materialsInfo: materialsInfo.value,
@@ -437,6 +445,7 @@ const result = computed(() => {
     ...base,
     selected: userSelected.value,
     lifeSupportAssumption: lifeAssumption.value,
+    fillScope: fillScope.value,
   });
 });
 
@@ -446,8 +455,18 @@ const assumptionCosts = computed(() => {
   if (!base || userSelected.value !== undefined) {
     return undefined;
   }
-  const current = solve({ ...base, selected: undefined, lifeSupportAssumption: 'current' });
-  const full = solve({ ...base, selected: undefined, lifeSupportAssumption: 'full' });
+  const current = solve({
+    ...base,
+    selected: undefined,
+    lifeSupportAssumption: 'current',
+    fillScope: fillScope.value,
+  });
+  const full = solve({
+    ...base,
+    selected: undefined,
+    lifeSupportAssumption: 'full',
+    fillScope: fillScope.value,
+  });
   return { current: current.summary.fillCost, full: full.summary.fillCost };
 });
 
@@ -713,7 +732,7 @@ async function refreshData(force = false) {
       void refreshBaseCount(planet, force, seq);
       return;
     }
-    const snap = await readGovernanceSnapshot(planet);
+    const snap = await readGovernanceSnapshot(planet, force);
     if (seq !== loadSeq || disposed.value) {
       return;
     }
@@ -786,6 +805,19 @@ function setLifeAssumption(value: LifeSupportAssumption) {
   lifeAssumption.value = value;
   userSelected.value = undefined;
 }
+
+// 补满范围只改待补量口径（补一格还是两格），不影响需求求解，
+// 所以不清手动勾选，用户选的物料保持不变。
+function setFillScope(value: FillScope) {
+  fillScope.value = value;
+}
+
+// 说明区第 2 行随补满范围变，避免「两格填满」和「只补即时仓」两种口径同时出现。
+const fillScopeNote = computed(() =>
+  fillScope.value === 'both'
+    ? '待补量：按「下一次消耗 + 储备」两格填满备货，已扣除该建筑现有存量。'
+    : '待补量：只补「下一次消耗」（即时仓），储备仓留空，已扣除该格现有存量。',
+);
 
 function currentLifePercent(): string {
   return formatPercent(currentLifeSupport.value);
@@ -1194,7 +1226,7 @@ onUnmounted(() => {
             勾选：选中即纳入方案，可随时手动调整。
           </div>
           <div :class="$style.planNote" data-govh-plan-note>
-            待补量：按「下一次消耗 + 储备」两格填满备货，已扣除该建筑现有存量。
+            {{ fillScopeNote }}
           </div>
           <div :class="$style.planNote" data-govh-plan-note>
             推荐：本地实时价下的逐需求贪心近似，非严格全局最优。
@@ -1204,6 +1236,30 @@ onUnmounted(() => {
           </div>
         </div>
         <div :class="$style.materialToolbar">
+          <!-- 补满范围放在补给方案表上方（与全选/清空同一行左侧）：
+               只改待补量口径，属于「这个表怎么算」，跟顶部的星球 / 维生参数不同层。 -->
+          <span :class="$style.fillScopeLabel">补满范围</span>
+          <div :class="$style.targetGroup" data-govh-fill-group :data-govh-fill-scope="fillScope">
+            <PrunButton
+              :primary="fillScope === 'next'"
+              :dark="fillScope !== 'next'"
+              inline
+              data-govh-fill-next
+              @click="setFillScope('next')"
+              >补满即时仓</PrunButton
+            >
+            <PrunButton
+              :primary="fillScope === 'both'"
+              :dark="fillScope !== 'both'"
+              inline
+              data-govh-fill-both
+              @click="setFillScope('both')"
+              >补满即时 + 储备仓</PrunButton
+            >
+          </div>
+          <span :class="$style.toolbarDivider" aria-hidden="true"></span>
+          <!-- 物料选择：与「补满范围」同格式的分组标签，标明右侧三个按钮作用于勾选。 -->
+          <span :class="$style.fillScopeLabel">物料选择</span>
           <PrunButton dark inline @click="selectAll">全选</PrunButton>
           <PrunButton dark inline @click="selectNone">清空</PrunButton>
           <PrunButton dark inline @click="resetToRecommended">恢复推荐</PrunButton>
@@ -1219,19 +1275,17 @@ onUnmounted(() => {
                 <th :class="$style.needsHeader">覆盖需求</th>
                 <th :class="$style.checkCol">选</th>
                 <th :class="$style.materialCol">物料</th>
-                <th :class="$style.numCol">日耗</th>
-                <th :class="$style.numCol">满仓量</th>
+                <th :class="$style.numCol">{{ fillScope === 'next' ? '即时仓量' : '满仓量' }}</th>
                 <th :class="$style.numCol">待补量</th>
                 <th :class="$style.numCol">单价</th>
                 <th>来源</th>
-                <th :class="$style.numCol">日成本</th>
                 <th :class="$style.numCol">待补成本</th>
                 <th :class="$style.numCol">性价比</th>
               </tr>
             </thead>
             <tbody>
               <tr v-if="materialRows.length === 0">
-                <td colspan="12" :class="$style.empty">该星球没有已建基建，或没有匹配的物料。</td>
+                <td colspan="10" :class="$style.empty">该星球没有已建基建，或没有匹配的物料。</td>
               </tr>
               <tr
                 v-for="row in materialRows"
@@ -1286,17 +1340,18 @@ onUnmounted(() => {
                     <MaterialIcon :ticker="row.option.ticker" size="medium" />
                   </div>
                 </td>
-                <td :class="$style.numCell" data-govh-col="日耗">{{
-                  fixed2(row.option.qtyPerDay)
-                }}</td>
                 <td :class="$style.numCell" data-govh-col="满仓量">{{
-                  fixed0(row.option.grossFillAmount)
+                  row.option.capacityKnown ? fixed0(row.option.grossFillAmount) : '—'
                 }}</td>
                 <!-- 待补量与计算合并成一列：算式右对齐，等号后的得数加粗加深。
                      内层 span 保留 data-govh-col="计算过程" 作为稳定验收钩子。 -->
                 <td :class="[$style.numCell, $style.calcCell]" data-govh-col="待补量">
-                  <span :class="$style.calcExpr" data-govh-col="计算过程">{{ row.calcExpr }}=</span
-                  ><span :class="$style.calcResult">{{ row.calcResult }}</span>
+                  <span :class="$style.calcExpr" data-govh-col="计算过程">{{
+                    row.option.capacityKnown ? row.calcExpr + '=' : ''
+                  }}</span
+                  ><span :class="$style.calcResult">{{
+                    row.option.capacityKnown ? row.calcResult : '容量未知'
+                  }}</span>
                 </td>
                 <td :class="$style.numCell" data-govh-col="单价">{{
                   row.option.price === undefined ? '—' : fixed2(row.option.price)
@@ -1304,11 +1359,10 @@ onUnmounted(() => {
                 <td :class="$style.sourceCell" data-govh-col="来源">{{
                   priceExchanges[row.option.ticker]
                 }}</td>
-                <td :class="$style.numCell" data-govh-col="日成本">{{
-                  row.option.price === undefined ? '—' : fixed0(row.option.dailyCost)
-                }}</td>
                 <td :class="$style.numCell" data-govh-col="待补成本">{{
-                  row.option.price === undefined ? '—' : fixed0(row.option.netFillCost)
+                  row.option.price === undefined || !row.option.capacityKnown
+                    ? '—'
+                    : fixed0(row.option.netFillCost)
                 }}</td>
                 <td :class="$style.numCell" data-govh-col="性价比">
                   {{
@@ -1330,14 +1384,9 @@ onUnmounted(() => {
         <SectionHeader>汇总与采购联动</SectionHeader>
         <div :class="$style.summaryGrid">
           <div :class="$style.statCell">
-            <div :class="$style.statLabel">日成本</div>
-            <div :class="$style.statValue"
-              >{{ result.summary.missingPrices > 0 ? '≈' : ''
-              }}{{ fixed0(result.summary.dailyCost) }}</div
+            <div :class="$style.statLabel"
+              >待补成本({{ fillScope === 'next' ? '即时仓' : '满仓' }})</div
             >
-          </div>
-          <div :class="$style.statCell">
-            <div :class="$style.statLabel">待补成本(满仓)</div>
             <div :class="$style.statValue"
               >{{ result.summary.missingPrices > 0 ? '≈' : ''
               }}{{ fixed0(result.summary.fillCost) }}</div
@@ -1857,6 +1906,17 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+}
+/* 工具条分组标签（补满范围 / 物料选择）：与「已选 x / y」同色，不抢主按钮的层级。 */
+.fillScopeLabel {
+  color: rgb(167, 176, 183);
+  font-size: 11px;
+}
+.toolbarDivider {
+  width: 1px;
+  height: 14px;
+  background: rgba(167, 176, 183, 0.35);
+  margin: 0 2px;
 }
 .selectedCount {
   color: rgb(167, 176, 183);

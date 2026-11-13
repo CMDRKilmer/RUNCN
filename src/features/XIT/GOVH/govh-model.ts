@@ -43,6 +43,12 @@ export type InfraNeed = (typeof INFRA_NEEDS)[number];
 // 目标满足度恒为 100%（「省钱档 / 70%」旋钮已从模型与界面移除，求解器不再接受任意 target）。
 export type LifeSupportAssumption = 'current' | 'full';
 
+// 补满范围：
+//   next = 只补「下一次消耗」那一格（即时仓）——够撑到下一次结算，最省料；
+//   both = 即时仓 + 储备仓（30 天缓冲）——一次填满，之后只在消耗时补。
+// 两格的满格容量都来自本地容量表（见 FACILITY_CAPACITY）。
+export type FillScope = 'next' | 'both';
+
 export const NEED_LABELS: Record<Need, string> = {
   LIFE_SUPPORT: '维生',
   SAFETY: '安全',
@@ -120,12 +126,15 @@ export const HAPPINESS_WEIGHTS: Record<WorkforceLevel, Record<Need, number>> = {
 export const HAPPINESS_WEEK_WEIGHTS = [0.4, 0.25, 0.2, 0.1, 0.05] as const;
 
 // ── 14 座基建建筑（实机 POPI 列表，顺序与游戏 / oog infra-data.js 一致）──
-// qtyPerDay 是每 1 级日耗；needs 是全部物料供给时每 1 级提供的需求单位。
+// materials 是这座建筑维护要用的物料清单（不含任何消耗速率）；
+// needs 是全部物料供给时每 1 级提供的需求单位。
+// 本插件不涉及「日耗」：备货是一次性填满两格仓，容量直接查
+// FACILITY_CAPACITY 或读 POPID 的 progress.max，不需要消耗速率参与。
 export interface UpkeepBuilding {
   ticker: string;
   name: string;
   enName: string;
-  upkeep: Record<string, number>;
+  materials: readonly string[];
   needs: Partial<Record<InfraNeed, number>>;
 }
 
@@ -134,110 +143,230 @@ export const UPKEEP_BUILDINGS: readonly UpkeepBuilding[] = [
     ticker: 'SST',
     name: '安全站',
     enName: 'Safety Station',
-    upkeep: { DW: 10, OFF: 10, SUN: 2 },
+    materials: ['DW', 'OFF', 'SUN'],
     needs: { SAFETY: 2500 },
   },
   {
     ticker: 'SDP',
     name: '安防无人机站',
     enName: 'Security Drone Post',
-    upkeep: { POW: 1, RAD: 0.47, CCD: 0.07, SUD: 0.07 },
+    materials: ['POW', 'RAD', 'CCD', 'SUD'],
     needs: { SAFETY: 5000 },
   },
   {
     ticker: 'EMC',
     name: '应急中心',
     enName: 'Emergency Center',
-    upkeep: { PK: 2, POW: 0.4, BND: 4, RED: 0.07, BSC: 0.07 },
+    materials: ['PK', 'POW', 'BND', 'RED', 'BSC'],
     needs: { SAFETY: 1000, HEALTH: 1000 },
   },
   {
     ticker: 'INF',
     name: '医务室',
     enName: 'Infirmary',
-    upkeep: { OFF: 10, TUB: 6.67, STR: 0.67 },
+    materials: ['OFF', 'TUB', 'STR'],
     needs: { HEALTH: 2500 },
   },
   {
     ticker: 'HOS',
     name: '医院',
     enName: 'Hospital',
-    upkeep: { PK: 2, SEQ: 0.4, BND: 4, SDR: 0.07, RED: 0.07, BSC: 0.13 },
+    materials: ['PK', 'SEQ', 'BND', 'SDR', 'RED', 'BSC'],
     needs: { HEALTH: 5000 },
   },
   {
     ticker: 'WCE',
     name: '健康中心',
     enName: 'Wellness Center',
-    upkeep: { KOM: 4, OLF: 2, DW: 6, DEC: 0.67, PFE: 2.67, SOI: 6.67 },
+    materials: ['KOM', 'OLF', 'DW', 'DEC', 'PFE', 'SOI'],
     needs: { HEALTH: 1000, COMFORT: 1000 },
   },
   {
     ticker: 'PAR',
     name: '野生动物园',
     enName: 'Park',
-    upkeep: { DW: 10, FOD: 6, PFE: 2, SOI: 3.33, DEC: 0.33 },
+    materials: ['DW', 'FOD', 'PFE', 'SOI', 'DEC'],
     needs: { COMFORT: 2500 },
   },
   {
     ticker: '4DA',
     name: '4D游乐中心',
     enName: '4D Arcades',
-    upkeep: { POW: 2, MHP: 2, OLF: 4, BID: 0.2, HOG: 0.2, EDC: 0.2 },
+    materials: ['POW', 'MHP', 'OLF', 'BID', 'HOG', 'EDC'],
     needs: { COMFORT: 5000 },
   },
   {
     ticker: 'ACA',
     name: '艺术餐厅',
     enName: 'Art Cafe',
-    upkeep: { COF: 8, OLF: 2, VIT: 8, DW: 10, GL: 6.67, DEC: 0.67 },
+    materials: ['COF', 'OLF', 'VIT', 'DW', 'GL', 'DEC'],
     needs: { COMFORT: 1000, CULTURE: 1000 },
   },
   {
     ticker: 'ART',
     name: '画廊',
     enName: 'Art Gallery',
-    upkeep: { MHP: 1, HOG: 1, UTS: 0.67, DEC: 0.67 },
+    materials: ['MHP', 'HOG', 'UTS', 'DEC'],
     needs: { CULTURE: 2500 },
   },
   {
     ticker: 'VRT',
     name: 'VR剧院',
     enName: 'VR Theater',
-    upkeep: { POW: 1.4, MHP: 2, HOG: 1.4, OLF: 4, BID: 0.33, DEC: 0.67 },
+    materials: ['POW', 'MHP', 'HOG', 'OLF', 'BID', 'DEC'],
     needs: { CULTURE: 5000 },
   },
   {
     ticker: 'PBH',
     name: '行星广播站',
     enName: 'Planetary Broadcasting Hub',
-    upkeep: { OFF: 10, MHP: 1, SP: 1.33, AAR: 0.67, EDC: 0.27, IDC: 0.13 },
+    materials: ['OFF', 'MHP', 'SP', 'AAR', 'EDC', 'IDC'],
     needs: { CULTURE: 1000, EDUCATION: 1000 },
   },
   {
     ticker: 'LIB',
     name: '图书馆',
     enName: 'Library',
-    upkeep: { MHP: 1, HOG: 1, CD: 0.33, DIS: 0.33, BID: 0.2 },
+    materials: ['MHP', 'HOG', 'CD', 'DIS', 'BID'],
     needs: { EDUCATION: 2500 },
   },
   {
     ticker: 'UNI',
     name: '大学',
     enName: 'University',
-    upkeep: { COF: 10, REA: 10, TUB: 10, BID: 0.33, HD: 0.67, IDC: 0.2 },
+    materials: ['COF', 'REA', 'TUB', 'BID', 'HD', 'IDC'],
     needs: { EDUCATION: 5000 },
   },
 ];
 
 // 全部可补给物料（去重、按 ticker 排序）。
 export const ALL_MATERIALS: readonly string[] = [
-  ...new Set(UPKEEP_BUILDINGS.flatMap(b => Object.keys(b.upkeep))),
+  ...new Set(UPKEEP_BUILDINGS.flatMap(b => b.materials)),
 ].sort();
 
 const BUILDING_BY_TICKER = new Map(UPKEEP_BUILDINGS.map(b => [b.ticker, b]));
 export function getBuilding(ticker: string): UpkeepBuilding | undefined {
   return BUILDING_BY_TICKER.get(ticker);
+}
+
+// ── 每级容量表（满仓量离线推算）─────────────────────────────────────────
+// 2026-11-13 只读实测 VH-192b / AW-844a / QQ-001a 三颗星球、71 组
+// 「建筑 × 物料 × 建成等级 × 运行等级」，下面两条公式 71/71 全命中：
+//   储备满格       = reserve × 建成等级
+//   下一次消耗满格 = next    × 运行等级（LR「人口」标签的「当前」列）
+// 两格用的不是同一个等级：QQ-001a 的 SST 建成 10 / 运行 7，
+// 储备 3000 = 300 × 10，下一次消耗 350 = 50 × 7（不是 10 级应有的 500）；
+// INF 建成 9 / 运行 5 同理。等级上限 10 级，全程线性。
+//
+// 表里直接存**整数每级容量**（等级只是乘数），不存任何消耗速率再去乘：
+// 速率是四舍五入值，乘出来会偏（实测 1800，按速率自算得 1801）。
+//
+// 覆盖范围：实测过的 11 类建筑 54 条（4DA / VRT 于 2026-11-13 在 OT-889b 补测）。
+// EMC / HOS / WCE 还没有样本（周期是「建筑 × 物料」属性，同一物料在不同建筑可以
+// 不同——BID 在 LIB 是 15 天、在 UNI 是 5 天——所以不能跨建筑外推），
+// 这几类继续用 POPID 实测值。
+export interface MaterialCapacity {
+  // 储备每级容量（30 天用量）。
+  reserve: number;
+  // 「下一次消耗」每级容量（一个消耗周期：5 天或 15 天）。
+  next: number;
+}
+
+export const FACILITY_CAPACITY: Readonly<
+  Record<string, Readonly<Record<string, MaterialCapacity>>>
+> = {
+  SST: {
+    DW: { reserve: 300, next: 50 },
+    OFF: { reserve: 300, next: 50 },
+    SUN: { reserve: 60, next: 30 },
+  },
+  SDP: {
+    POW: { reserve: 30, next: 5 },
+    RAD: { reserve: 14, next: 7 },
+    CCD: { reserve: 2, next: 1 },
+    SUD: { reserve: 2, next: 1 },
+  },
+  INF: {
+    OFF: { reserve: 300, next: 50 },
+    TUB: { reserve: 200, next: 100 },
+    STR: { reserve: 20, next: 10 },
+  },
+  PAR: {
+    DW: { reserve: 300, next: 50 },
+    FOD: { reserve: 180, next: 30 },
+    PFE: { reserve: 60, next: 10 },
+    SOI: { reserve: 100, next: 50 },
+    DEC: { reserve: 10, next: 5 },
+  },
+  '4DA': {
+    POW: { reserve: 60, next: 10 },
+    MHP: { reserve: 60, next: 10 },
+    OLF: { reserve: 120, next: 20 },
+    BID: { reserve: 6, next: 3 },
+    HOG: { reserve: 6, next: 3 },
+    EDC: { reserve: 6, next: 3 },
+  },
+  ACA: {
+    DW: { reserve: 300, next: 50 },
+    COF: { reserve: 240, next: 40 },
+    VIT: { reserve: 240, next: 40 },
+    OLF: { reserve: 60, next: 10 },
+    GL: { reserve: 200, next: 100 },
+    DEC: { reserve: 20, next: 10 },
+  },
+  ART: {
+    MHP: { reserve: 30, next: 5 },
+    HOG: { reserve: 30, next: 5 },
+    UTS: { reserve: 20, next: 10 },
+    DEC: { reserve: 20, next: 10 },
+  },
+  VRT: {
+    POW: { reserve: 42, next: 7 },
+    MHP: { reserve: 60, next: 10 },
+    HOG: { reserve: 42, next: 7 },
+    OLF: { reserve: 120, next: 20 },
+    BID: { reserve: 10, next: 5 },
+    DEC: { reserve: 20, next: 10 },
+  },
+  PBH: {
+    OFF: { reserve: 300, next: 50 },
+    MHP: { reserve: 30, next: 5 },
+    SP: { reserve: 40, next: 20 },
+    AAR: { reserve: 20, next: 10 },
+    EDC: { reserve: 8, next: 4 },
+    IDC: { reserve: 4, next: 2 },
+  },
+  LIB: {
+    MHP: { reserve: 30, next: 5 },
+    HOG: { reserve: 30, next: 5 },
+    CD: { reserve: 10, next: 5 },
+    DIS: { reserve: 10, next: 5 },
+    BID: { reserve: 6, next: 3 },
+  },
+  UNI: {
+    COF: { reserve: 300, next: 50 },
+    REA: { reserve: 300, next: 50 },
+    TUB: { reserve: 300, next: 50 },
+    HD: { reserve: 20, next: 10 },
+    BID: { reserve: 10, next: 5 },
+    IDC: { reserve: 6, next: 3 },
+  },
+};
+
+// 某建筑某物料在给定建成 / 运行等级下的满仓两格容量；表外组合返回 undefined
+// （调用方回退 POPID 实测值）。运行等级缺失或为 0 时按建成等级算。
+export function facilityCapacity(
+  ticker: string,
+  material: string,
+  builtLevel: number,
+  runLevel?: number,
+): { reserve: number; next: number } | undefined {
+  const per = FACILITY_CAPACITY[ticker]?.[material];
+  if (per === undefined || builtLevel <= 0) {
+    return undefined;
+  }
+  const run = runLevel !== undefined && runLevel > 0 ? runLevel : builtLevel;
+  return { reserve: per.reserve * builtLevel, next: per.next * run };
 }
 
 // ── 输入 / 输出类型 ──────────────────────────────────────────────────────
@@ -246,8 +375,9 @@ export function getBuilding(ticker: string): UpkeepBuilding | undefined {
 // progress 的当前值；*Capacity 对应它们的 max（游戏给出的满格容量）。
 //
 // 两个仓位的真实语义（2026-11-12 只读实测 VH-192b SST LV2 与 AW-844a SDP LV1）：
-//   - 储备：容量恒为「日耗 × 30」，即 30 天缓冲；
-//   - 下一次消耗：容量恒为「日耗 × 该物料的消耗周期」（5 天或 15 天，按物料不同）。
+//   - 储备：30 天缓冲的量；容量 = 每级储备 × 建成等级；
+//   - 下一次消耗：一个消耗周期（5 或 15 天，按「建筑 × 物料」不同）的量；
+//     容量 = 每级周期量 × 运行等级。
 // 两者都要从基地仓库填进去，消耗完「下一次消耗」后由「储备」自动转移补位。
 // 所以「把这座建筑填满」= 填满两格 = 储备 30 天 + 一个完整周期，
 // 只按 30 天备货会把「下一次消耗」这格空着，建筑还差一个周期才真正满仓。
@@ -275,13 +405,23 @@ export interface GovhInput {
   currentFulfillment: Record<Need, number>;
   // 游戏已算好的五类人口幸福度 0~1（来自 POPR 幸福行）。仅用于展示「现状」。
   currentHappiness: Record<WorkforceLevel, number>;
-  // 各建筑已建造等级（来自 POPI 已建造列）：ticker -> level。
+  // 各建筑已建造等级（来自 LR「人口」的「建成」列）：ticker -> level。
   levels: Record<string, number>;
+  // 各建筑已建造等级（LR「人口」的「建成」列）。只用于按建成等级推算储备容量：
+  // 储备满格 = 每级储备 × 建成等级，与运行等级无关。
+  // 缺省时用 levels（levels 传的是运行等级时会少算）。
+  builtLevels?: Record<string, number>;
+  // 各建筑当前运行等级（LR「人口」的「当前」列）。只用于「下一次消耗」那格容量
+  // 按运行等级而非建成等级推算；缺省时按建成等级算。
+  effectiveLevels?: Record<string, number>;
   // 政府基建设施内部「下一次消耗 + 储备」当前存量（来自 POPID 维护供给表）。
-  // 只扣减一次性待补量，不影响日耗 / 需求贡献；缺省视为 0。
+  // 只扣减一次性待补量，不影响需求贡献；缺省视为 0。
   facilityStocks?: FacilityStocks;
   // 维生预期。缺省 current；一句话说明见 LifeSupportAssumption。
   lifeSupportAssumption?: LifeSupportAssumption;
+  // 补满范围：next = 只补「下一次消耗」（即时仓）；both = 即时仓 + 储备仓（缺省）。
+  // 只影响待补量与成本口径，不参与需求满足度求解。
+  fillScope?: FillScope;
   // 物料单价（从 cxobStore 实时盘口读），无报价为 undefined。
   prices: Record<string, number | undefined>;
   // 用户显式勾选的 (building, material) 键集合 `TICKER.MATERIAL`。
@@ -314,20 +454,18 @@ export interface SupplyOption {
   building: string;
   buildingName: string;
   ticker: string;
-  // 每 1 级日耗。
-  qtyPerDayPerLevel: number;
   builtLevel: number;
   // 覆盖的基建需求。
   needs: InfraNeed[];
   // 每 1 级、该物料贡献的各类需求单位（= needs[need] / n）。
   contribPerLevel: Partial<Record<InfraNeed, number>>;
   price: number | undefined;
-  // 填满全部已建等级时的日耗 / 日成本。
-  qtyPerDay: number;
-  dailyCost: number;
+  // 满仓容量是否已知：POPID 两格 progress 的 max 没解析出来、容量表也查不到时
+  // 为 false，该行待补量 / 成本 / 性价比全部显示「—」且不参与自动推荐。
+  capacityKnown: boolean;
   // 满仓毛量 / 毛成本（未扣政府基建设施内部存量）。
-  // 满仓 = POPID「下一次消耗 + 储备」两格都填满；容量直接取两格 progress 的 max，
-  // 取不到时（旧缓存 / 解析失败）退回「日耗 × 30」的 30 天口径。
+  // 满仓 = POPID「下一次消耗 + 储备」两格都填满；容量取两格 progress 的 max，
+  // POPID 没给到时用 FACILITY_CAPACITY 按等级推算。
   grossFillAmount: number;
   grossFillCost: number;
   // 目标星球该建筑该物料在「下一次消耗 / 储备」两栏的当前存量，非基地仓库。
@@ -343,7 +481,7 @@ export interface SupplyOption {
   // 表格「计算」列用的紧凑算式：`300−50−100=150`。
   // 表头与上方说明已交代各项含义，逐行只留数字与运算符，避免 20 行重复长文案。
   calculationCompact: string;
-  // 该 option 全部覆盖需求在实际等级下的总贡献 / 日成本（排序用；免费=Infinity，无报价=-1）。
+  // 该 option 全部覆盖需求在实际等级下的总贡献 / 本次待补成本（排序用；免费=Infinity，无报价/-1）。
   // Phase2 用它做粗排；Phase1 用 needEfficiency(option, need) 按当前短板需求精排。
   efficiency: number;
   selected: boolean;
@@ -357,7 +495,6 @@ export interface GovhResult {
   options: SupplyOption[];
   selected: Set<string>;
   summary: {
-    dailyCost: number;
     // 选中物料的净待补成本合计（已扣设施内部存量）。
     fillCost: number;
     weight: number;
@@ -442,8 +579,9 @@ function buildOptions(input: GovhInput): SupplyOption[] {
     if (builtLevel <= 0) {
       continue;
     }
-    const n = Object.keys(building.upkeep).length;
-    for (const [ticker, qtyPerDayPerLevel] of Object.entries(building.upkeep)) {
+    const n = building.materials.length;
+    for (const material of building.materials) {
+      const ticker = material;
       const contribPerLevel: Partial<Record<InfraNeed, number>> = {};
       for (const [need, amount] of Object.entries(building.needs) as [InfraNeed, number][]) {
         if (amount > 0) {
@@ -455,41 +593,68 @@ function buildOptions(input: GovhInput): SupplyOption[] {
         continue;
       }
       const price = input.prices[ticker];
-      const qtyPerDay = qtyPerDayPerLevel * builtLevel;
       const stock = input.facilityStocks?.[building.ticker]?.[ticker];
-      // 满仓量直接取 POPID 两格 progress 的 max（游戏按等级算好的真实容量）：
+      // 满仓量取 POPID 两格 progress 的 max（游戏按等级算好的真实容量）：
       // 储备 = 30 天缓冲，下一次消耗 = 一个完整消耗周期，两格都填满才算满仓。
-      // 读不到容量时退回 30 天口径并取整——日耗带小数（如 RAD 0.47/天）时
-      // 「日耗 × 30」会算出 14.1，游戏自己显示的是取整后的 14。
+      // 容量表只在 POPID 的 max 没解析出来时补位；两者都没有就如实标记
+      // 「容量未知」，不拿任何消耗速率去猜（本插件不使用日耗）。
       const stockNextCapacity = safeStock(stock?.nextCapacity);
       const stockReserveCapacity = safeStock(stock?.reserveCapacity);
-      const capacity = stockNextCapacity + stockReserveCapacity;
-      const grossFillAmount = capacity > 0 ? capacity : Math.round(qtyPerDay * 30);
       const stockNextConsumption = safeStock(stock?.nextConsumption);
       const stockReserve = safeStock(stock?.reserve);
-      const stockTotal = stockNextConsumption + stockReserve;
+      // 补满范围：next 档只补「下一次消耗」（即时仓），both 档两格都补。
+      // 存量抵扣也按同一范围取，避免 next 档把储备仓里的料算进抵扣。
+      const fillScope = input.fillScope ?? 'both';
+      const measuredCapacity =
+        fillScope === 'next' ? stockNextCapacity : stockNextCapacity + stockReserveCapacity;
+      // 实测优先（POPID 两格 progress.max），缺失时用容量表按等级推算。
+      const tableCapacity =
+        measuredCapacity > 0
+          ? undefined
+          : facilityCapacity(
+              building.ticker,
+              ticker,
+              input.builtLevels?.[building.ticker] ?? builtLevel,
+              input.effectiveLevels?.[building.ticker] ?? builtLevel,
+            );
+      const capacity =
+        measuredCapacity > 0
+          ? measuredCapacity
+          : tableCapacity === undefined
+            ? 0
+            : fillScope === 'next'
+              ? tableCapacity.next
+              : tableCapacity.reserve + tableCapacity.next;
+      // 两处都拿不到容量就无法算待补量 → 整行标「—」、不参与自动推荐，
+      // 由用户自己决定填多少（比按错误容量报一个假数字安全）。
+      const capacityKnown = capacity > 0;
+      const grossFillAmount = capacity;
+      const stockTotal =
+        fillScope === 'next' ? stockNextConsumption : stockNextConsumption + stockReserve;
       // 政府基建设施内部已有的「下一次消耗 + 储备」直接抵扣一次性采购量。
-      const netFillAmount = Math.max(0, grossFillAmount - stockTotal);
-      const dailyCost = price !== undefined ? qtyPerDay * price : 0;
+      const netFillAmount = capacityKnown ? Math.max(0, grossFillAmount - stockTotal) : 0;
       const grossFillCost = price !== undefined ? grossFillAmount * price : 0;
       const netFillCost = price !== undefined ? netFillAmount * price : 0;
-      // contribPerLevel 是「每 1 级」的贡献，dailyCost 已含 builtLevel；
-      // 性价比必须把贡献乘回实际等级，否则高等级建筑会被按 1/level 低估。
+      // contribPerLevel 是「每 1 级」的贡献，netFillCost 已含 builtLevel；
+      // 性价比 = 这次一次性备货每花 1 credit 换到的需求单位，
+      // 必须把贡献乘回实际等级，否则高等级建筑会被按 1/level 低估。
       const totalContrib = sum(needs.map(need => contribPerLevel[need] ?? 0)) * builtLevel;
       const efficiency =
-        price === undefined ? -1 : price === 0 ? Infinity : totalContrib / dailyCost;
+        price === undefined || !capacityKnown
+          ? -1
+          : price === 0 || netFillCost === 0
+            ? Infinity
+            : totalContrib / netFillCost;
       options.push({
         key: `${building.ticker}.${ticker}`,
         building: building.ticker,
         buildingName: building.name,
         ticker,
-        qtyPerDayPerLevel,
         builtLevel,
         needs,
         contribPerLevel,
         price,
-        qtyPerDay,
-        dailyCost,
+        capacityKnown,
         grossFillAmount,
         grossFillCost,
         stockNextConsumption,
@@ -497,12 +662,22 @@ function buildOptions(input: GovhInput): SupplyOption[] {
         stockTotal,
         netFillAmount,
         netFillCost,
-        calculation: `满仓量 ${formatQuantity(grossFillAmount)} − 下一次消耗 ${formatQuantity(
-          stockNextConsumption,
-        )} − 储备 ${formatQuantity(stockReserve)} = 待补 ${formatQuantity(netFillAmount)}`,
-        calculationCompact: `${formatQuantity(grossFillAmount)}−${formatQuantity(
-          stockNextConsumption,
-        )}−${formatQuantity(stockReserve)}=${formatQuantity(netFillAmount)}`,
+        calculation:
+          fillScope === 'next'
+            ? `即时仓 ${formatQuantity(grossFillAmount)} − 已备 ${formatQuantity(
+                stockNextConsumption,
+              )} = 待补 ${formatQuantity(netFillAmount)}`
+            : `满仓量 ${formatQuantity(grossFillAmount)} − 下一次消耗 ${formatQuantity(
+                stockNextConsumption,
+              )} − 储备 ${formatQuantity(stockReserve)} = 待补 ${formatQuantity(netFillAmount)}`,
+        calculationCompact:
+          fillScope === 'next'
+            ? `${formatQuantity(grossFillAmount)}−${formatQuantity(
+                stockNextConsumption,
+              )}=${formatQuantity(netFillAmount)}`
+            : `${formatQuantity(grossFillAmount)}−${formatQuantity(
+                stockNextConsumption,
+              )}−${formatQuantity(stockReserve)}=${formatQuantity(netFillAmount)}`,
         efficiency,
         selected: false,
       });
@@ -533,7 +708,8 @@ function computeProvided(
   provided.LIFE_SUPPORT = needed.LIFE_SUPPORT * lifeBaseline;
   for (const option of options) {
     // 已填满的存量是免费基线；未填满时必须显式采购才计入。
-    if (!active.has(option.key) && option.netFillAmount > 0) {
+    // 容量未知的物料无法判断是否已填满，同样不能当免费基线（否则会凭空多算贡献）。
+    if (!active.has(option.key) && (!option.capacityKnown || option.netFillAmount > 0)) {
       continue;
     }
     for (const [need, contrib] of Object.entries(option.contribPerLevel) as [InfraNeed, number][]) {
@@ -583,7 +759,10 @@ function needEfficiency(option: SupplyOption, need: InfraNeed): number {
   if (contrib <= 0) {
     return -1;
   }
-  return option.price === 0 ? Infinity : contrib / option.dailyCost;
+  if (option.price === 0) {
+    return Infinity;
+  }
+  return option.netFillCost > 0 ? contrib / option.netFillCost : -1;
 }
 
 function compareByEfficiency(a: number, b: number, direction: 'asc' | 'desc'): number {
@@ -677,7 +856,6 @@ export function solve(input: GovhInput): GovhResult {
     };
   }
 
-  let dailyCost = 0;
   let fillCost = 0;
   let weight = 0;
   let volume = 0;
@@ -694,7 +872,6 @@ export function solve(input: GovhInput): GovhResult {
       }
       continue;
     }
-    dailyCost += option.dailyCost;
     fillCost += option.netFillCost;
     const info = input.materialsInfo?.[option.ticker];
     if (info) {
@@ -726,7 +903,6 @@ export function solve(input: GovhInput): GovhResult {
     options,
     selected,
     summary: {
-      dailyCost,
       fillCost,
       weight,
       volume,

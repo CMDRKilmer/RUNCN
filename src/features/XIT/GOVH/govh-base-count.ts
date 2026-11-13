@@ -17,9 +17,85 @@ import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 
 const READ_TIMEOUT = 12000;
-// 基地增减很慢；同一星球 10 分钟内复用上次结果，避免每点一次「刷新数据」都开窗。
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const cache = new Map<string, { count: number; at: number }>();
+// 整星基地数服务于安全 / 健康的基础供给（每座 +50），而这两项是**按人口报告周期
+// 结算**的：周期内新建成 / 拆除基地不会立刻反映到满足度上，要等下一次报告。
+// 所以缓存跟着人口报告周期走——同一周期内复用，跨周期重读，与 POPR 缓存同一个
+// 失效时刻（`rprun.govh.popr.v1.<星球>` 的 endsAt）。
+// 读不到周期信息时退回 24 小时兜底，避免退化成每次开窗。
+// 表头始终标注「整星 N 座基地（自有 M）」，口径可见；「刷新数据」会强制重读。
+const FALLBACK_TTL_MS = 24 * 60 * 60 * 1000;
+const STORAGE_PREFIX = 'rprun.govh.base-count.v1.';
+const POPR_CACHE_PREFIX = 'rprun.govh.popr.v1.';
+
+// 该星球当前人口报告周期的结束时刻（由 POPR 缓存写入）。
+function reportCycleEndsAt(planet: string): number | undefined {
+  try {
+    const raw = localStorage.getItem(POPR_CACHE_PREFIX + planet.toUpperCase());
+    if (raw === null) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as { endsAt?: unknown } | null;
+    return typeof parsed?.endsAt === 'number' ? parsed.endsAt : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readCached(planet: string): number | undefined {
+  const code = planet.trim().toLowerCase();
+  try {
+    const raw = localStorage.getItem(STORAGE_PREFIX + code);
+    if (raw === null) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as {
+      count?: unknown;
+      at?: unknown;
+      cycleEndsAt?: unknown;
+    } | null;
+    if (
+      parsed === null ||
+      typeof parsed.count !== 'number' ||
+      typeof parsed.at !== 'number' ||
+      parsed.count <= 0
+    ) {
+      return undefined;
+    }
+    const cycle = reportCycleEndsAt(planet);
+    if (cycle !== undefined) {
+      // 与人口报告周期绑定：换了周期或已过期就重读，避免用上一期的基地数。
+      const sameCycle = parsed.cycleEndsAt === cycle;
+      if (!sameCycle || Date.now() >= cycle) {
+        return undefined;
+      }
+      return parsed.count;
+    }
+    if (Date.now() - parsed.at > FALLBACK_TTL_MS) {
+      localStorage.removeItem(STORAGE_PREFIX + code);
+      return undefined;
+    }
+    return parsed.count;
+  } catch {
+    // 隐私模式 / 配额不足 / 脏数据：当作没有缓存，走实时读取。
+    return undefined;
+  }
+}
+
+function writeCached(planet: string, count: number): void {
+  const code = planet.trim().toLowerCase();
+  try {
+    localStorage.setItem(
+      STORAGE_PREFIX + code,
+      JSON.stringify({
+        count,
+        at: Date.now(),
+        cycleEndsAt: reportCycleEndsAt(planet),
+      }),
+    );
+  } catch {
+    // 写不进去就每次重读，不影响功能。
+  }
+}
 
 export interface PlanetBaseCount {
   // 整星基地总数（含其他公司的基地）。
@@ -38,16 +114,16 @@ export async function readPlanetBaseCount(
     return undefined;
   }
   if (!force) {
-    const hit = cache.get(code);
-    if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
-      return { total: hit.count, source: 'channel' };
+    const cached = readCached(planet);
+    if (cached !== undefined) {
+      return { total: cached, source: 'channel' };
     }
   }
   const count = await countChannelMembers(code);
   if (count === undefined || count <= 0) {
     return undefined;
   }
-  cache.set(code, { count, at: Date.now() });
+  writeCached(planet, count);
   return { total: count, source: 'channel' };
 }
 

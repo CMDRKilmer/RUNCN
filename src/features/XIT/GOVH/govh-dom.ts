@@ -25,6 +25,7 @@ import {
   LEVEL_LABELS,
   NEED_LABELS,
   UPKEEP_BUILDINGS,
+  facilityCapacity,
   type FacilityMaterialStocks,
   type FacilityStocks,
   type Need,
@@ -373,6 +374,88 @@ function parseReportLabel(window: HTMLElement): string | undefined {
   return text || undefined;
 }
 
+// ── POPR 按人口报告周期缓存 ─────────────────────────────────────────────
+// 五类人口 / 五类幸福度 / 六类需求满足度在一个报告周期内是固定值（周期 7 天整），
+// 只有跨周期才会变。每颗星球的周期起止时刻不同，所以缓存按星球独立，并用 POPR
+// 顶部「报告#43/5天 13小时前」的生成时长反推本期结束时刻：
+//   本期结束 = 现在 + (7 天 − 报告距今天数)
+// 同一周期内再进面板直接复用，不再开 POPR 窗口；跨周期自动失效并重读。
+const REPORT_CYCLE_MS = 7 * 24 * 60 * 60 * 1000;
+const POPR_CACHE_PREFIX = 'rprun.govh.popr.v1.';
+
+// 「报告#43/5天 13小时前」「报告#43/3小时前」「报告#43/12分钟前」→ 毫秒。
+// 解析不出来（如「刚刚」）就返回 undefined，此时不写缓存，保持每次重读。
+function parseReportAgeMs(label: string | undefined): number | undefined {
+  if (label === undefined) {
+    return undefined;
+  }
+  const text = label.replace(/\s+/g, ' ');
+  const cnDay = /(\d+)\s*天\s*(\d+)\s*小时/.exec(text);
+  if (cnDay) {
+    return (Number(cnDay[1]) * 24 + Number(cnDay[2])) * 3600_000;
+  }
+  const enDay = /(\d+)\s*d(?:ays?)?\s*(\d+)\s*h/i.exec(text);
+  if (enDay) {
+    return (Number(enDay[1]) * 24 + Number(enDay[2])) * 3600_000;
+  }
+  const hour = /(\d+)\s*(?:小时|h)/i.exec(text);
+  if (hour) {
+    return Number(hour[1]) * 3600_000;
+  }
+  const minute = /(\d+)\s*(?:分钟|min)/i.exec(text);
+  if (minute) {
+    return Number(minute[1]) * 60_000;
+  }
+  return undefined;
+}
+
+function readPoprCycleCache(planet: string): GovhSnapshot | undefined {
+  try {
+    const raw = localStorage.getItem(POPR_CACHE_PREFIX + planet.toUpperCase());
+    if (raw === null) {
+      return undefined;
+    }
+    const parsed = JSON.parse(raw) as { snapshot?: GovhSnapshot; endsAt?: unknown } | null;
+    if (parsed === null || parsed.snapshot === undefined || typeof parsed.endsAt !== 'number') {
+      return undefined;
+    }
+    if (parsed.snapshot.planet?.toLowerCase() !== planet.toLowerCase()) {
+      return undefined;
+    }
+    if (Date.now() >= parsed.endsAt) {
+      localStorage.removeItem(POPR_CACHE_PREFIX + planet.toUpperCase());
+      return undefined;
+    }
+    return parsed.snapshot;
+  } catch {
+    // 隐私模式 / 脏数据：当作没有缓存，走实时读取。
+    return undefined;
+  }
+}
+
+function writePoprCycleCache(
+  planet: string,
+  snapshot: GovhSnapshot,
+  ageMs: number | undefined,
+): void {
+  if (ageMs === undefined || ageMs < 0) {
+    return;
+  }
+  const remaining = REPORT_CYCLE_MS - ageMs;
+  // 报告年龄超过一个周期说明解析到的是历史文本，宁可不缓存。
+  if (remaining <= 0) {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      POPR_CACHE_PREFIX + planet.toUpperCase(),
+      JSON.stringify({ snapshot, endsAt: Date.now() + remaining }),
+    );
+  } catch {
+    // 写不进去就每次重读，不影响功能。
+  }
+}
+
 // 从 POPR 底部「管理方项目」读取项目名与说明（没有该区块时返回 undefined）。
 function parseGovernanceProject(window: HTMLElement): GovernanceProject | undefined {
   const header = (_$$(window, 'div') as HTMLElement[]).find(
@@ -697,8 +780,8 @@ function parseProgressValue(cell: Element | undefined): number {
 }
 
 // 读取同一列 progress 的满格容量（max）。
-// 游戏在这里给出按等级算好的真实容量：储备 = 日耗 × 30，下一次消耗 = 日耗 × 周期，
-// 直接用它当「满仓量」比自算「日耗 × 30」更准（日耗带小数时自算会多出 0.1 位）。
+// 游戏在这里给出按等级算好的真实两格容量（储备 / 下一次消耗），直接拿来当满仓量；
+// 这里只读数值，不涉及任何消耗速率。
 function parseProgressCapacity(cell: Element | undefined): number {
   const progress = cell?.querySelector('progress');
   if (!progress) {
@@ -770,6 +853,57 @@ function parsePopidStock(window: HTMLElement): FacilityMaterialStocks | undefine
 // 最近一次读取失败的具体原因（给面板提示用）。成功或取走即清空。
 let lastFailure: string | undefined;
 
+// 满仓量「表 vs 实测」不一致的物料（去重）。表是固化常量，游戏改数值或表本身
+// 写错时会走到这里；此时按实测值算，避免静默按错表给出偏大 / 偏小的待补量。
+const capacityMismatches = new Set<string>();
+
+export function takeCapacityMismatches(): string[] {
+  const list = [...capacityMismatches];
+  capacityMismatches.clear();
+  return list;
+}
+
+// 用本地每级容量表覆盖每个物料的满仓两格容量。
+//
+// 为什么：容量 = 每级容量 × 等级，等级只有 1~10 且严格线性（2026-11-13 实测
+// 71/71），所以不需要每次开 POPID 解析 progress.max 才能拿到满仓量。这样即使
+// 某格进度条的 max 没解析出来，也不会退化成任何按速率自算的旧口径。
+// 两格用的不是同一个等级：储备按建成等级，下一次消耗按运行等级（LR「当前」列），
+// 所以运行等级未知时不算表——用建成等级猜会让下一次消耗偏大。
+//
+// 表算值优先；一旦与实测冲突则信实测（游戏本身），并记一条差异供诊断。
+function applyCapacityTable(
+  stocks: FacilityStocks,
+  levels: Record<string, number>,
+  effectiveLevels: Record<string, number> | undefined,
+): void {
+  if (effectiveLevels === undefined) {
+    return;
+  }
+  for (const [ticker, materials] of Object.entries(stocks)) {
+    const built = levels[ticker] ?? 0;
+    for (const [material, stock] of Object.entries(materials)) {
+      const predicted = facilityCapacity(ticker, material, built, effectiveLevels[ticker]);
+      if (predicted === undefined) {
+        continue;
+      }
+      const measuredReserve = stock.reserveCapacity;
+      const measuredNext = stock.nextCapacity;
+      const conflicts =
+        (measuredReserve !== undefined && measuredReserve !== predicted.reserve) ||
+        (measuredNext !== undefined && measuredNext !== predicted.next);
+      if (conflicts) {
+        capacityMismatches.add(`${ticker}.${material}`);
+        stock.reserveCapacity = measuredReserve ?? predicted.reserve;
+        stock.nextCapacity = measuredNext ?? predicted.next;
+        continue;
+      }
+      stock.reserveCapacity = predicted.reserve;
+      stock.nextCapacity = predicted.next;
+    }
+  }
+}
+
 export function takeReadFailure(): string | undefined {
   const failure = lastFailure;
   lastFailure = undefined;
@@ -796,22 +930,43 @@ function withSnapshotLock<T>(task: () => Promise<T>): Promise<T> {
 // 关键数据失败返回 undefined（面板降级提示），绝不按 0 存量静默给出偏大清单。
 // LR 是可选增强：读不到「项目」时面板降级回 POPR 的单行项目；读不到「人口」时
 // effectiveLevels 缺省、求解回退已建造等级，保持旧行为。两者都不阻断主流程。
-export function readGovernanceSnapshot(planet: string): Promise<GovhSnapshot | undefined> {
-  return withSnapshotLock(() => readGovernanceSnapshotLocked(planet));
+export function readGovernanceSnapshot(
+  planet: string,
+  force = false,
+): Promise<GovhSnapshot | undefined> {
+  return withSnapshotLock(() => readGovernanceSnapshotLocked(planet, force));
 }
 
-async function readGovernanceSnapshotLocked(planet: string): Promise<GovhSnapshot | undefined> {
+async function readGovernanceSnapshotLocked(
+  planet: string,
+  force: boolean,
+): Promise<GovhSnapshot | undefined> {
   // 星球编码保留玩家输入的原样（PrUn natural ID 大小写敏感，如 VH-192b）。
   const target = planet.trim();
   if (target === '') {
     return undefined;
   }
-  const popr = await withBuffer(`POPR ${target}`, POPR_TIMEOUT, window =>
-    parsePopr(window, target),
-  );
+  // 人口 / 幸福度 / 六类满足度在一个报告周期内是固定值：周期内直接复用上一次读到的
+  // POPR 结果，不再开窗；跨周期缓存自动失效。「刷新数据」按钮（force）强制重读。
+  let popr = force ? undefined : readPoprCycleCache(target);
   if (!popr) {
-    lastFailure = `POPR ${target} 的人口 / 需求满足度表没读到`;
-    return undefined;
+    const read = await withBuffer<{ snapshot: GovhSnapshot; ageMs: number | undefined }>(
+      `POPR ${target}`,
+      POPR_TIMEOUT,
+      window => {
+        const snapshot = parsePopr(window, target);
+        if (!snapshot) {
+          return undefined;
+        }
+        return { snapshot, ageMs: parseReportAgeMs(snapshot.reportLabel) };
+      },
+    );
+    if (!read) {
+      lastFailure = `POPR ${target} 的人口 / 需求满足度表没读到`;
+      return undefined;
+    }
+    popr = read.snapshot;
+    writePoprCycleCache(target, popr, read.ageMs);
   }
   const lr = await readLr(target);
   const infra = lr?.infra;
@@ -824,7 +979,8 @@ async function readGovernanceSnapshotLocked(planet: string): Promise<GovhSnapsho
     return undefined;
   }
   // 「当前」列是上一周期实际运行等级：目标降级 / 断供时会小于建成等级，
-  // 求解必须按它算日耗与贡献，否则按建成等级全额估算会系统性高估 provided。
+  // 求解必须按它算贡献（容量另按建成 / 运行等级分别推算），
+  // 否则按建成等级全额估算会系统性高估 provided。
   const effectiveLevels: Record<string, number> | undefined = infra
     ? Object.fromEntries(infra.levels.map(entry => [entry.ticker, entry.current]))
     : undefined;
@@ -869,6 +1025,8 @@ async function readGovernanceSnapshotLocked(planet: string): Promise<GovhSnapsho
     lastFailure = `已建建筑 ${missing.map(building => building.ticker).join(' / ')} 的 POPID 维护供给表没读到`;
     return undefined;
   }
+  // 满仓量改用本地对照表算（POPID 只保证当前存量）。表外建筑保留实测容量。
+  applyCapacityTable(facilityStocks, levels, effectiveLevels);
   return {
     ...popr,
     levels,
