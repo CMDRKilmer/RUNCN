@@ -261,6 +261,66 @@ export function gameRouteRecord(route: RouteData, shipId: string | undefined): N
   };
 }
 
+// 展示记录以**游戏航线定义**为准（玩家可能在原生 RT 里改过航点/步骤/档位）；
+// 本地记录只保留仍然匹配的估算值（预计飞行时长）与船/产业链元数据。
+export function mergeRouteRecord(
+  route: RouteData,
+  shipId: string | undefined,
+  local: NativeRouteRecord | undefined,
+): NativeRouteRecord {
+  const server = gameRouteRecord(route, shipId ?? local?.shipId);
+  if (local === undefined) {
+    return server;
+  }
+  const waypoints = server.waypoints.map((waypoint, index) => {
+    const previous = local.waypoints[index];
+    if (previous === undefined || !sameWaypoint(previous, waypoint)) {
+      return waypoint;
+    }
+    // 服务器目的地是暂时换不出名字的结构时，用本地同名航点的可读地址兜底。
+    const location =
+      waypoint.location === '未知航点' && typeof previous.location === 'string'
+        ? previous.location
+        : waypoint.location;
+    // 档位变了时长就不成立，只在档位仍一致时沿用。
+    if (previous.flightHours === undefined || previous.fuelPercent !== waypoint.fuelPercent) {
+      return { ...waypoint, location };
+    }
+    return { ...waypoint, location, flightHours: previous.flightHours };
+  });
+  return {
+    ...server,
+    // 服务端名称是空/默认的 RT 号时，沿用向导写入的产业链名。
+    name: server.name === server.naturalId && local.name !== '' ? local.name : server.name,
+    shipId: server.shipId !== '' ? server.shipId : local.shipId,
+    shipLabel: server.shipLabel !== '' ? server.shipLabel : local.shipLabel,
+    chainName: local.chainName,
+    createdAt: local.createdAt,
+    waypoints,
+  };
+}
+
+function sameWaypoint(a: NativeRouteWaypointRecord, b: NativeRouteWaypointRecord) {
+  if (typeof b.encoded === 'string') {
+    return typeof a.encoded === 'string'
+      ? a.encoded.trim().toUpperCase() === b.encoded.trim().toUpperCase()
+      : sameLocation(a.location, b.location);
+  }
+  // 服务器的目的地换不出可读地址时只能按航点序号对齐（local 与 server 按 index 配对）。
+  if (b.location === '未知航点') {
+    return true;
+  }
+  return sameLocation(a.location, b.location);
+}
+
+function sameLocation(a: string, b: string) {
+  return (
+    typeof a === 'string' &&
+    typeof b === 'string' &&
+    a.trim().toUpperCase() === b.trim().toUpperCase()
+  );
+}
+
 function toWaypoint(waypoint: RouteWaypointData): NativeRouteWaypointRecord {
   const target = resolveDestination(waypoint.destination);
   return {

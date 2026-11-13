@@ -42,7 +42,7 @@ import {
 } from './native-route-registry';
 import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
-import { gameRouteRecord, matchRunningRoutes, type RunningRoutes } from './native-route-game';
+import { mergeRouteRecord, matchRunningRoutes, type RunningRoutes } from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -265,7 +265,8 @@ const nativeRoutes = computed<NativeRouteView[]>(() => {
     const seen = new Set<string>();
     for (const entry of running.entries) {
       const local = findNativeRouteRecord(entry.route.id, entry.route.naturalId);
-      const record = local ?? gameRouteRecord(entry.route, entry.shipId);
+      // 航点/步骤/档位以游戏里的航线为准（玩家可能改过），本地只补仍然匹配的估算值。
+      const record = mergeRouteRecord(entry.route, entry.shipId, local);
       const shipId = entry.shipId ?? record.shipId;
       const key = `${entry.route.id}|${shipId}`;
       if (seen.has(key)) {
@@ -1234,15 +1235,8 @@ function flightTotalText(shipId: string): string {
     <div v-if="statusCheckNotice" :class="$style.notice">{{ statusCheckNotice }}</div>
     <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
-    <!-- 规划中 / 运行中 分页：有运行中环线时仍可规划其他环线，两页独立查看。 -->
-    <div
-      v-if="
-        activeRuns.length > 0 ||
-        shipPlans.length > 0 ||
-        nativeRoutes.length > 0 ||
-        filteredStopNotices.length > 0
-      "
-      :class="$style.content">
+    <!-- 规划中 / 运行中 分页：页签始终可见，运行中页进入时会自行发现游戏里正在执行的航线。 -->
+    <div :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
           <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
@@ -1707,29 +1701,29 @@ function flightTotalText(shipId: string): string {
       <div v-if="chainTab === 'plan' && unusedShipCount > 0" :class="$style.notice">
         已忽略 {{ unusedShipCount }} 艘未参与分配的船。
       </div>
-      <div v-if="visibleTables.length === 0 && nativeRoutes.length === 0" :class="$style.hint">
-        {{
-          chainTab === 'plan'
-            ? '当前没有可执行的规划。请在上方选择分组、基地与船只后点击「执行环线」。'
-            : '当前没有运行中的环线。'
-        }}
+      <template v-if="chainTab === 'plan'">
+        <div v-if="!chainGroup" :class="$style.hint">
+          选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
+        </div>
+        <div v-else-if="groupBases.length === 0" :class="$style.hint">
+          该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
+        </div>
+        <div v-else-if="selectedBases.length === 0" :class="$style.hint">
+          请勾选参与环线的基地。
+        </div>
+        <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
+          没有停靠 CX 且有仓库/货舱的可用船只。
+        </div>
+        <div v-else-if="selectedShips.length === 0" :class="$style.hint"> 请分配至少一艘船。 </div>
+        <LoadingSpinner v-else-if="loading" />
+        <div v-else-if="visibleTables.length === 0" :class="$style.hint">
+          当前没有可执行的规划。请在上方选择分组、基地与船只后点击「执行环线」。
+        </div>
+      </template>
+      <div v-else-if="visibleTables.length === 0 && nativeRoutes.length === 0" :class="$style.hint">
+        当前没有运行中的环线。
       </div>
     </div>
-
-    <template v-else>
-      <div v-if="!chainGroup" :class="$style.hint">
-        选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
-      </div>
-      <div v-else-if="groupBases.length === 0" :class="$style.hint">
-        该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
-      </div>
-      <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
-      <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
-        没有停靠 CX 且有仓库/货舱的可用船只。
-      </div>
-      <div v-else-if="selectedShips.length === 0" :class="$style.hint">请分配至少一艘船。</div>
-      <LoadingSpinner v-else-if="loading" />
-    </template>
   </div>
 </template>
 

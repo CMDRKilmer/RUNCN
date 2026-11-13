@@ -39,11 +39,12 @@ function chooseSample(samples: readonly FuelTradeoff[], maxFuel: number | undefi
 
 // 把试飞响应里的 TRANSIT 段转成 FTC 转移速度查询表的样本（q, aEff, v）：
 // 远端表只覆盖少数 aEff 行，采到该船自己的 aEff 行后，同船后续的 FTC 计算就不再判「超出可靠范围」。
-// 质量口径与 computeFtcPlan 一致（extraMassT 直接加到 ship.mass 上）。
+// 质量口径与 computeFtcPlan 一致：`perf.mass` 就是当前船质量（已含船上现有货物），
+// 这里只叠加**计划新增载重**；payload 里为了让服务器算对试飞而加的现有货物不能重复算。
 function recordTransitSpeedSamples(
   performance: ReturnType<typeof shipPerformanceFor>,
   ship: PrunApi.Ship,
-  payload: number,
+  addedMass: number,
   tank: number,
   fuelPercent: number,
   plan: PrunApi.FlightPlan,
@@ -52,7 +53,7 @@ function recordTransitSpeedSamples(
   if (engine === undefined || !(tank > 0)) {
     return;
   }
-  const mass = (ship.mass > 0 ? ship.mass : ship.operatingEmptyMass) + payload;
+  const mass = (ship.mass > 0 ? ship.mass : ship.operatingEmptyMass) + addedMass;
   if (!(mass > 0) || !(ship.operatingEmptyMass > 0) || !(ship.acceleration > 0)) {
     return;
   }
@@ -150,10 +151,8 @@ export async function measureNativeRouteFuel(
       const destination = await addressCode(to);
       // 载重 = 计划舱载 + 船上现有货物：规划器的 loadOnDeparture 从空舱起算
       // （现有货物只用来压减可用舱容），而服务器试飞只认 payload 参数。
-      const payload = Math.ceil(
-        legLoadWeight(candidate.plan, index, legCount) +
-          (candidate.ship.cargoStore?.weightLoad ?? 0),
-      );
+      const plannedLoad = Math.ceil(legLoadWeight(candidate.plan, index, legCount));
+      const payload = plannedLoad + (candidate.ship.cargoStore?.weightLoad ?? 0);
       const samples: FuelTradeoff[] = [];
       let timeouts = 0;
       let rejected = 0;
@@ -180,7 +179,7 @@ export async function measureNativeRouteFuel(
         }
         if (plan.status === 'OK') {
           const summary = summarizeNativeFlightPlan(plan);
-          recordTransitSpeedSamples(performance, ship, payload, stlFuel, percent, plan);
+          recordTransitSpeedSamples(performance, ship, plannedLoad, stlFuel, percent, plan);
           if (summary.totalSeconds > 0) {
             samples.push({
               fuel: percent,
