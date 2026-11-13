@@ -5,7 +5,7 @@ import {
 } from '@src/features/XIT/FTC/ftc-compute';
 import { stlDepartureFuelCapPercent } from '@src/features/XIT/FTC/fuel-model';
 import type { ShipChainPlan } from './chain-allocation';
-import { measureNativeRouteFuel, type BtfFuelResult } from './native-route-btf';
+import { measureNativeRouteFuel } from './native-route-btf';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
   legLoadWeight,
@@ -38,22 +38,42 @@ export async function computeNativeRouteFuel(
   signal: AbortSignal,
   onProgress: (status: string) => void,
 ): Promise<NativeRouteFuelPlan> {
-  const registration = candidate.ship.ship.registration;
+  const ship = candidate.ship.ship;
+  const registration = ship.registration;
   const legCount = waypoints.length - 1;
-  // 出发地有 STL 补满步骤 = 每圈都满罐起飞；模型默认用当前余量，会把还没补油的船算慢/算费。
-  const fuelRemaining = shipFuelRemainingFor(candidate.ship.ship);
-  const refillsStl =
-    waypoints[0]?.steps.some(x => x.kind === 'refuel' && x.tank === 'STL') ?? false;
-  const stlFuelOverride = refillsStl && fuelRemaining.stlCap > 0 ? fuelRemaining.stlCap : undefined;
+  const performance = shipPerformanceFor(ship);
+  const fuelNow = shipFuelRemainingFor(ship);
+  const stlCap = fuelNow.stlCap > 0 ? fuelNow.stlCap : performance.stlFuelCapacity;
+  const ftlCap = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : undefined;
+  // 出发油量：有补油步骤时出发前会补满，否则用当前余量；后续航段按上一段实耗递减，
+  // 只有真正存在补油步骤的航点才重置为罐容量（规划器只在出发地写补油）。
+  let stlFuel = fuelNow.stlRemaining > 0 ? fuelNow.stlRemaining : undefined;
+  let ftlFuel = fuelNow.ftlRemaining > 0 ? fuelNow.ftlRemaining : undefined;
+  const refuels = (waypointIndex: number, tank: 'STL' | 'FTL') =>
+    waypoints[waypointIndex]?.steps.some(x => x.kind === 'refuel' && x.tank === tank) ?? false;
+  const applyRefuel = (waypointIndex: number) => {
+    if (refuels(waypointIndex, 'STL')) {
+      stlFuel = stlCap;
+    }
+    if (refuels(waypointIndex, 'FTL')) {
+      ftlFuel = ftlCap;
+    }
+  };
+  const consume = (used: { stlFuel?: number; ftlFuel?: number }) => {
+    if (stlFuel !== undefined && typeof used.stlFuel === 'number') {
+      stlFuel = Math.max(0, stlFuel - used.stlFuel);
+    }
+    if (ftlFuel !== undefined && typeof used.ftlFuel === 'number') {
+      ftlFuel = Math.max(0, ftlFuel - used.ftlFuel);
+    }
+  };
   const legs = waypoints.map<NativeRouteLegPercent>(() => ({
     fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT,
   }));
   const warnings: string[] = [];
   // 档位上限：离港燃料饱和点 f_cap = 10.96×STL 流量（节油引擎≈8%、标准≈16%）。
   // 超过它离港只多烧油不再加速，所以拐点/实测值都按它封顶。
-  const capPercent = stlDepartureFuelCapPercent(
-    shipPerformanceFor(candidate.ship.ship).stlFuelFlowRate,
-  );
+  const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
   const finalize = (): NativeRouteFuelPlan => {
     if (capPercent !== undefined) {
       let clamped = 0;
@@ -73,11 +93,12 @@ export async function computeNativeRouteFuel(
     }
     return { legs, warnings };
   };
-  const unresolved: number[] = [];
   for (let index = 1; index <= legCount; index++) {
     signal.throwIfAborted();
     const from = waypoints[index - 1]!.location;
     const to = waypoints[index]!.location;
+    // 航点 index-1 的补油步骤在飞往 index 之前执行。
+    applyRefuel(index - 1);
     onProgress(`FTC ${registration} · ${index}/${legCount} · ${from} → ${to}`);
     const result = await computeFtcPlan({
       shipRegistration: registration,
@@ -87,7 +108,7 @@ export async function computeNativeRouteFuel(
       valueOptimal: true,
       // 与写入航点的偏好一致（socketEditWaypoint 写 useGateways: true，BTF 也开网关）
       useGateway: true,
-      stlFuelOverride,
+      stlFuelOverride: stlFuel,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
@@ -98,89 +119,41 @@ export async function computeNativeRouteFuel(
           : undefined,
         hours: result.best.totalHours,
       };
+      consume(result.best);
       continue;
     }
-    unresolved.push(index);
     warnings.push(`FTC 跳过 ${from} → ${to}：${skipReason(result)}`);
-  }
-  if (unresolved.length === 0) {
-    return finalize();
-  }
-  onProgress(`FTC 缺 ${unresolved.length} 段的模型输入，改用 BTF 试飞`);
-  let measured: BtfFuelResult | undefined;
-  try {
-    measured = await measureNativeRouteFuel(candidate, waypoints, unresolved, signal, onProgress);
-  } catch (err) {
-    if (signal.aborted) {
-      throw err;
-    }
-    const legNames = unresolved.map(
-      index => `${waypoints[index - 1]!.location} → ${waypoints[index]!.location}`,
-    );
-    warnings.push(
-      `BTF 试飞未完成（${err instanceof Error ? err.message : String(err)}）：` +
-        `${legNames.join('、')} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%。`,
-    );
-    return finalize();
-  }
-  const stillMissing: number[] = [];
-  for (const warning of measured.warnings) {
-    warnings.push(warning);
-  }
-  for (const index of unresolved) {
-    const leg = measured.legs.get(index);
-    if (leg === undefined) {
-      stillMissing.push(index);
-      continue;
-    }
-    legs[index] = {
-      fuelPercent: clampPercent(leg.fuel),
-      reactorPercent: leg.reactor === undefined ? undefined : clampPercent(leg.reactor),
-      hours: leg.hours,
-    };
-  }
-  if (stillMissing.length === 0) {
-    return finalize();
-  }
-  // 试飞也没算出来的段：退回公式估算（起降距离用实测中位数），再不行就是游戏默认档。
-  const fallback = await estimateLegs(
-    candidate,
-    waypoints,
-    stillMissing,
-    legCount,
-    registration,
-    legs,
-    warnings,
-    stlFuelOverride,
-  );
-  for (const index of stillMissing) {
-    if (!fallback.has(index)) {
-      const from = waypoints[index - 1]!.location;
-      const to = waypoints[index]!.location;
+    // 该段缺模型输入：用 BTF 试飞实测，油量用当前航段出发时的剩余量。
+    try {
+      const measured = await measureNativeRouteFuel(
+        candidate,
+        waypoints,
+        [index],
+        signal,
+        onProgress,
+        { stlFuel, ftlFuel },
+      );
+      warnings.push(...measured.warnings);
+      const leg = measured.legs.get(index);
+      if (leg !== undefined) {
+        legs[index] = {
+          fuelPercent: clampPercent(leg.fuel),
+          reactorPercent: leg.reactor === undefined ? undefined : clampPercent(leg.reactor),
+          hours: leg.hours,
+        };
+        consume(leg);
+        continue;
+      }
+    } catch (err) {
+      if (signal.aborted) {
+        throw err;
+      }
       warnings.push(
-        `${from} → ${to} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%（试飞与公式估算都不可用）。`,
+        `BTF 试飞未完成（${err instanceof Error ? err.message : String(err)}）：${from} → ${to}。`,
       );
     }
-  }
-  return finalize();
-}
-
-// 兜底：BTF 试飞也没结果的段用公式估算的几何再算一次 FTC（时间近似，只做最后退路）。
-async function estimateLegs(
-  candidate: ShipChainPlan,
-  waypoints: readonly NativeWaypoint[],
-  indexes: readonly number[],
-  legCount: number,
-  registration: string,
-  legs: NativeRouteLegPercent[],
-  warnings: string[],
-  stlFuelOverride: number | undefined,
-) {
-  const used = new Set<number>();
-  for (const index of indexes) {
-    const from = waypoints[index - 1]!.location;
-    const to = waypoints[index]!.location;
-    const result = await computeFtcPlan({
+    // 试飞也没算出来：退回公式估算（起降距离用实测中位数），再不行就是游戏默认档。
+    const estimate = await computeFtcPlan({
       shipRegistration: registration,
       from,
       to,
@@ -188,25 +161,29 @@ async function estimateLegs(
       valueOptimal: true,
       useGateway: true,
       estimateGeometry: true,
-      stlFuelOverride,
+      stlFuelOverride: stlFuel,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
-    if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
+    if (estimate.ok && estimate.best !== undefined && estimate.inputIncomplete === undefined) {
       legs[index] = {
-        fuelPercent: clampPercent(result.best.fuel * 100),
-        reactorPercent: result.reactorRelevant
-          ? clampPercent(result.best.reactor * 100)
+        fuelPercent: clampPercent(estimate.best.fuel * 100),
+        reactorPercent: estimate.reactorRelevant
+          ? clampPercent(estimate.best.reactor * 100)
           : undefined,
-        hours: result.best.totalHours,
+        hours: estimate.best.totalHours,
       };
-      used.add(index);
+      consume(estimate.best);
       warnings.push(
         `${from} → ${to}：试飞没得到结果，起降距离按公式估算补算（时间近似）。` +
           '在 SFC 为这段生成一次飞行计划（或试飞一次）即可转为原生几何。',
       );
+      continue;
     }
+    warnings.push(
+      `${from} → ${to} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%（试飞与公式估算都不可用）。`,
+    );
   }
-  return used;
+  return finalize();
 }
 
 function clampPercent(value: number) {

@@ -82,6 +82,9 @@ export interface BtfLegFuel {
   reactor?: number;
   // 该档位下服务器试飞的总时长（小时），供 FLEET「飞行」列直接展示。
   hours: number;
+  // 该档位消耗的 STL/FTL 燃料（用于后续航段递减油量）。
+  stlFuel: number;
+  ftlFuel: number;
 }
 
 export interface BtfFuelResult {
@@ -100,6 +103,8 @@ export async function measureNativeRouteFuel(
   legs: readonly number[],
   signal: AbortSignal,
   onProgress: (status: string) => void,
+  // 起飞油量：多段航线的后续段要用上一段剩下的油（不补油时），缺省按罐容量。
+  fuel?: { stlFuel?: number; ftlFuel?: number },
 ): Promise<BtfFuelResult> {
   const ship = candidate.ship.ship;
   signal.throwIfAborted();
@@ -108,12 +113,22 @@ export async function measureNativeRouteFuel(
   if (blueprint === undefined) {
     throw new Error(`未获取到蓝图 ${ship.blueprintNaturalId}，无法试飞。`);
   }
-  // 试飞的油量基准用「罐容量」而不是当前余量：航线在每一站都补满油（REFUEL 步骤），
-  // 实际每段都是满罐起飞；用余量会让高档位试飞因油不够直接失败，把平衡点压到低档。
+  // 试飞的油量基准默认用「罐容量」：航线在出发地补满时每段都是满罐起飞；
+  // 但多段之间没有补油时由调用方传入当前剩余油量。
   const performance = shipPerformanceFor(ship);
   const fuelNow = shipFuelRemainingFor(ship);
-  const stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlCap : (performance.stlFuelCapacity ?? 0);
-  const ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : fuelNow.ftlRemaining;
+  const stlFuel =
+    fuel?.stlFuel !== undefined
+      ? fuel.stlFuel
+      : fuelNow.stlCap > 0
+        ? fuelNow.stlCap
+        : (performance.stlFuelCapacity ?? 0);
+  const ftlFuel =
+    fuel?.ftlFuel !== undefined
+      ? fuel.ftlFuel
+      : fuelNow.ftlCap > 0
+        ? fuelNow.ftlCap
+        : fuelNow.ftlRemaining;
   // 反应堆使用量：默认 50%，但不能低于蓝图下限（高下限船会直接拒绝低反应堆的计划）。
   const reactorUsage = Math.min(
     1,
@@ -204,7 +219,13 @@ export async function measureNativeRouteFuel(
       if (best === undefined) {
         throw new Error('试飞没有可用方案。');
       }
-      measured.set(index, { fuel: best.fuel, reactor: reactorPercent, hours: best.totalHours });
+      measured.set(index, {
+        fuel: best.fuel,
+        reactor: reactorPercent,
+        hours: best.totalHours,
+        stlFuel: best.stlFuel,
+        ftlFuel: best.ftlFuel,
+      });
     } catch (err) {
       if (signal.aborted) {
         throw err;
