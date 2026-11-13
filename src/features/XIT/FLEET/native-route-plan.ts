@@ -5,7 +5,8 @@ export const DEFAULT_WAYPOINT_FUEL_PERCENT = 25;
 export type RouteTank = 'STL' | 'FTL';
 
 export type NativeRouteStep =
-  { kind: 'load' | 'unload'; ticker: string; amount: number } | { kind: 'refuel'; tank: RouteTank };
+  | { kind: 'load' | 'unload'; ticker: string; amount: number; capacity?: true }
+  | { kind: 'refuel'; tank: RouteTank };
 
 export interface NativeWaypoint {
   location: string;

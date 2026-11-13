@@ -13,6 +13,8 @@ import {
 export interface NativeRouteLegPercent {
   fuelPercent: number;
   reactorPercent?: number;
+  // 该档位下的预计飞行时长（小时）：FTC 选点结果或 BTF 试飞实测顺带带回。
+  hours?: number;
 }
 
 export interface NativeRouteFuelPlan {
@@ -80,6 +82,7 @@ export async function computeNativeRouteFuel(
         reactorPercent: result.reactorRelevant
           ? clampPercent(result.best.reactor * 100)
           : undefined,
+        hours: result.best.totalHours,
       };
       continue;
     }
@@ -119,6 +122,7 @@ export async function computeNativeRouteFuel(
     legs[index] = {
       fuelPercent: clampPercent(leg.fuel),
       reactorPercent: leg.reactor === undefined ? undefined : clampPercent(leg.reactor),
+      hours: leg.hours,
     };
   }
   if (stillMissing.length === 0) {
@@ -175,6 +179,7 @@ async function estimateLegs(
         reactorPercent: result.reactorRelevant
           ? clampPercent(result.best.reactor * 100)
           : undefined,
+        hours: result.best.totalHours,
       };
       used.add(index);
       warnings.push(

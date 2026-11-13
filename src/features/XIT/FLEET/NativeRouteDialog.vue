@@ -42,18 +42,25 @@ const {
   candidate,
   initialWaypoints,
   chainName = '',
+  autoStart = false,
 } = defineProps<{
   candidate: ShipChainPlan;
   initialWaypoints: NativeWaypoint[];
   // 产业链名称：写入原生 RT 的航线名，同时记录到 FLEET 展示。
   chainName?: string;
+  // 首次打开向导时直接跑燃料计算与写入（FLEET「生成原生 RT」默认开启）。
+  autoStart?: boolean;
 }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; started: [] }>();
 
-const tanks = ref<RouteTank[]>([]);
+// 出发地默认补满 STL 与 FTL（不做线路检测：自动流程没有勾选时机，循环几圈后
+// 任何一箱油耗尽都会把航线阻塞）。
+const tanks = ref<RouteTank[]>(['STL', 'FTL']);
 const fuelUsagePercents = ref(initialWaypoints.map(() => DEFAULT_WAYPOINT_FUEL_PERCENT));
 // 空串 = 该航点不写反应堆使用量（无自然跃迁或 BTF 未设置），保持游戏原值。
 const reactorUsagePercents = ref<(number | '')[]>(initialWaypoints.map(() => ''));
+// 与航点等长：飞到该航点的预计飞行时长（小时），由 FTC/BTF 计算时顺带带回。
+const legHours = ref<(number | undefined)[]>([]);
 const fuelUsageValid = computed(() => fuelUsagePercents.value.every(isWaypointPercent));
 const reactorUsageValid = computed(() =>
   reactorUsagePercents.value.every(x => x === '' || isWaypointPercent(x)),
@@ -151,6 +158,7 @@ function recordRoute(routeId: string, naturalId: string) {
         location: waypoint.location,
         fuelPercent: fuelUsagePercents.value[index] ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
         reactorPercent: reactor === undefined || reactor === '' ? undefined : reactor,
+        flightHours: legHours.value[index],
         steps: waypoint.steps,
       };
     }),
@@ -169,6 +177,37 @@ onBeforeUnmount(() => {
   disposed = true;
   stopAutoFill();
 });
+
+// FLEET「生成原生 RT」默认自动跑：先算燃料（FTC/BTF），随后直写航线，不需要再点按钮。
+// 已经建过航线（routeId 有值）或不在初始阶段时不再重跑，避免重复创建。
+function startAutoFill() {
+  if (
+    disposed ||
+    busy.value ||
+    routeId.value !== undefined ||
+    progress.value.phase !== 'scan-fuel' ||
+    initialWaypoints.length === 0
+  ) {
+    return;
+  }
+  emit('started');
+  void advance(true);
+}
+
+onMounted(() => {
+  if (autoStart) {
+    startAutoFill();
+  }
+});
+// 同一个向导窗口里再次点「生成原生 RT」时组件不会重挂，靠 prop 变化重新触发。
+watch(
+  () => autoStart,
+  value => {
+    if (value) {
+      startAutoFill();
+    }
+  },
+);
 
 const retryAction = computed(() => {
   const phase = progress.value.phase;
@@ -312,6 +351,7 @@ async function advanceOnce(retrying: boolean) {
       if (!controller.signal.aborted) {
         fuelUsagePercents.value = results.legs.map(x => x.fuelPercent);
         reactorUsagePercents.value = results.legs.map(x => x.reactorPercent ?? '');
+        legHours.value = results.legs.map(x => x.hours);
         fuelWarnings.value = results.warnings;
         progress.value = { phase: 'write' };
       }

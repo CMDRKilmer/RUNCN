@@ -4,8 +4,12 @@ import type { NativeRouteStep } from './native-route-plan';
 // 向导创建过的原生 RT 航线（FLEET 里只读展示；游戏侧的真实内容以原生 RT 为准）。
 export interface NativeRouteWaypointRecord {
   location: string;
+  // 游戏内部编码地址（游戏 UI 手动创建的航线才有）：位置换不回 naturalId 时用它匹配航班。
+  encoded?: string;
   fuelPercent: number;
   reactorPercent?: number;
+  // 飞到该航点的预计飞行时长（小时）：FTC 模型选点或 BTF 试飞实测时顺带记下。
+  flightHours?: number;
   steps: NativeRouteStep[];
 }
 

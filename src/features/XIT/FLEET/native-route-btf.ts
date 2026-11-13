@@ -76,6 +76,8 @@ export interface BtfLegFuel {
   fuel: number;
   // 试飞时实际使用的反应堆使用量。
   reactor?: number;
+  // 该档位下服务器试飞的总时长（小时），供 FLEET「飞行」列直接展示。
+  hours: number;
 }
 
 export interface BtfFuelResult {
@@ -191,7 +193,7 @@ export async function measureNativeRouteFuel(
       if (best === undefined) {
         throw new Error('试飞没有可用方案。');
       }
-      measured.set(index, { fuel: best.fuel, reactor: REACTOR_PERCENT });
+      measured.set(index, { fuel: best.fuel, reactor: REACTOR_PERCENT, hours: best.totalHours });
     } catch (err) {
       if (signal.aborted) {
         throw err;

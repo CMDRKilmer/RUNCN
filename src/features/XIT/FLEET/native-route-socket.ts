@@ -15,13 +15,18 @@ export interface RouteStepData {
   id: string;
   type: string;
   material?: { id: string; ticker: string };
-  minimum?: { units?: number };
-  maximum?: { units?: number };
+  // 补油步骤的油箱；游戏 UI 手动创建的航线可能没有绝对数量（type = CAPACITY）。
+  fuel?: 'STL' | 'FTL';
+  minimum?: { type?: string; units?: number };
+  maximum?: { type?: string; units?: number };
   retain?: number;
 }
 
 export interface RouteWaypointData {
   id: string;
+  // 航点目的地。写入请求用 "{系统}|PLA|STA,{天体}" 编码字符串，但真实响应里
+  // 是结构化对象（地址/实体），所以这里不能按 string 断言。
+  destination?: unknown;
   landing: boolean;
   fuelUsageFactor: number;
   reactorUsageFactor: number;

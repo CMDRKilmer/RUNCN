@@ -39,6 +39,8 @@ import {
   type NativeRouteRecord,
 } from './native-route-registry';
 import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
+import { readRouteExecutions } from './native-route-rte';
+import { gameRouteRecord, matchRunningRoutes, type RunningRoutes } from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
@@ -49,6 +51,7 @@ import {
   getEntityNaturalIdFromAddress,
   getSystemLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
+import { encodeAddress } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
@@ -221,29 +224,70 @@ function openNativeRoutePlan() {
     const waypoints = buildNativeWaypoints(candidate.plan);
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
-    stagedNativeRoute.value = { candidate, waypoints, chainName: chainGroup.value ?? '' };
+    stagedNativeRoute.value = {
+      candidate,
+      waypoints,
+      chainName: chainGroup.value ?? '',
+      autoStart: true,
+    };
     void showBuffer('XIT RTWIZ');
   } catch (err) {
     executeNotice.value = err instanceof Error ? err.message : String(err);
   }
 }
 
-// 原生 RT（socket 写入的航线）在「运行中」页按同样的表格展示，含逐站进度。
-const nativeRoutes = computed(() => {
+// 「运行中」只显示游戏 RTE 里确实有船在执行的航线（含在游戏 UI 手动创建的）。
+// RTE 读不到时退回本地记录（向导创建过的），保持旧行为。
+const gameRunningRoutes = ref<RunningRoutes>();
+
+interface NativeRouteView {
+  record: NativeRouteRecord;
+  ship: PrunApi.Ship | undefined;
+  loads: NativeRouteLoad[];
+  capacity: { weight: number; volume: number };
+}
+
+function findNativeRouteRecord(routeId: string, naturalId: string | undefined) {
+  const key = typeof naturalId === 'string' ? naturalId.trim().toUpperCase() : '';
+  return Object.values(nativeRouteRecords.value).find(
+    x => x.routeId === routeId || x.naturalId.trim().toUpperCase() === key,
+  );
+}
+
+const nativeRoutes = computed<NativeRouteView[]>(() => {
+  const running = gameRunningRoutes.value;
+  // unresolved > 0 且一条都没对上：RTE 窗口结构变了，回退本地记录而不是清空。
+  if (running !== undefined && (running.entries.length > 0 || running.unresolved === 0)) {
+    const rows: NativeRouteView[] = [];
+    const seen = new Set<string>();
+    for (const entry of running.entries) {
+      const local = findNativeRouteRecord(entry.route.id, entry.route.naturalId);
+      const record = local ?? gameRouteRecord(entry.route, entry.shipId);
+      const shipId = entry.shipId ?? record.shipId;
+      const key = `${entry.route.id}|${shipId}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const ship = shipsStore.getById(shipId);
+      rows.push({
+        record,
+        ship,
+        loads: nativeRouteLoads(record),
+        capacity: nativeRouteCapacity(ship),
+      });
+    }
+    return rows;
+  }
   const group = chainGroup.value?.trim().toLowerCase();
   const seen = new Set<string>();
-  const rows: {
-    record: NativeRouteRecord;
-    ship: PrunApi.Ship | undefined;
-    loads: NativeRouteLoad[];
-    capacity: { weight: number; volume: number };
-  }[] = [];
+  const rows: NativeRouteView[] = [];
   const sorted = Object.values(nativeRouteRecords.value).sort((a, b) => b.createdAt - a.createdAt);
   for (const record of sorted) {
     if (group !== undefined && record.chainName.trim().toLowerCase() !== group) {
       continue;
     }
-    if (seen.has(record.shipId)) {
+    if (record.shipId !== '' && seen.has(record.shipId)) {
       continue;
     }
     seen.add(record.shipId);
@@ -259,8 +303,10 @@ const nativeRoutes = computed(() => {
 });
 
 // 用游戏里的真实航线列表校准本地记录：游戏里已经没有的航线（在游戏 UI 里删掉、没写成、
-// 早期版本残留）直接丢弃，不再出现在「运行中」。写航线期间不发请求——socket 响应没有
-// actionId，只能靠 FIFO 顺序匹配，插一条就会让向导的对位错乱。
+// 早期版本残留）直接丢弃，不再出现在「运行中」。同时读一次原生 RTE，拿到
+// 「哪些船正在跑哪条航线」——游戏报文里没有分配关系，只能看执行窗口。
+// 写航线期间不发请求——socket 响应没有 actionId，只能靠 FIFO 顺序匹配，
+// 插一条就会让向导的对位错乱。
 let refreshingGameRoutes = false;
 async function refreshGameRoutes() {
   if (refreshingGameRoutes || hasPendingRouteRequest()) {
@@ -268,15 +314,21 @@ async function refreshGameRoutes() {
   }
   refreshingGameRoutes = true;
   try {
+    // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
+    // 打乱按 FIFO 对位的响应匹配。
     const routes = await socketGetRoutes();
+    // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
+    const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
     const ids = new Set(routes.map(route => route.id));
     for (const record of Object.values(nativeRouteRecords.value)) {
       if (!ids.has(record.routeId)) {
         removeNativeRoute(record.routeId);
       }
     }
+    gameRunningRoutes.value =
+      executions === undefined ? undefined : matchRunningRoutes(routes, executions);
   } catch {
-    // socket 未就绪或超时：按本地记录继续显示，不打断面板。
+    // socket 未就绪或超时：保留上一次结果，按本地记录继续显示，不打断面板。
   } finally {
     refreshingGameRoutes = false;
   }
@@ -291,6 +343,7 @@ function nativeRouteProgress(record: NativeRouteRecord, ship: PrunApi.Ship | und
 }
 
 // 用飞船的当前航班（或在港位置）匹配航点，得到逐站状态；与「运行中」表格同一套标记。
+// 游戏 UI 手动创建的航线只有编码地址，换不出 naturalId 时用编码地址直接比对航班。
 function nativeRouteStates(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
   const flight =
     ship === undefined
@@ -300,12 +353,29 @@ function nativeRouteStates(record: NativeRouteRecord, ship: PrunApi.Ship | undef
     flight !== undefined
       ? getEntityNaturalIdFromAddress(flight.destination)
       : getEntityNaturalIdFromAddress(ship?.address ?? undefined);
+  const encodedTarget =
+    flight !== undefined
+      ? encodeAddress(flight.destination)
+      : ship?.address != null
+        ? encodeAddress(ship.address)
+        : undefined;
   const index =
-    target === undefined
+    target === undefined && encodedTarget === undefined
       ? -1
-      : record.waypoints.findIndex(
-          x => x.location.trim().toUpperCase() === target.trim().toUpperCase(),
-        );
+      : record.waypoints.findIndex(x => {
+          if (
+            target !== undefined &&
+            typeof x.location === 'string' &&
+            x.location.trim().toUpperCase() === target.trim().toUpperCase()
+          ) {
+            return true;
+          }
+          return (
+            typeof x.encoded === 'string' &&
+            encodedTarget !== undefined &&
+            x.encoded.trim().toUpperCase() === encodedTarget.trim().toUpperCase()
+          );
+        });
   return record.waypoints.map((_, i): StopState => {
     if (index < 0) {
       return 'pending';
@@ -347,6 +417,14 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
       if (sameRoute || sameShip) {
         removeNativeRoute(other.routeId);
       }
+    }
+    // 游戏 UI 手动创建的航线没有本地记录：直接把它从运行列表里摘掉，不必等下一次校准。
+    const running = gameRunningRoutes.value;
+    if (running !== undefined) {
+      gameRunningRoutes.value = {
+        ...running,
+        entries: running.entries.filter(x => x.route.id !== record.routeId),
+      };
     }
     statusCheckNotice.value = `已删除原生 RT ${record.naturalId}。`;
     executeNotice.value = undefined;
@@ -402,12 +480,18 @@ function nativeRouteStepMaterials(
   kind: 'load' | 'unload',
 ) {
   const bills: Record<string, number> = {};
+  const capacities: string[] = [];
   for (const step of record.waypoints[index]?.steps ?? []) {
-    if (step.kind === kind) {
-      bills[step.ticker] = (bills[step.ticker] ?? 0) + step.amount;
+    if (step.kind === 'refuel' || step.kind !== kind) {
+      continue;
     }
+    if (step.capacity) {
+      capacities.push(`${step.ticker}×${kind === 'load' ? '满' : '全部'}`);
+      continue;
+    }
+    bills[step.ticker] = (bills[step.ticker] ?? 0) + step.amount;
   }
-  return formatMaterials(bills);
+  return [...(formatMaterials(bills) ? [formatMaterials(bills)] : []), ...capacities].join('、');
 }
 
 function nativeRouteRefuelText(record: NativeRouteRecord, index: number) {
@@ -425,6 +509,11 @@ function isNativeRouteEnd(record: NativeRouteRecord, index: number) {
 function nativeRouteNextLeg(record: NativeRouteRecord, index: number) {
   // 第 0 行是出发站，档位同样在下一站上。
   return record.waypoints[index + 1];
+}
+
+// 预计飞行时长与档位同一口径：存在「飞到该航点」的航点上。
+function nativeRouteLegHours(record: NativeRouteRecord, index: number) {
+  return record.waypoints[index + 1]?.flightHours;
 }
 // 状态检查结果提示：环线运行中网页关闭导致到港触发器错过时，提示自动恢复情况。
 
@@ -1450,7 +1539,9 @@ function flightTotalText(shipId: string): string {
         <div v-for="entry in nativeRoutes" :key="entry.record.routeId" :class="$style.shipPlan">
           <div :class="$style.shipHeader">
             <span>
-              {{ entry.ship?.name || entry.ship?.registration || entry.record.shipLabel }}
+              {{
+                entry.ship?.name || entry.ship?.registration || entry.record.shipLabel || '未知船只'
+              }}
               <span :class="$style.running"
                 >（{{ entry.record.name || entry.record.naturalId }} ·
                 {{ nativeRouteProgress(entry.record, entry.ship) }}）</span
@@ -1549,6 +1640,12 @@ function flightTotalText(shipId: string): string {
                       · 反应堆
                       {{ nativeRouteNextLeg(entry.record, index)!.reactorPercent }}%</template
                     >
+                  </div>
+                  <div
+                    v-if="nativeRouteLegHours(entry.record, index) !== undefined"
+                    :class="$style.loadSub">
+                    预计
+                    {{ formatFlightDuration(nativeRouteLegHours(entry.record, index)! * 3600000) }}
                   </div>
                 </td>
                 <td :class="$style.narrowCol">

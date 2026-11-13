@@ -8,6 +8,8 @@ export interface StagedNativeRoute {
   waypoints: NativeWaypoint[];
   // 产业链分组名（用作航线名）。
   chainName: string;
+  // 首次打开向导时自动跑完燃料计算与写入；向导发 started 后由窗口清掉。
+  autoStart?: boolean;
 }
 
 export const stagedNativeRoute = ref<StagedNativeRoute | undefined>(undefined);
