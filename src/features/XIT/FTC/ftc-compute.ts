@@ -381,6 +381,9 @@ export interface FtcComputeInput {
   // 按 (参考质量/质量的 0.78 次方) 衰减）与着陆/起飞载重项，故按该段计划载重补进
   // `ShipPerformance.mass`。缺省 0 = 用飞船当前质量。
   extraMassT?: number;
+  // 规划出发时的 STL 罐余量（u）：航线在出发地补满时传罐容量。模型默认用当前余量
+  // （`ShipPerformance.stlRemaining`），不覆盖会把「尚未补油」的船算慢/算费。
+  stlFuelOverride?: number;
   // 缺服务器原生 STL 段记录时按公式估算起降几何（`route-planner.estimateRouteStl`）。
   // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
   // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
@@ -442,6 +445,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
+  if (input.stlFuelOverride !== undefined) {
+    perf.stlRemaining = input.stlFuelOverride > 0 ? input.stlFuelOverride : undefined;
+  }
   if (input.extraMassT !== undefined && input.extraMassT > 0) {
     perf.mass += input.extraMassT;
   }

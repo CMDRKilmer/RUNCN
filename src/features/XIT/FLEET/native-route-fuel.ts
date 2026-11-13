@@ -1,4 +1,8 @@
-import { computeFtcPlan, shipPerformanceFor } from '@src/features/XIT/FTC/ftc-compute';
+import {
+  computeFtcPlan,
+  shipFuelRemainingFor,
+  shipPerformanceFor,
+} from '@src/features/XIT/FTC/ftc-compute';
 import { stlDepartureFuelCapPercent } from '@src/features/XIT/FTC/fuel-model';
 import type { ShipChainPlan } from './chain-allocation';
 import { measureNativeRouteFuel, type BtfFuelResult } from './native-route-btf';
@@ -36,6 +40,11 @@ export async function computeNativeRouteFuel(
 ): Promise<NativeRouteFuelPlan> {
   const registration = candidate.ship.ship.registration;
   const legCount = waypoints.length - 1;
+  // 出发地有 STL 补满步骤 = 每圈都满罐起飞；模型默认用当前余量，会把还没补油的船算慢/算费。
+  const fuelRemaining = shipFuelRemainingFor(candidate.ship.ship);
+  const refillsStl =
+    waypoints[0]?.steps.some(x => x.kind === 'refuel' && x.tank === 'STL') ?? false;
+  const stlFuelOverride = refillsStl && fuelRemaining.stlCap > 0 ? fuelRemaining.stlCap : undefined;
   const legs = waypoints.map<NativeRouteLegPercent>(() => ({
     fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT,
   }));
@@ -78,6 +87,7 @@ export async function computeNativeRouteFuel(
       valueOptimal: true,
       // 与写入航点的偏好一致（socketEditWaypoint 写 useGateways: true，BTF 也开网关）
       useGateway: true,
+      stlFuelOverride,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
@@ -141,6 +151,7 @@ export async function computeNativeRouteFuel(
     registration,
     legs,
     warnings,
+    stlFuelOverride,
   );
   for (const index of stillMissing) {
     if (!fallback.has(index)) {
@@ -163,6 +174,7 @@ async function estimateLegs(
   registration: string,
   legs: NativeRouteLegPercent[],
   warnings: string[],
+  stlFuelOverride: number | undefined,
 ) {
   const used = new Set<number>();
   for (const index of indexes) {
@@ -176,6 +188,7 @@ async function estimateLegs(
       valueOptimal: true,
       useGateway: true,
       estimateGeometry: true,
+      stlFuelOverride,
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {

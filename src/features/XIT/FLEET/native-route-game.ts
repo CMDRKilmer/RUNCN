@@ -282,8 +282,13 @@ export function mergeRouteRecord(
       waypoint.location === '未知航点' && typeof previous.location === 'string'
         ? previous.location
         : waypoint.location;
-    // 档位变了时长就不成立，只在档位仍一致时沿用。
-    if (previous.flightHours === undefined || previous.fuelPercent !== waypoint.fuelPercent) {
+    // 档位变了时长就不成立，只在燃料与反应堆档位都仍一致时沿用。
+    const sameReactor = (previous.reactorPercent ?? null) === (waypoint.reactorPercent ?? null);
+    if (
+      previous.flightHours === undefined ||
+      previous.fuelPercent !== waypoint.fuelPercent ||
+      !sameReactor
+    ) {
       return { ...waypoint, location };
     }
     return { ...waypoint, location, flightHours: previous.flightHours };
