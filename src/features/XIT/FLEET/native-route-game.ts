@@ -277,17 +277,26 @@ export function mergeRouteRecord(
     if (previous === undefined || !sameWaypoint(previous, waypoint)) {
       return waypoint;
     }
+    // 时长描述的是「上一站 → 本站」：上一站改了，本站的旧时长同样失效。
+    const previousOrigin = index === 0 ? undefined : local.waypoints[index - 1];
+    const serverOrigin = index === 0 ? undefined : server.waypoints[index - 1];
+    const sameOrigin =
+      index === 0 ||
+      (previousOrigin !== undefined &&
+        serverOrigin !== undefined &&
+        sameWaypoint(previousOrigin, serverOrigin));
     // 服务器目的地是暂时换不出名字的结构时，用本地同名航点的可读地址兜底。
     const location =
       waypoint.location === '未知航点' && typeof previous.location === 'string'
         ? previous.location
         : waypoint.location;
-    // 档位变了时长就不成立，只在燃料与反应堆档位都仍一致时沿用。
+    // 档位变了时长就不成立：燃料/反应堆档位与上一站都仍一致时才沿用。
     const sameReactor = (previous.reactorPercent ?? null) === (waypoint.reactorPercent ?? null);
     if (
       previous.flightHours === undefined ||
       previous.fuelPercent !== waypoint.fuelPercent ||
-      !sameReactor
+      !sameReactor ||
+      !sameOrigin
     ) {
       return { ...waypoint, location };
     }

@@ -107,8 +107,15 @@ function matchShipId(text: string) {
   if (byRegistration !== undefined) {
     return byRegistration.id;
   }
-  // 船名是玩家自定义文本：区分大小写，减少与航线名/地名的误匹配。
-  return ships.find(x => x.name !== '' && text.includes(x.name))?.id;
+  // 船名是玩家自定义文本：区分大小写、要求完整词边界；命中多个（如「Cargo 1」与
+  // 「Cargo 10」同时命中同一条文本）时视为不确定，交给调用方按航班推断。
+  const byName = ships.filter(x => x.name !== '' && containsName(text, x.name));
+  return byName.length === 1 ? byName[0]!.id : undefined;
+}
+
+function containsName(text: string, name: string) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^\\p{L}\\p{N}])${escaped}($|[^\\p{L}\\p{N}])`, 'u').test(text);
 }
 
 function normalize(text: string | null | undefined) {

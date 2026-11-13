@@ -411,6 +411,11 @@ async function advanceOnce(retrying: boolean) {
         },
         id => {
           partialRouteId.value = id;
+          // 窗口在建航线响应回来之前就已关闭：终止清理钩子已经跑过，这里立即补删。
+          if (disposed) {
+            void socketDeleteRoute(id).catch(() => undefined);
+            partialRouteId.value = undefined;
+          }
         },
       );
       if (controller.signal.aborted) {
