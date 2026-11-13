@@ -14,13 +14,22 @@
 //   - 生产代码**没有**为可测性做任何改动（无注入点、无测试开关）。
 
 let fuelFixture = { stlRemaining: 0, ftlRemaining: 0, stlCap: 0, ftlCap: 0 };
+// 非 null 时 computeFtcPlan 返回这个最优方案（用例用它覆盖「档位取整改重算」「油量不够」两支）。
+let optionFixture = null;
 export const ftcCalls = [];
 export const btfCalls = [];
+export const fuelModelCalls = [];
 
 export function stubSetFuel(fixture) {
   fuelFixture = fixture;
+  optionFixture = null;
   ftcCalls.length = 0;
   btfCalls.length = 0;
+  fuelModelCalls.length = 0;
+}
+
+export function stubSetOption(option) {
+  optionFixture = option;
 }
 
 // ---- 以下为被替换模块的导出面 ----
@@ -35,8 +44,18 @@ export const computeFtcPlan = async input => {
   ftcCalls.push({
     stlFuelOverride: input.stlFuelOverride,
     estimateGeometry: input.estimateGeometry,
+    fixedFuel: input.fixedFuel,
+    fixedReactor: input.fixedReactor,
   });
-  return { ok: false, message: 'stub：判缺', inputIncomplete: ['stub'] };
+  if (optionFixture === null) {
+    return { ok: false, message: 'stub：判缺', inputIncomplete: ['stub'] };
+  }
+  return {
+    ok: true,
+    message: 'stub',
+    best: optionFixture.best,
+    reactorRelevant: optionFixture.reactorRelevant,
+  };
 };
 
 // './native-route-btf'

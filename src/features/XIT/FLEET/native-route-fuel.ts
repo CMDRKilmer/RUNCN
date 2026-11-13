@@ -70,6 +70,24 @@ export async function computeNativeRouteFuel(
       ftlFuel = Math.max(0, ftlFuel - used.ftlFuel);
     }
   };
+  // 出发余量不够这一段就飞不完：模型只给油耗、不校验油量，航线写下去会中途停下。
+  // 只在「已知余量」时判断（油罐读不出来时无话可说），不阻止写入。
+  const reportShortfall = (index: number, used: { stlFuel?: number; ftlFuel?: number }) => {
+    const route = `${waypoints[index - 1]!.location} → ${waypoints[index]!.location}`;
+    const tanks = [
+      { tank: 'STL', balance: stlFuel, need: used.stlFuel },
+      { tank: 'FTL', balance: ftlFuel, need: used.ftlFuel },
+    ] as const;
+    for (const { tank, balance, need } of tanks) {
+      if (balance === undefined || typeof need !== 'number' || need <= balance + 1e-6) {
+        continue;
+      }
+      warnings.push(
+        `${route}：${tank} 不够（本段需 ${Math.ceil(need)}，出发只有 ${Math.round(balance)}），` +
+          '航线会中途停下——在游戏里给该站加补油，或降低这一段的档位。',
+      );
+    }
+  };
   const legs = waypoints.map<NativeRouteLegPercent>(() => ({
     fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT,
   }));
@@ -110,7 +128,10 @@ export async function computeNativeRouteFuel(
     const reactorPercent = reactorRelevant
       ? percentAtLeast(option.reactor, performance.minReactorUsage ?? 0)
       : undefined;
-    if (capped === selected) {
+    // 取整改了反应堆档位（例如下限 0.653 写成 66%）时，时长与油耗属于旧档位，必须重算。
+    const reactorChanged =
+      reactorPercent !== undefined && Math.abs(reactorPercent - option.reactor * 100) > 1e-6;
+    if (capped === selected && !reactorChanged) {
       return {
         fuelPercent: selected,
         reactorPercent,
@@ -190,6 +211,7 @@ export async function computeNativeRouteFuel(
         reactorPercent: chosen.reactorPercent,
         hours: chosen.hours,
       };
+      reportShortfall(index, chosen);
       consume(chosen);
       continue;
     }
@@ -212,6 +234,7 @@ export async function computeNativeRouteFuel(
           reactorPercent: leg.reactor === undefined ? undefined : clampPercent(leg.reactor),
           hours: leg.hours,
         };
+        reportShortfall(index, leg);
         consume(leg);
         continue;
       }
@@ -249,6 +272,7 @@ export async function computeNativeRouteFuel(
         reactorPercent: chosen.reactorPercent,
         hours: chosen.hours,
       };
+      reportShortfall(index, chosen);
       consume(chosen);
       warnings.push(
         `${from} → ${to}：试飞没得到结果，起降距离按公式估算补算（时间近似）。` +

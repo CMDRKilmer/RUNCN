@@ -14,7 +14,7 @@
 // 覆盖的是编排层的油量初始化与作废范围，不覆盖 FTC 模型数值与真实试飞。
 import { register } from 'node:module';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
-const { stubSetFuel, ftcCalls, btfCalls } = await import('./lib/native-route-fuel-stub.mjs');
+const { stubSetFuel, stubSetOption, ftcCalls, btfCalls } = await import('./lib/native-route-fuel-stub.mjs');
 const { computeNativeRouteFuel } = await import('../src/features/XIT/FLEET/native-route-fuel.ts');
 const { hoursInvalidatedBySettingChange, percentAtLeast } =
   await import('../src/features/XIT/FLEET/native-route-plan.ts');
@@ -142,6 +142,61 @@ await check('改档作废：反应堆档只认 FTL 补油（STL 补油不停）'
 
 await check('改档作废：末段没有下游，只清本段', async failures => {
   expectEqual(failures, 'stale', [3], hoursInvalidatedBySettingChange(fourStops, 3, 4, ['STL']));
+});
+
+await check('反应堆档被向上取整时要按写入的档位重算', async failures => {
+  stubSetFuel({ stlRemaining: 3000, ftlRemaining: 500, stlCap: 3000, ftlCap: 500 });
+  stubSetOption({
+    reactorRelevant: true,
+    best: { fuel: 0.04, reactor: 0.653, totalHours: 1, stlFuel: 100, ftlFuel: 10 },
+  });
+  const result = await computeNativeRouteFuel(
+    candidate,
+    noRefuel,
+    new AbortController().signal,
+    () => {},
+  );
+  expectEqual(failures, 'FTC 调用次数', 2, ftcCalls.length);
+  expectEqual(failures, '重算用的反应堆档', 0.66, ftcCalls[1]?.fixedReactor);
+  expectEqual(failures, '重算用的燃料档', 0.04, ftcCalls[1]?.fixedFuel);
+  expectEqual(failures, '写入的反应堆百分比', 66, result.legs[1]?.reactorPercent);
+});
+
+await check('出发余量不够的航段要给出警告', async failures => {
+  stubSetFuel({ stlRemaining: 3000, ftlRemaining: 50, stlCap: 3000, ftlCap: 500 });
+  stubSetOption({
+    reactorRelevant: true,
+    best: { fuel: 0.04, reactor: 0.5, totalHours: 1, stlFuel: 100, ftlFuel: 40 },
+  });
+  const threeStops = [
+    { location: 'A', steps: [] },
+    { location: 'B', steps: [] },
+    { location: 'C', steps: [] },
+  ];
+  const result = await computeNativeRouteFuel(
+    candidate,
+    threeStops,
+    new AbortController().signal,
+    () => {},
+  );
+  expectEqual(
+    failures,
+    'FTL 不足警告数',
+    1,
+    result.warnings.filter(x => x.includes('FTL 不够')).length,
+  );
+  expectEqual(
+    failures,
+    '首段不报缺',
+    false,
+    result.warnings.some(x => x.includes('A → B：FTL 不够')),
+  );
+  expectEqual(
+    failures,
+    '第二段报缺',
+    true,
+    result.warnings.some(x => x.includes('B → C：FTL 不够')),
+  );
 });
 
 await check('写入档位向上取整：蓝图下限 0.653 不会写成 65%', async failures => {
