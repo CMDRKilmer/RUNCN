@@ -213,9 +213,7 @@ function detectionSignature() {
         x.weightLoad,
         x.items
           .map(item =>
-            item.quantity
-              ? `${item.quantity.material.ticker}:${item.quantity.amount ?? 0}`
-              : '',
+            item.quantity ? `${item.quantity.material.ticker}:${item.quantity.amount ?? 0}` : '',
           )
           .join(','),
       ].join('~'),

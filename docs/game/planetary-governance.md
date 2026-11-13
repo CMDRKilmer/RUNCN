@@ -57,3 +57,29 @@ Priorities per tier:
 Upkeep consumed daily (reserve = 30 days). Effect scales linearly with upkeep availability (e.g., 4 of 7 days fed = 4/7 effect).
 
 Education infrastructure (PBH +0.001, LIB +0.002, UNI +0.004) boosts education growth rate.
+
+## Government View (context) — what the server sends
+- The top-left "视图" switcher on the main screen switches the UI between the company
+  context (`#/screen=<id>`) and a government context (`#/context=<adminCenterId>&screen=<id>`).
+- In the government context the URL carries the administration center id, and it is listed
+  under `USER_DATA.contexts` with `type: "GOVERNMENT"` (the company context is `type: "COMPANY"`).
+- **The server only pushes government / planet scoped data in that view.** Login batch
+  messages such as `COMPANY_DATA`, `SITE_DATA`, `STORAGE_DATA` are not sent, so stores like
+  `companyStore`, `sitesStore`, `storagesStore` stay empty there; global data
+  (`UI_DATA`, `MATERIAL_DATA`, …) still arrives.
+- Plugin consequence: `prun-api-listener` must not drop messages for a context that belongs
+  to the user's own `contexts`, and `initializeApi()` must not wait for company-scoped stores
+  in a non-company context — otherwise `features.init()` never runs and neither the theme nor
+  any plugin UI loads in the government view.
+
+### 会计数据是「上下文实体」的，不是整个账号的
+- Entering a government context re-scopes `ACCOUNTING_*`: `ACCOUNTING_CASH_BALANCES` then
+  describes the **administration center's treasury**, not the company. Measured on
+  `#/context=4eef…`: `ICA 63,701.91`, `NCC/AIC/CIS = 0` — one funded account, the other three
+  currencies exist with zero balances.
+- Consequence for `balancesStore`: blindly `setAll()`-ing that payload wipes the company's
+  four balances. The bottom-right cash strip then shows only ICA (zeros are filtered), and
+  switching back to the company context keeps showing the government figures until the next
+  company login. The store therefore only accepts cash balances while the URL context is the
+  company context, and keeps a `localStorage` snapshot (`rprun-cash-snapshot`) for the
+  government view to fall back on.

@@ -28,6 +28,7 @@ const categoryMap: Record<string, string> = {
   PWARN: '生产与基地',
   WFOR: '生产与基地',
   REP: '生产与基地',
+  GOVH: '生产与基地',
   BPLAN: '规划与计算',
   JH: '规划与计算',
   BMAT: '规划与计算',

@@ -305,14 +305,17 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] [data-rp-ui][data-rp-selected=
   text-underline-offset: 2px !important;
 }
 
-/* ── SHPI：窗体内部的文字「卸货」按钮搬到标题栏图标按钮 ─────────────────
+/* ── SHPI：窗体内部原生「卸货」按钮的隐藏由功能开关控制 ──────────────
    shpi-header-actions 挂在 TileFrame.header 右侧：FB 面板会把内嵌磁贴的
    TileFrame.controls 整体隐藏，挂在那里按钮完全不可见；header 在独立窗口和
    FB 内嵌磁贴里都始终可见，所以两种窗口统一隐藏原文字按钮，不再留例外。
-   原按钮只是 display:none，节点保留，图标按钮仍通过 click() 走游戏原生流程。 */
-.rp-command-SHPI [class*='StoreView__centered'] > button {
-  display: none !important;
-}
+   只读 CDP 实测确认该按钮是游戏原生节点
+   （Button__primary / Button__btn，父链全为 StoreView__*，无 data-rp-*），
+   因此隐藏规则**必须**写在 shpi-header-actions 的 init() 里，随 XIT SET FEAT
+   开关一起启停：禁用该功能后原生按钮恢复、标题栏图标一并消失，
+   不会出现「图标没了、原按钮还被藏」导致卸货入口彻底消失的情况。
+   原按钮只是 display:none，节点保留，图标按钮仍通过 click() 走游戏原生流程。
+   规则本体见 src/features/basic/shpi-header-actions.tsx。 */
 
 /* ── SHPI：卸货 / 起飞图标靠到标题栏最右、原生窗口按键左边 ────────────
    TileFrame.header 是 display:block，按钮组是 inline-flex，margin-left:auto
@@ -489,6 +492,33 @@ html[data-rp-theme][data-rp-theme][data-rp-theme]
   :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
   :is([class*='card'], [class*='Card'], [class*='panel'], [class*='Panel'], [class*='section'], [class*='Section']) {
   border-color: var(--rp-skin-border, currentColor) !important;
+}
+
+/* XIT FIN / FINPR「关键指标」：10 张指标卡只靠 1px 外边距互相分隔，卡片底色
+   被主题引擎重映射成 rgb(240,240,240)、与窗口底色几乎相同，浅色主题下各指标
+   边界看不出来。这里只在财务窗口作用域给每张卡补一圈内描边（box-shadow inset
+   不占盒模型，避免 2px 边框把 4 卡一行挤成 3 卡，见 R14），并把底色钉到
+   --rp-skin-panel，让卡片与间隙、与窗口底色都拉开层次。
+   不写裸色值（R01）；原样主题无 data-rp-theme 不受影响（R21）。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
+  [class*='FinanceOverviewPanel__info'] {
+  background-color: var(--rp-skin-panel, transparent) !important;
+  box-shadow: inset 0 0 0 1px var(--rp-skin-border, currentColor) !important;
+  border-radius: 2px !important;
+}
+
+/* XIT GOVH「管理方项目」左侧 4 个共用竖表头（类别 / 项目 / 说明 / 结束于·开始于）
+   不要底色：游戏与主题引擎对所有 <th> 统一上了淡蓝底，自定义主题下那条规则带
+   html[data-rp-theme]×3 + !important，组件内普通声明、甚至普通 !important 都压不过
+   （实测四种写法只有同等前缀特异性生效，R06）。只清 tbody 的 4 个行表头，
+   thead 的「管理方项目 / 当期 / 即办」保留原底色作为表头。 */
+[data-govh-projects] tbody th[scope='row'] {
+  background-color: transparent !important;
+}
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  [data-govh-projects] tbody th[scope='row'] {
+  background-color: transparent !important;
 }
 
 /* 禁用控件：上面的 opacity 规则特意放过了 [disabled]，但组件常用
@@ -864,6 +894,11 @@ html[data-rp-theme='ceramic-colorful'] {
   --rp-cc-cat-2-text: #235148;
   --rp-cc-cat-2-border: #8fbfb5;
   --rp-cc-cat-2-chart: #3f887d;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色减半深度得到（R33），专用于 <progress>
+     容量条（FLT 燃料条等），不再复用图表实色，避免浅色陶瓷下燃料条过重。
+     与图表色分离，改这里不影响图表序列配色。 */
+  --rp-cc-progress-primary: #9fc3d4;
+  --rp-cc-progress-secondary: #9fc4be;
   --rp-cc-cat-3-bg: #eff0da;
   --rp-cc-cat-3-text: #505024;
   --rp-cc-cat-3-border: #bfc185;

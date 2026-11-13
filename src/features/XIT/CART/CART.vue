@@ -5,6 +5,7 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import Active from '@src/components/forms/Active.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import { sortMaterials } from '@src/core/sort-materials';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -352,10 +353,10 @@ function setStatus(message: string, isError = false) {
       <section :class="$style.section">
         <SectionHeader>物品目录</SectionHeader>
         <div :class="$style.panel">
-          <input
+          <SearchInput
             v-model="search"
             :class="[$style.surfaceInput, $style.searchInput]"
-            type="text"
+            :container-class="$style.searchWrap"
             placeholder="搜索 ticker 或名称"
             @keydown.enter.prevent="addFirstFilteredMaterial" />
 
@@ -516,8 +517,12 @@ function setStatus(message: string, isError = false) {
 }
 
 .searchInput {
-  margin-bottom: 8px;
   padding: 4px 6px;
+}
+
+/* 间距放在包裹层上：留在 input 身上会让放大镜按「含外边距」居中，偏下 4px。 */
+.searchWrap {
+  margin-bottom: 8px;
 }
 
 .materialList {

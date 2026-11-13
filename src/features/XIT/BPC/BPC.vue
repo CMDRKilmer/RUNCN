@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
@@ -355,12 +356,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
           </option>
         </select>
       </label>
-      <input
+      <SearchInput
         id="bpc-search"
         v-model="search"
         name="bpc-search"
         :class="$style.input"
-        type="text"
         placeholder="搜索配件 ticker 或名称" />
       <PrunButton primary @click="refreshPrices">更新价格</PrunButton>
       <label

@@ -1,6 +1,6 @@
 import socketIOMiddleware, { Middleware } from './socket-io-middleware';
 import { dispatch, dispatchForce } from '@src/infrastructure/prun-api/data/api-messages';
-import { companyContextId } from '@src/infrastructure/prun-api/data/user-data';
+import { companyContextId, userContextIds } from '@src/infrastructure/prun-api/data/user-data';
 import { startMeasure, stopMeasure } from '@src/utils/performance-measure';
 import { context } from '@src/infrastructure/prun-api/data/screens';
 import { watchUntil } from '@src/utils/watch';
@@ -25,7 +25,19 @@ const middleware: Middleware<Message> = {
     // 强制通道：无条件分发解包后的响应（绕过下方上下文检查），
     // 确保插件主动请求（STL 采集等）在任意上下文都能收到服务器响应。
     dispatchAlways(message);
-    if (context.value === companyContextId.value || !companyContextId.value || !context.value) {
+    // 政府管理视图（URL 里带 `context=<管理机构 id>`）下，游戏仍在同一条 socket 上
+    // 推自己的账号数据。原逻辑「context 与公司 id 不一致就整条丢弃」会把该视图里的
+    // 全部消息吞掉：initializeApi 永远等不到 store → features.init() 不执行，主题和
+    // 所有功能都不加载（现象就是「政府管理视图没加载到插件、主题覆盖不到」）。
+    // 现在只在 context 属于「自己不认识的外部实体」时才丢弃；userDataStore 还没到
+    // （companyContextId 为空）时照旧放行，避免把 USER_DATA 本身挡掉造成死锁。
+    const urlContext = context.value;
+    const isOwnContext =
+      !urlContext ||
+      !companyContextId.value ||
+      urlContext === companyContextId.value ||
+      userContextIds.value.has(urlContext);
+    if (isOwnContext) {
       return (await processEvent(message)) ?? false;
     }
     return false;

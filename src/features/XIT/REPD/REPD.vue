@@ -8,7 +8,7 @@ import SelectInput from '@src/components/forms/SelectInput.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import Tooltip from '@src/components/Tooltip.vue';
-import GenerateBraRepairActDialog from '@src/features/basic/bra-generate-repair-act/GenerateBraRepairActDialog.vue';
+import { setRepairQuote } from '@src/features/XIT/CART/repair-quote';
 import {
   calculateBillAtOffset,
   calculateRepairBoard,
@@ -20,7 +20,7 @@ import type {
   RepairBoardStatus,
   RepairBoardType,
 } from '@src/features/XIT/REPD/entries';
-import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
 import { timestampEachMinute } from '@src/utils/dayjs';
 import { fixed0, fixed1, formatCurrency, percent1 } from '@src/utils/format';
@@ -138,6 +138,60 @@ function typeStatus(type: RepairBoardType) {
   return repairStatus(type.dueIn, settings.value.dueSoonDays);
 }
 
+// ── 明细勾选：只把勾中的建筑类型计入购物清单 ────────────────────────────
+// 默认勾「逾期 + 即将到期」的类型（与左侧三色判定同一口径），未到期的不选；
+// 切换基地时按新基地状态重置，之后用户手动改动一直保持到下次切换。
+const selectedTypes = ref<Set<string>>(new Set());
+
+function defaultSelectedTypes(base: RepairBoardBase | undefined): Set<string> {
+  if (!base) {
+    return new Set();
+  }
+  return new Set(
+    base.types
+      .filter(type => repairStatus(type.dueIn, settings.value.dueSoonDays) !== 'later')
+      .map(type => type.ticker),
+  );
+}
+
+watch(
+  () => selected.value?.siteId,
+  siteId => {
+    selectedTypes.value = defaultSelectedTypes(siteId ? selected.value : undefined);
+  },
+  { immediate: true },
+);
+
+function isTypeSelected(ticker: string) {
+  return selectedTypes.value.has(ticker);
+}
+
+function toggleType(ticker: string) {
+  const next = new Set(selectedTypes.value);
+  if (next.has(ticker)) {
+    next.delete(ticker);
+  } else {
+    next.add(ticker);
+  }
+  selectedTypes.value = next;
+}
+
+const allTypesSelected = computed(
+  () =>
+    !!selected.value &&
+    selected.value.types.length > 0 &&
+    selected.value.types.every(type => selectedTypes.value.has(type.ticker)),
+);
+
+function toggleAllTypes() {
+  if (!selected.value) {
+    return;
+  }
+  selectedTypes.value = allTypesSelected.value
+    ? new Set()
+    : new Set(selected.value.types.map(type => type.ticker));
+}
+
 const selectedRowStyle = { backgroundColor: 'rgba(255, 255, 255, 0.12)' };
 const selectedAccentStyle = { boxShadow: 'inset 3px 0 0 #5aa9e6' };
 
@@ -164,6 +218,7 @@ const offsetBill = computed(() => {
     offsetDays.value,
     settings.value.subtractStore,
     timestampEachMinute.value,
+    selectedTypes.value,
   );
 });
 
@@ -177,6 +232,7 @@ const todayBill = computed(() => {
     0,
     settings.value.subtractStore,
     timestampEachMinute.value,
+    selectedTypes.value,
   );
 });
 
@@ -186,13 +242,48 @@ const offsetDelta = computed(() => {
   return at === undefined || today === undefined ? undefined : at - today;
 });
 
-// 复用插件自带「生成维修ACT」对话框：它按星球自然编号自己读 BRA 数据算账单。
-function onGenerateAct(ev: Event) {
+// 「比价」与「ACT」共用的完整维修账单：当前勾选建筑类型 + 当前抵达偏移，
+// 未扣任何库存（第三个参数 false）。两条链路必须读同一份数据，
+// 否则 REPD 直接 ACT 与「比价 → CBUY → ACT」会算出不同的数量与金额。
+// 库存抵扣（基地仓库 + 交易所仓库）统一由下游 CBUY / 生成 ACT 对话框负责，
+// 避免两处各扣一遍。
+const currentBill = computed(() => {
+  const base = selected.value;
+  if (!base) {
+    return undefined;
+  }
+  return calculateBillAtOffset(
+    base.siteId,
+    offsetDays.value,
+    false,
+    timestampEachMinute.value,
+    selectedTypes.value,
+  )?.load;
+});
+
+// 「比价购买」复用 XIT BURN 的 XIT CBUY 入口：把当前勾选类型的完整维修账单
+// 交给 CBUY 的临时清单模式，再开窗做四交易所实时盘口比价。
+// 同样不扣库存，抵扣与 MTRA 转移量由 CBUY 统一算。
+// 清单一路走模块内存，不读写 XIT CART 购物车，不新增任何外部价格源。
+function onCompare() {
   const base = selected.value;
   if (!base) {
     return;
   }
-  showTileOverlay(ev, GenerateBraRepairActDialog, { planetNaturalId: base.naturalId });
+  const load = currentBill.value;
+  if (!load || load.length === 0) {
+    return;
+  }
+  setRepairQuote({
+    siteId: base.siteId,
+    naturalId: base.naturalId,
+    items: load.map(x => ({
+      ticker: x.material.ticker,
+      name: x.material.ticker,
+      amount: x.amount,
+    })),
+  });
+  showBuffer('XIT CBUY REPD');
 }
 </script>
 
@@ -313,22 +404,50 @@ function onGenerateAct(ev: Event) {
           <BaseAlias :site-id="selected.siteId" />
         </div>
         <div :class="$style.meta">
-          目标 {{ targetText(selected) }} · 最老 {{ fixed1(selected.ageDays) }} 天 ·
+          整站目标 {{ targetText(selected) }} · 最老 {{ fixed1(selected.ageDays) }} 天 ·
           {{ selected.buildingCount }} 栋 / {{ selected.typeCount }} 类
         </div>
         <div :class="$style.detailBody">
-          <table :class="$style.compact">
+          <table :class="$style.compact" data-rp-repd-detail>
             <thead>
               <tr>
+                <th :class="$style.checkCol">
+                  <input
+                    type="checkbox"
+                    :checked="allTypesSelected"
+                    :title="allTypesSelected ? '清空选择' : '全选本基地类型'"
+                    @change="toggleAllTypes" />
+                </th>
                 <th>类型</th>
+                <th
+                  :class="$style.numeric"
+                  title="每种建筑类型各自算出的最优维修间隔；算不出时用维修设置里的固定天数">
+                  最优
+                </th>
                 <th :class="$style.numeric">数量</th>
                 <th :class="$style.numeric">年龄</th>
                 <th :class="$style.numeric">剩余</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="type in selected.types" :key="type.ticker">
+              <tr v-for="type in selected.types" :key="type.ticker" :data-repd-type="type.ticker">
+                <td :class="$style.checkCol">
+                  <input
+                    type="checkbox"
+                    :checked="isTypeSelected(type.ticker)"
+                    :aria-label="`选择 ${type.ticker}`"
+                    @change="toggleType(type.ticker)" />
+                </td>
                 <td>{{ type.ticker }}</td>
+                <td
+                  :class="$style.numeric"
+                  :title="
+                    type.targetIsOptimal
+                      ? '按该类型产能收益与建设成本算出的最优间隔'
+                      : '维修设置里的固定天数'
+                  ">
+                  {{ fixed0(type.targetDay) }}
+                </td>
                 <td :class="$style.numeric">{{ type.count }}</td>
                 <td :class="$style.numeric">{{ fixed1(type.ageDays) }}</td>
                 <td :class="$style.numeric" :style="statusStyle(typeStatus(type))">
@@ -337,6 +456,9 @@ function onGenerateAct(ev: Event) {
               </tr>
             </tbody>
           </table>
+        </div>
+        <div :class="$style.meta">
+          已选 {{ selectedTypes.size }} / {{ selected.types.length }} 类 · 「最优」按类型单独计算
         </div>
         <div :class="$style.meta">
           等待 {{ formatCost(selected.waitingPerDay) }}/天 · 状况
@@ -367,7 +489,18 @@ function onGenerateAct(ev: Event) {
       <div v-if="selected" :class="[$style.panel, $style.cart]">
         <div :class="[$style.panelTitle, $style.cartTitle]">
           <span>购物清单 · {{ formatCost(offsetBill?.cost) }}</span>
-          <PrunButton dark inline @click="onGenerateAct">ACT</PrunButton>
+          <div :class="$style.cartActions">
+            <PrunButton
+              dark
+              inline
+              :disabled="!selectedTypes.size || !offsetBill?.load?.length"
+              data-tooltip="按已勾选类型的维修材料比价购买；自动扣除被维修基地仓库与所选交易所仓库的已有库存"
+              data-tooltip-position="top"
+              data-rp-repd-compare
+              @click="onCompare"
+              >比价购买</PrunButton
+            >
+          </div>
         </div>
         <div :class="$style.meta">
           {{ offsetDays === 0 ? '今天抵达' : `+${offsetDays} 天后抵达` }}
@@ -375,6 +508,10 @@ function onGenerateAct(ev: Event) {
           {{ fixed1(offsetBill?.volume ?? 0) }}m³<template v-if="settings.subtractStore"
             >，已扣基地库存</template
           >
+          · 已选 {{ selectedTypes.size }} 类
+        </div>
+        <div v-if="!selectedTypes.size" :class="$style.meta" data-rp-repd-empty>
+          在上方明细最左侧勾选要修的建筑类型，购物清单会随之更新。
         </div>
         <MaterialPurchaseTable :materials="offsetBill?.load ?? []" />
       </div>
@@ -629,6 +766,26 @@ function onGenerateAct(ev: Event) {
 
 .numeric {
   text-align: right;
+}
+
+/* 明细最左侧的维修勾选列：只占一个复选框宽，表头那个用于全选 / 清空。 */
+.checkCol {
+  width: 20px;
+  text-align: center;
+}
+
+.checkCol :global(input[type='checkbox']) {
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+/* 购物清单标题右侧的「比价购买」，紧贴标题、同一行。 */
+.cartActions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
 }
 
 /* 明细表体固定 5 行高（表头 + 5 行数据），多出来的类型在框内滚动。 */

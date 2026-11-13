@@ -34,7 +34,10 @@ export async function showBuffer(command: string, options?: ShowBufferOptions) {
   if (!options?.force) {
     const existing = tiles.find(command).find(x => !x.docked);
     if (existing) {
-      const window = existing.frame.closest(`.${C.Window.window}`)!;
+      // 显式收窄成 HTMLDivElement：这是窗口根节点，调用方（GOVH 等）要拿它当
+      // HTMLElement 解析。原来 closest() 的 Element 类型会让所有 await showBuffer
+      // 的调用点都退化成 Element。
+      const window = existing.frame.closest(`.${C.Window.window}`)! as HTMLDivElement;
       const command = UI_WINDOWS_REQUEST_FOCUS(existing.id);
       if (dispatchClientPrunMessage(command)) {
         return window;

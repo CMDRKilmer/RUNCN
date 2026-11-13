@@ -1,17 +1,21 @@
 <script setup lang="ts">
-import { MaterialBurn } from '@src/core/burn';
+import { MaterialBurn, computeNeed, getResupplyDays } from '@src/core/burn';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import DaysCell from '@src/features/XIT/BURN/DaysCell.vue';
 import { fixed0, fixed01, fixed02, fixed1, fixed2 } from '@src/utils/format';
 import { useTileState } from '@src/features/XIT/BURN/tile-state';
-import PrunButton from '@src/components/PrunButton.vue';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { userData } from '@src/store/user-data';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 
-const { alwaysVisible, burn, material } = defineProps<{
+const { alwaysVisible, burn, material, naturalId } = defineProps<{
   alwaysVisible?: boolean;
   burn: MaterialBurn;
   material: PrunApi.Material;
+  // 所属星球编码：用于读取该星球的补给天数覆盖与仓储容量上限，
+  // 使「需要」列与 FLEET 执行预览、XIT CBUY 的数量完全一致。
+  // 「整体消耗」等虚拟汇总行没有该值，退回全局补给天数。
+  naturalId?: string;
 }>();
 
 const production = computed(() => burn.dailyAmount);
@@ -85,16 +89,13 @@ const outClass = computed(() => ({
   [C.ColoredValue.positive]: outAmount.value > 0,
 }));
 
+// 「需要」列：补到目标天数的缺口。目标天数 = 该星球的补给天数（含单星球
+// 覆盖），再按基地仓储容量上限钳制；缺口算法统一走 core/burn 的 computeNeed
+// （只看 inventory，不含 remainingAllocation），与 FLEET 账单口径一致。
 const needAmt = computed(() => {
-  const resupply = userData.settings.burn.resupply;
-  if (days.value > resupply || production.value > 0) {
-    return 0;
-  }
-  let need = Math.ceil((days.value - resupply) * production.value);
-  // 这个检查是为了防止出现 "-0" 值，
-  // 例如：0 * -0.25 => -0 这种情况。
-  need = need === 0 ? 0 : need;
-  return need;
+  const site = naturalId ? sitesStore.getByPlanetNaturalIdOrName(naturalId) : undefined;
+  const targetDays = clampTargetDays(getResupplyDays(naturalId) ?? 10, getSuppliesCap(site));
+  return computeNeed(burn, targetDays);
 });
 </script>
 
@@ -126,9 +127,6 @@ const needAmt = computed(() => {
       <span>{{ isNaN(needAmt) ? '0' : fixed0(needAmt) }}</span>
     </td>
     <DaysCell :days="days" />
-    <td>
-      <PrunButton dark inline @click="showBuffer(`CXM ${material.ticker}`)">CXM</PrunButton>
-    </td>
   </tr>
 </template>
 

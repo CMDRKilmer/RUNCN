@@ -240,14 +240,29 @@ export function getResupplyDays(planetNaturalId?: string | null) {
   return userData.settings.burn.resupply;
 }
 
-export function computeNeed(mat: MaterialBurn, resupplyDays: number) {
-  const production = mat.dailyAmount;
-  const isInf = production >= 0;
-  const days = isInf ? 1000 : mat.daysLeft;
-  if (days > resupplyDays || production > 0) {
+/**
+ * 补给缺口：把该物料补到「总目标天数」还差多少（向上取整）。
+ *
+ * 库存口径只看 `mat.inventory`，**不计 `remainingAllocation`**。后者是已分配给
+ * 生产队列、但尚未被消耗的料，FLEET 的补给账单与 ACT 的 Resupply 组一直按
+ * 「不算它」执行（保守多买）；若这里改成算它，同一个基地在 BURN / CBUY / FLEET
+ * 三处会给出不同的采购量。历史上 BURN 的「需要」列与 CBUY 用 daysLeft（算了
+ * remainingAllocation），比 FLEET 少买 1 个单位，就是这么来的。
+ *
+ * @param mat 该物料的消耗数据
+ * @param resupplyDays 目标总天数（补到第 N 天，不是「再补 N 天」）；调用方负责
+ *   先按基地仓储容量上限钳制（见 clampTargetDays）
+ * @param useBaseInv 是否用基地现有库存抵扣；false 时按「从零补满」计算
+ */
+export function computeNeed(mat: MaterialBurn, resupplyDays: number, useBaseInv = true) {
+  const dailyConsume = -mat.dailyAmount;
+  if (!Number.isFinite(dailyConsume) || dailyConsume <= 0) {
     return 0;
   }
-  const need = Math.ceil((days - resupplyDays) * production);
-  // 此检查可避免出现 "-0" 的值，例如：0 * -0.25 => -0。
-  return need === 0 ? 0 : need;
+  const inventory = useBaseInv ? mat.inventory : 0;
+  const required = resupplyDays * dailyConsume - inventory;
+  if (!(required > 0)) {
+    return 0;
+  }
+  return Math.ceil(required);
 }

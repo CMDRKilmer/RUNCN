@@ -85,7 +85,13 @@ export function buildCeramicSkin(): Skin {
       '--rp-skin-action-unload': 'var(--rp-cc-cat-4-text)',
       '--rp-skin-action-flight': 'var(--rp-cc-cat-2-text)',
       '--rp-skin-action-fuel': 'var(--rp-cc-cat-5-text)',
+      // 缺料/危险语义红（R27）：BRA「所需材料」不足的数量角标。
+      '--rp-skin-danger': 'var(--rp-cc-status-danger-text)',
       '--rp-skin-action-done': 'var(--rp-cc-cat-6-text)',
+      // SFC 燃料条专用全深度色：直接取 cat-1 / cat-2 图表实色，
+      // 与 R33 的 --rp-cc-progress-*（减半浅色，供 FLT 大燃料条）分离。
+      '--rp-skin-sfc-fuel-stl': 'var(--rp-cc-cat-1-chart)',
+      '--rp-skin-sfc-fuel-ftl': 'var(--rp-cc-cat-2-chart)',
       '--rp-accent-rgb': hexToTriple(accent),
       '--rp-color-accent-primary': 'var(--rp-cc-accent-line)',
       '--rp-color-text': 'var(--rp-cc-text-primary)',
@@ -122,8 +128,9 @@ export function buildCeramicSkin(): Skin {
       lineSoft: accent,
     },
     progress: {
-      primary: token('--rp-cc-cat-1-chart'),
-      secondary: token('--rp-cc-cat-2-chart'),
+      // 主/次填充用减半深度的专用 token（R33），与图表 cat-1/cat-2 实色分离。
+      primary: token('--rp-cc-progress-primary'),
+      secondary: token('--rp-cc-progress-secondary'),
       warning: token('--rp-cc-status-warning-text'),
       success: token('--rp-cc-status-success-text'),
       danger: token('--rp-cc-status-danger-text'),
@@ -202,16 +209,29 @@ ${P} :is([class*='Button__primary'], [data-rp-btn='primary']):hover {
 ${P} :is([class*='Button__primary'], [data-rp-btn='primary']):active {
   background-color: var(--rp-cc-btn-primary-active) !important;
 }
+${P} :is([class*='Button__success'], [data-rp-btn='success']) {
+  color: var(--rp-cc-status-success-text) !important;
+  background-color: var(--rp-cc-status-success-bg) !important;
+  border-color: var(--rp-cc-status-success-border) !important;
+}
+${P} :is([class*='Button__success'], [data-rp-btn='success']):hover {
+  background-color: var(--rp-cc-status-success-border) !important;
+}
+${P} :is([class*='Button__success'], [data-rp-btn='success']):active {
+  color: #fffdf8 !important;
+  background-color: var(--rp-cc-status-success-text) !important;
+}
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']) {
-  color: var(--rp-cc-btn-danger-text) !important;
-  background-color: var(--rp-cc-btn-danger-bg) !important;
-  border-color: var(--rp-cc-btn-danger-border) !important;
+  color: var(--rp-cc-status-danger-text) !important;
+  background-color: var(--rp-cc-status-danger-bg) !important;
+  border-color: var(--rp-cc-status-danger-border) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']):hover {
-  background-color: var(--rp-cc-btn-danger-hover) !important;
+  background-color: var(--rp-cc-status-danger-border) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']):active {
-  background-color: var(--rp-cc-btn-danger-active) !important;
+  color: #fffdf8 !important;
+  background-color: var(--rp-cc-status-danger-text) !important;
 }
 ${P} :is([class*='Button__ghost'], [data-rp-btn='ghost']) {
   color: var(--rp-cc-btn-ghost-text) !important;
@@ -401,7 +421,7 @@ ${P} progress::-webkit-progress-bar {
   background-color: var(--rp-cc-control-track) !important;
 }
 ${P} :is([class*='ProgressBar__good'], [class*='ProgressBar__primary'])::-webkit-progress-value {
-  background-color: var(--rp-cc-cat-1-chart) !important;
+  background-color: var(--rp-cc-progress-primary) !important;
 }
 ${P} [class*='ProgressBar__warning']::-webkit-progress-value {
   background-color: var(--rp-cc-status-warning-text) !important;

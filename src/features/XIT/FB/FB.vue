@@ -809,10 +809,7 @@ defineExpose({ tileIds: () => Array.from(moved.keys()) });
     </div>
     <div :class="$style.middle">
       <div ref="bsHost" :class="$style.slot" data-fb-slot="bs" />
-      <div
-        ref="invHost"
-        :class="[$style.slot, $style.mainInvSlot]"
-        data-fb-slot="inv" />
+      <div ref="invHost" :class="[$style.slot, $style.mainInvSlot]" data-fb-slot="inv" />
       <div ref="burnHost" :class="$style.slot" data-fb-slot="burn" />
     </div>
     <div :class="$style.right">

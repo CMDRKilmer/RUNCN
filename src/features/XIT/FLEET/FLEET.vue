@@ -4,7 +4,7 @@ import { buildDispatchActionPlan, type IncludedBase } from './dispatch-actions';
 import PrunButton from '@src/components/PrunButton.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import TextInput from '@src/components/forms/TextInput.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
 import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
 import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
@@ -593,7 +593,7 @@ onUnmounted(() => clearTimeout(noticeTimer));
           <RadioItem v-model="showWar" horizontal>仓储</RadioItem>
           <RadioItem v-model="showFill" horizontal>填满</RadioItem>
           <div :class="$style.searchContainer">
-            <TextInput v-model="planetFilter" />
+            <SearchInput v-model="planetFilter" placeholder="搜索基地" />
             <PrunButton
               v-if="planetFilter"
               dark
@@ -764,10 +764,14 @@ onUnmounted(() => clearTimeout(noticeTimer));
 }
 
 .searchContainer :global(input) {
+  /* 原生 input 不继承父级字体，默认是 13.3px Arial；同排 RadioItem 是 11px，
+     不写 font: inherit 会显得字偏大、字形也不一致。 */
+  font: inherit;
   background-color: #42361d;
   border-width: 0 0 1px;
   border-bottom: 1px solid #8d6411;
   color: #cccccc;
+  /* 左侧留白（放大镜位置）由 SearchInput 统一提供，这里只管右/上下。 */
   padding: 0 5px;
   width: 80px;
 }

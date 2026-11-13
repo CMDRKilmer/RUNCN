@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -330,10 +331,9 @@ const lmTotal = computed(() => {
   <div :class="[$style.container, C.type.typeRegular, C.fonts.fontRegular]">
     <!-- ═══ 查询栏 ═══ -->
     <div :class="$style.toolbar">
-      <input
+      <SearchInput
         v-model="query"
         :class="$style.searchInput"
-        type="text"
         placeholder="公司代码 / 名称 / 用户名（如 KI / Kodiak / Xk37）"
         @keyup.enter="onEnter" />
       <PrunButton primary inline :disabled="loading" @click="onEnter">
