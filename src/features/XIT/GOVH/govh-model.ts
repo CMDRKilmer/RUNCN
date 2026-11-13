@@ -707,9 +707,14 @@ function computeProvided(
   provided.HEALTH = base;
   provided.LIFE_SUPPORT = needed.LIFE_SUPPORT * lifeBaseline;
   for (const option of options) {
+    // 容量未知 = 连「要补多少」都不知道。无论用户有没有勾选，都不能计入贡献：
+    // 否则点「全选」或手动勾这些行会让 achievable 凭空变 true、成本为 0，
+    // 而导出的采购单里根本没有这些物料（PR #60 审查）。
+    if (!option.capacityKnown) {
+      continue;
+    }
     // 已填满的存量是免费基线；未填满时必须显式采购才计入。
-    // 容量未知的物料无法判断是否已填满，同样不能当免费基线（否则会凭空多算贡献）。
-    if (!active.has(option.key) && (!option.capacityKnown || option.netFillAmount > 0)) {
+    if (!active.has(option.key) && option.netFillAmount > 0) {
       continue;
     }
     for (const [need, contrib] of Object.entries(option.contribPerLevel) as [InfraNeed, number][]) {
@@ -789,10 +794,16 @@ export function solve(input: GovhInput): GovhResult {
 
   let selected: Set<string>;
   if (input.selected !== undefined) {
-    // 用户显式选择：仅保留仍存在的键。
-    selected = new Set([...input.selected].filter(key => optionByKey.has(key)));
+    // 用户显式选择：仅保留仍存在、且容量已知的键；容量未知的行不在采购单里，
+    // 不能因为被勾上就白算贡献。
+    selected = new Set(
+      [...input.selected].filter(key => {
+        const option = optionByKey.get(key);
+        return option !== undefined && option.capacityKnown;
+      }),
+    );
   } else if (input.fillAll) {
-    selected = new Set(options.map(o => o.key));
+    selected = new Set(options.filter(o => o.capacityKnown).map(o => o.key));
   } else {
     // ── Phase 1：逐需求贪心（沿用 oog 两阶段思路）──────────────────────
     // 免费基线（已满仓的物料）由 computeProvided 自动计入，不需要采购，

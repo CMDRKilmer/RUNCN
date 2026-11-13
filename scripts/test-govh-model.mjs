@@ -730,4 +730,28 @@ check('报告年龄：任何解析成功的标签，剩余时长都不超过「7
   }
 });
 
+check('容量未知的行：手动勾选也不计贡献、不进 selected（PR #60 审查）', () => {
+  const base = { ...baseInput(), levels: { ...baseInput().levels, EMC: 2 } };
+  const empty = solve({ ...base, selected: new Set() });
+  const picked = solve({ ...base, selected: new Set(['EMC.PK']) });
+  assert.ok(!picked.selected.has('EMC.PK'), '容量未知的行被放进 selected');
+  assert.equal(picked.summary.fillCost, 0);
+  assert.equal(picked.achievable, empty.achievable, '勾选后 achievable 凭空变 true');
+  assert.equal(JSON.stringify(picked.needs), JSON.stringify(empty.needs), '勾选后提供量被白算');
+});
+
+check('容量未知的行：全选（fillAll）也不会选上', () => {
+  const r = solve({
+    ...baseInput(),
+    levels: { ...baseInput().levels, EMC: 2 },
+    selected: undefined,
+    fillAll: true,
+  });
+  const unknown = r.options.filter(o => !o.capacityKnown);
+  assert.ok(unknown.length > 0, '样本里没有容量未知的行');
+  for (const option of unknown) {
+    assert.ok(!r.selected.has(option.key), `${option.key} 被全选选中`);
+  }
+});
+
 console.log(`\n${pass} 项通过`);

@@ -776,6 +776,11 @@ async function refreshPrices() {
 
 // 勾选 / 取消某物料（含同一 ticker 的多建筑条目独立）。
 function toggleOption(key: string) {
+  // 容量未知的行在 UI 上是禁用的，这里再挡一次，防止键盘 / 脚本绕过。
+  const option = result.value?.options.find(o => o.key === key);
+  if (option !== undefined && !option.capacityKnown) {
+    return;
+  }
   const current = new Set(result.value?.selected ?? []);
   if (current.has(key)) {
     current.delete(key);
@@ -791,7 +796,10 @@ function isSelected(key: string): boolean {
 
 // 全选 / 清空 / 恢复推荐。
 function selectAll() {
-  userSelected.value = new Set(result.value?.options.map(o => o.key) ?? []);
+  // 容量未知的行没有采购量，勾上也不会进清单，全选时直接跳过。
+  userSelected.value = new Set(
+    result.value?.options.filter(o => o.capacityKnown).map(o => o.key) ?? [],
+  );
 }
 function selectNone() {
   userSelected.value = new Set();
@@ -1331,6 +1339,7 @@ onUnmounted(() => {
                   <input
                     type="checkbox"
                     :checked="isSelected(row.option.key)"
+                    :disabled="!row.option.capacityKnown"
                     :class="$style.checkbox"
                     @change="toggleOption(row.option.key)" />
                 </td>
