@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import {
+  executionIndicatorStatus,
+  requestRouteExecutions,
+  routeExecutionsStore,
+} from '@src/infrastructure/prun-api/data/route-executions';
 import { getInvStore } from '@src/core/store-id';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
@@ -32,6 +37,8 @@ import TimeCell from './TimeCell.vue';
 import FleetCargoBar from './FleetCargoBar.vue';
 import { fixed0 } from '@src/utils/format';
 
+type RouteStatus = 'ok' | 'warning' | 'error';
+
 type FlightRow = {
   ship: PrunApi.Ship;
   stlFuelRatio: number | undefined;
@@ -39,6 +46,10 @@ type FlightRow = {
   cargoSizeText: string;
   isFtlCapable: boolean;
   statusIcon: string;
+  // 已分配航线时才有值：**严格取自游戏原生航线执行状态**（RTE 航点前指示器同源）。
+  // 数据来自 SHIP_ROUTES_EXECUTION(S)：execution.state → 与原生同一张开关表。
+  // 未收到执行数据时为 undefined（显示为「未同步」中性圆点）。
+  routeStatus: RouteStatus | undefined;
 };
 
 const rawRows = computed<FlightRow[] | undefined>(() => {
@@ -59,6 +70,11 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
     const segment = flight?.segments[flight.currentSegmentIndex];
     const statusIcon = segment ? segStatusIcon(segment.type) : stationaryIcon;
 
+    // 严格同步：颜色直接来自游戏原生航线执行状态。
+    const execution = routeExecutionsStore.getById(ship.id);
+    const routeStatus =
+      execution !== undefined ? executionIndicatorStatus(execution.state) : undefined;
+
     return {
       ship,
       stlFuelRatio,
@@ -66,6 +82,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
       cargoSizeText: getCargoSizeText(inventory),
       isFtlCapable,
       statusIcon,
+      routeStatus,
     };
   });
 });
@@ -113,6 +130,45 @@ function getFuelRatio(store: PrunApi.Store | undefined) {
 function onFuel(registration: string) {
   showBuffer(`SHPF ${registration}`);
 }
+
+function routeStatusTooltip(status: RouteStatus | undefined) {
+  if (status === 'warning') {
+    return '航线节点：警告（等待任务 / 步骤受阻）';
+  }
+  if (status === 'error') {
+    return '航线节点：异常（受阻或无法执行）';
+  }
+  if (status === 'ok') {
+    return '航线节点：正常（点击打开 RTE）';
+  }
+  return '未同步原生状态（点击打开 RTE 加载）';
+}
+
+// 点击指示器打开该船的航线执行窗口：RTE 的参数是**船注册号（应答代码）**，
+// 例如 `RTE AVI-06HW8`；不是航线号。注册号为空时退回 RTE 列表。
+function openRoute(row: FlightRow) {
+  const registration = row.ship.registration;
+  void showBuffer(registration !== '' ? `RTE ${registration}` : 'RTE');
+}
+
+// 打开面板即自动同步一次原生航线执行状态，不必等点击：直接发
+// SHIP_ROUTES_GET_EXECUTIONS 请求（响应由被动订阅的 store 收下）。
+// socket/上下文没就绪时按 1.5s 间隔重试，最多约 15s。
+function syncRouteExecutions(attempt: number) {
+  if (routeExecutionsStore.fetched.value) {
+    return;
+  }
+  if (requestRouteExecutions()) {
+    return;
+  }
+  if (attempt < 10) {
+    setTimeout(() => syncRouteExecutions(attempt + 1), 1500);
+  }
+}
+
+onMounted(() => {
+  syncRouteExecutions(0);
+});
 </script>
 
 <template>
@@ -130,16 +186,22 @@ function onFuel(registration: string) {
 
       <!-- Body rows -->
       <div v-for="x in rows" :key="x.ship.id" :class="$style.row">
-        <div :class="[$style.bodyCell]">
+        <div :class="[$style.bodyCell, $style.nameCell]">
           <span
             :class="[
               C.Link.link,
+              { [$style.nameBox]: x.ship.assignedRoute != null && x.ship.assignedRoute !== '' },
               { [$style.warnCondition]: shipConditionLevel(x.ship.condition) === 'warn' },
               { [$style.lowCondition]: shipConditionLevel(x.ship.condition) === 'danger' },
             ]"
             @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}
           </span>
+          <span
+            v-if="x.ship.assignedRoute != null && x.ship.assignedRoute !== ''"
+            :class="[$style.routeDot, $style[x.routeStatus ?? 'unknown']]"
+            :data-tooltip="routeStatusTooltip(x.routeStatus)"
+            @click="openRoute(x)"></span>
         </div>
 
         <div :class="[$style.bodyCell, $style.cargoCombinedCell]">
@@ -277,6 +339,54 @@ function onFuel(registration: string) {
 .statusArrow {
   margin-right: 4px;
   color: #3fa2de;
+}
+
+/* 已分配航线的舰名：虚线框 + 右侧航线节点状态圆点。
+   虚线框与圆点都是 flex 子项，靠 .bodyCell 的 align-items:center 与舰名文字垂直居中。
+   颜色优先取主题语义 token（有主题时自动跟随），无主题时用兜底色保证可见。 */
+.nameCell {
+  gap: 4px;
+}
+
+.nameBox {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--rp-skin-border-strong, currentColor);
+  border-radius: 6px;
+  /* 左右各 4px 内边距 + 1px 边框，靠 -5px 左边距抵消，使框内文字与未加框行
+     的舰名左缘对齐（避免加框后文字整体右移）；整体更紧凑。 */
+  padding: 0 4px;
+  margin-left: -5px;
+  line-height: 1.4;
+}
+
+.routeDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.routeDot.ok {
+  background: var(--rp-skin-success, #4fae6a);
+  box-shadow: 0 0 5px 1px var(--rp-skin-success, #4fae6a);
+}
+
+.routeDot.warning {
+  background: var(--rp-skin-warning, #d9a13b);
+  box-shadow: 0 0 5px 1px var(--rp-skin-warning, #d9a13b);
+}
+
+.routeDot.error {
+  background: var(--rp-skin-danger, #d9534f);
+  box-shadow: 0 0 5px 1px var(--rp-skin-danger, #d9534f);
+}
+
+/* 还没收到原生执行数据时的中性指示（空心圈）：不伪造颜色，点击可打开 RTE 触发加载。 */
+.routeDot.unknown {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--rp-skin-muted, #7b8b96);
 }
 
 /* 耐久 80%~83% 时舰名变黄警示。 */
