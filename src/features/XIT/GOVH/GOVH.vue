@@ -25,7 +25,7 @@ import {
   type GovernanceProjectEntry,
   type GovhSnapshot,
 } from './govh-dom';
-import { readCachedSnapshot, writeCachedSnapshot } from './govh-cache';
+import { readCachedSnapshot, writeCachedBaseCount, writeCachedSnapshot } from './govh-cache';
 import { useManagedGovernments } from './govh-governments';
 import { setGovhQuote } from './govh-quote';
 import { readPrices, subscribePrices, GOVH_EXCHANGES } from './govh-prices';
@@ -665,7 +665,11 @@ function snapshotInfo(snap: GovhSnapshot, suffix: string): string {
 // 触发 result 重算 + 20 行 × 11 列整表（含计算过程长文本）二次重建，用户感知为
 // 「每次激活 GOVH 都要重新载入计算过程」。在首次渲染前把快照就位即可避免这一次重建。
 // 只恢复纯 DOM 快照，价格仍走 cxobStore 实时源；「刷新数据」按钮仍强制重读。
+// 整星基地数也随快照一起恢复：缓存挂载没有 refreshData → refreshBaseCount 这条路，
+// 不恢复就会在重开面板时回退自有基地数（PR #60 审查 P2）。
 const restoredFromCache = ref(false);
+// 记录上一次按哪个星球读过整星基地数，切星球时要把旧值清掉。
+let lastBaseCountPlanet = '';
 function restoreFromCache(): boolean {
   const planet = planetInput.value.trim();
   if (planet === '') {
@@ -676,6 +680,8 @@ function restoreFromCache(): boolean {
     return false;
   }
   snapshot.value = cached.snapshot;
+  planetBaseCount.value = cached.planetBaseCount;
+  lastBaseCountPlanet = planet.toUpperCase();
   info.value = snapshotInfo(
     cached.snapshot,
     `本地缓存（${cacheAge(cached.savedAt)}，点「刷新数据」重读）`,
@@ -685,9 +691,6 @@ function restoreFromCache(): boolean {
 }
 restoreFromCache();
 
-// 记录上一次按哪个星球读过整星基地数，切星球时要把旧值清掉。
-let lastBaseCountPlanet = '';
-
 // 读整星基地数（hidden COMG 窗口）。失败不阻断主流程：baseCount 回退自有基地数。
 async function refreshBaseCount(planet: string, force: boolean, seq: number) {
   const count = await readPlanetBaseCount(planet, force);
@@ -695,6 +698,8 @@ async function refreshBaseCount(planet: string, force: boolean, seq: number) {
     return;
   }
   planetBaseCount.value = count?.total;
+  // 异步读到的基地数补进缓存，重开面板时首绘就有正确数值。
+  writeCachedBaseCount(planet, count?.total);
 }
 
 // 读取 POPR / POPI / POPID 快照。loadSeq 保证快速切换政府时只认最后一次结果。
@@ -724,6 +729,7 @@ async function refreshData(force = false) {
     const cached = force ? undefined : readCachedSnapshot(planet);
     if (cached) {
       snapshot.value = cached.snapshot;
+      planetBaseCount.value = cached.planetBaseCount;
       info.value = snapshotInfo(
         cached.snapshot,
         `本地缓存（${cacheAge(cached.savedAt)}，点「刷新数据」重读）`,
@@ -747,7 +753,7 @@ async function refreshData(force = false) {
       return;
     }
     snapshot.value = snap;
-    writeCachedSnapshot(planet, snap);
+    writeCachedSnapshot(planet, snap, planetBaseCount.value);
     info.value = snapshotInfo(snap, '刚刚从本地窗口读取');
     // 本地订单簿按需订阅（hidden CXOB，零外部请求）。
     void subscribePrices(tickers.value, () => disposed.value);
@@ -919,8 +925,12 @@ onMounted(() => {
   mounted.value = true;
   if (restoredFromCache.value) {
     // 首绘已由 setup 同步恢复的快照填充，无需再走 onMounted → refreshData 的路径：
-    // 那条路会给 snapshot 赋新引用，导致整表二次重建。这里只补订本地订单簿价格。
+    // 那条路会给 snapshot 赋新引用，导致整表二次重建。这里只补订本地订单簿价格，
+    // 并在缓存没有基地数（上次 COMG 读取失败）时补读一次，不重建表格。
     void subscribePrices(tickers.value, () => disposed.value);
+    if (planetBaseCount.value === undefined) {
+      void refreshBaseCount(planetInput.value.trim(), false, loadSeq);
+    }
     return;
   }
   if (planetInput.value.trim() !== '') {
