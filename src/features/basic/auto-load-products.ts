@@ -6,6 +6,13 @@
 // 生成一个只含 MTRA 的一次性包，queueTriggerRun + 隐藏窗口自动执行，
 // 与 trigger-engine / FLEET 到港卸货同一套流程。
 //
+// 游戏 2026-11-11 上线「航线（RT）」后必须让路：航线船的到站装卸由服务器按
+// 航点步骤执行（飞船到站先跑 unload / load / refuel，跑完才飞下一点），
+// 插件抢先把货搬上船会顶掉 load 步骤的舱位与库存判断，让 step 一直卡在
+// 「等待最少数量」。所以 **ship.assignedRoute 非 null 的船一律不碰**，
+// 判定用游戏自己给船的 assignedRoute 字段（初始 SHIP_SHIPS 快照里就有，
+// 不需要开 RT / RTE 窗口）。
+//
 // 默认关闭，开关位于 XIT SET → 功能页的「功能性开关」区。
 import { getBaseProducts } from '@src/core/base-products';
 import { shipsAtBaseMap } from '@src/core/base-ship-map';
@@ -77,6 +84,17 @@ function isCargoFull(cargo: PrunApi.Store) {
   const capacity = cargo.weightCapacity ?? 0;
   // 留 2% 余量：接近满载就不再尝试，避免 MTRA 每轮都 clamp 成 0 空跑。
   return capacity > 0 && cargo.weightLoad >= capacity * 0.98;
+}
+
+// 船是否被分配到航线（游戏 RT 功能）。分流给航线的船由服务器在航点执行装卸，
+// 插件必须完全不碰：不搬货、不生成 ACT 包、也不留 attempt 记录。
+// assignedRoute 是 route id 字符串；未分配为 null / 字段缺失（旧版本游戏）时按「未分配」处理。
+export function isRouteBound(ship: PrunApi.Ship | undefined): boolean {
+  if (!ship) {
+    return false;
+  }
+  const route = ship.assignedRoute;
+  return typeof route === 'string' && route !== '';
 }
 
 function stageAndRun(
@@ -171,6 +189,11 @@ function runDetection() {
         if (!ship) {
           continue;
         }
+        // 航线船交给游戏自己装卸（RT 航点的 load 步骤），插件让路。
+        if (isRouteBound(ship)) {
+          attempts.delete(registration);
+          continue;
+        }
         const cargo = cargoStoreOf(ship.id);
         if (!cargo || isCargoFull(cargo)) {
           continue;
@@ -213,9 +236,7 @@ function detectionSignature() {
         x.weightLoad,
         x.items
           .map(item =>
-            item.quantity
-              ? `${item.quantity.material.ticker}:${item.quantity.amount ?? 0}`
-              : '',
+            item.quantity ? `${item.quantity.material.ticker}:${item.quantity.amount ?? 0}` : '',
           )
           .join(','),
       ].join('~'),
@@ -223,6 +244,11 @@ function detectionSignature() {
     .join('\n');
   return [
     JSON.stringify(shipsAtBaseMap.value),
+    // 船的航线分配会改变「这条船该不该由插件装货」，跟着一起触发重新检测：
+    // 取消分配后要能立刻恢复自动装船，新分配后要立刻停止。
+    JSON.stringify(
+      (shipsStore.all.value ?? []).map(ship => [ship.registration, ship.assignedRoute ?? null]),
+    ),
     JSON.stringify(userData.baseProducts),
     stores,
     isEnabled() ? 'on' : 'off',
@@ -237,6 +263,6 @@ function init() {
 features.add(
   import.meta.url,
   init,
-  'BSN 产物自动装船：基地有船停靠时，把该基地产物列的最终产出品静默搬进船货舱（开关在 XIT ABCC 面板 XIT FLT 标题栏右侧）。',
+  'BSN 产物自动装船：基地有船停靠时，把该基地产物列的最终产出品静默搬进船货舱（开关在 XIT ABCC 面板 XIT FLT 标题栏右侧）。已分配到航线（游戏 RT）的船只自动跳过，交给游戏的航点装卸执行。',
   true,
 );
