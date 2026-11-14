@@ -290,40 +290,51 @@ const nativeRoutes = computed<NativeRouteView[]>(() =>
 // 写航线期间不发请求——socket 响应没有 actionId，只能靠 FIFO 顺序匹配，
 // 插一条就会让向导的对位错乱。
 let refreshingGameRoutes = false;
+// 航线增删的序号：刷新期间删掉航线后，旧快照会把已删除的航线写回列表，序号不一致就重拉。
+let routeMutationSeq = 0;
 async function refreshGameRoutes() {
   if (refreshingGameRoutes || hasPendingRouteRequest()) {
     return;
   }
   refreshingGameRoutes = true;
   try {
-    // 响应反映的是发起请求那一刻的航线列表：期间向导可能刚建完一条航线，它的 id 不在
-    // 这份快照里，不能因此判定「游戏里已删除」。
-    const known = new Set(Object.keys(nativeRouteRecords.value));
-    // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
-    // 打乱按 FIFO 对位的响应匹配。
-    const routes = await socketGetRoutes();
-    // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
-    const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
-    for (const record of Object.values(nativeRouteRecords.value)) {
-      const server = routes.find(
-        x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId),
-      );
-      if (server === undefined) {
-        if (!known.has(record.routeId)) {
-          continue;
-        }
-        removeNativeRoute(record.routeId);
+    // 响应反映的是发起请求那一刻的航线列表：期间向导可能刚建完一条航线（不在快照里，
+    // 不能判定「已删除」），也可能刚删掉一条（不能把快照里的旧定义写回去）。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const seq = routeMutationSeq;
+      const known = new Set(Object.keys(nativeRouteRecords.value));
+      // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
+      // 打乱按 FIFO 对位的响应匹配。
+      const routes = await socketGetRoutes();
+      // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
+      const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
+      // 等待期间删过航线：这份快照已经过期，重拉一次；仍未稳定就放弃发布。
+      if (seq !== routeMutationSeq) {
         continue;
       }
-      // 界面路径创建时只有 RT 号：校准后换成服务端哈希 id，删除与配对都用它。
-      if (server.id !== record.routeId) {
-        removeNativeRoute(record.routeId);
-        recordNativeRoute({ ...record, routeId: server.id });
+      for (const record of Object.values(nativeRouteRecords.value)) {
+        const server = routes.find(
+          x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId),
+        );
+        if (server === undefined) {
+          if (!known.has(record.routeId)) {
+            continue;
+          }
+          removeNativeRoute(record.routeId);
+          continue;
+        }
+        // 界面路径创建时只有 RT 号：校准后换成服务端哈希 id，删除与配对都用它。
+        if (server.id !== record.routeId) {
+          removeNativeRoute(record.routeId);
+          recordNativeRoute({ ...record, routeId: server.id });
+          continue;
+        }
       }
+      gameRouteDefinitions.value = routes;
+      gameRunningRoutes.value =
+        executions === undefined ? undefined : matchRunningRoutes(routes, executions);
+      break;
     }
-    gameRouteDefinitions.value = routes;
-    gameRunningRoutes.value =
-      executions === undefined ? undefined : matchRunningRoutes(routes, executions);
   } catch {
     // socket 未就绪或超时：保留上一次结果，按本地记录继续显示，不打断面板。
   } finally {
@@ -371,6 +382,8 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
     // 界面路径创建的记录只有 RT 号：先换成服务端 id，否则删除会打错对象。
     const routeId = await resolveServerRouteId(record);
     await socketDeleteRoute(routeId);
+    // 删除发生在刷新等待期间时，让进行中的那次刷新丢掉旧快照、重新拉取。
+    routeMutationSeq++;
     // 只清被删的那条航线：同一艘船 + 同一产业链可以有多条航线（历史记录也合法存在），
     // 删掉其中一条不代表别的航线被删或作废。
     for (const id of recordsToRemoveAfterDelete(
