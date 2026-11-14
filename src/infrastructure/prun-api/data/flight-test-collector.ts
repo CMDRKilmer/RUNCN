@@ -146,6 +146,8 @@ export function calculateTestFlight(
 export interface TestFlightSample {
   massT: number;
   stlFuel: number;
+  // 测这份样本时的船况（0–1）：耗时已含当时的惩罚，复用时要按它还原。
+  condition: number;
 }
 
 const testFlightSamples = new WeakMap<PrunApi.FlightPlan, TestFlightSample>();

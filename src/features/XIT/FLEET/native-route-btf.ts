@@ -202,7 +202,7 @@ export async function measureNativeRouteFuel(
         }
         if (plan.status === 'OK') {
           const summary = summarizeNativeFlightPlan(plan);
-          setTestFlightSample(plan, { massT: sampleMassT, stlFuel });
+          setTestFlightSample(plan, { massT: sampleMassT, stlFuel, condition: ship.condition });
           recordTransitSpeedSamples(performance, ship, sampleMassT, stlFuel, percent, plan);
           if (summary.totalSeconds > 0) {
             samples.push({

@@ -542,6 +542,59 @@ await checkAsync('试飞样本按它自己的出发油量校准', async f => {
   expectExact(f, '标记了测量条件的样本与实时余量无关', live1500, live3500);
 });
 
+// 试飞耗时含测那次船况的惩罚：样本复用时必须按**样本船况**还原速度（乘回惩罚 = 罚两次，
+// 用当前船况 = 修复后换件/修好仍按旧惩罚算）。
+await checkAsync('样本按它自己的船况还原速度', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 100e6, departKm: 0, approachKm: 0 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 样本：100M km / 20000s，测于 40% 船况 → 健康船 12500 km/s。
+  stub.stubSetNativePlan({ transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 });
+  const run = async sample => {
+    stub.stubSetTestFlightSample(sample);
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 1500,
+    });
+    return out.best?.totalHours;
+  };
+  const tagged = await run({ massT: ship.mass, stlFuel: 1500, condition: 0.4 });
+  stub.stubSetTestFlightSample(undefined);
+  const untagged = await run(undefined);
+  // conditionFactor(0.4) = 0.5（80% 以下按 condition/80% 计，下限 0.2）：
+  // 带样本船况 → 健康船 10000 km/s → 100e6/(10000×3600) = 2.778h；
+  // 无标记按当前船况（100%，系数 1）换算 → 5000 km/s → 5.556h。
+  expectCondition(
+    f,
+    '按样本船况还原',
+    tagged !== undefined && Math.abs(tagged - 100e6 / (10000 * 3600)) < 1e-3,
+    (100e6 / (10000 * 3600)).toFixed(3),
+    String(tagged),
+  );
+  expectCondition(
+    f,
+    '无标记按当前船况',
+    untagged !== undefined && Math.abs(untagged - 100e6 / (5000 * 3600)) < 1e-3,
+    (100e6 / (5000 * 3600)).toFixed(3),
+    String(untagged),
+  );
+});
+
 // 假设性计算（原生 RT 向导：规划载重 + 未来出发油量 + 固定封顶档）即使输入完整也不能
 // 发布给 SFC：同键写入会覆盖玩家当前航班正在用的参数。
 await checkAsync('门控：publish = false → 输入完整也不写滑块、不发完成信号', async f => {

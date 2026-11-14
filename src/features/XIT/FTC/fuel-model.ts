@@ -874,7 +874,9 @@ export interface ModelSettings {
   // 原生 TRANSIT 样本是服务器按「当前质量」算的（含当时货物/油量）。规划额外载重
   // 改变质量时，用同一质量幂律把测到的速度换算到目标质量，否则时长与载重无关。
   nativeTransitMassT?: number;
-  // 原生 LANDING 段耗时；着陆不是 TRANSIT，不能并入转移速度。
+  // 测这份样本时的飞船状况（0–1）。试飞按请求参数算，事后复用时必须按**样本当时**的
+  // 船况还原速度；缺省视为与当前船况相同（游戏按当前状态下发的原生计划）。
+  nativeTransitCondition?: number;
   nativeLandingSeconds?: number;
 }
 
@@ -922,19 +924,25 @@ export function computeFuelOption(
     // **为什么必须带质量项**：2026-09-24 那版把 27,512 km/s 当「船无关常数」，用户实测立刻
     // 证伪（2,727t 船 15,186 km/s，慢 1.81× = 质量比 2.145 的 0.78 次方）—— 参考样本是载重 0
     // 的 1,271t 船，重船按幂律减速（与离港/进近段的 stlLoadFactor 同族，但指数不同）。
-    // 原生秒数是当前船况下的时间，所以校准速度时乘回 conditionFactor；之后统一在
-    // 末尾除以 cond。燃料样本反推出观测滑块，再用引擎 f 曲线只做相对缩放，避免把
-    // 某一次计划的 f 固定到所有候选项。
+    // 原生秒数是样本那次船况下的时间：先还原成健康船速度，之后统一在末尾除以当前 cond。
+    // 燃料样本反推出观测滑块，再用引擎 f 曲线只做相对缩放，避免把某一次计划的 f 固定到所有候选项。
     const nativeDistance = settings.nativeTransitDistanceKm;
     const nativeSeconds = settings.nativeTransitSeconds;
     const nativeTank = settings.nativeStlTank;
     const nativeFuel = settings.nativeTransitFuel;
+    // 样本耗时含它自己那次船况的惩罚，必须按**样本船况**还原成健康船速度（模型最后才统一
+    // 除以当前船况）；缺样本船况时按「与当前相同」处理（游戏按飞船当前状态下发）。
+    const sampleCond =
+      settings.nativeTransitCondition !== undefined
+        ? conditionFactor(settings.nativeTransitCondition)
+        : cond;
     const nativeSpeedRaw =
       nativeDistance !== undefined &&
       nativeDistance > 0 &&
       nativeSeconds !== undefined &&
-      nativeSeconds > 0
-        ? (nativeDistance / nativeSeconds) * cond
+      nativeSeconds > 0 &&
+      sampleCond > 0
+        ? nativeDistance / nativeSeconds / sampleCond
         : undefined;
     // 服务器样本是按样本质量测的：按 (样本质量/当前质量)^0.78 换算到本次规划质量。
     const nativeSpeed =

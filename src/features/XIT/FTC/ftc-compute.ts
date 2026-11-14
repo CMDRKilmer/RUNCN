@@ -582,6 +582,8 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       // 样本质量同理取「测这份计划时的质量」：用当前质量会让模型按 (当前/规划) 再缩一遍，
       // 等于把货舱惩罚算两次。
       nativeTransitMassT: testFlight?.massT ?? currentMassT,
+      // 试飞耗时含测那次船况的惩罚：模型要按样本船况还原，而不是按当前船况。
+      nativeTransitCondition: testFlight?.condition,
       nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,
