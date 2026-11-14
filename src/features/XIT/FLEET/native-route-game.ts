@@ -468,6 +468,18 @@ export function collectNativeRoutes(
   return rows;
 }
 
+// 删除成功后要清掉的本地记录：**只清被删的那条航线**。同一艘船 + 同一产业链可以有
+// 多条航线（旧记录也是真实存在过的航线），共用船/产业链不代表别的航线也被删或作废。
+export function recordsToRemoveAfterDelete(
+  records: Readonly<Record<string, NativeRouteRecord>>,
+  routeId: string,
+  naturalId: string,
+) {
+  return Object.values(records)
+    .filter(x => x.routeId === routeId || same(x.naturalId, naturalId))
+    .map(x => x.routeId);
+}
+
 // 删掉一条航线后，缓存的航线定义里也要把它摘掉——否则「运行中」还会显示这张卡，
 // 而游戏 UI 手动创建的航线没有本地记录，记录变化 watcher 也不会再触发刷新。
 export function withoutRouteDefinition(

@@ -34,6 +34,7 @@ globalThis.localStorage = {
 const {
   collectNativeRoutes,
   mergeRouteRecord,
+  recordsToRemoveAfterDelete,
   routeProgressText,
   routeStopStates,
   withoutRouteDefinition,
@@ -1467,6 +1468,19 @@ await check('native RT listing: fetched definitions override unassigned local ro
   const route2 = rows.find(x => x.record.naturalId === 'RT-A-2');
   assert.equal(route2.record.waypoints[0].fuelPercent, 35);
 });
+
+await check(
+  'native RT listing: deleting a route keeps other records on the same ship',
+  async () => {
+    const records = listingRecords();
+    // route-2 与 route-1 同船、同产业链：只删 route-1 时 route-2 的记录必须保留。
+    records['route-2'] = { ...records['route-2'], shipId: 'S', chainName: '' };
+    records['route-1'] = { ...records['route-1'], chainName: '' };
+    assert.deepEqual(recordsToRemoveAfterDelete(records, 'route-1', 'RT-A-1'), ['route-1']);
+    // UI 路径记录只有 RT 号：按 RT 号也要能命中唯一一条。
+    assert.deepEqual(recordsToRemoveAfterDelete(records, 'RT-A-2', 'RT-A-2'), ['route-2']);
+  },
+);
 
 await check('native RT listing: two ships on the same route get one card each', async () => {
   const route = nativeRouteServer([

@@ -49,6 +49,7 @@ import { readRouteExecutions } from './native-route-rte';
 import {
   collectNativeRoutes,
   matchRunningRoutes,
+  recordsToRemoveAfterDelete,
   routeProgressText,
   routeStopStates,
   withoutRouteDefinition,
@@ -370,16 +371,14 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
     // 界面路径创建的记录只有 RT 号：先换成服务端 id，否则删除会打错对象。
     const routeId = await resolveServerRouteId(record);
     await socketDeleteRoute(routeId);
-    // 一条船同时只能跑一条航线，同船同产业链的旧记录都只是历史——一起清掉，
-    // 否则删掉最新那条后，上一轮的记录会冒出来继续显示在「运行中」。
-    for (const other of Object.values(nativeRouteRecords.value)) {
-      const sameRoute = other.routeId === record.routeId || other.naturalId === record.naturalId;
-      const sameShip =
-        other.shipId === record.shipId &&
-        other.chainName.trim().toLowerCase() === record.chainName.trim().toLowerCase();
-      if (sameRoute || sameShip) {
-        removeNativeRoute(other.routeId);
-      }
+    // 只清被删的那条航线：同一艘船 + 同一产业链可以有多条航线（历史记录也合法存在），
+    // 删掉其中一条不代表别的航线被删或作废。
+    for (const id of recordsToRemoveAfterDelete(
+      nativeRouteRecords.value,
+      record.routeId,
+      record.naturalId,
+    )) {
+      removeNativeRoute(id);
     }
     // 游戏 UI 手动创建的航线没有本地记录：直接把它从缓存的航线定义与执行列表里摘掉，
     // 不必等下一次校准（否则列表会一直显示这张已删除的卡）。
