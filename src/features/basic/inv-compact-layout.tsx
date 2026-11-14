@@ -1,11 +1,17 @@
 import { computed } from 'vue';
 import { userData } from '@src/store/user-data';
+import { getInvStore } from '@src/core/store-id';
 import { hasMountedUi } from '@src/utils/mount-ui-once';
 import $style from './inv-compact-layout.module.css';
 
-// 排列模式按「基地 / 船只」各自记忆（R51）：key 取 `命令:参数` —— INV 的 parameter
-// 是基地 naturalId、SHPI 是船注册码。所以同一个基地在独立窗口与 XIT FB 面板里的磁贴
-// 共享同一状态，不同基地 / 船只互不影响（此前是一个全局开关，点一处全部一起变）。
+// 排列模式按「基地 / 船只」各自记忆：key = 命令 + 解析后的仓库 id。
+// 原生 INV 接受「Inventory or Address」（星球 naturalId 或仓库 id 前缀），
+// XIT FB 用 getBaseStoreCommand() 生成仓库 id 前缀，两者可能指向同一个仓库；
+// 直接拼 parameter 会让同一基地拿到两个 key、设置互不联动（PR #65 审查）。
+// getInvStore() 能把几种写法都解析到同一个 store，用 store.id 作规范身份。
+// SHPI 的 parameter 就是船注册码、没有别名，保持原样。
+// 所以同一个基地在独立窗口与 XIT FB 面板里的磁贴共享同一状态，不同基地 / 船只
+// 互不影响（此前是一个全局开关，点一处全部一起变）。
 // 状态写进 userData.settings.invCompactScopes 后由 user-data-serializer 自动保存，
 // 刷新页面即恢复；未记录过的 key 回落到 settings.invCompact —— 它曾是全局开关，
 // 现在只是「默认值」，于是存量用户升级后看到的排列不变。
@@ -13,15 +19,23 @@ import $style from './inv-compact-layout.module.css';
 // 状态靠 aria-pressed + data-rp-selected 表达，选中时只加一条下划线
 // （不加底色、不改文字颜色、不改字重），切换时文字与宽度都不变。
 function compactScopeKey(tile: PrunTile) {
+  if (tile.command === 'INV') {
+    const store = getInvStore(tile.parameter);
+    if (store !== undefined) {
+      return `INV:${store.id}`;
+    }
+  }
   return `${tile.command}:${tile.parameter ?? ''}`;
 }
 
 function compactOf(tile: PrunTile) {
-  const key = compactScopeKey(tile);
+  // key 本身是 computed：仓库 store 由服务器异步推送，早期解析不到时先回落参数原文，
+  // 数据到达后自动收敛到规范 key，同一基地的不同命令形式会同步。
+  const key = computed(() => compactScopeKey(tile));
   return computed({
-    get: () => userData.settings.invCompactScopes[key] ?? userData.settings.invCompact,
+    get: () => userData.settings.invCompactScopes[key.value] ?? userData.settings.invCompact,
     set: (value: boolean) => {
-      userData.settings.invCompactScopes[key] = value;
+      userData.settings.invCompactScopes[key.value] = value;
     },
   });
 }
@@ -78,5 +92,5 @@ function init() {
 features.add(
   import.meta.url,
   init,
-  '所有 INV/SHPI 窗口（含 XIT ABCC 面板内磁贴与独立打开的命令窗口）：窗体内部站点名行（如「Animus a (VH-874a)（制造）」）右端一个文字恒为「紧凑排列」的选中态按钮（选中=紧凑排列生效，靠 aria-pressed 与下划线表达，不切换文案、不改变宽度、不加底色），切换紧凑竖排分组与 BRN 分行原版排列；状态按基地 / 船只各自记忆（INV 按基地、SHPI 按船注册码），同一基地的独立窗口与 FB 面板内磁贴共享，不同基地互不影响；设置持久化，刷新后保持。',
+  '所有 INV/SHPI 窗口（含 XIT ABCC 面板内磁贴与独立打开的命令窗口）：窗体内部站点名行（如「Animus a (VH-874a)（制造）」）右端一个文字恒为「紧凑排列」的选中态按钮（选中=紧凑排列生效，靠 aria-pressed 与下划线表达，不切换文案、不改变宽度、不加底色），切换紧凑竖排分组与 BRN 分行原版排列；状态按基地 / 船只各自记忆（INV 按解析后的仓库 id，兼容星球编码与仓库 id 两种写法；SHPI 按船注册码），同一基地的独立窗口与 FB 面板内磁贴共享，不同基地互不影响；设置持久化，刷新后保持。',
 );
