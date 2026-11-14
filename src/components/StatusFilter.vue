@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 
 // 合同状态定义
 const STATUS_FILTERS = [
@@ -69,7 +70,7 @@ function selectNone() {
         {{ showFilters ? '隐藏过滤器' : '显示过滤器' }}
       </PrunButton>
     </div>
-    <div v-if="showFilters" :class="C.ContractsListTable.filter">
+    <div v-if="showFilters" :class="[C.ContractsListTable.filter, filterToolbarStyle.toolbar]">
       <RadioItem
         v-for="f in STATUS_FILTERS"
         :key="f.key"

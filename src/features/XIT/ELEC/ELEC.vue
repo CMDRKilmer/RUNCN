@@ -14,6 +14,7 @@ import { timestampEachSecond } from '@src/utils/dayjs';
 import dayjs from 'dayjs';
 import { useTileState } from '@src/features/XIT/ELEC/tile-state';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 
 interface ElectionWindow {
   electionStart?: number;
@@ -217,7 +218,7 @@ function getPlanetNaturalIdFromAlert(alert: PrunApi.Alert) {
 <template>
   <LoadingSpinner v-if="rows === undefined" />
   <template v-else>
-    <div :class="C.ComExOrdersPanel.filter">
+    <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
       <RadioItem v-model="gov" horizontal>GOV</RadioItem>
       <RadioItem v-model="cogc" horizontal>COGC</RadioItem>
     </div>

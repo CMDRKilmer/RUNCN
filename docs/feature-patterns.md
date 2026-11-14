@@ -706,6 +706,13 @@ function init() {
 
 `applyCssRule` must be called during feature `init()`.
 
+Game filter containers (`.ComExOrdersPanel.filter`, `.ContractsListTable.filter`, `.LocalMarket.filter`) stack their children vertically. A toolbar built from one must also carry the shared `filterToolbarStyle.toolbar` (`@src/components/filter-toolbar.module.css`), which turns it back into a wrapping row:
+
+```ts
+import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
+// <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar]">
+```
+
 For hover/focus/etc., use CSS Nesting inside the module — one `applyCssRule` call handles both base and nested rules:
 
 ```css
