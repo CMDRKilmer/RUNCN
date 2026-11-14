@@ -280,13 +280,23 @@ function onFuel(registration: string) {
 }
 
 /* 耐久 80%~83% 时舰名变黄警示。 */
+/* 耐久 ≤0.83：临近维修，舰名做成**琥珀色块标签**（底色 + 描边 + 加粗）。
+   只换字色不够——组件字面色值会被引擎按皮肤色相重映射（浅色下淡黄、深色下
+   与金色链接几乎同色，星海主题里链接本身就是 #f5d27a），单靠色相根本分不出来。
+   色块用 box-shadow 画描边，不占布局尺寸，避免行高抖动（见 R45）。 */
 .warnCondition {
-  color: #f0ad4e;
+  /* 只变字色、不加底色。必须走 token 而不是字面色值：组件里的字面颜色会被引擎
+     按皮肤色相重映射（浅色主题下 #f0ad4e 淡成近白底，对比只剩约 1.9:1）。
+     每套主题给自己的 --rp-skin-warning，保证与该主题的链接色（船名本身就是
+     链接）拉开色相：浅色明亮橙红、暖米纸玫红、陶瓷白深橙、星海亮橙。
+     字色必须 !important：引擎的链接规则（html[data-rp-theme] :is([class*='Link__link'])）
+     特异性 (0,2,1) 高于本组件单类 (0,1,0)，不压住就会被重置成链接色（见 R45）。 */
+  color: var(--rp-skin-warning, #c2410c) !important;
 }
 
 /* 耐久低于 80% 时舰名变红告警。 */
 .lowCondition {
-  color: #d9534f;
+  color: var(--rp-skin-danger, #9c3b3b) !important;
 }
 
 /* TimeCell right-aligns its own content, so the header has to follow suit in every

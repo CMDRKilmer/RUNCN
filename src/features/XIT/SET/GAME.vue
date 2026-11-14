@@ -7,6 +7,7 @@ import Active from '@src/components/forms/Active.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { initialUserData, userData } from '@src/store/user-data';
 import {
   downloadBackup,
@@ -172,39 +173,8 @@ function confirmResetAllData(ev: Event) {
   });
 }
 
-const notificationTypes: [string, string][] = [
-  ['PRODUCTION_ORDER_FINISHED', '生产完成'],
-  ['SITE_EXPERT_DROPPED', '专家通知'],
-  ['SHIP_FLIGHT_ENDED', '飞船到达'],
-  ['COMEX_ORDER_FILLED', '订单成交'],
-  ['COMEX_TRADE', '商品交易'],
-  ['FOREX_ORDER_FILLED', '外汇成交'],
-  ['FOREX_TRADE', '外汇交易'],
-  ['CONTRACT_CONDITION_FULFILLED', '合同条件完成'],
-  ['CONTRACT_CONTRACT_RECEIVED', '收到合同'],
-  ['CONTRACT_CONTRACT_CLOSED', '合同关闭'],
-  ['CONTRACT_CONTRACT_BREACHED', '合同违约'],
-  ['CONTRACT_DEADLINE_EXCEEDED_WITH_CONTROL', '合同超期'],
-  ['COMEX_PICKUP_CONTRACT_CREATED', '取货合同'],
-  ['WORKFORCE_LOW_SUPPLIES', '物资不足'],
-  ['WORKFORCE_OUT_OF_SUPPLIES', '物资耗尽'],
-  ['WORKFORCE_UNSATISFIED', '劳动力不满'],
-  ['COGC_PROGRAM_CHANGED', 'COGC 变更'],
-  ['COGC_UPKEEP_STARTED', 'COGC 维护'],
-  ['LOCAL_MARKET_AD_ACCEPTED', '本地合同接受'],
-  ['LOCAL_MARKET_AD_EXPIRED', '本地合同过期'],
-  ['POPULATION_REPORT_AVAILABLE', '人口报告'],
-  ['WAREHOUSE_STORE_LOCKED_INSUFFICIENT_FUNDS', '仓库锁定'],
-];
-
-function toggleMute(type: string) {
-  const list = userData.settings.mutedDesktopNotifications;
-  const idx = list.indexOf(type);
-  if (idx >= 0) {
-    list.splice(idx, 1);
-  } else {
-    list.push(type);
-  }
+function openDesktopNotifications() {
+  showBuffer('XIT DNOT');
 }
 </script>
 
@@ -253,15 +223,15 @@ function toggleMute(type: string) {
       <NumberInput v-model="userData.settings.burn.resupply" />
     </Active>
   </form>
-  <SectionHeader>桌面通知屏蔽</SectionHeader>
+  <SectionHeader>桌面通知</SectionHeader>
   <form>
-    <Active v-for="[type, label] in notificationTypes" :key="type" :label="label">
-      <input
-        type="checkbox"
-        :checked="userData.settings.mutedDesktopNotifications.includes(type)"
-        @change="toggleMute(type)" />
-    </Active>
+    <Commands>
+      <PrunButton primary @click="openDesktopNotifications">打开 XIT DNOT 设置</PrunButton>
+    </Commands>
   </form>
+  <p :class="$style.notificationHint">
+    在 XIT DNOT 中勾选要推送到桌面的通知类型，只有勾选的类型才会推送。
+  </p>
   <SectionHeader>
     左侧边栏按钮
     <Tooltip
@@ -319,6 +289,12 @@ function toggleMute(type: string) {
 </template>
 
 <style module>
+.notificationHint {
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 4px 0 12px;
+}
+
 .tooltip {
   float: revert;
   font-size: 12px;

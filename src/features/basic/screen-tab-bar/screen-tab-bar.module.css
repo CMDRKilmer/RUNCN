@@ -2,20 +2,46 @@
   flex: 1 1 auto;
 }
 
-.screenControls {
-  display: inline-flex;
-  flex: 1 1 auto;
+/* 游戏把顶栏高度钉死在 26px，标签一旦换行就会被裁掉、几行挤在一条里，
+   只剩互相压着的文字。这里让顶栏跟着标签变高（单行时仍是最小高度）。 */
+.head {
+  height: auto;
+  min-height: 27px;
+  align-items: stretch;
+}
 
-  > :not(:last-child) {
+.screenControls {
+  /* 游戏原生就是 flex。这里再写成 inline-flex 会让容器按内容宽度撑开，
+     窗口变窄时整条标签栏不收缩、直接溢出到屏幕外。 */
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+
+  /* 「界面：xxx / 添加 / 全屏 / SCRN」这些原生项不参与压缩，但标签栏必须能收缩
+     （否则窄窗口同样会撑出屏幕）。 */
+  > :not(:last-child):not([class*='rp-TabBar__container']) {
     flex-shrink: 0;
   }
+
+  > [class*='rp-TabBar__container'] {
+    flex: 1 1 auto;
+    min-width: 50px;
+  }
+}
+
+/* 顶栏里的 HeadItem 一半是 flex item（顶对齐 y=0），一半是包在 block 容器里的
+   inline-block（默认 baseline 对齐，位置随容器高度浮动：27px 时 y=1、标签折行后
+   容器 42px 又回到 y=0），于是「视图 / 界面 / 添加 / 全屏 / SCRN」文字会各自
+   不在一条线上。统一按行盒顶部对齐，位置就只由容器顶部决定。 */
+.headItems {
+  vertical-align: top;
 }
 
 /* 文字由 hide/shw 改成固定「隐藏」：定宽，选中态加粗也不跳宽。 */
 .hideButton {
-  width: 30px;
-  min-width: 30px;
-  max-width: 30px;
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
   padding: 0 2px;
   box-sizing: border-box;
   text-align: center;
@@ -24,4 +50,20 @@
 
 .hiddenName {
   color: #666;
+}
+
+/* 「界面」悬浮列表：游戏原生是 position:fixed 的 block 列表，一条一行往下排，
+   44 个界面就会排到屏幕外。这里改成多列（CSS columns，不改 display，因为显隐正是
+   由 display:none/block 控制的），列数与宽高由 layoutScreensMenu() 在显示时算。
+   列优先填充，顺序与原来一致，从上往下、从左往右。
+   注意：缩短屏幕名 / 收起行内操作按钮属于「隐藏信息」，已拆到 advanced/
+   的 screen-tab-bar-compact，这里只负责不改动原生信息的多列重排。 */
+.screensMenu {
+  column-gap: 10px;
+  column-fill: auto;
+  box-sizing: border-box;
+
+  > li {
+    break-inside: avoid;
+  }
 }

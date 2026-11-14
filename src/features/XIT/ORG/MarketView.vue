@@ -5,6 +5,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { OrgListing } from '@src/infrastructure/org-api/types';
 import * as listingsApi from '@src/infrastructure/org-api/listings';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { getMaterialName, getMaterialCategoryName } from '@src/infrastructure/prun-ui/i18n';
 import SectionHeader from '@src/components/SectionHeader.vue';
@@ -338,11 +339,11 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
 
     <!-- 过滤行：搜索 + 分类 -->
     <div :class="$style.toolbarFilter">
-      <input
+      <SearchInput
         v-model="searchQuery"
-        type="text"
         placeholder="搜索商品 (ticker / 名称)"
-        :class="$style.searchInput" />
+        :class="$style.searchInput"
+        :container-class="$style.searchWrap" />
       <select v-model="selectedCategory" :class="$style.categorySelect">
         <option v-for="opt in availableCategories" :key="opt.value" :value="opt.value">
           {{ opt.label }}
@@ -596,8 +597,13 @@ function bestAsk(orders: MarketOrder[]): MarketOrder | undefined {
   gap: 8px;
   padding: 4px 0 8px 0;
 }
+.searchWrap {
+  /* 搜索框是这一行里唯一可伸缩的元素（原来靠 input 自己的 flex:1）。 */
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .searchInput {
-  flex: 1;
+  width: 100%;
   box-sizing: border-box;
   background: rgb(26, 33, 38);
   border: 1px solid rgb(61, 74, 84);

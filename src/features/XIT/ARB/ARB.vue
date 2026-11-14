@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
@@ -578,12 +579,11 @@ function localizedCategory(o: ArbOpportunity): string {
     <div :class="$style.usage">使用方法：选择路线后点击"更新价格"按钮。</div>
 
     <div :class="$style.controls">
-      <input
+      <SearchInput
         id="arb-search"
         v-model="search"
         name="arb-search"
         :class="$style.input"
-        type="text"
         placeholder="搜索 ticker 或名称" />
       <label :class="$style.control">
         <span :class="$style.controlLabel">类别</span>
@@ -838,7 +838,8 @@ function localizedCategory(o: ArbOpportunity): string {
 }
 
 .warningAge {
-  color: rgb(194, 120, 70);
+  /* 数据时效提示：走皮肤告警色，字面色值会被引擎重映射成淡色（R45）。 */
+  color: var(--rp-skin-warning, #c2410c);
   font-weight: normal;
 }
 

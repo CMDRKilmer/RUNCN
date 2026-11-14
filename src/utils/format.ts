@@ -156,12 +156,14 @@ export function formatCountdown(ms: number) {
 const DEADLINE_DAY_MS = 24 * 60 * 60 * 1000;
 
 // 根据剩余毫秒数返回截止日期的内联样式：1 天内红色，3 天内橙色，否则无色。
+// 颜色必须走皮肤 token：字面色值会被主题引擎按皮肤色相重映射成淡色，浅底上
+// 几乎看不出（见 docs/theme-framework.md R45）。token 由主题提供，未注入时用兜底值。
 export function deadlineColor(remaining: number) {
   if (remaining < DEADLINE_DAY_MS) {
-    return 'color: #d9534f';
+    return 'color: var(--rp-skin-danger, #9c3b3b)';
   }
   if (remaining < DEADLINE_DAY_MS * 3) {
-    return 'color: #f0ad4e';
+    return 'color: var(--rp-skin-warning, #c2410c)';
   }
   return '';
 }
