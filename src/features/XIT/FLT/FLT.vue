@@ -6,6 +6,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { getInvStore } from '@src/core/store-id';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import { shipConditionLevel } from '@src/utils/ship-condition';
 
 // Status arrow icons (inlined from deleted ship-status-icons.ts). Arrow per
 // flight segment type; stationary (⦁) when docked or no active flight.
@@ -133,8 +134,8 @@ function onFuel(registration: string) {
           <span
             :class="[
               C.Link.link,
-              { [$style.warnCondition]: x.ship.condition >= 0.8 && x.ship.condition <= 0.83 },
-              { [$style.lowCondition]: x.ship.condition < 0.8 },
+              { [$style.warnCondition]: shipConditionLevel(x.ship.condition) === 'warn' },
+              { [$style.lowCondition]: shipConditionLevel(x.ship.condition) === 'danger' },
             ]"
             @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}

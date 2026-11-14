@@ -56,7 +56,7 @@ html[data-rp-theme='paper'] {
 }
 
 /* 把「某一类 → 某一个底色」挂到分类头元素本身。三套分类头规则
-   （html[data-rp-inv-compact='on'] 竖徽标 / 独立 INV 横排 / FB 面板横排）
+   （[data-rp-inv-compact='on'] 竖徽标 / 独立 INV 横排 / FB 面板横排）
    都用 rgba(var(--rp-inv-cat-bg-rgb), …) 读它，所以一次定义即同时覆盖
    「紧凑 + 非紧凑」「独立窗口 + FB 面板」全部组合，不必动任何组件规则。
    自定义属性在元素上定义，优先于从 html 继承下来的兜底值；
@@ -105,23 +105,29 @@ html[data-rp-font-size='standard'] {
   src: url('~/fonts/fa-regular-400.woff2') format('woff2');
 }
 
-/* ── INV 紧凑布局（可选，默认关闭；全局 INV / SHPI 生效） ──────────────
-   所有规则都带 html[data-rp-inv-compact='on'] 前缀：默认（含刷新后未开启时）
-   完全没有覆盖，游戏原生 INV / SHPI 保持原版排列与图标大小。只有点击窗体内部
-   站点名行右端的双状态排列按钮切到「紧凑排列」后，inv-compact-layout.tsx 才会把该
-   属性置为 on；切回「常规排列」时由下面的 off 组规则恢复 BRN 分行中文分类头。
-   按用户要求已同步到全局：原先紧凑布局与按钮是「XIT FB 面板」专属，
-   现在独立打开的 INV / SHPI 窗口也共用同一个开关，所以下面这组 on 规则
-   不再带 [data-rp-fb-panel] 前缀。off 组里 FB 面板专用那条（含 12px 右边距）
-   仍保留前缀，独立窗口的常规分类头仍由 :not([data-rp-fb-panel] *) 那组负责。
+/* ── INV 紧凑布局（可选，默认关闭；按基地 / 船只各自生效） ──────────────
+   所有规则都要求**该磁贴自己的 frame** 上带 data-rp-inv-compact='on'：默认（含
+   刷新后未开启、以及从未点过按钮的基地）完全没有覆盖，游戏原生 INV / SHPI 保持
+   原版排列与图标大小。只有点击该磁贴站点名行右端的双状态排列按钮切到「紧凑排列」
+   后，inv-compact-layout.tsx 才会把属性写到这个 frame 上（不再写 <html>，所以
+   点 A 基地不会连 B 基地一起变）；切回「常规排列」时属性变 off，由下面的 off 组
+   规则恢复 BRN 分行中文分类头。
+   属性挂在 frame（本身带 .rp-command-INV / .rp-command-SHPI 类）上，选择器因此写成
+   `html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on']`：
+   前面的 html 是为了与旧版 `html[data-rp-inv-compact] …` 保持同等特异性 (0,2,1)，
+   避免被游戏自己的同名容器规则抢走。
+   放在磁贴内部也意味着 XIT FB 面板里内嵌的 INV / SHPI 磁贴同样按自己的基地走，
+   与独立窗口共享同一状态，因为状态 key 是「命令 + 基地 naturalId / 船注册码」。
+   off 组里 FB 面板专用那条（含 12px 右边距）仍保留 [data-rp-fb-panel] 前缀，
+   独立窗口的常规分类头仍由 :not([data-rp-fb-panel] *) 那组负责。
    原生排布是分组头独占一整行 + space-around，会在组末留大片空白；改成竖排
    中文窄标签后物料跨组连续流动，图标、拖拽、排序控件全部保留。
    图标档位只改 --rp-inv-icon-size（当前 34px，按需 ±2px 微调即可）。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] {
   --rp-inv-icon-size: 34px;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='InventoryView__grid'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='InventoryView__grid'] {
   justify-content: flex-start !important;
   align-content: flex-start !important;
   margin-bottom: 0 !important;
@@ -130,7 +136,7 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='I
 /* 分组头做成「竖排书脊徽标」：原先只有 14px 宽、0.15 透明底、一条淡色左边框
    和 10px 竖排字，夹在物料图标里几乎认不出是分类。现在换成与独立 INV / FB 普通
    排版共用的半透明底（--rp-inv-cat-bg-rgb，按主题 × 类别分别取值）+ 主题深字粗体竖排中文；四类各有底色，靠颜色与文字双重区分。底色存成纯 RGB 三元组的 var()，主题引擎只扫描 # / rgb() 颜色字面量，不会把这层底色二次重映射。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'] {
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -154,7 +160,7 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='S
   line-height: 1 !important;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container']::after {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container']::after {
   content: attr(data-label);
   color: var(--rp-skin-ink, #26333d) !important;
   -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
@@ -165,20 +171,20 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='S
   text-shadow: none !important;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Consumables']::after {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'][data-label='Consumables']::after {
   content: '消耗';
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Inputs']::after {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'][data-label='Inputs']::after {
   content: '投入';
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Outputs']::after {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'][data-label='Outputs']::after {
   content: '产出';
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='其他']::after,
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Other']::after {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'][data-label='其他']::after,
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='SectionHeader__container'][data-label='Other']::after {
   content: '其他';
 }
 
@@ -187,32 +193,32 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='S
    是它的父元素，这里写「命令类的后代 Tile__tile」永远匹配不到，故不再重复。
    下面只处理 ScrollView__view 的 -15px 负边距留下的固定空白。 */
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ScrollView__view'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='ScrollView__view'] {
   margin-right: 0 !important;
   margin-bottom: 0 !important;
   padding-right: 0 !important;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__container'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='GridItemView__container'] {
   width: calc(var(--rp-inv-icon-size) + 10px) !important;
   margin: 2px !important;
   padding: 1px !important;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__image'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='GridItemView__image'] {
   width: var(--rp-inv-icon-size) !important;
   height: var(--rp-inv-icon-size) !important;
   margin: 1px auto !important;
 }
 
 /* 图标尺寸由游戏写在 style 属性里，必须 !important 才能覆盖。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__container'],
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__container'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='MaterialIcon__container'],
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='ColoredIcon__container'] {
   width: var(--rp-inv-icon-size) !important;
   height: var(--rp-inv-icon-size) !important;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__container'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='ColoredIcon__container'] {
   font-size: calc(var(--rp-inv-icon-size) * 0.33) !important;
 }
 
@@ -222,7 +228,7 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='C
    以前这里写 display:block 会把它压掉，导致紧凑模式下
    关掉名字无效（非紧凑模式没有覆盖所以正常）。去掉后两种排版都受同一开关控制，
    未开启时由 prun-bugs 的 .gridItemName 保持 display:block。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='GridItemView__name'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='GridItemView__name'] {
   font-size: 9px;
   line-height: 1.1;
   white-space: nowrap;
@@ -234,12 +240,12 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='G
 /* 紧凑小图标里，缩写字母原本居中铺满整个图标，数量角标又绝对定位在右下
    且带不透明底，正好把字母右半边盖住。让字母整体上移、角标收紧成
    小角标，分成「上部字母 / 右下数量」两区，互不遮挡。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='ColoredIcon__labelContainer'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='ColoredIcon__labelContainer'] {
   padding-bottom: 11px !important;
   box-sizing: border-box;
 }
 
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__indicator']:not([class*='Container']) {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='MaterialIcon__indicator']:not([class*='Container']) {
   padding: 1px 2px !important;
   font-size: 9px !important;
   line-height: 1 !important;
@@ -249,7 +255,7 @@ html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='M
 /* 数量角标只留数字，不要外框：物料图标自身已有一圈边框，角标再描一圈会
    形成「内外框」。主题层已在 html[data-rp-theme] 统一去掉描边（theme.ts），
    这里在紧凑作用域内再加一道保险，防止游戏原生规则把边框带回来。 */
-html[data-rp-inv-compact='on'] :is(.rp-command-INV, .rp-command-SHPI) [class*='MaterialIcon__indicator'] {
+html :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='on'] [class*='MaterialIcon__indicator'] {
   border: 0 !important;
   outline: 0 !important;
   box-shadow: none !important;
@@ -667,7 +673,7 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='ActionFeedback__error
    z-index:2 的 ScrollView__track-vertical 底下被盖住（独立窗口网格天然短 10px，
    没有此问题）。这里给色条让出 12px 右边距，右端停在轨道左侧约 3px，
    与独立 INV 的观感一致；紧凑模式的 20px 竖徽标不走这条规则。 */
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label] {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label] {
   margin-right: 12px !important;
   background-color: rgba(var(--rp-inv-cat-bg-rgb), var(--rp-inv-cat-bg-alpha)) !important;
   background-image: none !important;
@@ -678,7 +684,7 @@ html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-comm
   line-height: 1 !important;
 }
 
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label]::after {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label]::after {
   content: attr(data-label);
   color: var(--rp-skin-ink, #26333d) !important;
   -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
@@ -689,20 +695,20 @@ html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-comm
   text-shadow: none !important;
 }
 
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Consumables']::after {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label='Consumables']::after {
   content: '消耗';
 }
 
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Inputs']::after {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label='Inputs']::after {
   content: '投入';
 }
 
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Outputs']::after {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label='Outputs']::after {
   content: '产出';
 }
 
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='其他']::after,
-html[data-rp-inv-compact='off'] [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI) [class*='SectionHeader__container'][data-label='Other']::after {
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label='其他']::after,
+html [data-rp-fb-panel] :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off'] [class*='SectionHeader__container'][data-label='Other']::after {
   content: '其他';
 }
 
