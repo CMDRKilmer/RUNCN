@@ -16,6 +16,8 @@
 let fuelFixture = { stlRemaining: 0, ftlRemaining: 0, stlCap: 0, ftlCap: 0 };
 // 非 null 时 computeFtcPlan 返回这个最优方案（用例用它覆盖「档位取整改重算」「油量不够」两支）。
 let optionFixture = null;
+// 离港饱和点只取决于 STL 流量：旧口径会在 10.96×0.0075 ≈ 8% 处砍档，用例据此验证「不再砍」。
+let flowRate = 0.5;
 export const ftcCalls = [];
 export const btfCalls = [];
 export const fuelModelCalls = [];
@@ -23,9 +25,14 @@ export const fuelModelCalls = [];
 export function stubSetFuel(fixture) {
   fuelFixture = fixture;
   optionFixture = null;
+  flowRate = 0.5;
   ftcCalls.length = 0;
   btfCalls.length = 0;
   fuelModelCalls.length = 0;
+}
+
+export function stubSetFlowRate(value) {
+  flowRate = value;
 }
 
 export function stubSetOption(option) {
@@ -36,7 +43,7 @@ export function stubSetOption(option) {
 
 // '@src/features/XIT/FTC/ftc-compute'
 export const shipPerformanceFor = () => ({
-  stlFuelFlowRate: 0.5,
+  stlFuelFlowRate: flowRate,
   stlFuelCapacity: 3500,
 });
 export const shipFuelRemainingFor = () => fuelFixture;

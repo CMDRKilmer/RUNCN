@@ -386,8 +386,7 @@ export interface FtcComputeInput {
   // （`ShipPerformance.stlRemaining`），不覆盖会把「尚未补油」的船算慢/算费。
   // 显式 0 必须保留（前一段把油烧完），不能回退成罐容量假装满油。
   stlFuelOverride?: number;
-  // 只评估指定燃料档位（0–1）：原生 RT 生成把最优档按离港饱和点封顶后，用它重算
-  // 该档位的实际消耗与时长。
+  // 只评估指定燃料档位（0–1）：原生 RT 生成按实际写入的档位重算该档位的消耗与时长。
   fixedFuel?: number;
   // 与 fixedFuel 配套：固定反应堆档（写入航点时实际使用的档位），避免重算换档。
   fixedReactor?: number;
@@ -399,7 +398,7 @@ export interface FtcComputeInput {
   // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优（FTC 面板口径）。
   valueOptimal?: boolean;
   // 是否把结果发布给 SFC（共享滑块参数 + lastFtcCompute 完成信号）。原生 RT 向导是
-  // **假设性**计算——规划载重、未来出发油量、固定封顶档都不代表当前 SFC 航班，
+  // **假设性**计算——规划载重、未来出发油量、按实际写入档位重算的档位都不代表当前 SFC 航班，
   // 同键写入会覆盖玩家正在用的实时参数，所以传 false。缺省 true。
   publish?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。

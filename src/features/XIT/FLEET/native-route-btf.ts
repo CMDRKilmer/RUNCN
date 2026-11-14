@@ -14,7 +14,6 @@ import {
   autoFuelGrid,
   conditionFactor,
   pickBestValueOption,
-  stlDepartureFuelCapPercent,
   type FuelTradeoff,
 } from '@src/features/XIT/FTC/fuel-model';
 import { summarizeNativeFlightPlan } from '@src/features/XIT/FTC/route-planner';
@@ -29,13 +28,16 @@ const fuelPercents = autoFuelGrid().map(fuel => Math.round(fuel * 100));
 const DEFAULT_REACTOR_USAGE = 0.5;
 // 服务器限速礼貌间隔（与 transit-f-scan 的批量采集一致）。
 const REQUEST_INTERVAL_MS = 250;
+// 连续这么多档被拒绝且一条样本都没有就停止扫描：载荷与消耗对燃料档位单调，
+// 最低档已经飞不出去时，更高档只会更费油。
+const REJECT_STOP = 2;
 
 // 性价比选点：扫完整档位（5%–100%）后逐档比较「多烧的燃料换回多少时间」，
 // 边际收益跌破首档一半就停（`pickBestValueOption`）——临近饱和段速度提升很小、
 // 燃料却继续涨，扫完才能看清整条曲线，所以这里不做提前停止。
 
-function chooseSample(samples: readonly FuelTradeoff[], maxFuel: number | undefined) {
-  return pickBestValueOption([...samples], maxFuel);
+function chooseSample(samples: readonly FuelTradeoff[]) {
+  return pickBestValueOption([...samples]);
 }
 
 // 试飞计划的飞行质量：`ship.mass` 已含船上现有货物，只叠加**计划新增载重**；
@@ -123,26 +125,20 @@ export async function measureNativeRouteFuel(
   }
   // 试飞的油量基准默认用「罐容量」：航线在出发地补满时每段都是满罐起飞；
   // 但多段之间没有补油时由调用方传入当前剩余油量。
+  // 读不出来时（`undefined`）**不传**该字段：覆盖成 undefined 会连
+  // `calculateTestFlight` 的基线默认值一起顶掉，回退成 0 又会让跨星系航线
+  // 每一档都因跃迁没油被服务器拒绝。STL 还有蓝图容量可用，FTL 没有第二个来源。
   const performance = shipPerformanceFor(ship);
   const fuelNow = shipFuelRemainingFor(ship);
   const stlFuel =
-    fuel?.stlFuel !== undefined
-      ? fuel.stlFuel
-      : fuelNow.stlCap > 0
-        ? fuelNow.stlCap
-        : (performance.stlFuelCapacity ?? 0);
-  const ftlFuel =
-    fuel?.ftlFuel !== undefined
-      ? fuel.ftlFuel
-      : fuelNow.ftlCap > 0
-        ? fuelNow.ftlCap
-        : fuelNow.ftlRemaining;
+    fuel?.stlFuel ?? (fuelNow.stlCap > 0 ? fuelNow.stlCap : performance.stlFuelCapacity);
+  // 容量读不出来时余量也可能是 0（无油罐数据），那种 0 不是「真空罐」，不能拿去试飞。
+  const ftlTank = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : fuelNow.ftlRemaining;
+  const ftlFuel = fuel?.ftlFuel ?? (ftlTank > 0 ? ftlTank : undefined);
   // 反应堆使用量：默认 50%，但不能低于蓝图下限（高下限船会直接拒绝低反应堆的计划）。
   // 试飞与写入必须用**同一个**百分比：向下取整会让写进航线的档位低于下限。
   const reactorPercent = percentAtLeast(DEFAULT_REACTOR_USAGE, performance.minReactorUsage ?? 0);
   const reactorUsage = reactorPercent / 100;
-  // 档位上限：离港燃料饱和点（10.96×STL 流量），超过它只会多烧油。
-  const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
   const legCount = waypoints.length - 1;
   const codes = new Map<string, string>();
   const measured = new Map<number, BtfLegFuel>();
@@ -177,8 +173,10 @@ export async function measureNativeRouteFuel(
       // 这份样本按多少质量测的：FTC 之后复用同一份计划时要按它换算，不能按飞船当前质量。
       const sampleMassT = testFlightMass(ship, plannedLoad);
       const samples: FuelTradeoff[] = [];
+      const rejectStatuses = new Map<string, number>();
       let timeouts = 0;
       let rejected = 0;
+      let stopped = false;
       for (const percent of fuelPercents) {
         signal.throwIfAborted();
         onProgress(
@@ -188,8 +186,8 @@ export async function measureNativeRouteFuel(
           fuelUsageFactor: percent / 100,
           payload,
           condition: ship.condition,
-          stlFuel,
-          ftlFuel,
+          ...(stlFuel === undefined ? {} : { stlFuel }),
+          ...(ftlFuel === undefined ? {} : { ftlFuel }),
           reactorUsageFactor: reactorUsage,
           landing: true,
           // 与游戏自己写入航点时的默认偏好一致（实采 SHIP_ROUTES_EDIT_WAYPOINT：
@@ -202,8 +200,12 @@ export async function measureNativeRouteFuel(
         }
         if (plan.status === 'OK') {
           const summary = summarizeNativeFlightPlan(plan);
-          setTestFlightSample(plan, { massT: sampleMassT, stlFuel, condition: ship.condition });
-          recordTransitSpeedSamples(performance, ship, sampleMassT, stlFuel, percent, plan);
+          // 出发油量未知时不采样本：转移速度表按 Q = 0.98×罐×min(f,0.5) 键控，
+          // 猜一个罐容量会污染后续所有校准。
+          if (stlFuel !== undefined) {
+            setTestFlightSample(plan, { massT: sampleMassT, stlFuel, condition: ship.condition });
+            recordTransitSpeedSamples(performance, ship, sampleMassT, stlFuel, percent, plan);
+          }
           if (summary.totalSeconds > 0) {
             samples.push({
               fuel: percent,
@@ -215,6 +217,11 @@ export async function measureNativeRouteFuel(
           }
         } else {
           rejected++;
+          rejectStatuses.set(plan.status, (rejectStatuses.get(plan.status) ?? 0) + 1);
+          if (samples.length === 0 && rejected >= REJECT_STOP) {
+            stopped = true;
+            break;
+          }
         }
         await sleep(REQUEST_INTERVAL_MS);
       }
@@ -222,9 +229,16 @@ export async function measureNativeRouteFuel(
         warnings.push(`${from} → ${to}：${timeouts} 档试飞无响应（已跳过）。`);
       }
       if (rejected > 0) {
-        warnings.push(`${from} → ${to}：${rejected} 档试飞被服务器拒绝（不影响已测档位）。`);
+        const statuses = [...rejectStatuses]
+          .map(([status, count]) => `${status} ×${count}`)
+          .join('、');
+        warnings.push(
+          `${from} → ${to}：${rejected} 档试飞被服务器拒绝（${statuses}）` +
+            (stopped ? '，已停止扫描' : samples.length > 0 ? '，不影响已测档位' : '') +
+            '。',
+        );
       }
-      const best = chooseSample(samples, capPercent);
+      const best = chooseSample(samples);
       if (best === undefined) {
         throw new Error('试飞没有可用方案。');
       }

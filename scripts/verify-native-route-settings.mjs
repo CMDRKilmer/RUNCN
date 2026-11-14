@@ -6,15 +6,17 @@
 //   ② 只有油罐读不出（容量也 = 0）才按未知处理（override = undefined）；
 //   ③ 出发地有补油步骤时按罐容量起飞，与当前余量无关；
 //   ④ 玩家手改某段档位后，本段与下游段（直到受影响油罐补满）的预计时长全部作废：
-//     燃料档只影响 STL 罐、反应堆档只影响 FTL 罐（FTL 燃料 = 系数 × 反应堆档 × 距离）。
+//     燃料档只影响 STL 罐、反应堆档只影响 FTL 罐（FTL 燃料 = 系数 × 反应堆档 × 距离）；
+//   ⑤ 离港饱和点只用于模型口径，**不再砍写入的档位**：选中 30% 就写 30%，也不会报「封顶」。
 //
-// 用法：node scripts/verify-native-route-settings.mjs
+// 用法：node --experimental-strip-types scripts/verify-native-route-settings.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：ftc-compute / BTF 是替身（恒失败，只记录入参，见 scripts/lib/native-route-fuel-stub.mjs），
-// 覆盖的是编排层的油量初始化与作废范围，不覆盖 FTC 模型数值与真实试飞。
+// 覆盖的是编排层的油量初始化、作废范围与档位写入，不覆盖 FTC 模型数值与真实试飞。
 import { register } from 'node:module';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
-const { stubSetFuel, stubSetOption, ftcCalls, btfCalls } = await import('./lib/native-route-fuel-stub.mjs');
+const { stubSetFuel, stubSetOption, stubSetFlowRate, ftcCalls, btfCalls } =
+  await import('./lib/native-route-fuel-stub.mjs');
 const { computeNativeRouteFuel } = await import('../src/features/XIT/FLEET/native-route-fuel.ts');
 const { hoursInvalidatedBySettingChange, percentAtLeast } =
   await import('../src/features/XIT/FLEET/native-route-plan.ts');
@@ -160,6 +162,29 @@ await check('反应堆档被向上取整时要按写入的档位重算', async f
   expectEqual(failures, '重算用的反应堆档', 0.66, ftcCalls[1]?.fixedReactor);
   expectEqual(failures, '重算用的燃料档', 0.04, ftcCalls[1]?.fixedFuel);
   expectEqual(failures, '写入的反应堆百分比', 66, result.legs[1]?.reactorPercent);
+});
+
+await check('离港饱和点不再砍档：选中的高档位原样写入', async failures => {
+  stubSetFuel({ stlRemaining: 3000, ftlRemaining: 500, stlCap: 3000, ftlCap: 500 });
+  // 流量 0.0075 → 旧口径的离港饱和点是 8%，会把这一段砍到 8%。
+  stubSetFlowRate(0.0075);
+  stubSetOption({
+    reactorRelevant: false,
+    best: { fuel: 0.3, reactor: 0.5, totalHours: 2, stlFuel: 200, ftlFuel: 0 },
+  });
+  const result = await computeNativeRouteFuel(
+    candidate,
+    noRefuel,
+    new AbortController().signal,
+    () => {},
+  );
+  expectEqual(failures, '写入的燃料百分比', 30, result.legs[1]?.fuelPercent);
+  expectEqual(
+    failures,
+    '不再出现封顶警告',
+    false,
+    result.warnings.some(x => x.includes('封顶')),
+  );
 });
 
 await check('出发余量不够的航段要给出警告', async failures => {

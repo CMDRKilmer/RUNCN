@@ -3,7 +3,6 @@ import {
   shipFuelRemainingFor,
   shipPerformanceFor,
 } from '@src/features/XIT/FTC/ftc-compute';
-import { stlDepartureFuelCapPercent } from '@src/features/XIT/FTC/fuel-model';
 import type { ShipChainPlan } from './chain-allocation';
 import { measureNativeRouteFuel } from './native-route-btf';
 import {
@@ -92,48 +91,24 @@ export async function computeNativeRouteFuel(
     fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT,
   }));
   const warnings: string[] = [];
-  // 档位上限：离港燃料饱和点 f_cap = 10.96×STL 流量（节油引擎≈8%、标准≈16%）。
-  // 超过它离港只多烧油不再加速，所以拐点/实测值都按它封顶。
-  const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
-  const finalize = (): NativeRouteFuelPlan => {
-    if (capPercent !== undefined) {
-      let clamped = 0;
-      for (const leg of legs) {
-        if (leg.fuelPercent > capPercent) {
-          leg.fuelPercent = capPercent;
-          // 时长是按原（更快）档位算的，封顶后不再成立：清掉，避免显示与实写档位不符的预计值。
-          leg.hours = undefined;
-          clamped++;
-        }
-      }
-      if (clamped > 0) {
-        warnings.push(
-          `燃料档位按离港饱和点 ${capPercent}%（10.96×STL 流量）封顶，${clamped} 段被截断。`,
-        );
-      }
-    }
-    return { legs, warnings };
-  };
-  // 选中档位按离港饱和点封顶；若被封顶，按**实际写入的档位**重算消耗与时长，
-  // 否则后续航段会按更费油的旧档位扣油，越算越紧。
-  const applyDepartureCap = async (
+  // 选中档位按整数百分比写入；写入用的反应堆档被取整抬高时（例如下限 0.653 写成 66%），
+  // 时长与油耗属于旧档位，必须按**实际写入的档位**重算，否则后续航段按旧档位扣油。
+  const applyWrittenTiers = async (
     index: number,
     option: { fuel: number; reactor: number; totalHours: number; stlFuel: number; ftlFuel: number },
     reactorRelevant: boolean,
     estimatedGeometry: boolean,
   ) => {
-    const selected = clampPercent(option.fuel * 100);
-    const capped = capPercent === undefined ? selected : Math.min(selected, capPercent);
+    const fuelPercent = clampPercent(option.fuel * 100);
     // 写入用的整数百分比必须仍然满足蓝图下限（向下取整会写出跑不动的档位）。
     const reactorPercent = reactorRelevant
       ? percentAtLeast(option.reactor, performance.minReactorUsage ?? 0)
       : undefined;
-    // 取整改了反应堆档位（例如下限 0.653 写成 66%）时，时长与油耗属于旧档位，必须重算。
     const reactorChanged =
       reactorPercent !== undefined && Math.abs(reactorPercent - option.reactor * 100) > 1e-6;
-    if (capped === selected && !reactorChanged) {
+    if (!reactorChanged) {
       return {
-        fuelPercent: selected,
+        fuelPercent,
         reactorPercent,
         hours: option.totalHours as number | undefined,
         stlFuel: option.stlFuel,
@@ -146,10 +121,10 @@ export async function computeNativeRouteFuel(
       to: waypoints[index]!.location,
       browse: false,
       valueOptimal: true,
-      // 假设性计算（规划载重 + 未来出发油量 + 固定封顶档）：不发布给 SFC。
+      // 假设性计算（规划载重 + 未来出发油量 + 实际写入的固定档）：不发布给 SFC。
       publish: false,
       useGateway: true,
-      fixedFuel: capped / 100,
+      fixedFuel: fuelPercent / 100,
       // 用**写入的那个档位**重算，避免重算结果与实际航线不一致。
       fixedReactor: reactorPercent === undefined ? undefined : reactorPercent / 100,
       stlFuelOverride: stlFuel,
@@ -163,16 +138,16 @@ export async function computeNativeRouteFuel(
       recalculated.inputIncomplete === undefined
     ) {
       return {
-        fuelPercent: capped,
+        fuelPercent,
         reactorPercent,
         hours: recalculated.best.totalHours,
         stlFuel: recalculated.best.stlFuel,
         ftlFuel: recalculated.best.ftlFuel,
       };
     }
-    // 重算失败：保守按原（更费油）消耗续算，封顶后的时长不再展示。
+    // 重算失败：保守按原（更费油）消耗续算，该段时长不再展示。
     return {
-      fuelPercent: capped,
+      fuelPercent,
       reactorPercent,
       hours: undefined as number | undefined,
       stlFuel: option.stlFuel,
@@ -200,7 +175,7 @@ export async function computeNativeRouteFuel(
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
-      const chosen = await applyDepartureCap(
+      const chosen = await applyWrittenTiers(
         index,
         result.best,
         result.reactorRelevant === true,
@@ -261,7 +236,7 @@ export async function computeNativeRouteFuel(
       extraMassT: legLoadWeight(candidate.plan, index, legCount),
     });
     if (estimate.ok && estimate.best !== undefined && estimate.inputIncomplete === undefined) {
-      const chosen = await applyDepartureCap(
+      const chosen = await applyWrittenTiers(
         index,
         estimate.best,
         estimate.reactorRelevant === true,
@@ -284,7 +259,7 @@ export async function computeNativeRouteFuel(
       `${from} → ${to} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%（试飞与公式估算都不可用）。`,
     );
   }
-  return finalize();
+  return { legs, warnings };
 }
 
 function clampPercent(value: number) {
