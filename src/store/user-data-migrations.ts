@@ -44,6 +44,19 @@ function normalizeDispatchBaseConfigs(configs: Record<string, any>) {
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
   [
+    '14.11.2026 Split INV compact layout per base',
+    userData => {
+      // 紧凑排列从「一个全局开关」改为「按基地 / 船只各自记忆」。
+      // 存量数据只有 settings.invCompact，保留它作为未记录 key 的回退默认值，
+      // 所以升级后玩家看到的排列不变；这里只负责补上空的 map 容器。
+      const settings = userData.settings;
+      if (!settings) {
+        return;
+      }
+      settings.invCompactScopes ??= {};
+    },
+  ],
+  [
     '11.11.2026 Add theme appearance settings',
     userData => {
       const settings = userData.settings;

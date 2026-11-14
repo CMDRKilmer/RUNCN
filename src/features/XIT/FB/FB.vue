@@ -809,10 +809,7 @@ defineExpose({ tileIds: () => Array.from(moved.keys()) });
     </div>
     <div :class="$style.middle">
       <div ref="bsHost" :class="$style.slot" data-fb-slot="bs" />
-      <div
-        ref="invHost"
-        :class="[$style.slot, $style.mainInvSlot]"
-        data-fb-slot="inv" />
+      <div ref="invHost" :class="[$style.slot, $style.mainInvSlot]" data-fb-slot="inv" />
       <div ref="burnHost" :class="$style.slot" data-fb-slot="burn" />
     </div>
     <div :class="$style.right">
@@ -1033,7 +1030,8 @@ defineExpose({ tileIds: () => Array.from(moved.keys()) });
 
 /* 内嵌 INV / SHPI 的图标尺寸不再由 FB 单独缩小：默认必须保持游戏原版 48px。
    紧凑模式下的 32px 图标、42px 格子和竖排分组，统一由 refined-prun.css 中带
-   html[data-rp-inv-compact='on'] [data-rp-fb-panel] 双前缀的全局规则提供；
+   [data-rp-inv-compact='on'] 的逐磁贴规则提供（属性由 inv-compact-layout.tsx
+   写在每个磁贴自己的 frame 上）；
    紧凑排列及其按钮只作用于 XIT FB 面板内部，独立 INV / SHPI 窗口始终是原版。 */
 
 /* ── 主 INV 槽布局 ──────────────────────────────────────────────────
@@ -1042,7 +1040,7 @@ defineExpose({ tileIds: () => Array.from(moved.keys()) });
    下面这条高度分配只在紧凑模式下生效：紧凑后内容只需约 160px，按三槽均分
    （292px）会在下方留一大片空白，收掉约 40px 让给 BS / BURN。
    默认（原版排列）保持三槽均分不动。 */
-html[data-rp-inv-compact='on'] [data-rp-fb-panel] .slot.mainInvSlot {
+html [data-rp-fb-panel] .slot.mainInvSlot:has([data-rp-inv-compact='on']) {
   flex: 0.8 1 0;
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import PrunButton from '@src/components/PrunButton.vue';
 import type { DispatchBaseConfig, DispatchShip } from '@src/features/XIT/FLEET/utils';
+import { shipConditionLevel } from '@src/utils/ship-condition';
 
 const { ships, baseConfigs } = defineProps<{
   ships: DispatchShip[];
@@ -30,6 +31,11 @@ function shipLabel(entry: DispatchShip) {
 
 function byShipLabel(a: DispatchShip, b: DispatchShip) {
   return shipLabel(a).localeCompare(shipLabel(b));
+}
+
+// 船名胶囊按维修阈值变色（R50）：与 XIT FLT 的船况告警同一套判定。
+function conditionLevel(entry: DispatchShip) {
+  return shipConditionLevel(entry.ship.condition);
 }
 
 function onDragStart(event: DragEvent, shipId: string) {
@@ -62,8 +68,16 @@ function onDragStart(event: DragEvent, shipId: string) {
               :class="$style.shipWrap"
               draggable="true"
               @dragstart="onDragStart($event, entry.ship.id)">
-              <PrunButton primary :class="$style.shipButton">
-                <span :class="$style.shipLabel">{{ shipLabel(entry) }}</span>
+              <PrunButton
+                primary
+                :class="[
+                  $style.shipButton,
+                  {
+                    [$style.warnShip]: conditionLevel(entry) === 'warn',
+                    [$style.dangerShip]: conditionLevel(entry) === 'danger',
+                  },
+                ]">
+                <span :class="$style.shipName">{{ shipLabel(entry) }}</span>
               </PrunButton>
             </div>
           </td>
@@ -77,8 +91,16 @@ function onDragStart(event: DragEvent, shipId: string) {
               :class="$style.shipWrap"
               draggable="true"
               @dragstart="onDragStart($event, entry.ship.id)">
-              <PrunButton primary :class="$style.shipButton">
-                <span :class="$style.shipLabel">{{ shipLabel(entry) }}</span>
+              <PrunButton
+                primary
+                :class="[
+                  $style.shipButton,
+                  {
+                    [$style.warnShip]: conditionLevel(entry) === 'warn',
+                    [$style.dangerShip]: conditionLevel(entry) === 'danger',
+                  },
+                ]">
+                <span :class="$style.shipName">{{ shipLabel(entry) }}</span>
               </PrunButton>
             </div>
           </td>
@@ -143,7 +165,44 @@ function onDragStart(event: DragEvent, shipId: string) {
   box-sizing: border-box;
 }
 
-.shipLabel {
+/* 维修阈值告警（R50）：与 XIT FLT 船况告警同一口径——0.80~0.83 临近维修、
+   低于 0.80 维修临界。这里不能只换字色：胶囊本身是实心主按钮色块，陶瓷白 / 星海的
+   主按钮底很深，琥珀字压上去只有 1.5~2:1，反而比不改更难读。所以整块换色——
+   底色取该主题的告警强调色，字色取该主题的画布色（浅色主题是近白的字压深橙，
+   深色主题是近黑的字压亮橙），两端都 ≥4.5:1，且与右侧「执行」等主按钮区分开。
+   兜底值同时服务原样主题（不注入 token 时 var() 走 fallback）。 */
+.shipButton.warnShip {
+  color: var(--rp-skin-bg, #f2f5f7) !important;
+  background-color: var(--rp-skin-warning, #c2410c) !important;
+  border-color: var(--rp-skin-warning, #c2410c) !important;
+}
+
+.shipButton.dangerShip {
+  color: var(--rp-skin-bg, #f2f5f7) !important;
+  background-color: var(--rp-skin-danger, #9c3b3b) !important;
+  border-color: var(--rp-skin-danger, #9c3b3b) !important;
+}
+
+/* 主题下要压过引擎的主按钮规则（`html[data-rp-theme] :is([class*='Button__primary'])`
+   是 (0,3,1) + !important），单个组件类压不住，沿用 R49 的三重属性选择器写法。 */
+:global(html[data-rp-theme][data-rp-theme][data-rp-theme]) .shipButton.warnShip {
+  color: var(--rp-skin-bg, #f2f5f7) !important;
+  background-color: var(--rp-skin-warning, #c2410c) !important;
+  border-color: var(--rp-skin-warning, #c2410c) !important;
+}
+
+:global(html[data-rp-theme][data-rp-theme][data-rp-theme]) .shipButton.dangerShip {
+  color: var(--rp-skin-bg, #f2f5f7) !important;
+  background-color: var(--rp-skin-danger, #9c3b3b) !important;
+  border-color: var(--rp-skin-danger, #9c3b3b) !important;
+}
+
+/* 类名不能带 `Label__` 子串：token 主题（陶瓷白多彩 / 星海霓虹）的组件映射表里有
+   `[class*='Label__'] { color: var(--rp-cc-text-secondary) }`，会连 CSS Module 生成的
+   `rp-ShipPool__shipLabel___<hash>` 一起命中——船名因此被改成次级文字色（陶瓷白下是
+   rgb(65,74,68) 压在主按钮深青绿底上，几乎读不出，见 R49）。改名后文字继承按钮自身的
+   主按钮文字色，各主题自动跟随。 */
+.shipName {
   display: block;
   width: 100%;
   max-width: calc(var(--poolMaxWidth) - 13px);
