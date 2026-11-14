@@ -637,5 +637,70 @@ check('油罐查表：两个字段都缺 → 余量/容量 0（未停靠或未�
   stub.stubSetStores();
 });
 
+// ---- ⑥ 样本速度曲线按**样本自己的油量**评估 ----
+// 查表键 Q = 0.98×油量×min(f,0.5)：分母若用候选侧的 override 评估，样本与候选同档位时
+// 比值恒为 1（等于没校准），不同出发油量算出同样的时长。
+// 本用例注入两条转移速度样本（Q 由 1500 / 3500 油量、f=0.10 反推），污染全局查询表，
+// 故放在最后执行。
+await checkAsync('样本速度曲线按样本油量评估（不同规划油量改变斜率）', async f => {
+  const { setTransitSpeedTableForTest } = await import('../src/features/XIT/FTC/fuel-model.ts');
+  const ship = { ...stub.STUB_SHIP, acceleration: 78.48, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  // 只留转移段（离港/进近 0 km），时长完全由样本校准决定，避免起降段干扰。
+  const metrics = stub.stubMetrics({ stlDistanceKm: 100e6, departKm: 0, approachKm: 0 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 表里两个点：Q 由 1500 / 3500 油量 × f=0.10 反推，速度分别 1000 / 2000 km/s。
+  const aEff = (ship.acceleration * ship.operatingEmptyMass) / ship.mass;
+  setTransitSpeedTableForTest({
+    [SHIP.stlEngineOption]: [
+      [0.98 * 1500 * 0.1, aEff, 1000],
+      [0.98 * 3500 * 0.1, aEff, 2000],
+    ],
+  });
+  // 样本：100M km / 20000s = 5000 km/s，测于 1500 油量、10% 档。
+  stub.stubSetNativePlan({ transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 });
+  stub.stubSetTestFlightSample({ massT: ship.mass, stlFuel: 1500 });
+  const run = async stlFuelOverride => {
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride,
+    });
+    return out.best?.totalHours;
+  };
+  const at1500 = await run(1500);
+  const at3500 = await run(3500);
+  stub.stubSetTestFlightSample(undefined);
+  setTransitSpeedTableForTest(undefined);
+  // 1500：样本曲线与候选同一行 → 5000 km/s → 5.556h；3500：候选曲线 ×2 → 2.778h。
+  expectCondition(
+    f,
+    '样本油量下的时长',
+    at1500 !== undefined && Math.abs(at1500 - 100e6 / (5000 * 3600)) < 1e-3,
+    (100e6 / (5000 * 3600)).toFixed(3),
+    String(at1500),
+  );
+  expectCondition(
+    f,
+    '规划油量更大时按候选曲线加速',
+    at3500 !== undefined && Math.abs(at3500 - 100e6 / (10000 * 3600)) < 1e-3,
+    (100e6 / (10000 * 3600)).toFixed(3),
+    String(at3500),
+  );
+});
+
 console.log(`PASS ${summary.pass}/${summary.pass + summary.fail}`);
 process.exit(summary.fail === 0 ? 0 : 1);

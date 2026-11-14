@@ -954,9 +954,14 @@ export function computeFuelOption(
         : undefined;
     let transitSpeed = stlIntraTransitSpeedFor(ship, fuel);
     if (nativeSpeed !== undefined) {
+      // 曲线基准必须按**样本自己的出发油量**评估：查表键 Q = 0.98×油量×min(f,0.5)
+      // 取的是 ship.stlRemaining，用候选侧的 override 评估分母会让样本与候选混在同一个
+      // 油量下（两者档位相同时比值恒为 1，等于没校准）。
+      const sampleShip =
+        nativeTank !== undefined && nativeTank > 0 ? { ...ship, stlRemaining: nativeTank } : ship;
       const curveAtNative =
         nativeFuelSlider !== undefined
-          ? stlIntraTransitSpeedFor(ship, nativeFuelSlider)
+          ? stlIntraTransitSpeedFor(sampleShip, nativeFuelSlider)
           : undefined;
       const curveAtCandidate =
         nativeFuelSlider !== undefined ? stlIntraTransitSpeedFor(ship, fuel) : undefined;
