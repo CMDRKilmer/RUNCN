@@ -572,6 +572,10 @@ async function loadTransitSpeedTable(): Promise<void> {
     // 加载失败：保持空表 → 全部走旧式兜底
     transitTable = {};
   }
+  // 本地实测样本（BTF 试飞顺带采的）始终叠加在远端表上，避免被覆盖。
+  for (const [engine, pts] of Object.entries(localSamples)) {
+    transitTable[engine] = [...(transitTable[engine] ?? []), ...pts];
+  }
 }
 
 // 查询表插值。返回 undefined 表示表不可用（引擎未知/无点），调用方走旧式。
@@ -708,6 +712,60 @@ export function setTransitSpeedTableForTest(
   transitTable = table;
 }
 
+// ---- 本地实测样本（自动补表）----
+// 远端表的 aEff 覆盖极窄（节油/超推引擎只有单一 aEff 行），任何质量比不同的船都会触发
+// `stlTransitTableReliableFor` 判「超出可靠范围」→ FTC 整段跳过。这里允许把**我们自己
+// BTF 试飞**测到的 (q, aEff, v) 追加进表：每采一次就补齐该船自己那条 aEff 行，
+// 下一次 FTC 就能算（BTF 试飞本来就是因为 FTC 算不了才跑的，可自我修复）。
+const MAX_LOCAL_SAMPLES = 400;
+const localSamples: Record<string, TransitTablePoint[]> = {};
+
+export function transitSpeedSamplesSnapshot(): Record<string, [number, number, number][]> {
+  return Object.fromEntries(
+    Object.entries(localSamples).map(([engine, pts]) => [
+      engine,
+      pts.map(p => [p[0], p[1], p[2]] as [number, number, number]),
+    ]),
+  );
+}
+
+export function restoreTransitSpeedSamples(
+  table: Record<string, readonly TransitTablePoint[]> | undefined,
+): void {
+  if (table === undefined) {
+    return;
+  }
+  for (const [engine, pts] of Object.entries(table)) {
+    for (const [q, aEff, v] of pts) {
+      addTransitSpeedSample(engine, q, aEff, v);
+    }
+  }
+}
+
+// 追加一条实测样本；位置重复（log 距离 1% 内）时丢弃，返回是否真的加了。
+export function addTransitSpeedSample(engine: string, q: number, aEff: number, v: number): boolean {
+  if (!(q > 0) || !(aEff > 0) || !(v > 0)) {
+    return false;
+  }
+  transitTable ??= {};
+  const existing = [...(transitTable[engine] ?? []), ...(localSamples[engine] ?? [])];
+  const duplicate = existing.some(
+    ([pq, pa, pv]) =>
+      pv > 0 && Math.abs(Math.log(pq / q)) < 0.01 && Math.abs(Math.log(pa / aEff)) < 0.01,
+  );
+  if (duplicate) {
+    return false;
+  }
+  const point: TransitTablePoint = [q, aEff, v];
+  const local = localSamples[engine] ?? (localSamples[engine] = []);
+  local.push(point);
+  if (local.length > MAX_LOCAL_SAMPLES) {
+    local.shift();
+  }
+  transitTable[engine] = [...(transitTable[engine] ?? []), point];
+  return true;
+}
+
 void ensureTransitSpeedTable();
 
 const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
@@ -718,6 +776,15 @@ const STL_TRANSIT_SPEED: Record<string, { vSat: number; fExp: number }> = {
 };
 const DEFAULT_STL_TRANSIT_SPEED = STL_TRANSIT_SPEED.STL_ENGINE_STANDARD;
 const STL_DEPARTURE_F_SAT_COEF = 10.96; // 离港 f 饱和系数：f_cap = 系数×流量（OOG LCB 0.0075→0.0822 实测）
+
+// 离港段燃料在 f_cap = 系数×STL 流量处饱和：超过它离港只多烧油、不再加速。
+// 燃油档位的实际上限用它——玩家要的「省油」手感基本就是这个点（节油 8%、标准 16% 一类）。
+export function stlDepartureFuelCapPercent(flowRate: number | undefined): number | undefined {
+  if (flowRate === undefined || !(flowRate > 0)) {
+    return undefined;
+  }
+  return Math.min(100, Math.max(1, Math.round(STL_DEPARTURE_F_SAT_COEF * flowRate * 100)));
+}
 const STL_APPROACH_EXTRA = 8; // 进近差近似（新手船 3.5-6.5、WCB 5.5-7.5、HCB 10-14 取中上，偏重船更安全）
 const STL_LANDING_DIST_C = 0.47; // 着陆燃料系数：fuel = C×√(R_km × P^-0.2)（WCB 实测 7 点 ±0.7u）
 const STL_LANDING_P_EXP = 0.2; // 气压缩短着陆段指数（着陆距离 = 0.66×R×P^-0.2）
@@ -804,7 +871,12 @@ export interface ModelSettings {
   nativeTransitSeconds?: number;
   nativeTransitFuel?: number;
   nativeStlTank?: number;
-  // 原生 LANDING 段耗时；着陆不是 TRANSIT，不能并入转移速度。
+  // 原生 TRANSIT 样本是服务器按「当前质量」算的（含当时货物/油量）。规划额外载重
+  // 改变质量时，用同一质量幂律把测到的速度换算到目标质量，否则时长与载重无关。
+  nativeTransitMassT?: number;
+  // 测这份样本时的飞船状况（0–1）。试飞按请求参数算，事后复用时必须按**样本当时**的
+  // 船况还原速度；缺省视为与当前船况相同（游戏按当前状态下发的原生计划）。
+  nativeTransitCondition?: number;
   nativeLandingSeconds?: number;
 }
 
@@ -852,20 +924,35 @@ export function computeFuelOption(
     // **为什么必须带质量项**：2026-09-24 那版把 27,512 km/s 当「船无关常数」，用户实测立刻
     // 证伪（2,727t 船 15,186 km/s，慢 1.81× = 质量比 2.145 的 0.78 次方）—— 参考样本是载重 0
     // 的 1,271t 船，重船按幂律减速（与离港/进近段的 stlLoadFactor 同族，但指数不同）。
-    // 原生秒数是当前船况下的时间，所以校准速度时乘回 conditionFactor；之后统一在
-    // 末尾除以 cond。燃料样本反推出观测滑块，再用引擎 f 曲线只做相对缩放，避免把
-    // 某一次计划的 f 固定到所有候选项。
+    // 原生秒数是样本那次船况下的时间：先还原成健康船速度，之后统一在末尾除以当前 cond。
+    // 燃料样本反推出观测滑块，再用引擎 f 曲线只做相对缩放，避免把某一次计划的 f 固定到所有候选项。
     const nativeDistance = settings.nativeTransitDistanceKm;
     const nativeSeconds = settings.nativeTransitSeconds;
     const nativeTank = settings.nativeStlTank;
     const nativeFuel = settings.nativeTransitFuel;
-    const nativeSpeed =
+    // 样本耗时含它自己那次船况的惩罚，必须按**样本船况**还原成健康船速度（模型最后才统一
+    // 除以当前船况）；缺样本船况时按「与当前相同」处理（游戏按飞船当前状态下发）。
+    const sampleCond =
+      settings.nativeTransitCondition !== undefined
+        ? conditionFactor(settings.nativeTransitCondition)
+        : cond;
+    const nativeSpeedRaw =
       nativeDistance !== undefined &&
       nativeDistance > 0 &&
       nativeSeconds !== undefined &&
-      nativeSeconds > 0
-        ? (nativeDistance / nativeSeconds) * cond
+      nativeSeconds > 0 &&
+      sampleCond > 0
+        ? nativeDistance / nativeSeconds / sampleCond
         : undefined;
+    // 服务器样本是按样本质量测的：按 (样本质量/当前质量)^0.78 换算到本次规划质量。
+    const nativeSpeed =
+      nativeSpeedRaw !== undefined &&
+      settings.nativeTransitMassT !== undefined &&
+      settings.nativeTransitMassT > 0 &&
+      ship.mass > 0
+        ? nativeSpeedRaw *
+          Math.pow(settings.nativeTransitMassT / ship.mass, STL_INTRA_TRANSIT_MASS_EXP)
+        : nativeSpeedRaw;
     const nativeFuelSlider =
       nativeFuel !== undefined && nativeFuel > 0 && nativeTank !== undefined && nativeTank > 0
         ? Math.min(
@@ -875,9 +962,14 @@ export function computeFuelOption(
         : undefined;
     let transitSpeed = stlIntraTransitSpeedFor(ship, fuel);
     if (nativeSpeed !== undefined) {
+      // 曲线基准必须按**样本自己的出发油量**评估：查表键 Q = 0.98×油量×min(f,0.5)
+      // 取的是 ship.stlRemaining，用候选侧的 override 评估分母会让样本与候选混在同一个
+      // 油量下（两者档位相同时比值恒为 1，等于没校准）。
+      const sampleShip =
+        nativeTank !== undefined && nativeTank > 0 ? { ...ship, stlRemaining: nativeTank } : ship;
       const curveAtNative =
         nativeFuelSlider !== undefined
-          ? stlIntraTransitSpeedFor(ship, nativeFuelSlider)
+          ? stlIntraTransitSpeedFor(sampleShip, nativeFuelSlider)
           : undefined;
       const curveAtCandidate =
         nativeFuelSlider !== undefined ? stlIntraTransitSpeedFor(ship, fuel) : undefined;
@@ -1026,13 +1118,18 @@ export function autoReactorGrid(ship: ShipPerformance): number[] {
 }
 
 // 方案燃料总量（STL + FTL）。
-function totalFuelOf(o: FuelOption): number {
+export type FuelTradeoff = Pick<
+  FuelOption,
+  'fuel' | 'reactor' | 'stlFuel' | 'ftlFuel' | 'totalHours'
+>;
+
+function totalFuelOf(o: FuelTradeoff): number {
   return o.stlFuel + o.ftlFuel;
 }
 
 // Pareto 前沿（时间 ↦ 燃料双目标）：返回不被其它方案在时间与燃料上都严格支配的方案，
 // 按时间升序（首项最快/最费油，末项最慢/最省油）。
-export function paretoFrontier(options: FuelOption[]): FuelOption[] {
+export function paretoFrontier<T extends FuelTradeoff>(options: T[]): T[] {
   return options
     .filter(
       o =>
@@ -1055,8 +1152,8 @@ const BALANCE_TIE_EPS = 1e-9;
 // 最省油方案：燃料总量最小；并列时取反应堆使用量最小；再并列取燃料滑块最小。
 // 退化情形（燃料或时间在所有候选方案中无差异）的兜底——此时「折衷」无意义，
 // 只能退到最省油端，绝不能退到最快端（f = 1 拉满）。
-function cheapestFuelOption(options: FuelOption[]): FuelOption | undefined {
-  let best: FuelOption | undefined;
+function cheapestFuelOption<T extends FuelTradeoff>(options: T[]): T | undefined {
+  let best: T | undefined;
   for (const o of options) {
     if (best === undefined) {
       best = o;
@@ -1100,7 +1197,7 @@ function cheapestFuelOption(options: FuelOption[]): FuelOption | undefined {
 // 因此：燃料或时间任一维度无差异时绝不返回最快方案，而是返回最省油方案。
 // 反过来**不允许**用「极小 span 归一化」（旧代码的 Math.max(1e-9, span)）把无意义的
 // 浮点噪声放大成满量程——那正是本 bug 的放大机制。
-export function findBalanceOption(options: FuelOption[]): FuelOption | undefined {
+export function findBalanceOption<T extends FuelTradeoff>(options: T[]): T | undefined {
   const pareto = paretoFrontier(options);
   if (pareto.length === 0) {
     return undefined;
@@ -1148,6 +1245,92 @@ export function findBalanceOption(options: FuelOption[]): FuelOption | undefined
 /** 邻档对比的默认半径（档 = autoFuelGrid 的步长 0.05，即前后各 5 档 = 最优 ±0.25）。 */
 export const NEARBY_FUEL_SPAN = 5;
 
+// 最优性价比：沿着燃料档往上走，每 +1 个百分点燃料换回的时间（小时/百分点）跌破
+// 首档的一半就停——临近饱和段速度提升很小、燃料却继续涨，正是该停的位置。
+export const MARGINAL_RETENTION = 0.5;
+
+export function pickBestValueOption<T extends FuelTradeoff>(
+  options: T[],
+  maxFuel?: number,
+): T | undefined {
+  const candidates = options.filter(o => maxFuel === undefined || o.fuel <= maxFuel);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  // 反应堆使用量与燃料档位正交（只影响 FTL 速度/充能），必须按反应堆分组后
+  // 在**同一序列内**比较「多烧 1% 燃料换回多少时间」；跨反应堆混排会把反应堆
+  // 带来的时间差算进燃料边际收益，结果随输入顺序变化（同一航线可算出 10%/30%
+  // 或 20%/100% 两种结论）。
+  const series = new Map<number, T[]>();
+  for (const option of candidates) {
+    const key = Math.round(option.reactor * 1000);
+    const list = series.get(key);
+    if (list === undefined) {
+      series.set(key, [option]);
+    } else {
+      list.push(option);
+    }
+  }
+  const picks: T[] = [];
+  for (const list of series.values()) {
+    const pick = pickSeriesValue(list);
+    if (pick !== undefined) {
+      picks.push(pick);
+    }
+  }
+  if (picks.length === 0) {
+    return undefined;
+  }
+  // BTF 实测样本只有一种反应堆：序列内结果就是最终结果（与旧口径逐位一致）。
+  if (picks.length === 1) {
+    return picks[0];
+  }
+  // 跨反应堆必须按**实际时间与消耗**比较：自然跃迁航线上，每个反应堆序列给 STL 曲线
+  // 加的是同一个常数时间，序列内「时间/燃料」比值会把反应堆的时间优势抵消掉，于是选出
+  // 的可能是「更慢又更费油」的劣解。先剔除被严格支配的候选，再按同一套折衷口径选点
+  // （无差异 → 最省油）。
+  const frontier = paretoFrontier(picks);
+  if (frontier.length === 1) {
+    return frontier[0];
+  }
+  return findBalanceOption(frontier) ?? frontier[0];
+}
+
+// 固定反应堆序列内的性价比拐点：返回选中档位与它相对序列最省油档的平均收益。
+function pickSeriesValue<T extends FuelTradeoff>(options: T[]): T | undefined {
+  const sorted = options.slice().sort((a, b) => a.fuel - b.fuel);
+  const first = sorted[0]!;
+  const fuels = sorted.map(totalFuelOf);
+  // 燃料完全无差别（短途、由固定起降段主导）：时间更短的方案严格占优。
+  if (!(Math.max(...fuels) - Math.min(...fuels) > 1e-9)) {
+    return sorted.reduce((a, b) => (b.totalHours < a.totalHours ? b : a));
+  }
+  let best = first;
+  let firstRate: number | undefined;
+  for (let i = 1; i < sorted.length; i++) {
+    const previous = sorted[i - 1]!;
+    const current = sorted[i]!;
+    const deltaFuel = current.fuel - previous.fuel;
+    const deltaHours = previous.totalHours - current.totalHours;
+    if (!(deltaFuel > 0)) {
+      continue;
+    }
+    const rate = deltaHours / deltaFuel;
+    if (firstRate === undefined) {
+      if (!(rate > 0)) {
+        return findBalanceOption(sorted) ?? best;
+      }
+      firstRate = rate;
+      best = current;
+      continue;
+    }
+    if (!(rate > 0) || rate < firstRate * MARGINAL_RETENTION) {
+      break;
+    }
+    best = current;
+  }
+  return best;
+}
 // 邻档对比：以最优方案为中心，取**同一反应堆使用量**下燃料滑块前后各 span 档的方案。
 // 复用 scanFuelOptions 已算出的全部组合，不重算。
 //

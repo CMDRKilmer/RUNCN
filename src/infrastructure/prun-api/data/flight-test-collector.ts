@@ -100,10 +100,12 @@ export function calculateTestFlight(
   overrides?: {
     fuelUsageFactor?: number;
     stlFuel?: number;
+    ftlFuel?: number;
     payload?: number;
     condition?: number;
     reactorUsageFactor?: number;
     landing?: boolean;
+    preferences?: { ftlPreference: string; useGateways: boolean };
   },
 ): Promise<PrunApi.FlightPlan | undefined> {
   const missionId = crypto.randomUUID();
@@ -136,6 +138,30 @@ export function calculateTestFlight(
       },
     });
   });
+}
+
+// 试飞计划是按**请求参数**算的，和飞船当前状态不是一回事：飞行质量（payload）与出发
+// 油量（stlFuel）都可能不同于实时余额。响应对象同时进入 `flightPlansStore`，FTC 复用它的
+// 转移速度样本时必须按「测这份样本时的条件」换算，否则会按实时状态再缩放一遍。
+export interface TestFlightSample {
+  massT: number;
+  stlFuel: number;
+  // 测这份样本时的船况（0–1）：耗时已含当时的惩罚，复用时要按它还原。
+  condition: number;
+}
+
+const testFlightSamples = new WeakMap<PrunApi.FlightPlan, TestFlightSample>();
+
+// 记录试飞计划对应的测量条件。调用方知道 payload 与试飞时的出发油量才算得出来。
+export function setTestFlightSample(plan: PrunApi.FlightPlan, sample: TestFlightSample) {
+  if (sample.massT > 0) {
+    testFlightSamples.set(plan, sample);
+  }
+}
+
+// 试飞计划的测量条件；游戏按飞船当前状态下发的原生计划没有这条记录（= undefined）。
+export function testFlightSample(plan: PrunApi.FlightPlan) {
+  return testFlightSamples.get(plan);
 }
 
 // 把地址编码为飞行计划请求的 origin/destination："{systemId}|PLA|STA,{bodyId}"。

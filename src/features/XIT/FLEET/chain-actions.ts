@@ -19,6 +19,27 @@ export interface ChainActionPlan {
   finalPkg: ChainStopPackage | undefined;
 }
 
+export function chainPurchasePackage(
+  ship: DispatchShip,
+  plan: ChainPlan,
+): UserData.ActionPackageData {
+  const name = `购买 ${ship.exchangeCode}`;
+  return {
+    global: { name },
+    groups: [{ type: 'Manual', name, materials: { ...plan.purchaseBill } }],
+    actions: [
+      {
+        type: 'CX Buy',
+        name,
+        group: name,
+        exchange: ship.exchangeCode,
+        useCXInv: true,
+        cxInvReserve: { ...plan.originPickup },
+      },
+    ],
+  };
+}
+
 export function buildChainActionPackages(
   ship: DispatchShip,
   plan: ChainPlan,
@@ -59,16 +80,9 @@ export function buildChainActionPackages(
 
   // 采购：仅合并开启「购买」的基地账单；未开启的基地账单仍会装船（来自仓库库存）。
   if (Object.keys(plan.purchaseBill).length > 0) {
-    const buyGroupName = `购买 ${ship.exchangeCode}`;
-    groups.push({ type: 'Manual', name: buyGroupName, materials: plan.purchaseBill });
-    actions.push({
-      type: 'CX Buy',
-      name: buyGroupName,
-      group: buyGroupName,
-      exchange: ship.exchangeCode,
-      useCXInv: true,
-      cxInvReserve: { ...plan.originPickup },
-    });
+    const purchase = chainPurchasePackage(ship, plan);
+    groups.push(...purchase.groups);
+    actions.push(...purchase.actions);
   }
 
   groups.push({ type: 'Manual', name: loadGroupName, materials: plan.cxBill });

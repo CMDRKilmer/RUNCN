@@ -5,6 +5,10 @@ import { userData } from '@src/store/user-data';
 import Cookies from 'js-cookie';
 import { mergedPrunStyles, prunStyleUpdated } from '@src/infrastructure/prun-ui/prun-css';
 import { isRecordingPrunLog, prunLog } from '@src/infrastructure/prun-api/prun-api-listener';
+import {
+  clientMessages,
+  isRecordingClientMessages,
+} from '@src/infrastructure/prun-api/socket-io-middleware';
 import SectionHeader from '@src/components/SectionHeader.vue';
 import { relayUrl } from '@src/infrastructure/prun-api/relay';
 import Active from '@src/components/forms/Active.vue';
@@ -29,6 +33,18 @@ function stopRecordingPrunLog() {
   isRecordingPrunLog.value = false;
   downloadFile(prunLog.value, 'prun-log.json', true);
   prunLog.value = [];
+}
+
+// 录制**发往服务器**的请求（逆向新接口用，如原生 RT 写入）。
+function startRecordingClientMessages() {
+  clientMessages.value = [];
+  isRecordingClientMessages.value = true;
+}
+
+function stopRecordingClientMessages() {
+  isRecordingClientMessages.value = false;
+  downloadFile(clientMessages.value, 'prun-client-log.json', true);
+  clientMessages.value = [];
 }
 
 function downloadCssDefinition() {
@@ -65,6 +81,10 @@ function downloadPrunStyles() {
     </form>
     <DebugButton v-if="!isRecordingPrunLog" @click="recordPrunLog">录制 PrUn 日志</DebugButton>
     <DebugButton v-else @click="stopRecordingPrunLog">停止录制</DebugButton>
+    <DebugButton v-if="!isRecordingClientMessages" @click="startRecordingClientMessages"
+      >录制请求消息</DebugButton
+    >
+    <DebugButton v-else @click="stopRecordingClientMessages">停止录制请求</DebugButton>
     <DebugButton @click="switchPrunDebug"> {{ prunDebug ? '禁用' : '启用' }} pu-debug </DebugButton>
     <DebugButton @click="logUserData">记录用户数据</DebugButton>
     <DebugButton @click="downloadCssDefinition">导出 prun-css.types.d.ts</DebugButton>

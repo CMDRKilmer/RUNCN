@@ -23,6 +23,7 @@ import './DEV/DEV';
 import './FB/FB';
 import './FLEET/FLEET';
 import './FLEET/FLEETACT';
+import './FLEET/RTWIZ';
 import './FTC/FTC';
 import './ELEC/ELEC';
 import './EXP/EXP';

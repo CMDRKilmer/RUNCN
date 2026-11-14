@@ -126,7 +126,9 @@ try {
 
 const api = await import('../src/infrastructure/prun-api/data/api-messages.ts');
 const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/system-bodies.ts');
-const { routeMetrics } = await import('../src/features/XIT/FTC/route-planner.ts');
+const { routeMetrics, estimateRouteStl } = await import(
+  '../src/features/XIT/FTC/route-planner.ts'
+);
 const { computeFtcPlan } = await import('../src/features/XIT/FTC/ftc-compute.ts');
 const stub = await import('./lib/ftc-geometry-stub.mjs');
 
@@ -492,6 +494,15 @@ check('② 有跳航线仍按跳键取原生记录（跨星系行为未变）', 
   stub.stubClearStlRecords();
   stub.stubSetApproachRecord('OT-580', 'MOR', { distanceKm: 72737809, seconds: 2959 });
   expectExact(f, '到达侧键不再被查表命中', routeMetrics(crossRoute).approachKm, undefined);
+});
+
+// ⑦ 公式估算（仅 computeFtcPlan({ estimateGeometry: true }) 使用；routeMetrics / 面板 / SFC
+// 仍严格判缺 —— 上面的 ② 负对照就是这条边界的守卫）。跨星系自然段取内置实测中位数。
+check('⑦ estimateRouteStl：跨星系自然段按内置中位数估算（离港 70M / 进近 68M）', f => {
+  const estimate = estimateRouteStl(crossRoute);
+  expectExact(f, '离港', estimate.departKm, 70e6);
+  expectExact(f, '进近', estimate.approachKm, 68e6);
+  expectExact(f, '总 STL', estimate.stlDistanceKm, 70e6 + 68e6);
 });
 
 // ---- ③④ 编排层：真实 computeFtcPlan（browse:false = SFC 联动 / browse:true = 面板）----
