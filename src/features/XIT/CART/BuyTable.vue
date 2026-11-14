@@ -290,6 +290,11 @@ const deductions = computed<CbuyDeduction[]>(() =>
         exchange: 0,
         transfer: need.amount,
         net: need.amount,
+        // 购物车模式不做库存抵扣，但仍必须给出出库交易所：沿用同一个
+        // outboundExchange（单市场 = 选定/最优市场，分市场 = 各物料最优价市场）。
+        // 否则 actGroups 拿不到 code 会把每一行 continue，普通 XIT CBUY 永远
+        // 无法生成 ACT（PR #60 2026-11-14 审查：普通购物车路由回归）。
+        exchangeCode: outboundExchange(need.ticker),
       })),
 );
 const deductionsByTicker = computed(() => new Map(deductions.value.map(d => [d.ticker, d])));
@@ -429,6 +434,8 @@ const actGroups = computed<Map<string, CbuyActGroup>>(() => {
     // 另一边去 AI1 买并把货转运到 AI1，CI1 的库存永远不动（PR #60 审查 #224）。
     // 纯转移行（net=0）没有报价，exchangeCode 由 deductNeeds 退到「仓库里真有该物料的
     // 交易所」，因此转运也不会被丢掉（PR #60 审查 #223）。
+    // 购物车模式不做抵扣，但同样由 outboundExchange 预先写入 exchangeCode，
+    // 所以这里对两种模式都是唯一事实源（PR #60 2026-11-14 审查：普通购物车路由回归）。
     const code = d.exchangeCode;
     if (!code) {
       continue;
@@ -446,11 +453,16 @@ const actGroups = computed<Map<string, CbuyActGroup>>(() => {
 });
 
 // 库存把某些物料的采购量完全抵成 0 时，组内可能只剩 MTRA 转移量；
-// 两组都空的市场不值得生成 ACT。
-const canGenerateActOptions = computed(() =>
-  [...actGroups.value.values()].some(
-    group => Object.keys(group.buy).length > 0 || Object.keys(group.transfer).length > 0,
-  ),
+// 两组都空的市场不值得生成 ACT。临时清单还要等三个库存 store 拉齐：
+// 政府上下文冷启动时仓库数据可能尚未到达，此时按「空仓库」算出的全额采购包
+// 会把 useCXInv 关掉，等真实库存到达后执行 ACT 就不会再抵扣已有库存
+// （PR #60 2026-11-14 审查：库存未就绪即导出）。
+const canGenerateActOptions = computed(
+  () =>
+    inventoryReady.value &&
+    [...actGroups.value.values()].some(
+      group => Object.keys(group.buy).length > 0 || Object.keys(group.transfer).length > 0,
+    ),
 );
 
 // 与 BPC/BMAT 一致的 ASCII 净化：XIT 参数仅吃 ASCII。
@@ -463,7 +475,8 @@ function asciiSafe(value: string): string {
 }
 
 function generateAct() {
-  if (actGroups.value.size === 0) {
+  // 与按钮的 disabled 判定同源，防止非点击路径（或库存刚好在此刻失效）绕过门槛。
+  if (!inventoryReady.value || actGroups.value.size === 0) {
     return;
   }
   const groups: UserData.MaterialGroupData[] = [];
@@ -761,7 +774,9 @@ function isBest(component: { bestExchange?: string }, code: string) {
             splitMarketMode ? '分市场' : deductionExchange || '—'
           }}</strong>
           <template v-if="repairMode"> + 基地仓库</template>
-          <span v-if="!inventoryReady" :class="$style.summaryWarn">（库存读取中…）</span>
+          <span v-if="!inventoryReady" :class="$style.summaryWarn"
+            >（库存数据未就绪，暂停生成 ACT）</span
+          >
           <span v-else
             >（已抵扣 <span data-cbu-deducted>{{ deductedCount }}</span> 种）</span
           >

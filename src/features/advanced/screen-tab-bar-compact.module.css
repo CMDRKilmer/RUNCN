@@ -1,0 +1,37 @@
+/* 「界面」悬浮列表的紧凑化：缩短屏幕名 + 默认收起行内操作按钮。
+   两者都属于「缩短 / 隐藏信息」，按 docs/contributing.md 只能在 FULL 模式启用，
+   所以单独放在 advanced/；多列重排本身不带信息删减，仍由 basic/screen-tab-bar 提供。 */
+.screensMenuCompact {
+  /* 名字定宽（原生 140px → 74px）：每行的按钮都紧跟同一个 74px 边界，
+     左边缘落在同一竖线上，不再随名字长短顺延成阶梯状；超长名走省略号。 */
+  [class*='ScreenControls__name'] {
+    flex: 0 0 74px;
+    width: 74px;
+    min-width: 0;
+    padding: 0 4px;
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  [class*='ScreenControls__delete'] {
+    flex: 0 0 auto;
+    margin: 1px;
+    padding: 0 2px;
+    white-space: nowrap;
+
+    /* 行内 4 个按钮默认收起，鼠标移到该行（或键盘聚焦到按钮）才淡入。
+       不用 display:none —— 菜单自身的显隐就靠 display 切换，覆盖会导致菜单关不掉；
+       opacity + pointer-events 保留占位，按钮出现时不会有布局跳动。 */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease-in-out;
+  }
+
+  li[class*='ScreenControls__screen']:hover [class*='ScreenControls__delete'],
+  li[class*='ScreenControls__screen']:focus-within [class*='ScreenControls__delete'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}

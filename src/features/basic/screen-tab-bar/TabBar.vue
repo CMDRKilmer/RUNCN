@@ -37,13 +37,20 @@ watch(
 
 // 拖拽结果按 screen id 写回：只重排「仍在的屏幕」所占的槽位，已删除的 ID 保持原位，
 // 既保住 append-only 的历史数据，也不会因为删过屏幕而错位。
-watch(dragOrder, visible => {
-  const before = userData.tabs.order;
-  const merged = reconcileTabOrder(before, visible, id => getScreen(id) !== undefined);
-  if (merged.join('|') !== before.join('|')) {
-    userData.tabs.order = merged;
-  }
-});
+// v-draggable 是**原地**改写数组（splice），普通 ref 的浅 watch 只监听 .value 被替换，
+// 收不到这种变更、拖完的顺序不会落盘，重载即丢失；deep 才会追踪数组元素
+// （PR #60 2026-11-14 审查：拖拽顺序不落盘）。
+watch(
+  dragOrder,
+  visible => {
+    const before = userData.tabs.order;
+    const merged = reconcileTabOrder(before, visible, id => getScreen(id) !== undefined);
+    if (merged.join('|') !== before.join('|')) {
+      userData.tabs.order = merged;
+    }
+  },
+  { deep: true },
+);
 
 // 政府管理视图是在「context=管理机构 id」下看同一批界面。标签页如果用纯
 // `#screen=<id>` 跳转，会把 context 丢掉、直接从政府视图弹回公司上下文，
