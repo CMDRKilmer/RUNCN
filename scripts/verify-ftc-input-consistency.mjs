@@ -360,9 +360,8 @@ globalThis.config = { url: { planetEnv: 'https://stub.invalid/planet-env.json' }
 globalThis.fetch = async () => ({ json: async () => ({}) });
 
 const stub = await import('./lib/ftc-node-stub.mjs');
-const { computeFtcPlan, shipPerformanceFor, shipFuelRemainingFor } = await import(
-  '../src/features/XIT/FTC/ftc-compute.ts'
-);
+const { computeFtcPlan, shipPerformanceFor, shipFuelRemainingFor } =
+  await import('../src/features/XIT/FTC/ftc-compute.ts');
 
 const stubRoute = (metrics, stlFuelCapacity = SHIP.stlFuelCapacity) => {
   stub.stubSetShip(stub.STUB_SHIP);
@@ -448,6 +447,172 @@ await checkAsync('门控：跨星系几何完整（有罐容量）→ 不报缺�
   expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
 });
 
+// 原生 TRANSIT 样本按「测它时的出发油量」反推档位：规划的 stlFuelOverride 只能改候选侧，
+// 不能顶掉样本侧，否则同一份样本会被按另一个档位重标定，时长随规划油量漂。
+await checkAsync('原生样本的出发油量不受规划 override 影响', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 200e6, departKm: 70e6, approachKm: 68e6 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 规划 override 固定 3500，只改「飞船当前余量」，并对比「有样本 / 无样本」两次：
+  // 有样本时余量必须参与样本档位反推（时长不同），无样本时时长与余量无关（相等）。
+  const run = async (currentFuel, summary) => {
+    stub.stubSetStores([
+      {
+        id: 'stl',
+        weightCapacity: 3500,
+        items: [{ type: 'INVENTORY', quantity: { amount: currentFuel } }],
+      },
+    ]);
+    stub.stubSetNativePlan(summary);
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 3500,
+    });
+    return out.best?.totalHours;
+  };
+  const sample = { transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 };
+  const sampleAt1500 = await run(1500, sample);
+  const sampleAt3500 = await run(3500, sample);
+  const bareAt1500 = await run(1500, undefined);
+  const bareAt3500 = await run(3500, undefined);
+  expectExact(f, '无样本：时长与当前余量无关', bareAt1500, bareAt3500);
+  // 非空断言：有样本时当前余量必须改变结果，否则说明用的是规划 override（bug）。
+  expectCondition(
+    f,
+    '有样本：样本档位按当前余量反推',
+    sampleAt1500 !== undefined && sampleAt3500 !== undefined && sampleAt1500 !== sampleAt3500,
+    '不同时长',
+    `${sampleAt1500} vs ${sampleAt3500}`,
+  );
+});
+
+// 试飞样本按**请求里的出发油量**算（向导可能传罐容量或规划余量）：标记了测量条件的样本
+// 不能用实时余量再换算一次。
+await checkAsync('试飞样本按它自己的出发油量校准', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  const setLive = amount =>
+    stub.stubSetStores([
+      { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount } }] },
+    ]);
+  setLive(1500);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 200e6, departKm: 70e6, approachKm: 68e6 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  const sample = { transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 };
+  const run = async live => {
+    setLive(live);
+    stub.stubSetNativePlan(sample);
+    // 样本是在 3500 油量下测的（向导按罐容量试飞）。
+    stub.stubSetTestFlightSample({ massT: stub.STUB_SHIP.mass, stlFuel: 3500 });
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 3500,
+    });
+    return out.best?.totalHours;
+  };
+  const live1500 = await run(1500);
+  const live3500 = await run(3500);
+  stub.stubSetTestFlightSample(undefined);
+  expectExact(f, '标记了测量条件的样本与实时余量无关', live1500, live3500);
+});
+
+// 试飞耗时含测那次船况的惩罚：样本复用时必须按**样本船况**还原速度（乘回惩罚 = 罚两次，
+// 用当前船况 = 修复后换件/修好仍按旧惩罚算）。
+await checkAsync('样本按它自己的船况还原速度', async f => {
+  const ship = { ...stub.STUB_SHIP, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  const metrics = stub.stubMetrics({ stlDistanceKm: 100e6, departKm: 0, approachKm: 0 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 样本：100M km / 20000s，测于 40% 船况 → 健康船 12500 km/s。
+  stub.stubSetNativePlan({ transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 });
+  const run = async sample => {
+    stub.stubSetTestFlightSample(sample);
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride: 1500,
+    });
+    return out.best?.totalHours;
+  };
+  const tagged = await run({ massT: ship.mass, stlFuel: 1500, condition: 0.4 });
+  stub.stubSetTestFlightSample(undefined);
+  const untagged = await run(undefined);
+  // conditionFactor(0.4) = 0.5（80% 以下按 condition/80% 计，下限 0.2）：
+  // 带样本船况 → 健康船 10000 km/s → 100e6/(10000×3600) = 2.778h；
+  // 无标记按当前船况（100%，系数 1）换算 → 5000 km/s → 5.556h。
+  expectCondition(
+    f,
+    '按样本船况还原',
+    tagged !== undefined && Math.abs(tagged - 100e6 / (10000 * 3600)) < 1e-3,
+    (100e6 / (10000 * 3600)).toFixed(3),
+    String(tagged),
+  );
+  expectCondition(
+    f,
+    '无标记按当前船况',
+    untagged !== undefined && Math.abs(untagged - 100e6 / (5000 * 3600)) < 1e-3,
+    (100e6 / (5000 * 3600)).toFixed(3),
+    String(untagged),
+  );
+});
+
+// 假设性计算（原生 RT 向导：规划载重 + 未来出发油量 + 固定封顶档）即使输入完整也不能
+// 发布给 SFC：同键写入会覆盖玩家当前航班正在用的参数。
+await checkAsync('门控：publish = false → 输入完整也不写滑块、不发完成信号', async f => {
+  stubRoute(stub.stubMetrics());
+  const out = await computeFtcPlan({
+    shipRegistration: 'STUB-01',
+    from: 'zv-307a',
+    to: 'ANT',
+    browse: false,
+    publish: false,
+  });
+  expectExact(f, 'inputIncomplete', out.inputIncomplete, undefined);
+  expectExact(f, 'ok', out.ok, true);
+  expectExact(f, '滑块写入次数', stub.sliderWrites.length, 0);
+  expectExact(f, '反应堆写入次数', stub.reactorWrites.length, 0);
+  expectExact(f, 'best 仍然返回', out.best?.fuel, 0.15);
+});
+
 // ---- ⑤ 油罐查表口径：必须按 **store id** 查（getById）----
 // 背景（2026-09-25 用户实测 bug）：FTC 面板显示「当前油量：STL 0/0 ｜ FTL 0/0」+ 假缺口
 // 警告，而游戏里实际 STL 3,238/3,500、FTL 1,974/2,000。根因：shipFuelRemainingFor 用
@@ -523,6 +688,71 @@ check('油罐查表：两个字段都缺 → 余量/容量 0（未停靠或未�
   expectExact(f, 'stlRemaining', r.stlRemaining, 0);
   expectExact(f, 'stlCap', r.stlCap, 0);
   stub.stubSetStores();
+});
+
+// ---- ⑥ 样本速度曲线按**样本自己的油量**评估 ----
+// 查表键 Q = 0.98×油量×min(f,0.5)：分母若用候选侧的 override 评估，样本与候选同档位时
+// 比值恒为 1（等于没校准），不同出发油量算出同样的时长。
+// 本用例注入两条转移速度样本（Q 由 1500 / 3500 油量、f=0.10 反推），污染全局查询表，
+// 故放在最后执行。
+await checkAsync('样本速度曲线按样本油量评估（不同规划油量改变斜率）', async f => {
+  const { setTransitSpeedTableForTest } = await import('../src/features/XIT/FTC/fuel-model.ts');
+  const ship = { ...stub.STUB_SHIP, acceleration: 78.48, stlFuelStoreId: 'stl' };
+  stub.stubSetStores([
+    { id: 'stl', weightCapacity: 3500, items: [{ type: 'INVENTORY', quantity: { amount: 1500 } }] },
+  ]);
+  stub.stubSetShip(ship);
+  stub.stubSetBlueprint(stub.stubBlueprint(3500));
+  // 只留转移段（离港/进近 0 km），时长完全由样本校准决定，避免起降段干扰。
+  const metrics = stub.stubMetrics({ stlDistanceKm: 100e6, departKm: 0, approachKm: 0 });
+  stub.stubSetRoute(
+    'zv-307a',
+    'ANT',
+    { label: 'natural', fromBody: 'zv-307a', toBody: 'ANT', metrics },
+    metrics,
+  );
+  stub.stubResetWrites();
+  // 表里两个点：Q 由 1500 / 3500 油量 × f=0.10 反推，速度分别 1000 / 2000 km/s。
+  const aEff = (ship.acceleration * ship.operatingEmptyMass) / ship.mass;
+  setTransitSpeedTableForTest({
+    [SHIP.stlEngineOption]: [
+      [0.98 * 1500 * 0.1, aEff, 1000],
+      [0.98 * 3500 * 0.1, aEff, 2000],
+    ],
+  });
+  // 样本：100M km / 20000s = 5000 km/s，测于 1500 油量、10% 档。
+  stub.stubSetNativePlan({ transitDistanceKm: 100e6, transitSeconds: 20000, transitFuel: 147 });
+  stub.stubSetTestFlightSample({ massT: ship.mass, stlFuel: 1500 });
+  const run = async stlFuelOverride => {
+    const out = await computeFtcPlan({
+      shipRegistration: 'STUB-01',
+      from: 'zv-307a',
+      to: 'ANT',
+      browse: false,
+      fixedFuel: 0.1,
+      stlFuelOverride,
+    });
+    return out.best?.totalHours;
+  };
+  const at1500 = await run(1500);
+  const at3500 = await run(3500);
+  stub.stubSetTestFlightSample(undefined);
+  setTransitSpeedTableForTest(undefined);
+  // 1500：样本曲线与候选同一行 → 5000 km/s → 5.556h；3500：候选曲线 ×2 → 2.778h。
+  expectCondition(
+    f,
+    '样本油量下的时长',
+    at1500 !== undefined && Math.abs(at1500 - 100e6 / (5000 * 3600)) < 1e-3,
+    (100e6 / (5000 * 3600)).toFixed(3),
+    String(at1500),
+  );
+  expectCondition(
+    f,
+    '规划油量更大时按候选曲线加速',
+    at3500 !== undefined && Math.abs(at3500 - 100e6 / (10000 * 3600)) < 1e-3,
+    (100e6 / (10000 * 3600)).toFixed(3),
+    String(at3500),
+  );
 });
 
 console.log(`PASS ${summary.pass}/${summary.pass + summary.fail}`);

@@ -1,0 +1,301 @@
+import {
+  computeFtcPlan,
+  shipFuelRemainingFor,
+  shipPerformanceFor,
+} from '@src/features/XIT/FTC/ftc-compute';
+import { stlDepartureFuelCapPercent } from '@src/features/XIT/FTC/fuel-model';
+import type { ShipChainPlan } from './chain-allocation';
+import { measureNativeRouteFuel } from './native-route-btf';
+import {
+  DEFAULT_WAYPOINT_FUEL_PERCENT,
+  legLoadWeight,
+  percentAtLeast,
+  type NativeWaypoint,
+} from './native-route-plan';
+
+// 航点编辑器的两个百分比档位。反应堆使用量只在存在自然跃迁时写（全程系内/纯网关飞行
+// 反应堆不影响时长与燃料，保持游戏默认）。
+export interface NativeRouteLegPercent {
+  fuelPercent: number;
+  reactorPercent?: number;
+  // 该档位下的预计飞行时长（小时）：FTC 选点结果或 BTF 试飞实测顺带带回。
+  hours?: number;
+}
+
+export interface NativeRouteFuelPlan {
+  // 与 waypoints 等长：首站没有入站航段，保留默认值且不写反应堆。
+  legs: NativeRouteLegPercent[];
+  // 未算出、最终兜底默认值的航段逐个说明。
+  warnings: string[];
+}
+
+// 每段燃料消耗百分比优先用 FTC 模型算（自然航线、autoFuelGrid 全档、平衡点，与 FTC 面板同口径）；
+// 该段缺服务器原生 STL 段记录（missingModelInputs 判缺）或航线不可达时改用 BTF 实测。
+// 载重按该段离站时的计划舱载补进模型质量：规划期飞船通常还没装货，而质量既影响转移段速度
+// 也影响着陆/起飞燃料。
+export async function computeNativeRouteFuel(
+  candidate: ShipChainPlan,
+  waypoints: readonly NativeWaypoint[],
+  signal: AbortSignal,
+  onProgress: (status: string) => void,
+): Promise<NativeRouteFuelPlan> {
+  const ship = candidate.ship.ship;
+  const registration = ship.registration;
+  const legCount = waypoints.length - 1;
+  const performance = shipPerformanceFor(ship);
+  const fuelNow = shipFuelRemainingFor(ship);
+  const stlCap = fuelNow.stlCap > 0 ? fuelNow.stlCap : performance.stlFuelCapacity;
+  const ftlCap = fuelNow.ftlCap > 0 ? fuelNow.ftlCap : undefined;
+  // 出发油量：有补油步骤时出发前会补满，否则用当前余量；后续航段按上一段实耗递减，
+  // 只有真正存在补油步骤的航点才重置为罐容量（规划器只在出发地写补油）。
+  // 油罐已读出（容量已知）时余量 0 就是真空罐，必须原样保留——改成 undefined 会被
+  // 下游当成「读不到」而回退成满罐；只有容量也读不到（store 未加载）才算未知。
+  let stlFuel = fuelNow.stlCap > 0 ? fuelNow.stlRemaining : undefined;
+  let ftlFuel = fuelNow.ftlCap > 0 ? fuelNow.ftlRemaining : undefined;
+  const refuels = (waypointIndex: number, tank: 'STL' | 'FTL') =>
+    waypoints[waypointIndex]?.steps.some(x => x.kind === 'refuel' && x.tank === tank) ?? false;
+  const applyRefuel = (waypointIndex: number) => {
+    if (refuels(waypointIndex, 'STL')) {
+      stlFuel = stlCap;
+    }
+    if (refuels(waypointIndex, 'FTL')) {
+      ftlFuel = ftlCap;
+    }
+  };
+  const consume = (used: { stlFuel?: number; ftlFuel?: number }) => {
+    if (stlFuel !== undefined && typeof used.stlFuel === 'number') {
+      stlFuel = Math.max(0, stlFuel - used.stlFuel);
+    }
+    if (ftlFuel !== undefined && typeof used.ftlFuel === 'number') {
+      ftlFuel = Math.max(0, ftlFuel - used.ftlFuel);
+    }
+  };
+  // 出发余量不够这一段就飞不完：模型只给油耗、不校验油量，航线写下去会中途停下。
+  // 只在「已知余量」时判断（油罐读不出来时无话可说），不阻止写入。
+  const reportShortfall = (index: number, used: { stlFuel?: number; ftlFuel?: number }) => {
+    const route = `${waypoints[index - 1]!.location} → ${waypoints[index]!.location}`;
+    const tanks = [
+      { tank: 'STL', balance: stlFuel, need: used.stlFuel },
+      { tank: 'FTL', balance: ftlFuel, need: used.ftlFuel },
+    ] as const;
+    for (const { tank, balance, need } of tanks) {
+      if (balance === undefined || typeof need !== 'number' || need <= balance + 1e-6) {
+        continue;
+      }
+      warnings.push(
+        `${route}：${tank} 不够（本段需 ${Math.ceil(need)}，出发只有 ${Math.round(balance)}），` +
+          '航线会中途停下——在游戏里给该站加补油，或降低这一段的档位。',
+      );
+    }
+  };
+  const legs = waypoints.map<NativeRouteLegPercent>(() => ({
+    fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT,
+  }));
+  const warnings: string[] = [];
+  // 档位上限：离港燃料饱和点 f_cap = 10.96×STL 流量（节油引擎≈8%、标准≈16%）。
+  // 超过它离港只多烧油不再加速，所以拐点/实测值都按它封顶。
+  const capPercent = stlDepartureFuelCapPercent(performance.stlFuelFlowRate);
+  const finalize = (): NativeRouteFuelPlan => {
+    if (capPercent !== undefined) {
+      let clamped = 0;
+      for (const leg of legs) {
+        if (leg.fuelPercent > capPercent) {
+          leg.fuelPercent = capPercent;
+          // 时长是按原（更快）档位算的，封顶后不再成立：清掉，避免显示与实写档位不符的预计值。
+          leg.hours = undefined;
+          clamped++;
+        }
+      }
+      if (clamped > 0) {
+        warnings.push(
+          `燃料档位按离港饱和点 ${capPercent}%（10.96×STL 流量）封顶，${clamped} 段被截断。`,
+        );
+      }
+    }
+    return { legs, warnings };
+  };
+  // 选中档位按离港饱和点封顶；若被封顶，按**实际写入的档位**重算消耗与时长，
+  // 否则后续航段会按更费油的旧档位扣油，越算越紧。
+  const applyDepartureCap = async (
+    index: number,
+    option: { fuel: number; reactor: number; totalHours: number; stlFuel: number; ftlFuel: number },
+    reactorRelevant: boolean,
+    estimatedGeometry: boolean,
+  ) => {
+    const selected = clampPercent(option.fuel * 100);
+    const capped = capPercent === undefined ? selected : Math.min(selected, capPercent);
+    // 写入用的整数百分比必须仍然满足蓝图下限（向下取整会写出跑不动的档位）。
+    const reactorPercent = reactorRelevant
+      ? percentAtLeast(option.reactor, performance.minReactorUsage ?? 0)
+      : undefined;
+    // 取整改了反应堆档位（例如下限 0.653 写成 66%）时，时长与油耗属于旧档位，必须重算。
+    const reactorChanged =
+      reactorPercent !== undefined && Math.abs(reactorPercent - option.reactor * 100) > 1e-6;
+    if (capped === selected && !reactorChanged) {
+      return {
+        fuelPercent: selected,
+        reactorPercent,
+        hours: option.totalHours as number | undefined,
+        stlFuel: option.stlFuel,
+        ftlFuel: option.ftlFuel,
+      };
+    }
+    const recalculated = await computeFtcPlan({
+      shipRegistration: registration,
+      from: waypoints[index - 1]!.location,
+      to: waypoints[index]!.location,
+      browse: false,
+      valueOptimal: true,
+      // 假设性计算（规划载重 + 未来出发油量 + 固定封顶档）：不发布给 SFC。
+      publish: false,
+      useGateway: true,
+      fixedFuel: capped / 100,
+      // 用**写入的那个档位**重算，避免重算结果与实际航线不一致。
+      fixedReactor: reactorPercent === undefined ? undefined : reactorPercent / 100,
+      stlFuelOverride: stlFuel,
+      // 来自公式兜底的段没有原生几何：重算必须保持估算模式，否则会被判输入残缺。
+      estimateGeometry: estimatedGeometry || undefined,
+      extraMassT: legLoadWeight(candidate.plan, index, legCount),
+    });
+    if (
+      recalculated.ok &&
+      recalculated.best !== undefined &&
+      recalculated.inputIncomplete === undefined
+    ) {
+      return {
+        fuelPercent: capped,
+        reactorPercent,
+        hours: recalculated.best.totalHours,
+        stlFuel: recalculated.best.stlFuel,
+        ftlFuel: recalculated.best.ftlFuel,
+      };
+    }
+    // 重算失败：保守按原（更费油）消耗续算，封顶后的时长不再展示。
+    return {
+      fuelPercent: capped,
+      reactorPercent,
+      hours: undefined as number | undefined,
+      stlFuel: option.stlFuel,
+      ftlFuel: option.ftlFuel,
+    };
+  };
+  for (let index = 1; index <= legCount; index++) {
+    signal.throwIfAborted();
+    const from = waypoints[index - 1]!.location;
+    const to = waypoints[index]!.location;
+    // 航点 index-1 的补油步骤在飞往 index 之前执行。
+    applyRefuel(index - 1);
+    onProgress(`FTC ${registration} · ${index}/${legCount} · ${from} → ${to}`);
+    const result = await computeFtcPlan({
+      shipRegistration: registration,
+      from,
+      to,
+      browse: false,
+      valueOptimal: true,
+      // 假设性计算（规划载重 + 未来出发油量）：不发布给 SFC。
+      publish: false,
+      // 与写入航点的偏好一致（socketEditWaypoint 写 useGateways: true，BTF 也开网关）
+      useGateway: true,
+      stlFuelOverride: stlFuel,
+      extraMassT: legLoadWeight(candidate.plan, index, legCount),
+    });
+    if (result.ok && result.best !== undefined && result.inputIncomplete === undefined) {
+      const chosen = await applyDepartureCap(
+        index,
+        result.best,
+        result.reactorRelevant === true,
+        false,
+      );
+      legs[index] = {
+        fuelPercent: chosen.fuelPercent,
+        reactorPercent: chosen.reactorPercent,
+        hours: chosen.hours,
+      };
+      reportShortfall(index, chosen);
+      consume(chosen);
+      continue;
+    }
+    warnings.push(`FTC 跳过 ${from} → ${to}：${skipReason(result)}`);
+    // 该段缺模型输入：用 BTF 试飞实测，油量用当前航段出发时的剩余量。
+    try {
+      const measured = await measureNativeRouteFuel(
+        candidate,
+        waypoints,
+        [index],
+        signal,
+        onProgress,
+        { stlFuel, ftlFuel },
+      );
+      warnings.push(...measured.warnings);
+      const leg = measured.legs.get(index);
+      if (leg !== undefined) {
+        legs[index] = {
+          fuelPercent: clampPercent(leg.fuel),
+          reactorPercent: leg.reactor === undefined ? undefined : clampPercent(leg.reactor),
+          hours: leg.hours,
+        };
+        reportShortfall(index, leg);
+        consume(leg);
+        continue;
+      }
+    } catch (err) {
+      if (signal.aborted) {
+        throw err;
+      }
+      warnings.push(
+        `BTF 试飞未完成（${err instanceof Error ? err.message : String(err)}）：${from} → ${to}。`,
+      );
+    }
+    // 试飞也没算出来：退回公式估算（起降距离用实测中位数），再不行就是游戏默认档。
+    const estimate = await computeFtcPlan({
+      shipRegistration: registration,
+      from,
+      to,
+      browse: false,
+      valueOptimal: true,
+      // 假设性计算（规划载重 + 估算几何）：不发布给 SFC。
+      publish: false,
+      useGateway: true,
+      estimateGeometry: true,
+      stlFuelOverride: stlFuel,
+      extraMassT: legLoadWeight(candidate.plan, index, legCount),
+    });
+    if (estimate.ok && estimate.best !== undefined && estimate.inputIncomplete === undefined) {
+      const chosen = await applyDepartureCap(
+        index,
+        estimate.best,
+        estimate.reactorRelevant === true,
+        true,
+      );
+      legs[index] = {
+        fuelPercent: chosen.fuelPercent,
+        reactorPercent: chosen.reactorPercent,
+        hours: chosen.hours,
+      };
+      reportShortfall(index, chosen);
+      consume(chosen);
+      warnings.push(
+        `${from} → ${to}：试飞没得到结果，起降距离按公式估算补算（时间近似）。` +
+          '在 SFC 为这段生成一次飞行计划（或试飞一次）即可转为原生几何。',
+      );
+      continue;
+    }
+    warnings.push(
+      `${from} → ${to} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%（试飞与公式估算都不可用）。`,
+    );
+  }
+  return finalize();
+}
+
+function clampPercent(value: number) {
+  return Math.min(100, Math.max(1, Math.round(value)));
+}
+
+// 压缩成一行原因：缺少的模型输入只取条目名（冒号前），完整成因留在 FTC 面板。
+function skipReason(result: { message: string; inputIncomplete?: string[] }) {
+  const items = result.inputIncomplete;
+  if (items === undefined || items.length === 0) {
+    return result.message;
+  }
+  return items.map(x => x.split('：')[0]!.trim()).join('、');
+}

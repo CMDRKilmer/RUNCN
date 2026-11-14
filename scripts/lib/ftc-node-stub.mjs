@@ -145,11 +145,30 @@ export const planRoutes = (from, to) => {
   return { natural: entry.route, gateway: undefined };
 };
 export const routeMetrics = route => route.metrics;
+// './route-planner' 的 estimateRouteStl：computeFtcPlan 的 estimateGeometry 门默认关闭，
+// 本脚本不覆盖估算路径；导出只为满足静态导入。
+export const estimateRouteStl = () => ({
+  departKm: undefined,
+  approachKm: undefined,
+  stlDistanceKm: undefined,
+});
 // './route-planner' 的 findNativeFlightPlan：编排层用它回传「服务器当前计划实测总时长」，
 // Node 替身没有 flightPlansStore → 恒 undefined（面板不显示该提示），与浏览器行为一致。
-export const findNativeFlightPlan = () => undefined;
-// 同上的「服务器计划实测总时长」摘要：无 flightPlansStore → 恒 undefined。
-export const summarizeNativeFlightPlan = () => undefined;
+// './route-planner' 的 findNativeFlightPlan：缺省没有原生计划（面板不显示实测总时长）；
+// 用例用 stubSetNativePlan 注入一份「服务器已下发」的摘要，覆盖原生样本校准分支。
+let nativePlanFixture = null;
+export function stubSetNativePlan(summary) {
+  nativePlanFixture = summary === undefined ? null : { summary };
+}
+export const findNativeFlightPlan = () => nativePlanFixture;
+export const summarizeNativeFlightPlan = plan => plan?.summary;
+// '@src/infrastructure/prun-api/data/flight-test-collector'：试飞计划的测量条件标记。
+// 用例用 stubSetTestFlightSample 注入，覆盖「按样本条件校准」的分支。
+let testFlightSampleFixture;
+export function stubSetTestFlightSample(sample) {
+  testFlightSampleFixture = sample;
+}
+export const testFlightSample = () => testFlightSampleFixture;
 
 // './transfer-geometry'：ftc-compute 在缺前向几何时调它补系内距离。本脚本只覆盖
 // 「残缺输入 → 不写滑块」的门控，不涉及几何预测 → 恒 undefined（与无轨道数据时一致），

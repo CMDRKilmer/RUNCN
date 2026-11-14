@@ -24,12 +24,38 @@ import type { ShipChainPlan } from './chain-allocation';
 import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
 import type { ChainFlightLeg } from './chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
+import { matWeightVolume } from './chain-data';
 import { getBaseGroups } from '@src/core/base-groups';
 import { useTileState } from '@src/store/user-data-tiles';
 import { userData } from '@src/store/user-data';
 
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
+import { buildNativeWaypoints } from './native-route-plan';
+import {
+  nativeRouteRecords,
+  recordNativeRoute,
+  removeNativeRoute,
+  type NativeRouteRecord,
+} from './native-route-registry';
+import {
+  socketDeleteRoute,
+  socketGetRoutes,
+  hasPendingRouteRequest,
+  type RouteData,
+} from './native-route-socket';
+import { readRouteExecutions } from './native-route-rte';
+import {
+  collectNativeRoutes,
+  matchRunningRoutes,
+  recordsToRemoveAfterDelete,
+  routeProgressText,
+  routeStopStates,
+  withoutRouteDefinition,
+  type RunningRoutes,
+} from './native-route-game';
+import { stagedNativeRoute } from './native-route-staged';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -197,6 +223,288 @@ const executeTooltip = computed(() => {
 });
 
 const executeNotice = ref<string | undefined>(undefined);
+
+function openNativeRoutePlan() {
+  const candidate = shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
+  if (
+    candidate === undefined ||
+    activeRuns.value.some(run => run.shipId === candidate.ship.ship.id)
+  ) {
+    executeNotice.value = '请先选择一艘未运行旧环线的船。';
+    return;
+  }
+  try {
+    const waypoints = buildNativeWaypoints(candidate.plan);
+    executeNotice.value = undefined;
+    // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
+    stagedNativeRoute.value = {
+      sessionId: Date.now(),
+      candidate,
+      waypoints,
+      chainName: chainGroup.value ?? '',
+      autoStart: true,
+    };
+    void showBuffer('XIT RTWIZ');
+  } catch (err) {
+    executeNotice.value = err instanceof Error ? err.message : String(err);
+  }
+}
+
+// RTE 里「哪些船正在跑哪条航线」——只用来把执行中的卡片换成游戏里的定义，列表本身
+// 不依赖它：「运行中」列出全部创建过的原生 RT，点页签立刻有内容。
+const gameRunningRoutes = ref<RunningRoutes>();
+// `SHIP_ROUTES_GET_ROUTES` 拿到的全部航线定义：没在执行的航线也按游戏里的内容显示。
+const gameRouteDefinitions = ref<RouteData[]>([]);
+
+interface NativeRouteView {
+  record: NativeRouteRecord;
+  ship: PrunApi.Ship | undefined;
+  loads: NativeRouteLoad[];
+  capacity: { weight: number; volume: number };
+}
+
+// 同一条航线可能同时被两艘船执行：key 必须带上船，否则 Vue 会报重复 key。
+function nativeRouteRowKey(entry: NativeRouteView) {
+  return `${entry.record.routeId}|${entry.ship?.id ?? entry.record.shipId}`;
+}
+
+const nativeRoutes = computed<NativeRouteView[]>(() =>
+  collectNativeRoutes(
+    nativeRouteRecords.value,
+    gameRunningRoutes.value,
+    gameRouteDefinitions.value,
+  ).map(row => {
+    const ship = shipsStore.getById(row.shipId);
+    return {
+      record: row.record,
+      ship,
+      loads: nativeRouteLoads(row.record),
+      capacity: nativeRouteCapacity(ship),
+    };
+  }),
+);
+
+// 用游戏里的真实航线列表校准本地记录：游戏里已经没有的航线（在游戏 UI 里删掉、没写成、
+// 早期版本残留）直接丢弃，不再出现在「运行中」。同时读一次原生 RTE，拿到
+// 「哪些船正在跑哪条航线」——游戏报文里没有分配关系，只能看执行窗口。
+// 写航线期间不发请求——socket 响应没有 actionId，只能靠 FIFO 顺序匹配，
+// 插一条就会让向导的对位错乱。
+let refreshingGameRoutes = false;
+// 航线增删的序号：刷新期间删掉航线后，旧快照会把已删除的航线写回列表，序号不一致就重拉。
+let routeMutationSeq = 0;
+async function refreshGameRoutes() {
+  if (refreshingGameRoutes || hasPendingRouteRequest()) {
+    return;
+  }
+  refreshingGameRoutes = true;
+  try {
+    // 响应反映的是发起请求那一刻的航线列表：期间向导可能刚建完一条航线（不在快照里，
+    // 不能判定「已删除」），也可能刚删掉一条（不能把快照里的旧定义写回去）。
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const seq = routeMutationSeq;
+      const known = new Set(Object.keys(nativeRouteRecords.value));
+      // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
+      // 打乱按 FIFO 对位的响应匹配。
+      const routes = await socketGetRoutes();
+      // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
+      const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
+      // 等待期间删过航线：这份快照已经过期，重拉一次；仍未稳定就放弃发布。
+      if (seq !== routeMutationSeq) {
+        continue;
+      }
+      for (const record of Object.values(nativeRouteRecords.value)) {
+        const server = routes.find(
+          x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId),
+        );
+        if (server === undefined) {
+          if (!known.has(record.routeId)) {
+            continue;
+          }
+          removeNativeRoute(record.routeId);
+          continue;
+        }
+        // 界面路径创建时只有 RT 号：校准后换成服务端哈希 id，删除与配对都用它。
+        if (server.id !== record.routeId) {
+          removeNativeRoute(record.routeId);
+          recordNativeRoute({ ...record, routeId: server.id });
+          continue;
+        }
+      }
+      gameRouteDefinitions.value = routes;
+      gameRunningRoutes.value =
+        executions === undefined ? undefined : matchRunningRoutes(routes, executions);
+      break;
+    }
+  } catch {
+    // socket 未就绪或超时：保留上一次结果，按本地记录继续显示，不打断面板。
+  } finally {
+    refreshingGameRoutes = false;
+  }
+}
+
+function openNativeRoute(record: NativeRouteRecord) {
+  void showBuffer(`RT ${record.naturalId}`);
+}
+
+function sameNaturalId(a: string | undefined, b: string | undefined) {
+  return (
+    typeof a === 'string' &&
+    typeof b === 'string' &&
+    a.trim().toUpperCase() === b.trim().toUpperCase()
+  );
+}
+
+// 界面路径创建的记录没有服务端哈希 id：用游戏航线列表按 RT 号反查。
+async function resolveServerRouteId(record: NativeRouteRecord) {
+  try {
+    const routes = await socketGetRoutes();
+    return (
+      routes.find(x => x.id === record.routeId || sameNaturalId(x.naturalId, record.naturalId))
+        ?.id ?? record.routeId
+    );
+  } catch {
+    return record.routeId;
+  }
+}
+
+// 与环线的「清理计划」一致：确认后在游戏里删除航线，并把记录从「运行中」移除。
+function onDeleteNativeRouteClick(e: Event, record: NativeRouteRecord) {
+  const name = record.name.trim();
+  const label = name === '' ? record.naturalId : `${name}（${record.naturalId}）`;
+  showConfirmationOverlay(e, () => void deleteNativeRoute(record), {
+    message: `删除原生 RT ${label}？游戏里的航线会一起删除。`,
+    confirmLabel: '删除',
+  });
+}
+
+async function deleteNativeRoute(record: NativeRouteRecord) {
+  try {
+    // 界面路径创建的记录只有 RT 号：先换成服务端 id，否则删除会打错对象。
+    const routeId = await resolveServerRouteId(record);
+    await socketDeleteRoute(routeId);
+    // 删除发生在刷新等待期间时，让进行中的那次刷新丢掉旧快照、重新拉取。
+    routeMutationSeq++;
+    // 只清被删的那条航线：同一艘船 + 同一产业链可以有多条航线（历史记录也合法存在），
+    // 删掉其中一条不代表别的航线被删或作废。
+    for (const id of recordsToRemoveAfterDelete(
+      nativeRouteRecords.value,
+      record.routeId,
+      record.naturalId,
+    )) {
+      removeNativeRoute(id);
+    }
+    // 游戏 UI 手动创建的航线没有本地记录：直接把它从缓存的航线定义与执行列表里摘掉，
+    // 不必等下一次校准（否则列表会一直显示这张已删除的卡）。
+    gameRouteDefinitions.value = withoutRouteDefinition(
+      gameRouteDefinitions.value,
+      record.routeId,
+      record.naturalId,
+    );
+    const running = gameRunningRoutes.value;
+    if (running !== undefined) {
+      gameRunningRoutes.value = {
+        ...running,
+        entries: running.entries.filter(
+          x => x.route.id !== record.routeId && !sameNaturalId(x.route.naturalId, record.naturalId),
+        ),
+      };
+    }
+    statusCheckNotice.value = `已删除原生 RT ${record.naturalId}。`;
+    executeNotice.value = undefined;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    executeNotice.value =
+      `删除原生 RT ${record.naturalId} 失败：${reason}` +
+      '（游戏里仍有船只在使用该航线时无法删除，先解除分配再试。）';
+  }
+}
+
+// 原生 RT 的逐段载重：按航点顺序累计（每站先卸后装），返程末行自然归零。
+interface NativeRouteLoad {
+  onArrival: { weight: number; volume: number };
+  onDeparture: { weight: number; volume: number };
+  // 出现「按容量装载/卸全部」步骤后，具体吨位无法由计划推算，后续行只显示未知。
+  uncertain?: boolean;
+}
+
+function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
+  const state = { weight: 0, volume: 0 };
+  const loads: NativeRouteLoad[] = [];
+  let uncertain = false;
+  for (const waypoint of record.waypoints) {
+    const onArrival = { ...state };
+    for (const step of waypoint.steps) {
+      if (step.kind === 'refuel') {
+        continue;
+      }
+      if (step.capacity) {
+        uncertain = true;
+        continue;
+      }
+      const wv = matWeightVolume(step.ticker, step.amount);
+      const sign = step.kind === 'load' ? 1 : -1;
+      state.weight += sign * wv.weight;
+      state.volume += sign * wv.volume;
+    }
+    loads.push({ onArrival, onDeparture: { ...state }, uncertain: uncertain || undefined });
+  }
+  return loads;
+}
+
+function nativeRouteCapacity(ship: PrunApi.Ship | undefined) {
+  const cargo = ship === undefined ? undefined : storagesStore.getById(ship.idShipStore);
+  return { weight: cargo?.weightCapacity ?? 0, volume: cargo?.volumeCapacity ?? 0 };
+}
+
+function formatLoadChange(load: NativeRouteLoad) {
+  const dw = load.onDeparture.weight - load.onArrival.weight;
+  const dv = load.onDeparture.volume - load.onArrival.volume;
+  const sign = (n: number) => (n > 0 ? `+${fixed0(n)}` : fixed0(n));
+  const arrow = dw > 0 || dv > 0 ? '↑' : dw < 0 || dv < 0 ? '↓' : '·';
+  return `${arrow} ${sign(dw)}t／${sign(dv)}m³`;
+}
+
+function nativeRouteStepMaterials(
+  record: NativeRouteRecord,
+  index: number,
+  kind: 'load' | 'unload',
+) {
+  const bills: Record<string, number> = {};
+  const capacities: string[] = [];
+  for (const step of record.waypoints[index]?.steps ?? []) {
+    if (step.kind === 'refuel' || step.kind !== kind) {
+      continue;
+    }
+    if (step.capacity) {
+      capacities.push(`${step.ticker}×${kind === 'load' ? '满' : '全部'}`);
+      continue;
+    }
+    bills[step.ticker] = (bills[step.ticker] ?? 0) + step.amount;
+  }
+  return [...(formatMaterials(bills) ? [formatMaterials(bills)] : []), ...capacities].join('、');
+}
+
+function nativeRouteRefuelText(record: NativeRouteRecord, index: number) {
+  return (record.waypoints[index]?.steps ?? [])
+    .filter(step => step.kind === 'refuel')
+    .map(step => step.tank)
+    .join('、');
+}
+
+function isNativeRouteEnd(record: NativeRouteRecord, index: number) {
+  return index === 0 || index === record.waypoints.length - 1;
+}
+
+// 第 index 行描述的是「从这一站飞到下一站」：档位存在下一站上（航点档位 = 飞到该航点的设置）。
+function nativeRouteNextLeg(record: NativeRouteRecord, index: number) {
+  // 第 0 行是出发站，档位同样在下一站上。
+  return record.waypoints[index + 1];
+}
+
+// 预计飞行时长与档位同一口径：存在「飞到该航点」的航点上。
+function nativeRouteLegHours(record: NativeRouteRecord, index: number) {
+  return record.waypoints[index + 1]?.flightHours;
+}
 // 状态检查结果提示：环线运行中网页关闭导致到港触发器错过时，提示自动恢复情况。
 
 // 执行时的计划快照：环线执行中船离港后 shipPlans 为空，
@@ -437,10 +745,29 @@ const runningTables = computed<ChainTableRow[]>(() => {
 const chainTab = useTileState<'plan' | 'running'>('chainTab', 'plan');
 const chainTabs = computed(() => [
   { id: 'plan' as const, label: '规划中', count: planTables.value.length },
-  { id: 'running' as const, label: '运行中', count: runningTables.value.length },
+  {
+    id: 'running' as const,
+    label: '运行中',
+    count: runningTables.value.length + nativeRoutes.value.length,
+  },
 ]);
 const visibleTables = computed<ChainTableRow[]>(() =>
   chainTab.value === 'plan' ? planTables.value : runningTables.value,
+);
+
+// 「运行中」页里原生 RT 也占一张卡：玩家点页签时用游戏里的航线列表校准本地记录。
+// 只在点击里发起——磁贴恢复成上次的「运行中」页时不能自动发请求 / 开隐藏窗口
+// （contributing.md：服务端通信必须由玩家点击触发）。
+function selectChainTab(tab: 'plan' | 'running') {
+  chainTab.value = tab;
+  if (tab === 'running') {
+    void refreshGameRoutes();
+  }
+}
+// 记录变化（向导新增、删除按钮）后跟游戏列表校准；校准失败就退回本地记录显示。
+watch(
+  () => Object.keys(nativeRouteRecords.value).sort().join(','),
+  () => void refreshGameRoutes(),
 );
 
 // 运行中环线折叠状态：按 shipId 持久化（跨面板重挂载保持），折叠后仅隐藏
@@ -801,6 +1128,12 @@ function flightTotalText(shipId: string): string {
         {{ syncStateText }}
       </span>
       <div :class="$style.spacer" />
+      <PrunButton
+        dark
+        :disabled="selectedShips.length !== 1 || shipPlans.length !== 1 || loading"
+        @click="openNativeRoutePlan">
+        生成原生 RT
+      </PrunButton>
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
         <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
       </Tooltip>
@@ -847,13 +1180,16 @@ function flightTotalText(shipId: string): string {
     <div v-if="statusCheckNotice" :class="$style.notice">{{ statusCheckNotice }}</div>
     <div v-if="syncNotice" :class="$style.notice">{{ syncNotice }}</div>
 
-    <!-- 规划中 / 运行中 分页：有运行中环线时仍可规划其他环线，两页独立查看。 -->
-    <div
-      v-if="activeRuns.length > 0 || shipPlans.length > 0 || filteredStopNotices.length > 0"
-      :class="$style.content">
+    <!-- 规划中 / 运行中 分页：页签始终可见；运行中页列出所有创建过的原生 RT
+         （点页签时再向游戏校准航线定义与执行状态）。 -->
+    <div :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
-          <div v-for="t in chainTabs" :key="t.id" :class="C.Tabs.header" @click="chainTab = t.id">
+          <div
+            v-for="t in chainTabs"
+            :key="t.id"
+            :class="C.Tabs.header"
+            @click="selectChainTab(t.id)">
             <a
               :class="[
                 chainTab === t.id ? C.Tabs.tabActive : '',
@@ -1185,32 +1521,168 @@ function flightTotalText(shipId: string): string {
         </div>
       </div>
 
+      <!-- 原生 RT（socket 写入）：与「运行中」同一套表格样式，含逐站进度 -->
+      <template v-if="chainTab === 'running'">
+        <div v-for="entry in nativeRoutes" :key="nativeRouteRowKey(entry)" :class="$style.shipPlan">
+          <div :class="$style.shipHeader">
+            <span>
+              {{
+                entry.ship?.name || entry.ship?.registration || entry.record.shipLabel || '未知船只'
+              }}
+              <span :class="$style.running"
+                >（{{ entry.record.name || entry.record.naturalId }} ·
+                {{ routeProgressText(entry.record, entry.ship) }}）</span
+              >
+            </span>
+            <div :class="$style.route">
+              <span :class="$style.routeLabel">航线：</span>
+              <template v-for="(stop, index) in entry.record.waypoints" :key="index">
+                <span v-if="index > 0" :class="$style.routeArrow">→</span>
+                <span
+                  :class="[
+                    isNativeRouteEnd(entry.record, index) ? $style.routeOrigin : $style.routeNode,
+                    routeStopStates(entry.record, entry.ship)[index] === 'done'
+                      ? $style.routeDone
+                      : '',
+                  ]"
+                  >{{ stop.location }}</span
+                >
+              </template>
+            </div>
+            <div :class="$style.shipActions">
+              <PrunButton dark @click="openNativeRoute(entry.record)">查看原生 RT</PrunButton>
+              <PrunButton dark @click="onDeleteNativeRouteClick($event, entry.record)"
+                >删除</PrunButton
+              >
+            </div>
+          </div>
+          <table :class="$style.table">
+            <colgroup>
+              <col :class="$style.colSeq" />
+              <col :class="$style.colStation" />
+              <col :class="$style.colOps" />
+              <col :class="$style.colFlight" />
+              <col :class="$style.colLoad" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th :class="$style.narrowCol">序</th>
+                <th :class="$style.narrowCol">星球/空间站</th>
+                <th>操作</th>
+                <th>飞行</th>
+                <th :class="$style.narrowCol">载重</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(stop, index) in entry.record.waypoints" :key="index">
+                <td :class="$style.narrowCol">
+                  <span
+                    :class="[
+                      $style.marker,
+                      $style[markClassKey(routeStopStates(entry.record, entry.ship)[index])],
+                    ]"
+                    >{{ stopMarker(routeStopStates(entry.record, entry.ship)[index]) }}</span
+                  >
+                  {{ index }}
+                </td>
+                <td :class="$style.narrowCol">
+                  <span v-if="isNativeRouteEnd(entry.record, index)" :class="$style.routeOrigin">{{
+                    stop.location
+                  }}</span>
+                  <template v-else
+                    >{{ stop.location }}<BaseAlias :natural-id="stop.location"
+                  /></template>
+                </td>
+                <td :class="$style.matCell">
+                  <div v-if="nativeRouteStepMaterials(entry.record, index, 'unload')">
+                    <span :class="$style.opsLabel">卸船</span>
+                    [{{ nativeRouteStepMaterials(entry.record, index, 'unload') }}]
+                  </div>
+                  <div v-if="nativeRouteStepMaterials(entry.record, index, 'load')">
+                    <span :class="$style.opsLabel">装载</span>
+                    [{{ nativeRouteStepMaterials(entry.record, index, 'load') }}]
+                  </div>
+                  <div v-if="nativeRouteRefuelText(entry.record, index)">
+                    <span :class="$style.opsLabel">补满</span>
+                    [{{ nativeRouteRefuelText(entry.record, index) }}]
+                  </div>
+                  <span
+                    v-if="
+                      !nativeRouteStepMaterials(entry.record, index, 'unload') &&
+                      !nativeRouteStepMaterials(entry.record, index, 'load') &&
+                      !nativeRouteRefuelText(entry.record, index)
+                    "
+                    >—</span
+                  >
+                </td>
+                <td :class="$style.matCell">
+                  <div v-if="index + 1 < entry.record.waypoints.length">
+                    → {{ entry.record.waypoints[index + 1]!.location }}
+                  </div>
+                  <div v-else>归航</div>
+                  <!-- 航点的燃料/反应堆档位描述「飞到该航点」的那一段，所以这一行要取下一站的档位。 -->
+                  <div v-if="nativeRouteNextLeg(entry.record, index)" :class="$style.loadSub">
+                    燃料 {{ nativeRouteNextLeg(entry.record, index)!.fuelPercent }}%<template
+                      v-if="nativeRouteNextLeg(entry.record, index)!.reactorPercent !== undefined">
+                      · 反应堆
+                      {{ nativeRouteNextLeg(entry.record, index)!.reactorPercent }}%</template
+                    >
+                  </div>
+                  <div
+                    v-if="nativeRouteLegHours(entry.record, index) !== undefined"
+                    :class="$style.loadSub">
+                    预计
+                    {{ formatFlightDuration(nativeRouteLegHours(entry.record, index)! * 3600000) }}
+                  </div>
+                </td>
+                <td :class="$style.narrowCol">
+                  <template v-if="entry.loads[index]">
+                    <div
+                      v-if="entry.loads[index]!.uncertain"
+                      data-tooltip="该航段含「按容量装载」或「卸全部」步骤，载重无法精确计算"
+                      >—</div
+                    >
+                    <template v-else>
+                      <div>{{
+                        formatLoadCell(entry.loads[index]!.onDeparture, entry.capacity)
+                      }}</div>
+                      <div :class="$style.loadSub">{{ formatLoadChange(entry.loads[index]!) }}</div>
+                    </template>
+                  </template>
+                  <span v-else>—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <div v-if="chainTab === 'plan' && unusedShipCount > 0" :class="$style.notice">
         已忽略 {{ unusedShipCount }} 艘未参与分配的船。
       </div>
-      <div v-if="visibleTables.length === 0" :class="$style.hint">
-        {{
-          chainTab === 'plan'
-            ? '当前没有可执行的规划。请在上方选择分组、基地与船只后点击「执行环线」。'
-            : '当前没有运行中的环线。'
-        }}
+      <template v-if="chainTab === 'plan'">
+        <div v-if="!chainGroup" :class="$style.hint">
+          选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
+        </div>
+        <div v-else-if="groupBases.length === 0" :class="$style.hint">
+          该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
+        </div>
+        <div v-else-if="selectedBases.length === 0" :class="$style.hint">
+          请勾选参与环线的基地。
+        </div>
+        <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
+          没有停靠 CX 且有仓库/货舱的可用船只。
+        </div>
+        <div v-else-if="selectedShips.length === 0" :class="$style.hint"> 请分配至少一艘船。 </div>
+        <LoadingSpinner v-else-if="loading" />
+        <div v-else-if="visibleTables.length === 0" :class="$style.hint">
+          当前没有可执行的规划。请在上方选择分组、基地与船只后点击「执行环线」。
+        </div>
+      </template>
+      <div v-else-if="visibleTables.length === 0 && nativeRoutes.length === 0" :class="$style.hint">
+        当前没有运行中的环线，也没有已创建的原生 RT。
       </div>
     </div>
-
-    <template v-else>
-      <div v-if="!chainGroup" :class="$style.hint">
-        选择一个产业链分组（在 BSN 面板为基地标注分组），分组内的基地将作为环线站点。
-      </div>
-      <div v-else-if="groupBases.length === 0" :class="$style.hint">
-        该分组下没有基地。请在 BSN 面板的「供应链分组」列为基地录入此分组名。
-      </div>
-      <div v-else-if="selectedBases.length === 0" :class="$style.hint">请勾选参与环线的基地。</div>
-      <div v-else-if="eligibleShips.length === 0" :class="$style.hint">
-        没有停靠 CX 且有仓库/货舱的可用船只。
-      </div>
-      <div v-else-if="selectedShips.length === 0" :class="$style.hint">请分配至少一艘船。</div>
-      <LoadingSpinner v-else-if="loading" />
-    </template>
   </div>
 </template>
 
@@ -1502,6 +1974,11 @@ function flightTotalText(shipId: string): string {
   gap: 0.5rem;
   font-weight: 600;
   color: rgb(63, 162, 222);
+}
+
+.shipActions {
+  display: flex;
+  gap: 6px;
 }
 
 .caret {

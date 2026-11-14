@@ -2,12 +2,14 @@ import { ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { testFlightSample } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
 import { hasSystemData, exportStationOrbits, gameNow } from '@src/infrastructure/fio/orbit';
 import {
   planRoutes,
   routeMetrics,
+  estimateRouteStl,
   findNativeFlightPlan,
   summarizeNativeFlightPlan,
 } from './route-planner';
@@ -18,6 +20,7 @@ import {
   autoFuelGrid,
   autoReactorGrid,
   findBalanceOption,
+  pickBestValueOption,
   nearbyFuelOptions,
   missingModelInputs,
   conditionFactor,
@@ -375,6 +378,30 @@ export interface FtcComputeInput {
   // 无法自动出发；星系数据未积累时用已有数据（**无回退**，几何缺失即判 incomplete
   // 不写滑块，等服务器下发该航线的原生 STL 段记录）。
   browse?: boolean;
+  // 规划期的额外载重（t）：飞船在规划时往往还没装货，而飞行质量决定时间（转移段速度
+  // 按 (参考质量/质量的 0.78 次方) 衰减）与着陆/起飞载重项，故按该段计划载重补进
+  // `ShipPerformance.mass`。缺省 0 = 用飞船当前质量。
+  extraMassT?: number;
+  // 规划出发时的 STL 罐余量（u）：航线在出发地补满时传罐容量。模型默认用当前余量
+  // （`ShipPerformance.stlRemaining`），不覆盖会把「尚未补油」的船算慢/算费。
+  // 显式 0 必须保留（前一段把油烧完），不能回退成罐容量假装满油。
+  stlFuelOverride?: number;
+  // 只评估指定燃料档位（0–1）：原生 RT 生成把最优档按离港饱和点封顶后，用它重算
+  // 该档位的实际消耗与时长。
+  fixedFuel?: number;
+  // 与 fixedFuel 配套：固定反应堆档（写入航点时实际使用的档位），避免重算换档。
+  fixedReactor?: number;
+  // 缺服务器原生 STL 段记录时按公式估算起降几何（`route-planner.estimateRouteStl`）。
+  // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
+  // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
+  estimateGeometry?: boolean;
+  // 选点口径：true = 最优性价比（`pickBestValueOption`：多烧的燃料换回的时间跌破首档一半即停），
+  // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优（FTC 面板口径）。
+  valueOptimal?: boolean;
+  // 是否把结果发布给 SFC（共享滑块参数 + lastFtcCompute 完成信号）。原生 RT 向导是
+  // **假设性**计算——规划载重、未来出发油量、固定封顶档都不代表当前 SFC 航班，
+  // 同键写入会覆盖玩家正在用的实时参数，所以传 false。缺省 true。
+  publish?: boolean;
   // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
@@ -404,6 +431,8 @@ export interface FtcComputeOutput {
   // best 可采信且已写入共享参数；有值时 best 基于残缺输入（退化），**未**写入共享参数，
   // SFC 自动联动须跳过滑块写入。
   inputIncomplete?: string[];
+  // STL 起降几何来自公式估算（无服务器原生记录，仅 estimateGeometry 开启时可能为 true）。
+  estimatedGeometry?: true;
 }
 
 // 计算最优燃料方案并写入共享参数（ftc-fuel-settings），无需 FTC 面板打开。
@@ -427,6 +456,17 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     progress('未获取到飞船蓝图（非公司蓝图或请求超时），已用默认性能估算，结果可能不准');
   }
   const perf = shipPerformanceFor(s);
+  // 试飞计划不同：它按请求参数算，测量条件（质量/出发油量）记在计划对象上。
+  const currentMassT = perf.mass;
+  // 原生 TRANSIT 样本是按飞船**当前**油量下发的：这个余量是反推样本档位的基准，
+  // 不能被下面的规划 override 顶掉（否则样本速度会按错的档位重标定）。
+  const sampleStlTank = perf.stlRemaining ?? perf.stlFuelCapacity;
+  if (input.stlFuelOverride !== undefined) {
+    perf.stlRemaining = input.stlFuelOverride;
+  }
+  if (input.extraMassT !== undefined && input.extraMassT > 0) {
+    perf.mass += input.extraMassT;
+  }
   // 计算时自动浏览星系（可选）：起终点星系阻塞获取轨道/恒星质量数据，
   // 其余无轨道空间站星系后台渐进。SFC 联动（browse=false）跳过开窗，避免干扰。
   if (input.browse !== false) {
@@ -466,6 +506,18 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       }
     }
   }
+  // 仍然没有几何（跨星系且服务器还没为这条航线下发原生 STL 段记录）：按公式估算起降距离。
+  // 只有显式 estimateGeometry 的调用方（原生 RT 生成）会走到这里 —— 面板/SFC 仍严格判缺。
+  let estimatedGeometry = false;
+  if (input.estimateGeometry === true && metrics.stlDistanceKm === undefined) {
+    const estimate = estimateRouteStl(route);
+    if (estimate.stlDistanceKm !== undefined) {
+      metrics.departKm = metrics.departKm ?? estimate.departKm;
+      metrics.approachKm = metrics.approachKm ?? estimate.approachKm;
+      metrics.stlDistanceKm = estimate.stlDistanceKm;
+      estimatedGeometry = true;
+    }
+  }
   const nativePlan = findNativeFlightPlan(
     metrics.fromLookup ?? route.fromBody ?? from,
     metrics.toLookup ?? route.toBody ?? to,
@@ -473,6 +525,8 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   );
   const nativeSummary =
     nativePlan !== undefined ? summarizeNativeFlightPlan(nativePlan) : undefined;
+  // 试飞样本的测量条件（质量 / 出发油量）；游戏按当前状态下发的原生计划没有标记。
+  const testFlight = nativePlan === undefined ? undefined : testFlightSample(nativePlan);
   // 跨星系航线的起/终点行星环境（内置 JSON）：着陆（半径+气压）与起飞段（出发行星）。
   // 空间站（全大写 naturalId）不在行星数据中 → undefined → 无着陆/起飞段（无大气）。
   const isCrossSystem = (metrics.natPc ?? 0) > 0 || (metrics.gwPc ?? 0) > 0;
@@ -485,9 +539,9 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // 也不要用残缺输入得出的假值覆盖掉面板已经算好的参数。
   const inputIncomplete = missingModelInputs(perf, metrics);
   await ensureTransitSpeedTable();
+  const fuelGrid = input.fixedFuel !== undefined ? [input.fixedFuel] : autoFuelGrid();
   if (metrics.transitKm !== undefined && metrics.transitKm > 0) {
-    const grid = autoFuelGrid();
-    if (grid.some(f => !stlTransitTableReliableFor(perf, f))) {
+    if (fuelGrid.some(f => !stlTransitTableReliableFor(perf, f))) {
       inputIncomplete.push('转移速度查询表超出可靠范围');
     }
   }
@@ -504,8 +558,12 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   const options = scanFuelOptions(
     perf,
     metrics,
-    autoFuelGrid(),
-    reactorRelevant ? autoReactorGrid(perf) : [1],
+    fuelGrid,
+    input.fixedReactor !== undefined
+      ? [input.fixedReactor]
+      : reactorRelevant
+        ? autoReactorGrid(perf)
+        : [1],
     {
       stlPrice: input.stlPrice ?? 0,
       ftlPrice: input.ftlPrice ?? 0,
@@ -519,7 +577,13 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
       nativeTransitDistanceKm: nativeSummary?.transitDistanceKm,
       nativeTransitSeconds: nativeSummary?.transitSeconds,
       nativeTransitFuel: nativeSummary?.transitFuel,
-      nativeStlTank: perf.stlRemaining ?? perf.stlFuelCapacity,
+      // 样本侧的出发油量：试飞按请求里的 stlFuel 算，原生计划按当前余量下发。
+      nativeStlTank: testFlight?.stlFuel ?? sampleStlTank,
+      // 样本质量同理取「测这份计划时的质量」：用当前质量会让模型按 (当前/规划) 再缩一遍，
+      // 等于把货舱惩罚算两次。
+      nativeTransitMassT: testFlight?.massT ?? currentMassT,
+      // 试飞耗时含测那次船况的惩罚：模型要按样本船况还原，而不是按当前船况。
+      nativeTransitCondition: testFlight?.condition,
       nativeLandingSeconds: nativeSummary?.landingSeconds,
     },
     remaining,
@@ -529,27 +593,39 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   }
   // 平衡点：设了时间价值（₳/小时）时按总成本（燃料费 + 时间价值）最优，
   // 即经济上的真正平衡；未设时用 Pareto 拐点——尽量快的同时燃料消耗少，两端都不极端。
+  // 原生 RT 生成另走「最优性价比」：边际时间收益跌破首档一半即停。
   const tv = input.timeValue ?? 0;
-  const best = tv > 0 ? options[0] : (findBalanceOption(options) ?? options[0]);
+  const best =
+    input.valueOptimal === true
+      ? (pickBestValueOption(options) ?? options[0])
+      : tv > 0
+        ? options[0]
+        : (findBalanceOption(options) ?? options[0]);
   // 共享给 SFC 自动设置：按**航线**（船 + 起终点 + 网关标志）写入本次计算的最优燃料滑块 /
   // 反应堆使用量。按航线键控后，同船换新目的地时读不到上一条航线的值（读不到 = 不改滑块），
   // 不会再出现「上一条航线的参数落到新航线」；多船 SFC 面板同时打开时各写各自的键，
   // 互不覆盖。
   // ⚠️ 仅在输入完整时写入：残缺输入下 best 必然退化（f = 1 / 0.05 这类假值），
   // 写进去会覆盖面板刚算好的正确参数，正是「SFC 自动拉条 ≠ FTC 面板结果」的成因。
+  // 估算几何（estimateGeometry）同样不写入共享参数：SFC 联动只认服务器原生几何。
+  // 假设性计算（publish = false）也不发布：它描述的不是当前 SFC 航班。
   const routeKey = ftcRouteKey(input.shipRegistration, from, to, input.useGateway === true);
-  if (inputIncomplete.length === 0) {
+  const shareable = inputIncomplete.length === 0 && !estimatedGeometry && input.publish !== false;
+  if (shareable) {
     setFtcFuelSlider(routeKey, best.fuel);
     setFtcReactorUsage(routeKey, best.reactor);
   }
   // 记录本次计算的航线，供 OPEN_SFC 等动作等待（每段飞行前先算好最优燃油）。
   // key 与上面的滑块参数键**同一个字符串**（等待方按 key 匹配 + 按同一键读滑块值）；
   // complete=false：输入残缺、参数未写入滑块，等待方直接沿用当前设置。
-  lastFtcCompute.value = {
-    key: routeKey,
-    at: Date.now(),
-    complete: inputIncomplete.length === 0,
-  };
+  // 假设性计算不写这个信号：等待方会把它当成「当前航班的参数已就绪」。
+  if (input.publish !== false) {
+    lastFtcCompute.value = {
+      key: routeKey,
+      at: Date.now(),
+      complete: shareable,
+    };
+  }
   // 服务器当前对该航线下发的原生 FlightPlan（用于面板并行展示实测总时长）。
   // 用反查后的实体键匹配（SFC 把空间站目的地规范化成所属星系 id，原生计划的目标端是
   // 不可变实体 id，与 metrics.fromLookup/toLookup 一致）；查不到即 undefined，面板不显示。
@@ -566,6 +642,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
     nearby: nearbyFuelOptions(options, best),
     reactorRelevant,
     inputIncomplete: inputIncomplete.length > 0 ? inputIncomplete : undefined,
+    estimatedGeometry: estimatedGeometry ? true : undefined,
     landingRadius: landingEnv?.radiusKm,
     landingPressure: landingEnv?.pressure,
     departureRadius: departEnv?.radiusKm,

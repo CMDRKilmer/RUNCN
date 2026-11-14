@@ -193,6 +193,10 @@ Experts provide fixed bonus multipliers to production line efficiency in their i
 
 ## Shipping & Logistics
 
+### Native Routes
+
+`RT` lists routes, `RT <id>` opens a route, and `RTE` shows execution. Assigning a ship starts the route immediately. Its first waypoint is a destination, and steps run in order on arrival. Material steps wait when the minimum amount is unavailable. Ships already assigned keep their current route snapshot until the next loop or reassignment. [Official route handbook](https://handbook.apex.prosperousuniverse.com/wiki/routes/)
+
 ### Ships
 - Each company starts with 2 starter ships.
 - Custom ships built via blueprints at planetary shipyards.
