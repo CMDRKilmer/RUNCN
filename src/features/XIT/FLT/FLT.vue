@@ -39,6 +39,10 @@ type FlightRow = {
   cargoSizeText: string;
   isFtlCapable: boolean;
   statusIcon: string;
+  // 是否已分配到航线（ship.assignedRoute 非空）。只用来决定舰名要不要加虚线框，
+  // 不涉及任何状态判断：航线执行状态只在服务端响应里，本地推不出来，
+  // 主动拉取又违反「服务端通信必须玩家点击」，所以面板不展示状态指示。
+  assigned: boolean;
 };
 
 const rawRows = computed<FlightRow[] | undefined>(() => {
@@ -58,6 +62,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
     const flight = flightsStore.getById(ship.flightId);
     const segment = flight?.segments[flight.currentSegmentIndex];
     const statusIcon = segment ? segStatusIcon(segment.type) : stationaryIcon;
+    const assigned = ship.assignedRoute != null && ship.assignedRoute !== '';
 
     return {
       ship,
@@ -66,6 +71,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
       cargoSizeText: getCargoSizeText(inventory),
       isFtlCapable,
       statusIcon,
+      assigned,
     };
   });
 });
@@ -134,6 +140,7 @@ function onFuel(registration: string) {
           <span
             :class="[
               C.Link.link,
+              { [$style.nameBox]: x.assigned },
               { [$style.warnCondition]: shipConditionLevel(x.ship.condition) === 'warn' },
               { [$style.lowCondition]: shipConditionLevel(x.ship.condition) === 'danger' },
             ]"
@@ -277,6 +284,21 @@ function onFuel(registration: string) {
 .statusArrow {
   margin-right: 4px;
   color: #3fa2de;
+}
+
+/* 已分配到航线的舰名套虚线框，与未分配航线的普通链接区分。
+   只表达「有没有航线」这一件事，不承载任何状态：航线执行状态只在服务端响应里，
+   本地推不出来，主动拉取又违反「服务端通信必须玩家点击」（docs/contributing.md）。 */
+.nameBox {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--rp-skin-border-strong, currentColor);
+  border-radius: 6px;
+  /* 左右各 4px 内边距 + 1px 边框，靠 -5px 左边距抵消，使框内文字与未加框行
+     的舰名左缘对齐（避免加框后文字整体右移）；整体更紧凑。 */
+  padding: 0 4px;
+  margin-left: -5px;
+  line-height: 1.4;
 }
 
 /* 耐久 80%~83% 时舰名变黄警示。 */
