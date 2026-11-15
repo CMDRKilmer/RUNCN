@@ -1,0 +1,14 @@
+.container {
+  /* 各栏等高，右侧竖线才能贯穿整个多栏区域。 */
+  flex-direction: row;
+  align-items: stretch;
+  overflow-x: auto;
+}
+
+.column {
+  flex: 0 0 200px;
+  width: 200px;
+  border-right: 1px solid var(--rp-skin-border-strong, currentColor);
+  /* 原生每个路径点带一条底边线（纵向布局的分隔线），多栏下会变成封口横线。 */
+  border-bottom: none;
+}
