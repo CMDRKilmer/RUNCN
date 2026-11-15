@@ -1,7 +1,5 @@
 // 界面主题注册表 —— 主题元数据的唯一事实源。
 //
-// 改动前必读 docs/theme-framework.md（规则库、新增主题 SOP、修改台账）。
-//
 // 约束：
 //  1. 本文件必须保持「纯数据、零依赖」。refined-prun-startup.ts 会在页面脚本
 //     启动早期（React 首次绘制之前）引用它，此时 store / 主题引擎 / DOM 都还
@@ -10,8 +8,8 @@
 //     设置页卡片 / 引擎可识别集合 / 首屏防闪 / 图表取色全部自动跟随。
 //  3. 历史数据迁移（user-data-migrations.ts）里的主题 id 必须硬编码，禁止引用
 //     本文件：迁移描述的是「当时的数据」，不能随注册表一起变化。
-//  4. 任何主题逻辑的改动，都必须同步更新 docs/theme-framework.md 的
-//     「有效规则库」与「修改台账」。
+//  4. 任何主题逻辑的改动，都必须同步检查：原样主题（default）不受影响、
+//     自定义主题的取色全部走 var(--rp-skin-*)、图表有回退色板。
 
 /** 主题的实现模式，决定引擎走哪条路径。 */
 export type ThemeMode = 'native' | 'skin' | 'token';
@@ -58,6 +56,12 @@ export const THEMES = [
     id: 'ceramic-colorful',
     label: '陶瓷白多彩',
     desc: '暖陶瓷白底 + 近白卡片，8 个低饱和色相只用于分类标签、图表、图标、装饰线与状态提示；按钮/表单/表格按组件类型统一，正文、焦点态与禁用态经 WCAG 对比度校验。',
+    mode: 'token',
+  },
+  {
+    id: 'nebula',
+    label: '星海霓虹',
+    desc: '参考深空星海科幻界面：近黑深蓝底 + 半透明玻璃面板，青蓝霓虹（#35c4e8）作为唯一主强调色贯穿选中态/主按钮/边框发光；金/绿/红/紫/青绿/玫红/蓝/黄八类功能彩色各司其职、同类同色，信息编码不刺眼。',
     mode: 'token',
   },
 ] as const satisfies readonly ThemeDefinition[];

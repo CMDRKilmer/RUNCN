@@ -1955,7 +1955,7 @@ function flightTotalText(shipId: string): string {
 }
 
 .warning {
-  color: #e8a33d;
+  color: var(--rp-skin-warning, #c2410c);
   font-size: 11px;
 }
 

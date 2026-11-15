@@ -92,7 +92,7 @@ function calculateVolume(amount: PrunApi.MaterialAmount) {
 }
 
 .total {
-  text-align: right;
+  text-align: left;
 }
 
 .materialCell {

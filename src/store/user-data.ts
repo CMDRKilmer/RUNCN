@@ -1,4 +1,5 @@
 import { deepFreeze } from '@src/utils/deep-freeze';
+import { DEFAULT_DESKTOP_NOTIFICATION_TYPES } from '@src/infrastructure/prun-api/data/notification-catalog';
 
 export const initialUserData = deepFreeze({
   firstLoad: Date.now(),
@@ -82,7 +83,10 @@ export const initialUserData = deepFreeze({
     },
     buffers: [] as [string, number, number][],
     audioVolume: 0.4,
+    // 已废弃：旧版「桌面通知屏蔽」黑名单，仅保留供迁移读取，运行时不再使用。
     mutedDesktopNotifications: [] as string[],
+    // 白名单：只有在 XIT DNOT 中勾选的通知类型才会推送到浏览器桌面通知。
+    desktopNotificationTypes: [...DEFAULT_DESKTOP_NOTIFICATION_TYPES] as string[],
     translation: {
       enabled: true,
       provider: 'MICROSOFT',

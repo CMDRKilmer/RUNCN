@@ -1,71 +1,20 @@
 import { alertsStore } from '@src/infrastructure/prun-api/data/alerts';
+import {
+  ALL_NOTIFICATION_TYPES,
+  NOTIFICATION_META,
+} from '@src/infrastructure/prun-api/data/notification-catalog';
+import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { getI18nValue } from '@src/infrastructure/prun-ui/i18n';
 import { userData } from '@src/store/user-data';
 import { watchUntil } from '@src/utils/watch';
 
-// ── 类型标签映射（与 nots-notification-type-label 保持一致）────────────────
-const labelMap = new Map<PrunApi.AlertType, string>([
-  ['ADMIN_CENTER_MOTION_ENDED', '动议'],
-  ['ADMIN_CENTER_MOTION_PASSED', '动议'],
-  ['ADMIN_CENTER_MOTION_VOTING_STARTED', '动议'],
-  ['ADMIN_CENTER_ELECTION_STARTED', '选举'],
-  ['ADMIN_CENTER_GOVERNOR_ELECTED', '选举'],
-  ['ADMIN_CENTER_NO_GOVERNOR_ELECTED', '选举'],
-  ['ADMIN_CENTER_RUN_SUCCEEDED', '选举'],
-  ['CONTRACT_CONDITION_FULFILLED', '合同'],
-  ['CONTRACT_CONTRACT_BREACHED', '合同'],
-  ['CONTRACT_CONTRACT_CANCELLED', '合同'],
-  ['CONTRACT_CONTRACT_CLOSED', '合同'],
-  ['CONTRACT_CONTRACT_EXTENDED', '合同'],
-  ['CONTRACT_CONTRACT_RECEIVED', '合同'],
-  ['CONTRACT_CONTRACT_REJECTED', '合同'],
-  ['CONTRACT_CONTRACT_TERMINATED', '合同'],
-  ['CONTRACT_CONTRACT_TERMINATION_REQUESTED', '合同'],
-  ['CONTRACT_DEADLINE_EXCEEDED_WITH_CONTROL', '合同'],
-  ['CONTRACT_DEADLINE_EXCEEDED_WITHOUT_CONTROL', '合同'],
-  ['COMEX_PICKUP_CONTRACT_CREATED', '合同'],
-  ['COMEX_ORDER_FILLED', '订单'],
-  ['FOREX_ORDER_FILLED', '订单'],
-  ['COMEX_TRADE', '交易'],
-  ['FOREX_TRADE', '交易'],
-  ['PRODUCTION_ORDER_FINISHED', '已生产'],
-  ['SITE_EXPERT_DROPPED', '专家'],
-  ['CORPORATION_PROJECT_FINISHED', '飞船'],
-  ['SHIPYARD_PROJECT_FINISHED', '飞船'],
-  ['COGC_PROGRAM_CHANGED', 'COGC'],
-  ['COGC_STATUS_CHANGED', 'COGC'],
-  ['COGC_UPKEEP_STARTED', 'COGC'],
-  ['POPULATION_PROJECT_UPGRADED', '人口'],
-  ['PLANETARY_PROJECT_FINISHED', '基建'],
-  ['INFRASTRUCTURE_OPERATIONAL_STATE_CHANGED', '基建'],
-  ['INFRASTRUCTURE_PROJECT_COMPLETED', '基建'],
-  ['INFRASTRUCTURE_UPGRADE_COMPLETED', '基建'],
-  ['INFRASTRUCTURE_UPKEEP_PHASE_STARTED', '基建'],
-  ['GATEWAY_JUMP_ABORTED_LINK_CHANGED', '星门'],
-  ['GATEWAY_JUMP_ABORTED_LINK_NOT_ESTABLISHED', '星门'],
-  ['GATEWAY_JUMP_ABORTED_MISSING_FUNDS', '星门'],
-  ['GATEWAY_JUMP_ABORTED_NO_CAPACITY', '星门'],
-  ['GATEWAY_JUMP_ABORTED_NO_FUEL', '星门'],
-  ['GATEWAY_JUMP_ABORTED_NOT_OPERATIONAL', '星门'],
-  ['GATEWAY_LINK_ESTABLISHED', '星门'],
-  ['GATEWAY_LINK_REQUEST_RECEIVED', '星门'],
-  ['GATEWAY_LINK_UNLINKED', '星门'],
-  ['SHIP_FLIGHT_ENDED', '到达'],
-  ['POPULATION_REPORT_AVAILABLE', '报告'],
-  ['LOCAL_MARKET_AD_ACCEPTED', '合同'],
-  ['LOCAL_MARKET_AD_EXPIRED', '合同'],
-  ['WORKFORCE_LOW_SUPPLIES', '物资'],
-  ['WORKFORCE_OUT_OF_SUPPLIES', '物资'],
-  ['WORKFORCE_UNSATISFIED', '物资'],
-  ['WAREHOUSE_STORE_LOCKED_INSUFFICIENT_FUNDS', '仓库'],
-  ['WAREHOUSE_STORE_UNLOCKED', '仓库'],
-  ['CORPORATION_MANAGER_INVITE_ACCEPTED', '公司'],
-  ['CORPORATION_MANAGER_INVITE_REJECTED', '公司'],
-  ['CORPORATION_MANAGER_SHAREHOLDER_LEFT', '公司'],
-  ['CORPORATION_SHAREHOLDER_DIVIDEND_RECEIVED', '公司'],
-  ['CORPORATION_SHAREHOLDER_INVITE_RECEIVED', '公司'],
-  ['TUTORIAL_TASK_FINISHED', '欢迎'],
-  ['WELCOME', '欢迎'],
-]);
+// 类型标签与中文事件名统一取自 notification-catalog.ts（全部 69 种），
+// 与 XIT DNOT 设置页、游戏内 NOTS 彩色标签共用同一份清单。
+const labelMap = new Map<PrunApi.AlertType, string>(
+  ALL_NOTIFICATION_TYPES.map(type => [type, NOTIFICATION_META.get(type)!.label]),
+);
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 function getData(alert: PrunApi.Alert, key: string): unknown {
@@ -101,49 +50,127 @@ function formatAddress(address: PrunApi.Address): string {
   return '';
 }
 
+// 服务器推送的商品/物料是材料 id（如 drinkingWater），转成玩家熟悉的物料代码（DW）。
+function formatMaterial(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) {
+    return undefined;
+  }
+  return materialsStore.getByName(value)?.ticker ?? value;
+}
+
+// exchange 是对象（{ name, code, ... }），旧代码直接插值会得到 [object Object]。
+// 这里取交易所代码，并从本地 exchangesStore 补上站点编码（如 IC1（HRT））。
+function formatExchange(value: unknown): string | undefined {
+  let code: string | undefined;
+  if (typeof value === 'string') {
+    code = value;
+  } else if (value && typeof value === 'object') {
+    const exchange = value as { code?: string; name?: string };
+    code = exchange.code;
+    if (!code) {
+      return exchange.name;
+    }
+  }
+  if (!code) {
+    return undefined;
+  }
+  const naturalId = exchangesStore.getNaturalIdFromCode(code);
+  return naturalId ? `${code}（${naturalId}）` : code;
+}
+
+// COGC 计划名直接复用游戏内置中文文本（CoGCProgram.*），与 COGCPEX 投票界面一致。
+// 优先全名（宣传活动：化工 / 教育活动：先驱者），缺失时退回短名，最后才是英文枚举。
+function formatCogcProgram(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) {
+    return undefined;
+  }
+  return (
+    getI18nValue(`CoGCProgram.${value}`) ?? getI18nValue(`CoGCProgram.${value}_SHORT`) ?? value
+  );
+}
+
+// 只取玩家设置的外显船名；绝不回退到应答器代码（registration）。
+function resolveShipName(alert: PrunApi.Alert): string | undefined {
+  const shipId = getData(alert, 'shipId') as string | undefined;
+  const registration = getData(alert, 'registration') as string | undefined;
+  const ship =
+    (shipId ? shipsStore.getById(shipId) : undefined) ??
+    (registration ? shipsStore.getByRegistration(registration) : undefined);
+  const name = ship?.name?.trim();
+  return name || undefined;
+}
+
+// 合同类通知的字段并不统一：有的是 contract 编号，有的只有 partner。
+// 统一在这里组装，避免正文里出现空泛的「合同已…」或丢掉对方名。
+function contractRef(alert: PrunApi.Alert): string {
+  const contract = getData(alert, 'contract') as string | undefined;
+  const partner = getData(alert, 'partner') as PrunApi.ContractPartner | undefined;
+  const partnerName = partner?.name;
+  if (contract && partnerName) {
+    return `合同 ${contract}（${partnerName}）`;
+  }
+  if (contract) {
+    return `合同 ${contract}`;
+  }
+  if (partnerName) {
+    return `合同（${partnerName}）`;
+  }
+  return '合同';
+}
+
+function contractAction(alert: PrunApi.Alert, action: string): string {
+  const ref = contractRef(alert);
+  if (ref === '合同') {
+    return `合同${action}`;
+  }
+  return ref.includes(' ') ? `${ref} ${action}` : `${ref}${action}`;
+}
+
 // ── 通知正文格式化 ─────────────────────────────────────────────────────────────
 function formatAlertBody(alert: PrunApi.Alert): string {
   switch (alert.type) {
     case 'SHIP_FLIGHT_ENDED': {
-      const reg = getData(alert, 'registration') as string | undefined;
+      const shipName = resolveShipName(alert);
       const dest = getData(alert, 'destination') as { address: PrunApi.Address } | undefined;
       const destStr = dest ? formatAddress(dest.address) : '';
-      if (reg && destStr) {
-        return `舰只 ${reg} 已到达 ${destStr}`;
+      if (shipName && destStr) {
+        return `舰只 ${shipName} 已到达 ${destStr}`;
       }
-      if (reg) {
-        return `舰只 ${reg} 已到达目的地`;
+      if (shipName) {
+        return `舰只 ${shipName} 已到达目的地`;
       }
-      return '飞船已到达目的地';
+      return destStr ? `飞船已到达 ${destStr}` : '飞船已到达目的地';
     }
     case 'COMEX_ORDER_FILLED': {
-      const commodity = getData(alert, 'commodity') as string | undefined;
-      const quantity = getData(alert, 'quantity') as number | undefined;
-      const exchange = getData(alert, 'exchange') as string | undefined;
-      const parts = [
-        commodity && `商品 ${commodity}`,
-        quantity != null && `数量 ${quantity}`,
-        exchange && `交易所 ${exchange}`,
-      ].filter(Boolean);
+      const commodity = formatMaterial(getData(alert, 'commodity'));
+      const exchange = formatExchange(getData(alert, 'exchange'));
+      const parts = [commodity && `商品 ${commodity}`, exchange && `交易所 ${exchange}`].filter(
+        Boolean,
+      );
       return parts.length > 0 ? parts.join('，') + ' — 订单成交' : '商品交易所订单已成交';
     }
     case 'FOREX_ORDER_FILLED': {
-      const ticker = getData(alert, 'ticker') as string | undefined;
-      return ticker ? `外汇 ${ticker} 订单已成交` : '外汇订单已成交';
+      const pair = getData(alert, 'pair') as
+        { base?: { code?: string }; quote?: { code?: string } } | undefined;
+      const pairStr =
+        pair?.base?.code && pair?.quote?.code ? `${pair.base.code}/${pair.quote.code}` : undefined;
+      return pairStr ? `外汇 ${pairStr} 订单已成交` : '外汇订单已成交';
     }
     case 'COMEX_TRADE': {
-      const commodity = getData(alert, 'commodity') as string | undefined;
-      const quantity = getData(alert, 'quantity') as number | undefined;
+      const commodity = formatMaterial(getData(alert, 'commodity'));
+      const trades = getData(alert, 'trades') as number | undefined;
+      const exchange = formatExchange(getData(alert, 'exchange'));
       const parts = [
         commodity && `商品 ${commodity}`,
-        quantity != null && `数量 ${quantity}`,
+        trades != null && `成交 ${trades} 笔`,
+        exchange && `交易所 ${exchange}`,
       ].filter(Boolean);
       return parts.length > 0 ? parts.join('，') + ' — 交易完成' : '商品交易完成';
     }
     case 'FOREX_TRADE':
       return '外汇交易完成';
     case 'PRODUCTION_ORDER_FINISHED': {
-      const material = getData(alert, 'material') as string | undefined;
+      const material = formatMaterial(getData(alert, 'material'));
       const quantity = getData(alert, 'quantity') as number | undefined;
       if (material && quantity != null) {
         return `${material} × ${quantity} 生产完成`;
@@ -154,10 +181,8 @@ function formatAlertBody(alert: PrunApi.Alert): string {
       return '生产订单已完成';
     }
     case 'CONTRACT_CONDITION_FULFILLED': {
-      const contract = getData(alert, 'contract') as string | undefined;
       const partner = getData(alert, 'partner') as PrunApi.ContractPartner | undefined;
-      const partnerStr = partner?.name ? `（${partner.name}）` : '';
-      return contract ? `合同 ${contract}${partnerStr} 的一项条件已完成` : '合同条件已完成';
+      return partner?.name ? `合同条件已完成（${partner.name}）` : '合同条件已完成';
     }
     case 'CONTRACT_CONTRACT_RECEIVED': {
       const contract = getData(alert, 'contract') as string | undefined;
@@ -165,42 +190,32 @@ function formatAlertBody(alert: PrunApi.Alert): string {
       const partnerStr = partner?.name ? `，对方：${partner.name}` : '';
       return `收到合同${contract ? ' ' + contract : ''}${partnerStr}`;
     }
-    case 'CONTRACT_CONTRACT_CLOSED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已关闭` : '合同已关闭';
-    }
-    case 'CONTRACT_CONTRACT_BREACHED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已违约！` : '合同已违约！';
-    }
-    case 'CONTRACT_CONTRACT_CANCELLED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已取消` : '合同已取消';
-    }
-    case 'CONTRACT_CONTRACT_TERMINATED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已终止` : '合同已终止';
-    }
-    case 'CONTRACT_CONTRACT_TERMINATION_REQUESTED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 收到终止请求` : '合同请求终止';
-    }
+    case 'CONTRACT_CONTRACT_CLOSED':
+      // 游戏里这个告警在双方签完字、合同正式生效时发出，中文语境是「签订」，
+      // 直译成「关闭」会让人误以为合同被取消。
+      return contractAction(alert, '已签订');
+    case 'CONTRACT_CONTRACT_BREACHED':
+      return contractAction(alert, '已违约！');
+    case 'CONTRACT_CONTRACT_CANCELLED':
+      return contractAction(alert, '已取消');
+    case 'CONTRACT_CONTRACT_TERMINATED':
+      return contractAction(alert, '已终止');
+    case 'CONTRACT_CONTRACT_TERMINATION_REQUESTED':
+      return contractAction(alert, '收到终止请求');
     case 'CONTRACT_DEADLINE_EXCEEDED_WITH_CONTROL':
-    case 'CONTRACT_DEADLINE_EXCEEDED_WITHOUT_CONTROL': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已超期` : '合同已超期';
-    }
-    case 'CONTRACT_CONTRACT_EXTENDED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已延期` : '合同已延期';
-    }
-    case 'CONTRACT_CONTRACT_REJECTED': {
-      const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `合同 ${contract} 已被拒绝` : '合同已被拒绝';
-    }
+    case 'CONTRACT_DEADLINE_EXCEEDED_WITHOUT_CONTROL':
+      return contractAction(alert, '已超期');
+    case 'CONTRACT_CONTRACT_EXTENDED':
+      return contractAction(alert, '已延期');
+    case 'CONTRACT_CONTRACT_REJECTED':
+      return contractAction(alert, '已被拒绝');
     case 'COMEX_PICKUP_CONTRACT_CREATED': {
       const contract = getData(alert, 'contract') as string | undefined;
-      return contract ? `取货合同 ${contract} 已创建` : '取货合同已创建';
+      const partner = (getData(alert, 'partner') as PrunApi.ContractPartner | undefined)?.name;
+      if (contract) {
+        return `取货合同 ${contract}${partner ? `（${partner}）` : ''} 已创建`;
+      }
+      return partner ? `与 ${partner} 的取货合同已创建` : '取货合同已创建';
     }
     case 'WORKFORCE_LOW_SUPPLIES': {
       const addr = getData(alert, 'address') as { address: PrunApi.Address } | undefined;
@@ -281,7 +296,7 @@ function formatAlertBody(alert: PrunApi.Alert): string {
     case 'POPULATION_REPORT_AVAILABLE':
       return '人口报告已发布';
     case 'COGC_PROGRAM_CHANGED': {
-      const program = getData(alert, 'program') as string | undefined;
+      const program = formatCogcProgram(getData(alert, 'program'));
       const planet = getData(alert, 'planet') as { address: PrunApi.Address } | undefined;
       const addr = getData(alert, 'address') as { address: PrunApi.Address } | undefined;
       const locStr = (planet ?? addr) ? formatAddress((planet ?? addr)!.address) : '';
@@ -315,8 +330,22 @@ function formatAlertBody(alert: PrunApi.Alert): string {
     case 'ADMIN_CENTER_RUN_SUCCEEDED':
       return '行政中心竞选成功';
     default:
-      return alert.type;
+      // 没有专属正文模板的类型也给出中文事件名，避免弹出英文枚举。
+      return NOTIFICATION_META.get(alert.type)?.name ?? alert.type;
   }
+}
+
+// ── 桌面通知可见文本 ──────────────────────────────────────────────────────────
+export interface DesktopNotificationText {
+  title: string;
+  body: string;
+}
+
+export function formatDesktopNotification(alert: PrunApi.Alert): DesktopNotificationText {
+  return {
+    title: `APEX — ${labelMap.get(alert.type) ?? '通知'}`,
+    body: formatAlertBody(alert),
+  };
 }
 
 // ── 发送桌面通知 ──────────────────────────────────────────────────────────────
@@ -324,12 +353,12 @@ function sendDesktopNotification(alert: PrunApi.Alert) {
   if (Notification.permission !== 'granted') {
     return;
   }
-  if (userData.settings.mutedDesktopNotifications.includes(alert.type)) {
+  // 白名单模式：只有在 XIT DNOT 中勾选的类型才会推送到桌面。
+  if (!userData.settings.desktopNotificationTypes.includes(alert.type)) {
     return;
   }
-  const label = labelMap.get(alert.type) ?? '通知';
-  const body = formatAlertBody(alert);
-  new Notification(`APEX — ${label}`, {
+  const { title, body } = formatDesktopNotification(alert);
+  new Notification(title, {
     body,
     tag: `apex-alert-${alert.id}`,
     icon: '/favicon.ico',
@@ -345,8 +374,12 @@ async function init() {
   // 记录已存在的通知 ID（页面加载时已有的不再弹出）
   const knownIds = new Set<string>(alertsStore.all.value?.map(a => a.id) ?? []);
 
-  // 请求桌面通知权限（如用户尚未决定）
-  if (Notification.permission === 'default') {
+  // 只有在 XIT DNOT 里至少勾选了一项时才申请站点通知权限，
+  // 避免「全关」状态下仍弹出无意义的浏览器权限请求。
+  if (
+    Notification.permission === 'default' &&
+    userData.settings.desktopNotificationTypes.length > 0
+  ) {
     await Notification.requestPermission();
   }
 
@@ -367,4 +400,4 @@ async function init() {
   );
 }
 
-features.add(import.meta.url, init, 'NOTS：将游戏内通知同步到桌面右下角（浏览器通知）。');
+features.add(import.meta.url, init, 'NOTS：仅把 XIT DNOT 中勾选的通知类型推送到浏览器桌面通知。');

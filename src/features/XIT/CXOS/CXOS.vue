@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { cxosStore } from '@src/infrastructure/prun-api/data/cxos';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -533,11 +534,7 @@ async function runPriceCut(target: Element, order: OrderWithRank, targetPrice: n
       </div>
       <div :class="$style.filterGroup">
         <label :class="$style.filterLabel">材料</label>
-        <input
-          v-model="materialSearch"
-          :class="$style.searchInput"
-          type="text"
-          placeholder="搜索代码…" />
+        <SearchInput v-model="materialSearch" :class="$style.searchInput" placeholder="搜索代码…" />
       </div>
     </div>
 

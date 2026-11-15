@@ -7,7 +7,7 @@ import {
   isSameAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { calculatePlanetBurn } from '@src/core/burn';
+import { calculatePlanetBurn, computeNeed } from '@src/core/burn';
 import type { MaterialBurn } from '@src/core/burn';
 import {
   clampTargetDays,
@@ -137,22 +137,14 @@ export function computeResupplyBill(
     if (!isResupplyMaterial(matBurn, data)) {
       continue;
     }
-    const dailyConsume = -matBurn.dailyAmount;
-    if (dailyConsume <= 0) {
-      continue;
-    }
-    // 与 BURN/ACT Resupply 公式一致：days * dailyConsume - inventory。
-    // inventory 已在 storage 计算时累加进 matBurn.inventory，无需再访问 store。
-    const inventory = useBaseInv ? matBurn.inventory : 0;
-    if (useBaseInv && inventory >= targetDays * dailyConsume) {
-      continue;
-    }
-    const rawRequired = targetDays * dailyConsume - inventory;
-    const required = Math.max(0, rawRequired);
+    // 缺口算法统一走 core/burn 的 computeNeed（只看 inventory，不含
+    // remainingAllocation）。BURN 的「需要」列、XIT CBUY 的比价清单都调用同一份，
+    // 三处数量因此必然一致；改公式只改那一个函数。
+    const required = computeNeed(matBurn, targetDays, useBaseInv);
     if (required <= 0) {
       continue;
     }
-    bill[ticker] = Math.ceil(required);
+    bill[ticker] = required;
   }
   return bill;
 }

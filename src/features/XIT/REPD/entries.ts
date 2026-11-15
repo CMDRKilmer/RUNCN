@@ -12,7 +12,7 @@
 
 import { getBaseAlias } from '@src/core/base-aliases';
 import { getBuildingBuildMaterials, isRepairableBuilding } from '@src/core/buildings';
-import { calculateSiteOptimalDay } from '@src/core/repair-plan';
+import { calculateSiteOptimalDay, calculateTypeOptimalDay } from '@src/core/repair-plan';
 import { mergeMaterialAmounts } from '@src/core/sort-materials';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import {
@@ -52,7 +52,11 @@ export interface RepairBoardType {
   ageDays: number;
   /** 该类型中最低的状况，0~1 */
   condition: number;
-  /** 距离目标日还有多少天，负数表示已逾期 */
+  /** 该建筑类型自有的最优维修间隔（天）；关闭最优或算不出时为固定天数 */
+  targetDay: number;
+  /** 该类型的目标日是否来自最优间隔算法 */
+  targetIsOptimal: boolean;
+  /** 距离该类型自有目标日还有多少天，负数表示已逾期 */
   dueIn: number;
 }
 
@@ -88,7 +92,10 @@ export interface RepairBoardBase {
   waitingPerDay: number | undefined;
 }
 
+// 整站最优间隔按 siteId 缓存；按类型算的最优间隔按 siteId + 建筑代号缓存。
+// 两者共用同一套 TTL：算不出来时只短暂缓存，等生产/价格数据到位再重试。
 const optimalCache = new Map<string, { at: number; value: number | undefined }>();
+const typeOptimalCache = new Map<string, { at: number; value: number | undefined }>();
 
 export function repairStatus(dueIn: number, dueSoonDays: number): RepairBoardStatus {
   if (dueIn < 0) {
@@ -121,6 +128,20 @@ function getOptimalDay(siteId: string, now: number) {
   return value;
 }
 
+// 每种建筑类型单独跑一次 sweep：产能收益、建设成本都不同，最优间隔自然不同。
+// 算不出时与整站一样回退到设置里的固定天数（由调用方决定）。
+function getTypeOptimalDay(siteId: string, ticker: string, now: number) {
+  const key = `${siteId}|${ticker}`;
+  const cached = typeOptimalCache.get(key);
+  const ttl = cached?.value === undefined ? OPTIMAL_RETRY_MS : OPTIMAL_TTL_MS;
+  if (cached && now - cached.at < ttl) {
+    return cached.value;
+  }
+  const value = calculateTypeOptimalDay(siteId, ticker);
+  typeOptimalCache.set(key, { at: now, value });
+  return value;
+}
+
 function sumCost(amounts: PrunApi.MaterialAmount[]) {
   let total = 0;
   for (const { material, amount } of amounts) {
@@ -146,13 +167,36 @@ function getBaseInventory(siteId: string): Record<string, number> {
 }
 
 // 计算某基地在「飞船 N 天后抵达」时的完整维修材料账单。
-// 只用 180 天折旧公式：RepairAmount = input − floor(input × (180 − min(180, age)) / 180)。
-// 不用游戏的 repairMaterials24 / repairMaterials48：实测这两档并不是 +24h / +48h 账单
-// （24h 那档与「现在」完全相同），会导致偏移一档就与 XIT REP 对不上。
-// 0 天时本公式与游戏原生 repairMaterials 完全一致（已与 XIT REP 逐项核对）。
-function computeBill(site: PrunApi.Site, offsetDays: number, now: number) {
+//
+// offsetDays = 0 时直接用游戏下发的原生 repairMaterials（与 BRA 面板「现在」
+// 完全一致，也与 FLEET 的维修账单同源）：服务器已经算好的整数值，没有取整残差。
+//
+// offsetDays > 0 才用 180 天折旧公式投影：
+//   RepairAmount = input − floor(input × (180 − min(180, age + offset)) / 180)。
+// 不用游戏的 repairMaterials24 / repairMaterials48：实测这两档并不是 +24h / +48h
+// 账单（24h 那档与「现在」完全相同），会导致偏移一档就与 XIT REP 对不上。
+function computeBill(
+  site: PrunApi.Site,
+  offsetDays: number,
+  now: number,
+  tickers?: ReadonlySet<string>,
+) {
   const amounts: PrunApi.MaterialAmount[] = [];
+  const useNative = offsetDays === 0;
   for (const building of site.platforms.filter(isRepairableBuilding)) {
+    // 勾选过滤：REPD 明细只把勾中的建筑类型计入购物清单。
+    // 传入空集合 = 一类都没选，账单为空；不传 = 整站全量（左侧总览口径）。
+    if (tickers && !tickers.has(building.module.reactorTicker)) {
+      continue;
+    }
+    if (useNative) {
+      for (const { material, amount } of building.repairMaterials ?? []) {
+        if (amount > 0) {
+          amounts.push({ material, amount });
+        }
+      }
+      continue;
+    }
     const ageDays = Math.max(0, (now - getBuildingLastRepair(building)) / MS_PER_DAY);
     const day = Math.min(REPAIR_DAY_MAX, ageDays + offsetDays);
     const recoverable = REPAIR_DAY_MAX - day;
@@ -214,12 +258,20 @@ function calculateBase(
 
   const types: RepairBoardType[] = [...byTicker].map(([ticker, bucket]) => {
     const typeAge = Math.max(...bucket.ages);
+    // 关键：每种建筑类型跑自己的 sweep，不再整站共用一个目标日。
+    // 关闭「按插件算出的最优间隔」或该类型算不出时，回退到设置里的固定天数。
+    const typeOptimal = settings.useOptimal
+      ? getTypeOptimalDay(site.siteId, ticker, now)
+      : undefined;
+    const typeTargetDay = typeOptimal ?? settings.targetDays;
     return {
       ticker,
       count: bucket.ages.length,
       ageDays: typeAge,
       condition: Math.min(...bucket.conditions),
-      dueIn: targetDay - typeAge,
+      targetDay: typeTargetDay,
+      targetIsOptimal: typeOptimal !== undefined,
+      dueIn: typeTargetDay - typeAge,
     };
   });
   types.sort((a, b) => {
@@ -304,13 +356,14 @@ export function calculateBillAtOffset(
   offsetDays: number,
   subtractStore: boolean,
   now: number,
+  tickers?: ReadonlySet<string>,
 ): RepairOffsetBill | undefined {
   const site = sitesStore.getById(siteId);
   if (!site) {
     return undefined;
   }
 
-  const bill = computeBill(site, offsetDays, now);
+  const bill = computeBill(site, offsetDays, now, tickers);
   let load = bill;
   if (subtractStore) {
     const inventory = getBaseInventory(siteId);

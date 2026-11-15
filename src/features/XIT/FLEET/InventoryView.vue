@@ -10,6 +10,7 @@ import {
   getLocationLineFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
 import RadioItem from '@src/components/forms/RadioItem.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import InvBar from '@src/features/XIT/FLEET/InvBar.vue';
 import PrunButton from '@src/components/PrunButton.vue';
@@ -179,12 +180,8 @@ const filteredRows = computed(() => {
         <RadioItem v-model="showBaseWar" horizontal>基地仓储</RadioItem>
         <div :class="$style.spacer" />
         <div :class="$style.searchContainer">
-          <input
+          <SearchInput
             v-model="locationFilter"
-            type="text"
-            autocomplete="off"
-            data-1p-ignore="true"
-            data-lpignore="true"
             placeholder="输入位置"
             :class="$style.searchInput" />
           <PrunButton
@@ -289,6 +286,8 @@ const filteredRows = computed(() => {
 }
 
 .searchInput {
+  /* 与同排 RadioItem（11px）一致：原生 input 不继承字体，默认 13.3px Arial。 */
+  font: inherit;
   min-width: 0;
   background-color: #42361d;
   border-width: 0 0 1px;

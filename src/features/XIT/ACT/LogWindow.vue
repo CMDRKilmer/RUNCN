@@ -117,7 +117,7 @@ const parsedMessages = computed(() => messages.map(m => parseMessage(m.message))
 }
 
 .warning {
-  color: #f7a600;
+  color: var(--rp-skin-warning, #c2410c);
 }
 
 .deviation {

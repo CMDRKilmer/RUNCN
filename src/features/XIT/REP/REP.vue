@@ -16,8 +16,8 @@ import { calcBuildingCondition } from '@src/core/buildings';
 import { diffDays } from '@src/utils/time-diff';
 import { userData } from '@src/store/user-data';
 import { mergeMaterialAmounts } from '@src/core/sort-materials';
-import Active from '@src/components/forms/Active.vue';
 import SectionHeader from '@src/components/SectionHeader.vue';
+import Tooltip from '@src/components/Tooltip.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import PrunLink from '@src/components/PrunLink.vue';
@@ -81,14 +81,26 @@ function calculateAge(lastRepair: number) {
 <template>
   <LoadingSpinner v-if="materials === undefined" />
   <template v-else>
-    <form>
-      <Active label="年龄阈值">
-        <NumberInput v-model="userData.settings.repair.threshold" />
-      </Active>
-      <Active label="时间偏移">
-        <NumberInput v-model="userData.settings.repair.offset" />
-      </Active>
-    </form>
+    <div :class="$style.settings">
+      <div :class="$style.settingItem">
+        <span :class="[C.FormComponent.label, $style.settingLabel]">年龄阈值</span>
+        <Tooltip
+          position="bottom"
+          tooltip="只把「上次维修后已超过这么多天」的建筑纳入清单；调小会带上更新的建筑，材料变多。" />
+        <div :class="[C.FormComponent.input, C.forms.input, $style.settingInput]">
+          <NumberInput v-model="userData.settings.repair.threshold" />
+        </div>
+      </div>
+      <div :class="$style.settingItem">
+        <span :class="[C.FormComponent.label, $style.settingLabel]">时间偏移</span>
+        <Tooltip
+          position="bottom"
+          tooltip="按「再过这么多天」的损耗程度算材料，相当于 BRA 面板的 +24h / +48h 预览。" />
+        <div :class="[C.FormComponent.input, C.forms.input, $style.settingInput]">
+          <NumberInput v-model="userData.settings.repair.offset" />
+        </div>
+      </div>
+    </div>
     <SectionHeader>购物车</SectionHeader>
     <MaterialPurchaseTable
       :collapsible="isMultiTarget"
@@ -126,3 +138,42 @@ function calculateAge(lastRepair: number) {
     </table>
   </template>
 </template>
+
+<style module>
+/* 两项设置并成一行：每项各占半行（flex: 1 1 0），标签保持文字宽度、
+   输入框吃掉该半行剩下的空间，窗口拉伸/收缩时两项同比例伸缩。
+   颜色不写裸值，标签与输入框沿用游戏自身的表单类，主题换肤自动跟随。 */
+.settings {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  padding: 3px 4px;
+}
+
+.settingItem {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settingLabel {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 提高一级特异性，压过游戏 forms.input 容器的默认宽度。 */
+.settingItem > .settingInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+/* 原生 <input> 默认按 size 撑到约 180px，会溢出容器，这里收回到容器宽度。 */
+.settingItem > .settingInput input {
+  width: 100%;
+  min-width: 0;
+}
+</style>
