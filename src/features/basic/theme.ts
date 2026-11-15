@@ -703,6 +703,32 @@ function statusOverride(selector: string, skin: Skin): Map<string, string> | nul
   ]);
 }
 
+// 状态圆点：游戏原生是「实色圆点 + 同色柔光」，用来标记航线节点、任务步骤等
+// 是否正常 / 告警 / 异常。通用降饱和会把它压成 ≈ 背景的透明淡色，浅底深底都
+// 几乎看不见，必须单独给回实色。必须用 `\.Status__` 锚定：OrderStatus__* /
+// ContractStatus__* / AdStatus__* 是其它语义状态徽章，Status__light 只是圆点
+// 底座（无底色），都不参与。
+const STATUS_DOT_RE = /\.Status__(ok|warning|error)/;
+
+function statusDotOverride(selector: string, skin: Skin): Map<string, string> | null {
+  const match = selector.match(STATUS_DOT_RE);
+  if (match === null) {
+    return null;
+  }
+  // 取各皮肤都提供的实色：绿 / 暗琥珀 / 红。warning 用深琥珀字色而不是
+  // status.warning.border——后者在浅底上只有约 1.8:1，圆点依旧看不清。
+  const color =
+    match[1] === 'ok'
+      ? skin.indicator.success
+      : match[1] === 'warning'
+        ? skin.status.warning.text
+        : skin.indicator.danger;
+  return new Map<string, string>([
+    ['background-color', color],
+    ['box-shadow', `0 0 5px 1px ${color}`],
+  ]);
+}
+
 // ── 选中态指示器 / 进度条：语义色覆盖 ────────────────────────────────────
 // 游戏与插件大量用「小色块」表示选中：RadioItem 的竖条、Tabs / HeadItem 的下划线、
 // Frame / Dock / Alert 的侧边指示；另外还有 <progress> 容量条（STL/FTL 燃料等）。
@@ -870,6 +896,14 @@ function collect(
         const semantic = semanticOverride(rule.selectorText, rule.style, skin);
         if (semantic) {
           for (const [prop, value] of semantic) {
+            decls.set(prop, value);
+          }
+        }
+        // 状态圆点最后兜底：它原本是实色 + 同色柔光，上面两步都不会给它实色，
+        // 不补回来就会留成 ≈ 背景的透明淡色。
+        const statusDot = statusDotOverride(rule.selectorText, skin);
+        if (statusDot) {
+          for (const [prop, value] of statusDot) {
             decls.set(prop, value);
           }
         }
