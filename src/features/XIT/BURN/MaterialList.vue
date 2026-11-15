@@ -15,5 +15,6 @@ const sorted = computed(() => sortMaterials(materials.value.filter(x => x !== un
     v-for="material in sorted"
     :key="material.id"
     :burn="burn.burn[material.ticker]"
-    :material="material" />
+    :material="material"
+    :natural-id="burn.naturalId" />
 </template>

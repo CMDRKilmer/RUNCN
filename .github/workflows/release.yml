@@ -23,6 +23,10 @@ on:
 permissions:
   contents: write
 jobs:
+  # 三个商店提交 job 默认「暂停」：job 定义、environment、凭据引用全部保留，
+  # 只是默认不执行，避免这个 fork 因缺少商店 API 凭据而在每次 push / release
+  # 显示红色失败。需要恢复时，到仓库 Settings → Secrets and variables →
+  # Actions → Variables 新建仓库变量 ENABLE_STORE_SUBMIT=true；删掉即重新暂停。
 
   build:
     name: Build
@@ -57,19 +61,25 @@ jobs:
             process.exit(78);
           }
           const { execSync } = require('child_process');
+          // 版本号 = 年.月.日（Asia/Shanghai），例如 26.11.7。
+          // 同一天第 2 次及以后发布依次追加 .1 / .2 / .3 …；用已有 git tag 去重，
+          // 保证 tag、附件名、manifest.json 三处版本号一致。Chrome manifest 最多
+          // 4 段整数，因此同日序号不会突破限制。
           const date = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'Asia/Shanghai',
             year: 'numeric',
             month: '2-digit',
             day: '2-digit',
           }).format(new Date());
-          let [y, m, d] = date.slice(2).split('-').map(x => Number(x));
+          const [y, m, d] = date.slice(2).split('-').map(x => Number(x));
           const taken = new Set(execSync('git tag', { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean));
-          let version = `${y}.${m}.${d}`;
+          const base = `${y}.${m}.${d}`;
+          let version = base;
           let suffix = 1;
           while (taken.has(version)) {
-            // 同一天二次发布：在日期后追加序号（26.8.19.1、26.8.19.2 …），不顺延到次日。
-            version = `${y}.${m}.${d}.${suffix}`;
+            // 同一天二次及以后发布：在日期后追加序号（26.11.7.1、26.11.7.2 …），
+            // 不顺延到次日。
+            version = `${base}.${suffix}`;
             suffix += 1;
           }
           fs.writeFileSync('/tmp/release-notes.md', body);
@@ -91,6 +101,8 @@ jobs:
         run: npx dot-json@1 public/manifest.json version "${{ steps.parse.outputs.VERSION }}"
       - name: Build
         run: pnpm build
+        env:
+          RELEASE_VERSION: ${{ steps.parse.outputs.VERSION }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -107,6 +119,9 @@ jobs:
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 本 fork 自己生成的独立 CRX 私钥（与上游官方密钥无关），固定扩展 ID
+          # fenmnigpimmoiiohcdfllgccjkklhemf；私钥只存在 Actions Secret 里。
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
         run: |
           VERSION="${{ steps.parse.outputs.VERSION }}"
           # ASCII 文件名（原因见文件头注释）；中文只用于 --title。
@@ -114,7 +129,17 @@ jobs:
           FILENAME_CRX="RefinedPrun-$VERSION.crx"
           cd "$DIRECTORY"
           zip -r "$FILENAME_ZIP" ./*
-          npx crx pack . -o "$FILENAME_CRX"
+          # 密钥缺失时直接失败，绝不回退到 crx 自动生成的临时密钥：
+          # 那样扩展 ID 每次都变，已安装的用户无法原地升级。
+          if [ -z "$CRX_PRIVATE_KEY" ]; then
+            echo "::error::CRX_PRIVATE_KEY 未配置，无法打固定 ID 的 CRX"
+            exit 1
+          fi
+          KEY_FILE="$RUNNER_TEMP/runcn-crx-key.pem"
+          printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          npx crx pack . -p "$KEY_FILE" -o "$FILENAME_CRX"
+          rm -f "$KEY_FILE"
           gh release create "$VERSION" "$FILENAME_ZIP" "$FILENAME_CRX" \
             --title "琉璃小工具 $VERSION" \
             --notes-file /tmp/release-notes.md
@@ -201,6 +226,7 @@ jobs:
 
   chrome:
     needs: build
+    if: vars.ENABLE_STORE_SUBMIT == 'true'
     name: Submit (Chrome)
     environment: Chrome
     runs-on: ubuntu-latest
@@ -222,6 +248,7 @@ jobs:
 
   edge:
     needs: build
+    if: vars.ENABLE_STORE_SUBMIT == 'true'
     name: Submit (Edge)
     environment: Edge
     runs-on: ubuntu-latest
@@ -259,6 +286,7 @@ jobs:
 
   firefox:
     needs: build
+    if: vars.ENABLE_STORE_SUBMIT == 'true'
     name: Submit (Firefox AMO)
     environment: Firefox
     runs-on: ubuntu-latest

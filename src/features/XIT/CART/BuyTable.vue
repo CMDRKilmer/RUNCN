@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
@@ -10,8 +11,19 @@ import { fixed0, fixed2 } from '@src/utils/format';
 import { userData } from '@src/store/user-data';
 import { getTileState } from '@src/store/user-data-tiles';
 import { getWarehouseName } from '@src/features/XIT/CART/cart-utils';
+import { repairQuoteRef, REPD_QUOTE_PARAM } from '@src/features/XIT/CART/repair-quote';
+import { govhQuoteRef, GOVH_QUOTE_PARAM } from '@src/features/XIT/GOVH/govh-quote';
+import {
+  deductNeeds,
+  getBaseStoreInventory,
+  getExchangeWarehouseInventory,
+  isCbuyInventoryReady,
+  type CbuyDeduction,
+  type CbuyInventory,
+} from '@src/features/XIT/CART/cbuy-inventory';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
-import { getPlanetBurn, type MaterialBurn } from '@src/core/burn';
+import { computeNeed, getPlanetBurn, getResupplyDays } from '@src/core/burn';
+import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { computeComponents, computeTotals, type BpcExchange } from '../BPC/bp-utils';
@@ -19,38 +31,70 @@ import { computeComponents, computeTotals, type BpcExchange } from '../BPC/bp-ut
 const cart = computed(() => userData.cart);
 const parameters = useXitParameters();
 
-// XIT CBUY <星球编码>：BURN 比价模式。清单来自该星球消耗品报告的「需要」列，
-// 是临时计算，不读写 userData.cart，所以不会覆盖用户在 XIT CART 里维护的清单。
-// 不带参数时走原来的购物车比价，行为完全不变。
-const burnNaturalId = computed(() => parameters[0] ?? '');
+// XIT CBUY 有三种清单来源：
+//   1. XIT CBUY            -> XIT CART 购物车（原版行为）
+//   2. XIT CBUY <星球编码>  -> 该星球 XIT BURN 消耗品「需要」列（BURN 比价）
+//   3. XIT CBUY REPD       -> XIT REPD 当前勾选后的维修购物清单（临时内存）
+// 后两种都是临时清单，不读写 userData.cart，不会覆盖用户在 XIT CART 里维护的清单。
+const repairMode = computed(() => parameters[0] === REPD_QUOTE_PARAM);
+const govhMode = computed(() => parameters[0] === GOVH_QUOTE_PARAM);
+const burnNaturalId = computed(() =>
+  repairMode.value || govhMode.value ? '' : (parameters[0] ?? ''),
+);
 const burnMode = computed(() => burnNaturalId.value !== '');
+// 临时清单模式：自动刷新盘口、默认全选、价格进度条等行为对 2 / 3 / 4 一视同仁。
+const tempMode = computed(() => burnMode.value || repairMode.value || govhMode.value);
+// 读响应式 ref，而不是一次性取模块变量：CBUY 窗口会被复用，
+// 每次点「比价」都要立刻反映最新勾选的临时清单。
+const repairQuote = computed(() => (repairMode.value ? repairQuoteRef.value : undefined));
+const repairNeeds = computed(() => repairQuote.value?.items ?? []);
+// GOVH 基建补给清单（按 ticker 合并的满仓待补量）。
+const govhQuote = computed(() => (govhMode.value ? govhQuoteRef.value : undefined));
+const govhNeeds = computed(() => govhQuote.value?.items ?? []);
 const burnSite = computed(() =>
   burnMode.value ? sitesStore.getByPlanetNaturalIdOrName(burnNaturalId.value) : undefined,
 );
 const planetBurn = computed(() => getPlanetBurn(burnSite.value?.siteId));
 const burnLoading = computed(() => burnMode.value && planetBurn.value === undefined);
 
-// 与 BURN/MaterialRow.vue 的 needAmt 保持同一口径：补足到补给天数所需数量。
-function burnNeedAmount(mat: MaterialBurn, resupply: number) {
-  const days = mat.dailyAmount >= 0 ? 1000 : mat.daysLeft;
-  if (days > resupply || mat.dailyAmount > 0) {
-    return 0;
+// 「打开航行控制」的目的地：当前要补给的基地所在星球（SFC 只认星球 / 站点地址）。
+// BURN 比价取消耗品报告里的星球名（例如 VH-331b，不是基地名），
+// REPD 比价取维修清单里的基地编码。
+const sfcDestination = computed(() => {
+  if (burnMode.value) {
+    return planetBurn.value?.[0]?.planetName ?? burnNaturalId.value;
   }
-  const need = Math.ceil((days - resupply) * mat.dailyAmount);
-  return need === 0 ? 0 : need;
-}
+  if (repairMode.value) {
+    return repairQuote.value?.naturalId ?? '';
+  }
+  // GOVH 补给要送到该星球：用星球编码作为 SFC 目的地（游戏 SFC 认星球/站点地址）。
+  if (govhMode.value) {
+    return govhQuote.value?.planet ?? '';
+  }
+  return '';
+});
 
+// 补给目标天数：与 FLEET dispatch 的默认配置同源（createBaseConfig 用
+// getResupplyDays(naturalId)，再按该基地仓储容量上限钳制），保证
+// 「XIT CBUY <星球>」与 FLEET 执行预览对同一基地给出完全相同的采购量。
+const burnTargetDays = computed(() => {
+  const days = getResupplyDays(burnNaturalId.value) ?? 10;
+  return clampTargetDays(days, getSuppliesCap(burnSite.value));
+});
+
+// 缺口算法统一走 core/burn 的 computeNeed：只看 mat.inventory，不含
+// remainingAllocation，与 FLEET 账单 / BURN 需要列 / ACT Resupply 组同一口径。
 const burnNeeds = computed(() => {
   const burn = planetBurn.value;
   if (!burnMode.value || !burn) {
     return [];
   }
-  const resupply = userData.settings.burn.resupply;
+  const targetDays = burnTargetDays.value;
   return Object.entries(burn.burn)
     .map(([ticker, mat]) => ({
       ticker,
       name: ticker,
-      amount: burnNeedAmount(mat, resupply),
+      amount: computeNeed(mat, targetDays),
     }))
     .filter(item => Number.isFinite(item.amount) && item.amount > 0)
     .sort((a, b) => a.ticker.localeCompare(b.ticker));
@@ -67,10 +111,29 @@ const cartNeeds = computed(() =>
     })),
 );
 
-const needs = computed(() => (burnMode.value ? burnNeeds.value : cartNeeds.value));
+// 上游传来的「完整需求」：REPD 传未扣库存的完整维修账单；BURN 传补足到
+// 补给天数的消耗品缺口（本身已相对基地库存）；购物车传用户手工维护的数量。
+// 所有仓库抵扣都在下面统一做，改这一份即可让比价 / ACT / CONTGEN 同步。
+const grossNeeds = computed(() =>
+  repairMode.value
+    ? repairNeeds.value
+    : govhMode.value
+      ? govhNeeds.value
+      : burnMode.value
+        ? burnNeeds.value
+        : cartNeeds.value,
+);
 
 // 比价模式下生成的 ACT 包 / CONTGEN 清单用独立名字，避免覆盖购物车那份。
-const listName = computed(() => (burnMode.value ? `BURN ${burnNaturalId.value}` : cart.value.name));
+const listName = computed(() =>
+  repairMode.value
+    ? `REPD ${repairQuote.value?.naturalId ?? ''}`
+    : govhMode.value
+      ? `GOVH ${govhQuote.value?.planet ?? ''}`
+      : burnMode.value
+        ? `BURN ${burnNaturalId.value}`
+        : cart.value.name,
+);
 
 const selectedTickers = ref<Set<string>>(new Set());
 
@@ -82,8 +145,205 @@ const exchanges: BpcExchange[] = [
   { code: 'NC1', currency: 'NCC' },
 ];
 
+// ── 交易所选择（提前定义：抵扣基准要跟随当前选中的市场）──────────────
+// 单市场模式：选中最便宜且凑齐全部物品的交易所整单购买。
+// singleMarketMode=false 时按各物品最优价分市场购买（最优混合）。
+const singleMarketMode = ref(true);
+// '' = 用最优市场；指定交易所代码则强制用该市场，即使它不是最优（就近采购）。
+const forcedExchange = ref('');
+const transferToShip = ref(false);
+// 生成 ACT 时追加「打开航行控制」步骤：转移完成后打开 SFC，目的地填当前基地星球。
+const autoOpenSfc = ref(false);
+
+// BURN 比价的实际链路是「交易所买入 → 转移到飞船 → 飞到补给基地」，
+// 所以从 BURN 点「比价」进来时默认把这两项一起勾上；购物车模式保持原样，
+// 不替用户预设飞行意图。
+watch(
+  [burnMode, govhMode],
+  ([burn, govh]) => {
+    // BURN 与 GOVH 都是「交易所买 → 转移到飞船 → 送到星球」链路，默认勾转移到飞船；
+    // 只有 BURN 额外自动打开航行控制（GOVH 让玩家自己决定何时打开，少弹一个窗口）。
+    transferToShip.value = burn || govh;
+    autoOpenSfc.value = burn;
+  },
+  { immediate: true },
+);
+
+// 复选框与卡片选中互为反向，两个控件状态永远一致：点卡片会自动取消勾选，
+// 勾选「分市场购买」后所有卡片橙框消失、只作比价参考。
+const splitMarketMode = computed({
+  get: () => !singleMarketMode.value,
+  set: (value: boolean) => {
+    singleMarketMode.value = !value;
+  },
+});
+
+// 默认市场按「完整需求」算，不随抵扣结果变化，否则会形成
+// 「选市场 -> 扣库存 -> 改价格 -> 换最优市场」的循环依赖。
+const grossComponents = computed(() => computeComponents(grossNeeds.value, exchanges));
+// 仅「已勾选」物料参与比价与自动选市场；未勾选任何一项时退化为全部，避免购物车
+// 首次打开（默认全空）时比价栏空白（PR #60 审查 #222）。
+const marketSelection = computed(() =>
+  selectedTickers.value.size > 0 ? selectedTickers.value : undefined,
+);
+
+// ── 本地仓库库存抵扣 ────────────────────────────────────────────────
+// 数据全部来自游戏推送的 store，不连接 FIO；口径与 ACT 执行器一致。
+const baseInventory = computed<CbuyInventory>(() =>
+  repairMode.value ? getBaseStoreInventory(repairQuote.value?.siteId) : {},
+);
+// 四个交易所仓库的库存快照：抵扣按「实际出库市场」逐市场取数，而不是统一扣一个市场
+// （PR #60 审查 #220）。
+const exchangeInventories = computed<Record<string, CbuyInventory>>(() => {
+  const map: Record<string, CbuyInventory> = {};
+  for (const ex of exchanges) {
+    map[ex.code] = getExchangeWarehouseInventory(ex.code);
+  }
+  return map;
+});
+const inventoryReady = computed(() => !tempMode.value || isCbuyInventoryReady());
+
+// 每种物料在「该交易所自己的仓库库存」抵扣后的采购量。交易所卡片账单、
+// 「最便宜单交易所」与自动选定市场三者共用这一份数据：同一物料在 CI1 有库存、
+// 在 AI1 没有时，AI1 的账单里必须包含它，否则 AI1 会漏算这件而虚假地变成最便宜，
+// 用户选中后成本又跳回去（PR #60 审查）。
+// 非临时模式没有库存抵扣，返回空表让 computeTotals 走原逻辑。
+const needsByExchange = computed<Map<string, Map<string, number>>>(() => {
+  const map = new Map<string, Map<string, number>>();
+  if (!tempMode.value) {
+    return map;
+  }
+  for (const ex of exchanges) {
+    // 强制「全部从该市场出库」，得到这个市场自己的抵扣结果。
+    const rows = deductNeeds(
+      grossNeeds.value,
+      baseInventory.value,
+      exchangeInventories.value,
+      () => ex.code,
+    );
+    const byTicker = new Map<string, number>();
+    for (const row of rows) {
+      if (row.transfer > 0) {
+        byTicker.set(row.ticker, row.net);
+      }
+    }
+    map.set(ex.code, byTicker);
+  }
+  return map;
+});
+
+// 卡片账单 / 「最便宜单交易所」/ 自动选定市场必须同一口径：都用各交易所自己的
+// **净需求**（扣完基地与交易所仓库之后的采购量）。只按完整需求算总价，会出现
+// 「卡片标 CI1 零成本最优、自动选择却仍是 AI1，生成的 ACT 在 AI1 白买」的错位
+// （PR #60 审查）。为避免「选市场 -> 扣库存 -> 改价格 -> 换市场」的循环依赖，
+// 这里用 grossComponents 的物料全集与报价配 needsByExchange 的净数量计算，
+// 不读取 chosenSingleExchange。
+const totals = computed(() =>
+  computeTotals(grossComponents.value, exchanges, marketSelection.value, needsByExchange.value),
+);
+const cheapestSingleExchange = computed(() => totals.value.cheapestSingle?.code);
+const chosenSingleExchange = computed(() =>
+  singleMarketMode.value ? forcedExchange.value || cheapestSingleExchange.value : undefined,
+);
+
+// 抵扣基准跟随当前指定的交易所（用户点卡片 = forcedExchange，默认 = 最优单市场）。
+// 盘口尚未推回来时最优市场为空，此时依次回退到购物车设定的常用交易所、
+// 再兜底第一个交易所，保证页面一打开就按仓库库存抵扣，不会先显示虚高的完整数量。
+const deductionExchange = computed(() => {
+  if (!tempMode.value) {
+    return '';
+  }
+  return (
+    forcedExchange.value || chosenSingleExchange.value || cart.value.exchange || exchanges[0].code
+  );
+});
+
+// 每种物料的实际出库（买 / 转）交易所，是抵扣与 ACT 路由的唯一事实源：
+// - 单市场模式且已选出凑齐全部物品的市场：统一用该市场；
+// - 单市场模式但没有任何市场凑齐全部物品（cheapestSingle 为空）：按各物料最优价市场
+//   路由，与 ACT 的分市场兜底一致——否则会出现「在 CI1 扣了库存、却去 AI1 买并往
+//   AI1 转运」，CI1 的库存永远不动（PR #60 审查 #224）；
+// - 分市场模式：各物料最优价市场（computeComponents 的 bestExchange，仅由价格决定，
+//   与数量 / 是否勾选无关）。
+// 无报价时返回 undefined，由 deductNeeds 退到「仓库里真有该物料的交易所」（纯转移行）。
+function outboundExchange(ticker: string): string | undefined {
+  const single = chosenSingleExchange.value;
+  if (single) {
+    return single;
+  }
+  return grossComponents.value.find(c => c.ticker === ticker)?.bestExchange;
+}
+
+const deductions = computed<CbuyDeduction[]>(() =>
+  tempMode.value
+    ? deductNeeds(
+        grossNeeds.value,
+        baseInventory.value,
+        exchangeInventories.value,
+        outboundExchange,
+      )
+    : grossNeeds.value.map(need => ({
+        ticker: need.ticker,
+        name: need.name,
+        gross: need.amount,
+        base: 0,
+        exchange: 0,
+        transfer: need.amount,
+        net: need.amount,
+        // 购物车模式不做库存抵扣，但仍必须给出出库交易所：沿用同一个
+        // outboundExchange（单市场 = 选定/最优市场，分市场 = 各物料最优价市场）。
+        // 否则 actGroups 拿不到 code 会把每一行 continue，普通 XIT CBUY 永远
+        // 无法生成 ACT（PR #60 2026-11-14 审查：普通购物车路由回归）。
+        exchangeCode: outboundExchange(need.ticker),
+      })),
+);
+const deductionsByTicker = computed(() => new Map(deductions.value.map(d => [d.ticker, d])));
+
+// 表格清单：凡是需要运到基地的物料都列出，amount 是最终采购量。
+// 交易所仓库库存已完全覆盖的行 amount = 0（价格按 0 计，不影响比价），
+// 但 MTRA 仍会按 transfer 把它们从交易所仓库一起运走。
+// 完全由基地库存满足（既不用买也不用运）的物料不出现在这里。
+const needs = computed(() =>
+  deductions.value
+    .filter(d => d.transfer > 0)
+    .map(d => ({ ticker: d.ticker, name: d.name, amount: d.net })),
+);
+
 const components = computed(() => computeComponents(needs.value, exchanges));
-const totals = computed(() => computeTotals(components.value, exchanges, selectedTickers.value));
+// 卡片总价 / 缺报价数只统计真正要买的物料，库存已足的行不参与「凑齐」判断。
+const pricedComponents = computed(() => components.value.filter(c => c.amount > 0));
+// 「最优混合」总价 / 无报价数按各物料当前抵扣后的净量估算。逐市场账单与
+// 「最便宜单交易所」见上面的 totals（口径是各市场自己的净需求）。
+const mixedTotals = computed(() =>
+  computeTotals(components.value, exchanges, marketSelection.value),
+);
+
+const deductedCount = computed(() => deductions.value.filter(d => d.base + d.exchange > 0).length);
+const fullyCovered = computed(
+  () => deductions.value.filter(d => d.transfer > 0 && d.net === 0).length,
+);
+const allCoveredByInventory = computed(
+  () => tempMode.value && grossNeeds.value.length > 0 && needs.value.length === 0,
+);
+
+// 数量列的悬停明细：完整需求 / 基地抵扣 / 交易所抵扣 / 采购量 / 转移量。
+function deductionTip(ticker: string) {
+  const d = deductionsByTicker.value.get(ticker);
+  if (!d || !tempMode.value || d.base + d.exchange === 0) {
+    return undefined;
+  }
+  return [
+    `完整需求 ${fixed0(d.gross)}`,
+    d.base > 0 ? `基地仓库 −${fixed0(d.base)}` : '',
+    d.exchange > 0
+      ? `${d.exchangeCode || deductionExchange.value || '交易所'} 仓库 −${fixed0(d.exchange)}`
+      : '',
+    `= 采购 ${fixed0(d.net)}`,
+    `需转移 ${fixed0(d.transfer)}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
 
 // 价格只来自游戏内实时订单簿（CXOB 推送），不连接 FIO 网站。
 // 原先用 `!cxStore.fetched` 拦住整张表，但 FIO 聚合价并不参与 readBuyPrice()，
@@ -120,42 +380,7 @@ const partialSelected = computed(
   () => !allSelected.value && components.value.some(c => selectedTickers.value.has(c.ticker)),
 );
 
-// 已选物品（按 ticker 去重），按全市场最优交易所分组。
-// 返回值：exchangeCode -> { ticker: amount }。
-const selectedByExchange = computed(() => {
-  const groups = new Map<string, Record<string, number>>();
-  for (const c of components.value) {
-    if (!selectedTickers.value.has(c.ticker) || c.bestExchange === undefined) {
-      continue;
-    }
-    const bucket = groups.get(c.bestExchange) ?? {};
-    bucket[c.ticker] = (bucket[c.ticker] ?? 0) + c.amount;
-    groups.set(c.bestExchange, bucket);
-  }
-  return groups;
-});
-
-// ACT 生成选项。默认单市场：选中最便宜且凑齐全部物品的交易所整单购买。
-// singleMarketMode=false 时按各物品最优价分市场购买（最优混合），由顶部
-// 「分市场购买」复选框控制。
-const singleMarketMode = ref(true);
-// '' = 用最优市场；指定交易所代码则强制用该市场，即使它不是最优（就近采购）。
-const forcedExchange = ref('');
-const transferToShip = ref(false);
-
-// 复选框与卡片选中互为反向，两个控件状态永远一致：点卡片会自动取消勾选，
-// 勾选「分市场购买」后所有卡片橙框消失、只作比价参考。
-const splitMarketMode = computed({
-  get: () => !singleMarketMode.value,
-  set: (value: boolean) => {
-    singleMarketMode.value = !value;
-  },
-});
-
-const cheapestSingleExchange = computed(() => totals.value.cheapestSingle?.code);
-const chosenSingleExchange = computed(() =>
-  singleMarketMode.value ? forcedExchange.value || cheapestSingleExchange.value : undefined,
-);
+// ACT 分组（购买量 / 转移量分开算）见下方 actGroups。
 
 // 卡片右上角角标：最优市场标「最优」，其余标相对最优的价差（1:1 口径，不换算
 // 汇率）；没凑齐全部物品的市场总价不可比，改标缺报价数，避免出现负差价。
@@ -184,24 +409,61 @@ function pickExchange(code: string) {
   forcedExchange.value = code;
 }
 
-// 按"单市场"或"混合最优"分组的 selectedByExchange。
-// 没有任何市场凑齐全部物品时（cheapestSingle 为空）自动退回混合，保证 ACT 仍可生成。
-const actGroups = computed(() => {
-  const code = singleMarketMode.value ? chosenSingleExchange.value : undefined;
-  if (code) {
-    const bucket: Record<string, number> = {};
-    for (const c of components.value) {
-      if (!selectedTickers.value.has(c.ticker)) {
-        continue;
-      }
-      bucket[c.ticker] = (bucket[c.ticker] ?? 0) + c.amount;
+// 按「单市场」或「混合最优」分组的 ACT 清单。
+// buy      = 最终下单采购量（已扣基地 / 交易所仓库库存）；
+// transfer = 需要运到基地的完整数量（含交易所仓库里原有、无需购买的那部分）。
+// 两者分开，才能保证「只买差额、但把仓库原有材料一起运走」，基地不缺料。
+interface CbuyActGroup {
+  buy: Record<string, number>;
+  transfer: Record<string, number>;
+}
+
+const actGroups = computed<Map<string, CbuyActGroup>>(() => {
+  const groups = new Map<string, CbuyActGroup>();
+  for (const c of components.value) {
+    if (!selectedTickers.value.has(c.ticker)) {
+      continue;
     }
-    return new Map([[code, bucket]]);
+    const d = deductionsByTicker.value.get(c.ticker);
+    if (!d || d.transfer <= 0) {
+      continue;
+    }
+    // 路由直接沿用抵扣阶段解出的交易所（outboundExchange -> deductNeeds 的 exchangeCode）：
+    // 「在哪扣就在哪买 / 在哪转」，两边共用同一个决策。此前这里独立取 c.bestExchange，
+    // 单市场兜底（没有任何市场凑齐全部物品）时会与抵扣选到不同市场——一边在 CI1 扣库存、
+    // 另一边去 AI1 买并把货转运到 AI1，CI1 的库存永远不动（PR #60 审查 #224）。
+    // 纯转移行（net=0）没有报价，exchangeCode 由 deductNeeds 退到「仓库里真有该物料的
+    // 交易所」，因此转运也不会被丢掉（PR #60 审查 #223）。
+    // 购物车模式不做抵扣，但同样由 outboundExchange 预先写入 exchangeCode，
+    // 所以这里对两种模式都是唯一事实源（PR #60 2026-11-14 审查：普通购物车路由回归）。
+    const code = d.exchangeCode;
+    if (!code) {
+      continue;
+    }
+    const group = groups.get(code) ?? { buy: {}, transfer: {} };
+    if (d.net > 0) {
+      group.buy[c.ticker] = (group.buy[c.ticker] ?? 0) + d.net;
+    }
+    if (tempMode.value && transferToShip.value) {
+      group.transfer[c.ticker] = (group.transfer[c.ticker] ?? 0) + d.transfer;
+    }
+    groups.set(code, group);
   }
-  return selectedByExchange.value;
+  return groups;
 });
 
-const canGenerateActOptions = computed(() => actGroups.value.size > 0);
+// 库存把某些物料的采购量完全抵成 0 时，组内可能只剩 MTRA 转移量；
+// 两组都空的市场不值得生成 ACT。临时清单还要等三个库存 store 拉齐：
+// 政府上下文冷启动时仓库数据可能尚未到达，此时按「空仓库」算出的全额采购包
+// 会把 useCXInv 关掉，等真实库存到达后执行 ACT 就不会再抵扣已有库存
+// （PR #60 2026-11-14 审查：库存未就绪即导出）。
+const canGenerateActOptions = computed(
+  () =>
+    inventoryReady.value &&
+    [...actGroups.value.values()].some(
+      group => Object.keys(group.buy).length > 0 || Object.keys(group.transfer).length > 0,
+    ),
+);
 
 // 与 BPC/BMAT 一致的 ASCII 净化：XIT 参数仅吃 ASCII。
 function asciiSafe(value: string): string {
@@ -213,14 +475,17 @@ function asciiSafe(value: string): string {
 }
 
 function generateAct() {
-  if (actGroups.value.size === 0) {
+  // 与按钮的 disabled 判定同源，防止非点击路径（或库存刚好在此刻失效）绕过门槛。
+  if (!inventoryReady.value || actGroups.value.size === 0) {
     return;
   }
   const groups: UserData.MaterialGroupData[] = [];
   const actions: UserData.ActionData[] = [];
-  for (const [exchangeCode, materials] of actGroups.value) {
+  // 记录生成的转移动作名：「打开航行控制」要用它反查飞船（见 open-sfc.ts）。
+  const transferActions: string[] = [];
+  for (const [exchangeCode, group] of actGroups.value) {
     const groupName = `CBUY_${exchangeCode}`;
-    groups.push({ type: 'Manual', name: groupName, materials });
+    groups.push({ type: 'Manual', name: groupName, materials: group.buy });
     actions.push({
       type: 'CX Buy',
       name: `Buy_${exchangeCode}`,
@@ -229,17 +494,49 @@ function generateAct() {
       priceLimits: {},
       buyPartial: false,
       allowUnfilled: false,
-      useCXInv: true,
+      // 临时清单已在 CBUY 扣过交易所仓库库存，关掉否则 ACT 执行时会二次扣减。
+      // 购物车模式没做抵扣，仍交给 ACT 的 useCXInv 自己处理。
+      useCXInv: !tempMode.value,
     });
     if (!transferToShip.value) {
       continue;
     }
+    if (tempMode.value && Object.keys(group.transfer).length > 0) {
+      // 转移组用完整需求：把交易所仓库里原有的那部分一起运走，基地才不缺料。
+      const transferName = `${groupName}_TRANSFER`;
+      groups.push({ type: 'Manual', name: transferName, materials: group.transfer });
+      actions.push({
+        type: 'MTRA',
+        name: `Transfer_${exchangeCode}`,
+        group: transferName,
+        origin: getWarehouseName(exchangeCode),
+        dest: configurableValue,
+      });
+    } else {
+      actions.push({
+        type: 'MTRA',
+        name: `Transfer_${exchangeCode}`,
+        group: groupName,
+        origin: getWarehouseName(exchangeCode),
+        dest: configurableValue,
+      });
+    }
+    transferActions.push(`Transfer_${exchangeCode}`);
+  }
+  // 自动打开航行控制：转移完成后打开 SFC，目的地预填当前补给基地所在星球。
+  // 飞船来源取第一个转移动作——单市场购买时它就是唯一一个；分市场购买时
+  // OPEN SFC 只能用一艘船，其余交易所的转移仍各自在执行时配置。
+  if (
+    autoOpenSfc.value &&
+    transferToShip.value &&
+    transferActions.length > 0 &&
+    sfcDestination.value
+  ) {
     actions.push({
-      type: 'MTRA',
-      name: `Transfer_${exchangeCode}`,
-      group: groupName,
-      origin: getWarehouseName(exchangeCode),
-      dest: configurableValue,
+      type: 'OPEN SFC',
+      name: 'Open Flight Controls',
+      destination: sfcDestination.value,
+      shipSourceAction: transferActions[0],
     });
   }
   // 包名用清单名 + " Buy" 后缀，避免与 CART 生成的同名 ACT 包互相覆盖。
@@ -258,15 +555,16 @@ function generateAct() {
 
 // 把当前已选物品（未选则全部）以顶层 materials 形态发给 CONTGEN 起草合同。
 function sendToContgen() {
-  if (components.value.length === 0) {
+  if (pricedComponents.value.length === 0) {
     return;
   }
   const tickersToSend =
     selectedTickers.value.size > 0
       ? new Set(selectedTickers.value)
-      : new Set(components.value.map(c => c.ticker));
+      : new Set(pricedComponents.value.map(c => c.ticker));
   const materials: Record<string, number> = {};
-  for (const c of components.value) {
+  // 只把真正要买的净数量写进合同；库存已抵扣的行 amount = 0，不发 0 数量条目。
+  for (const c of pricedComponents.value) {
     if (!tickersToSend.has(c.ticker)) {
       continue;
     }
@@ -285,7 +583,7 @@ function sendToContgen() {
   showBuffer('XIT CONTGEN');
 }
 
-const canSendToContgen = computed(() => components.value.length > 0);
+const canSendToContgen = computed(() => pricedComponents.value.length > 0);
 
 // ── 实时盘口订阅（与 BPC/BMAT 同一套机制）──────────────────────────
 // showBuffer('CXOB <ticker>.<exchange>', { autoClose: true }) 会新建一个隐藏
@@ -301,9 +599,10 @@ function openCxob(key: string, timedOut?: Ref<boolean>) {
 
 function pendingCxobKeys() {
   const keys = new Set<string>();
-  for (const need of needs.value) {
+  // 库存已完全抵扣（amount = 0）的物料不需要比价，不订阅盘口。
+  for (const component of pricedComponents.value) {
     for (const exchange of exchanges) {
-      const key = `${need.ticker}.${exchange.code}`;
+      const key = `${component.ticker}.${exchange.code}`;
       if (cxobStore.getByTicker(key) === undefined) {
         keys.add(key);
       }
@@ -322,51 +621,64 @@ function refreshPrices() {
 // 「比价」模式打开即自动订阅，不需要再点一次按钮。
 // 分批推入 showBuffer 的全局串行队列：一次性排满几十个请求会把用户手动开的
 // 缓冲窗堵在队尾。没有订单簿的物品服务器不会推数据，用超时兜底关掉隐藏窗口。
-const autoStarted = ref(false);
+// 切换交易所会改变「哪些物料还需要买」，因此用 subscribedKeys 去重后可反复补订阅，
+// 而不是只跑一次；refreshing 防止分批过程被并发触发。
 const autoTimedOut = shallowRef(false);
 const disposed = ref(false);
 let autoTimer: number | undefined;
+const subscribedKeys = new Set<string>();
+let refreshing = false;
 
 async function autoRefreshPrices() {
-  if (autoStarted.value) {
+  if (refreshing || disposed.value) {
     return;
   }
-  autoStarted.value = true;
-  const keys = pendingCxobKeys();
+  const keys = pendingCxobKeys().filter(key => !subscribedKeys.has(key));
   if (keys.length === 0) {
     return;
   }
-  autoTimedOut.value = false;
-  autoTimer = window.setTimeout(() => (autoTimedOut.value = true), 60000);
-  for (let i = 0; i < keys.length && !disposed.value; i += 6) {
-    for (const key of keys.slice(i, i + 6)) {
-      if (cxobStore.getByTicker(key) === undefined) {
-        openCxob(key, autoTimedOut);
+  for (const key of keys) {
+    subscribedKeys.add(key);
+  }
+  refreshing = true;
+  if (autoTimer === undefined) {
+    autoTimedOut.value = false;
+    autoTimer = window.setTimeout(() => (autoTimedOut.value = true), 60000);
+  }
+  try {
+    for (let i = 0; i < keys.length && !disposed.value; i += 6) {
+      for (const key of keys.slice(i, i + 6)) {
+        if (cxobStore.getByTicker(key) === undefined) {
+          openCxob(key, autoTimedOut);
+        }
       }
+      await new Promise(resolve => window.setTimeout(resolve, 600));
     }
-    await new Promise(resolve => window.setTimeout(resolve, 600));
+  } finally {
+    refreshing = false;
   }
 }
 
 onMounted(() => {
   watch(
-    () => burnMode.value && needs.value.length > 0,
-    ready => {
-      if (ready) {
+    () => (tempMode.value ? pricedComponents.value.map(c => c.ticker).join('|') : ''),
+    key => {
+      if (key) {
         void autoRefreshPrices();
       }
     },
     { immediate: true },
   );
-  // 比价（XIT CBUY <星球>）默认按整份补给清单计算。原组件的勾选框默认全空，
-  // 而「最优混合总价 / 最便宜单交易所 / 生成 ACT」都只算已选物品，不初始化就恒为 0。
-  // 按清单内容初始化一次：之后用户手动取消勾选（哪怕清空）都不会被强行拉回；
-  // 换成另一个星球、清单变了才重新全选。直接输 XIT CBUY 的购物车模式完全不参与。
+  // 临时清单比价（BURN 消耗品 / REPD 维修材料）默认按整份清单计算。
+  // 原组件的勾选框默认全空，而「最优混合总价 / 最便宜单交易所 / 生成 ACT」
+  // 都只算已选物品，不初始化就恒为 0。按清单内容初始化一次：之后用户手动
+  // 取消勾选（哪怕清空）都不会被强行拉回；换成另一份清单才重新全选。
+  // 直接输 XIT CBUY 的购物车模式完全不参与。
   let initializedFor = '';
   watch(
-    () => (burnMode.value ? components.value.map(c => c.ticker).join('|') : ''),
+    () => (tempMode.value ? components.value.map(c => c.ticker).join('|') : ''),
     key => {
-      if (!burnMode.value || !key || initializedFor === key) {
+      if (!tempMode.value || !key || initializedFor === key) {
         return;
       }
       selectedTickers.value = new Set(components.value.map(c => c.ticker));
@@ -387,14 +699,14 @@ onUnmounted(() => {
 });
 
 const priceProgress = computed(() => {
-  if (!burnMode.value) {
+  if (!tempMode.value) {
     return undefined;
   }
-  const total = needs.value.length * exchanges.length;
+  const total = pricedComponents.value.length * exchanges.length;
   let done = 0;
-  for (const need of needs.value) {
+  for (const component of pricedComponents.value) {
     for (const exchange of exchanges) {
-      if (cxobStore.getByTicker(`${need.ticker}.${exchange.code}`) !== undefined) {
+      if (cxobStore.getByTicker(`${component.ticker}.${exchange.code}`) !== undefined) {
         done++;
       }
     }
@@ -438,9 +750,17 @@ function isBest(component: { bestExchange?: string }, code: string) {
 <template>
   <div :class="$style.page">
     <div :class="$style.controls">
-      <span :class="$style.controlLabel">{{ burnMode ? '比价来源' : '购物车' }}</span>
-      <span :class="$style.cartMeta">
-        <template v-if="burnMode">
+      <span :class="$style.controlLabel">{{ tempMode ? '比价来源' : '购物车' }}</span>
+      <span :class="$style.cartMeta" data-cbu-meta>
+        <template v-if="repairMode">
+          <strong>XIT REPD {{ repairQuote?.naturalId ?? '' }}</strong> ·
+          {{ needs.length }} 种维修材料
+        </template>
+        <template v-else-if="govhMode">
+          <strong>XIT GOVH {{ govhQuote?.planet ?? '' }}</strong> · 目标
+          {{ Math.round((govhQuote?.target ?? 0) * 100) }}% · {{ needs.length }} 种基建补给
+        </template>
+        <template v-else-if="burnMode">
           <strong>XIT BURN {{ burnNaturalId }}</strong> · {{ needs.length }} 种需补物资
         </template>
         <template v-else>
@@ -448,13 +768,25 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <template v-if="cart.exchange"> · {{ cart.exchange }}</template>
           · {{ cart.items.length }} 种
         </template>
+        <template v-if="tempMode">
+          · 抵扣仓库
+          <strong :data-cbu-exchange="deductionExchange">{{
+            splitMarketMode ? '分市场' : deductionExchange || '—'
+          }}</strong>
+          <template v-if="repairMode"> + 基地仓库</template>
+          <span v-if="!inventoryReady" :class="$style.summaryWarn"
+            >（库存数据未就绪，暂停生成 ACT）</span
+          >
+          <span v-else
+            >（已抵扣 <span data-cbu-deducted>{{ deductedCount }}</span> 种）</span
+          >
+        </template>
       </span>
-      <input
+      <SearchInput
         id="cbu-search"
         v-model="search"
         name="cbu-search"
         :class="$style.input"
-        type="text"
         placeholder="搜索物品 ticker 或名称" />
       <PrunButton primary :disabled="noItems" @click="refreshPrices">更新价格</PrunButton>
       <label
@@ -468,13 +800,29 @@ function isBest(component: { bestExchange?: string }, code: string) {
           type="checkbox" />
         <span :class="$style.controlLabel">分市场购买</span>
       </label>
-      <label :class="$style.control">
+      <label
+        :class="$style.control"
+        data-tooltip="生成 ACT 时追加 MTRA 步骤：把物料从交易所仓库搬进飞船货舱（目的地执行时选船）。从 BURN 比价进来默认勾选"
+        data-tooltip-position="bottom">
         <input
           id="cbu-transfer-ship"
           v-model="transferToShip"
           name="cbu-transfer-ship"
           type="checkbox" />
         <span :class="$style.controlLabel">转移到飞船</span>
+      </label>
+      <label
+        v-if="tempMode && sfcDestination"
+        :class="[$style.control, transferToShip ? '' : $style.controlDisabled]"
+        data-tooltip="转移完成后自动打开 SFC 并输入目的地：目的地预填当前补给基地所在星球；分市场购买时以第一个转移动作的飞船为准"
+        data-tooltip-position="bottom">
+        <input
+          id="cbu-auto-sfc"
+          v-model="autoOpenSfc"
+          :disabled="!transferToShip"
+          name="cbu-auto-sfc"
+          type="checkbox" />
+        <span :class="$style.controlLabel">打开航行控制</span>
       </label>
       <PrunButton primary :disabled="!canGenerateActOptions" @click="generateAct"
         >生成 ACT</PrunButton
@@ -496,7 +844,16 @@ function isBest(component: { bestExchange?: string }, code: string) {
       正在加载 {{ burnNaturalId }} 的消耗品数据，请稍候…
     </div>
     <div v-else-if="noItems" :class="$style.empty">
-      <template v-if="burnMode">
+      <template v-if="allCoveredByInventory">
+        所需材料已全部由基地仓库现有库存满足，无需采购或运输。
+      </template>
+      <template v-else-if="repairMode">
+        维修购物清单为空：请先在 XIT REPD 明细里勾选要修的建筑类型，再点「比价购买」。
+      </template>
+      <template v-else-if="govhMode">
+        基建补给清单为空：请先在 XIT GOVH 里勾选要补给的物料，再点「比价购买」。
+      </template>
+      <template v-else-if="burnMode">
         {{ burnNaturalId }} 当前没有需要补给的消耗品（按补给天数过滤）。
       </template>
       <template v-else>
@@ -513,8 +870,8 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <span v-if="selectedTickers.size > 0" :class="$style.summaryProfit">
             · 已选 <strong>{{ selectedTickers.size }}</strong> 种</span
           >
-          <span v-if="totals.mixedMissing > 0" :class="$style.summaryWarn">
-            · {{ totals.mixedMissing }} 种无报价</span
+          <span v-if="mixedTotals.mixedMissing > 0" :class="$style.summaryWarn">
+            · {{ mixedTotals.mixedMissing }} 种无报价</span
           >
         </span>
         <span :class="$style.summaryItem">
@@ -528,10 +885,17 @@ function isBest(component: { bestExchange?: string }, code: string) {
         </span>
         <span :class="[$style.summaryItem, $style.summaryProfit]">
           最优混合总价 ·
-          <strong>{{ fixed0(totals.mixedTotal) }}</strong>
+          <strong>{{ fixed0(mixedTotals.mixedTotal) }}</strong>
           <span :class="$style.summaryNote">（1:1 不含汇率）</span>
         </span>
-        <span v-if="burnMode" :class="$style.summaryNote">
+        <span
+          v-if="tempMode && deductedCount > 0"
+          :class="$style.summaryItem"
+          data-cbu-deduction-summary>
+          库存抵扣 · <strong>{{ deductedCount }}</strong> 种
+          <template v-if="fullyCovered > 0">（{{ fullyCovered }} 种无需采购，仍需转移）</template>
+        </span>
+        <span v-if="tempMode" :class="$style.summaryNote">
           ·
           <template v-if="priceProgress && priceProgress.done < priceProgress.total">
             正在读取游戏实时盘口 {{ priceProgress.done }}/{{ priceProgress.total }}
@@ -625,9 +989,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
               <td colspan="100" :class="$style.empty">
                 {{
                   components.length === 0
-                    ? burnMode
-                      ? '该星球暂无可比价的物品。'
-                      : '购物车暂无可比价的物品。'
+                    ? repairMode
+                      ? '维修清单暂无可比价的物品。'
+                      : burnMode
+                        ? '该星球暂无可比价的物品。'
+                        : '购物车暂无可比价的物品。'
                     : '没有匹配的物品。'
                 }}
               </td>
@@ -647,7 +1013,15 @@ function isBest(component: { bestExchange?: string }, code: string) {
                   localized(c)
                 }}</span>
               </td>
-              <td :class="$style.numCell">{{ fixed0(c.amount) }}</td>
+              <!-- 采购量 0 = 仓库库存已完全覆盖：复用表内语义绿，不新增裸色值（主题框架 R01）；
+                   这些物料仍会进 MTRA 转移组，不是被漏算。 -->
+              <td
+                :class="[$style.numCell, c.amount === 0 ? $style.bestPrice : '']"
+                :data-cbu-ticker="c.ticker"
+                :data-cbu-net="c.amount"
+                :title="deductionTip(c.ticker)">
+                {{ fixed0(c.amount) }}
+              </td>
               <td
                 v-for="ex in exchanges"
                 :key="ex.code"
@@ -749,6 +1123,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+/* 依赖项未勾选时的禁用态：只降透明度，不引入新的裸色值（主题框架 R01）。 */
+.controlDisabled {
+  opacity: 0.45;
 }
 
 /* 控件栏在最顶部，游戏原生 tooltip 的 z-index 只有 50，往上弹会被标题栏 /

@@ -9,6 +9,20 @@
   margin-right: 10px;
 }
 
+/* 右下角每个货币余额都是一颗换汇入口（`FX <货币>`）。 */
+.chip {
+  cursor: pointer;
+}
+
+.chip:hover {
+  text-decoration: underline;
+}
+
+/* 余额为 0 的格子压暗，但仍然可点（可以拿它当"从 0 开始换"的入口）。 */
+.zero {
+  opacity: 0.55;
+}
+
 .label {
   padding: 2px 6px 3px;
   background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3, #54a0ff);

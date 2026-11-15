@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MaterialIcon from '@src/components/MaterialIcon.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import { cxStore } from '@src/infrastructure/fio/cx';
@@ -358,12 +359,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
         data-tooltip-position="top"
         >{{ totalBuildingCount }} 座建筑</span
       >
-      <input
+      <SearchInput
         id="bmat-search"
         v-model="search"
         name="bmat-search"
         :class="$style.input"
-        type="text"
         placeholder="搜索建材 ticker 或名称" />
       <PrunButton primary :disabled="needs.length === 0" @click="refreshPrices"
         >更新价格</PrunButton

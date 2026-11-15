@@ -14,6 +14,7 @@ import NumberInput from '@src/components/forms/NumberInput.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import Header from '@src/components/Header.vue';
 import { useTileState } from '@src/store/user-data-tiles';
+import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { newContractDraftAndFill } from '@src/features/XIT/CONTGEN/new-and-fill';
 import tiles from '@src/infrastructure/prun-ui/tiles';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
@@ -91,6 +92,25 @@ const LOCATION = 'HRT';
 const fromCurrency = useTileState<Currency>('fromCurrency', 'ICA');
 const toCurrency = useTileState<Currency>('toCurrency', 'AIC');
 const amount = useTileState<number | undefined>('amount', undefined);
+
+// 命令参数：`FX <源货币> [目标货币]`。右下角点某个货币余额就是这么打开的
+// （`FX NCC` 让面板一出来就停在"源 = NCC"）。没有参数时沿用上次的表单。
+// 四种货币的命令串各不相同 → 各开各的窗口，互不覆盖。
+const parameters = useXitParameters();
+const isCurrency = (value: string | undefined): value is Currency =>
+  value !== undefined && (CURRENCIES as string[]).includes(value);
+
+const fromParameter = parameters[0]?.toUpperCase();
+if (isCurrency(fromParameter)) {
+  fromCurrency.value = fromParameter;
+  const toParameter = parameters[1]?.toUpperCase();
+  if (isCurrency(toParameter) && toParameter !== fromParameter) {
+    toCurrency.value = toParameter;
+  } else if (toCurrency.value === fromParameter) {
+    // 目标和源撞车了（例如从 AIC 入口进来，而上一次的目标就是 AIC）→ 换另一头。
+    toCurrency.value = fromParameter === 'ICA' ? 'AIC' : 'ICA';
+  }
+}
 
 // 玩家在 FX 页填的"金额"语义是"换汇单价"：1 件 RAT 的 BUY/SELL 价格。
 // 商品数量固定 1，避免单价×数量算出来的总数让玩家困惑。

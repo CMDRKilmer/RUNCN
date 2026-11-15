@@ -11,6 +11,68 @@ function onListReady(list: HTMLElement) {
     syncState();
     sortScreenList(list);
   });
+  watchScreensMenuLayout(list);
+}
+
+// 「界面」悬浮列表默认一条一行，界面一多就顶出屏幕。改成多列：列宽固定，
+// 行数封顶，超出的往右排。列数受视口宽高双重约束，避免右边界出屏。
+const MENU_COLUMN_WIDTH = 192;
+const MENU_COLUMN_GAP = 10;
+const MENU_ROW_HEIGHT = 20;
+const MENU_MAX_ROWS = 12;
+
+function layoutScreensMenu(list: HTMLElement) {
+  const count = list.children.length;
+  const rect = list.getBoundingClientRect();
+  // 列表隐藏时（display:none）没有布局信息，等它显示时 ResizeObserver 会再触发。
+  if (count === 0 || rect.width < 1 || rect.height < 1) {
+    return;
+  }
+  const availableWidth = window.innerWidth - rect.left - 8 + MENU_COLUMN_GAP;
+  const maxColumns = Math.max(
+    1,
+    Math.floor(availableWidth / (MENU_COLUMN_WIDTH + MENU_COLUMN_GAP)),
+  );
+  const availableHeight = window.innerHeight - rect.top - 8;
+  const targetRows = Math.max(
+    1,
+    Math.min(MENU_MAX_ROWS, Math.floor(availableHeight / MENU_ROW_HEIGHT)),
+  );
+  const columns = Math.max(1, Math.min(maxColumns, Math.ceil(count / targetRows)));
+  const rows = Math.ceil(count / columns);
+  const width = columns * MENU_COLUMN_WIDTH + (columns - 1) * MENU_COLUMN_GAP;
+  const height = rows * MENU_ROW_HEIGHT;
+
+  const style = list.style;
+  const next = {
+    columnCount: String(columns),
+    width: `${width}px`,
+    height: `${Math.min(height, availableHeight)}px`,
+  };
+  if (
+    style.columnCount === next.columnCount &&
+    style.width === next.width &&
+    style.height === next.height
+  ) {
+    return;
+  }
+  style.columnCount = next.columnCount;
+  style.width = next.width;
+  style.height = next.height;
+}
+
+function watchScreensMenuLayout(list: HTMLElement) {
+  watchEffectWhileNodeAlive(list, onCleanup => {
+    // 显隐靠 display 切换，尺寸从 0 变成有值时触发重新计算。
+    const observer = new ResizeObserver(() => layoutScreensMenu(list));
+    observer.observe(list);
+    const onResize = () => layoutScreensMenu(list);
+    window.addEventListener('resize', onResize);
+    onCleanup(() => {
+      observer.disconnect();
+      window.removeEventListener('resize', onResize);
+    });
+  });
 }
 
 function sortScreenList(list: HTMLElement) {
@@ -87,7 +149,10 @@ function init() {
   });
   subscribe($$(document, C.ScreenControls.screens), onListReady);
   applyCssRule(`.${C.Head.contextAndScreens}`, $style.contextAndScreens);
+  applyCssRule(`.${C.Head.container}`, $style.head);
   applyCssRule(`.${C.ScreenControls.container}`, $style.screenControls);
+  applyCssRule(`.${C.Head.container} [class*='HeadItem__container']`, $style.headItems);
+  applyCssRule(`.${C.ScreenControls.screens}`, $style.screensMenu);
 }
 
 features.add(import.meta.url, init, '为用户屏幕添加标签栏。');

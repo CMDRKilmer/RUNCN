@@ -152,7 +152,7 @@ function onRestore() {
 }
 
 .warning {
-  color: #d9822b;
+  color: var(--rp-skin-warning, #c2410c);
   font-size: 11px;
 }
 </style>

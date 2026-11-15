@@ -29,6 +29,17 @@ function hexToTriple(hex: string): string {
   return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(', ');
 }
 
+// 画布是否足够暗，用来判定「深色主题」——决定中性色文字的映射方向（见 theme.ts）。
+function isDarkColor(hex: string): boolean {
+  const m = hex.match(/^#([\da-f]{6})$/i);
+  if (!m) {
+    return false;
+  }
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
+  // 相对亮度近似；< 90 视为深色主题（ceramic 的暖白画布远高于此）。
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 90;
+}
+
 function band(index: number) {
   const prefix = `--rp-cc-cat-${index}-`;
   return {
@@ -57,7 +68,11 @@ export function ceramicHueBands() {
 
 export function buildCeramicSkin(): Skin {
   const accent = token('--rp-cc-accent-line');
+  const canvas = token('--rp-cc-canvas');
+  const isDark = isDarkColor(canvas);
   return {
+    // 深色主题判定（画布亮度），决定中性色映射方向；浅色主题为 false，行为不变。
+    darkText: isDark,
     // 别名指回语义 token：现有组件和 CONTROL_CSS 里的 --rp-skin-* 无需改动。
     vars: {
       '--rp-skin-bg': 'var(--rp-cc-canvas)',
@@ -85,7 +100,22 @@ export function buildCeramicSkin(): Skin {
       '--rp-skin-action-unload': 'var(--rp-cc-cat-4-text)',
       '--rp-skin-action-flight': 'var(--rp-cc-cat-2-text)',
       '--rp-skin-action-fuel': 'var(--rp-cc-cat-5-text)',
+      // 缺料/危险语义红（R27）：BRA「所需材料」不足的数量角标。
+      '--rp-skin-danger': 'var(--rp-cc-status-danger-text)',
+      // 「临近阈值」告警色（R45）：只换字色、不加底色。取主题自己的强调色
+      // `--rp-cc-warn-accent`，而不是状态色板里的 warning——星海的链接本身就是
+      // 金色，状态 warning 的琥珀与它几乎同色，分不出来。
+      '--rp-skin-warning': 'var(--rp-cc-warn-accent)',
+      // 「正常 / 达标」绿：REPD 阈值状态文字等语义色（R45）用它，token 主题
+      // 此前没有该别名，只能落到字面值而被重映射成淡绿。
+      '--rp-skin-success': 'var(--rp-cc-status-success-text)',
+      '--rp-skin-success-bg': 'var(--rp-cc-status-success-bg)',
+      '--rp-skin-success-border': 'var(--rp-cc-status-success-border)',
       '--rp-skin-action-done': 'var(--rp-cc-cat-6-text)',
+      // SFC 燃料条专用全深度色：直接取 cat-1 / cat-2 图表实色，
+      // 与 R33 的 --rp-cc-progress-*（减半浅色，供 FLT 大燃料条）分离。
+      '--rp-skin-sfc-fuel-stl': 'var(--rp-cc-cat-1-chart)',
+      '--rp-skin-sfc-fuel-ftl': 'var(--rp-cc-cat-2-chart)',
       '--rp-accent-rgb': hexToTriple(accent),
       '--rp-color-accent-primary': 'var(--rp-cc-accent-line)',
       '--rp-color-text': 'var(--rp-cc-text-primary)',
@@ -99,7 +129,10 @@ export function buildCeramicSkin(): Skin {
       green: band(2),
     },
     hueBands: ceramicHueBands(),
-    neutralShift: [2, 1, -4],
+    // 中性灰偏移：浅色主题暖调 [2,1,-4]（暖纸）；深色主题改冷蓝 [-4,0,10]，
+    // 否则所有中性底/边框都会被偏成棕色（引擎按中性色重映射，如侧栏 #14130e、
+    // FB 面板 #12110c、表格空行线），与深空冷底完全不搭。
+    neutralShift: isDark ? [-4, 0, 10] : [2, 1, -4],
     status: {
       warning: {
         background: token('--rp-cc-status-warning-bg'),
@@ -122,8 +155,9 @@ export function buildCeramicSkin(): Skin {
       lineSoft: accent,
     },
     progress: {
-      primary: token('--rp-cc-cat-1-chart'),
-      secondary: token('--rp-cc-cat-2-chart'),
+      // 主/次填充用减半深度的专用 token（R33），与图表 cat-1/cat-2 实色分离。
+      primary: token('--rp-cc-progress-primary'),
+      secondary: token('--rp-cc-progress-secondary'),
       warning: token('--rp-cc-status-warning-text'),
       success: token('--rp-cc-status-success-text'),
       danger: token('--rp-cc-status-danger-text'),
@@ -202,16 +236,29 @@ ${P} :is([class*='Button__primary'], [data-rp-btn='primary']):hover {
 ${P} :is([class*='Button__primary'], [data-rp-btn='primary']):active {
   background-color: var(--rp-cc-btn-primary-active) !important;
 }
+${P} :is([class*='Button__success'], [data-rp-btn='success']) {
+  color: var(--rp-cc-status-success-text) !important;
+  background-color: var(--rp-cc-status-success-bg) !important;
+  border-color: var(--rp-cc-status-success-border) !important;
+}
+${P} :is([class*='Button__success'], [data-rp-btn='success']):hover {
+  background-color: var(--rp-cc-status-success-border) !important;
+}
+${P} :is([class*='Button__success'], [data-rp-btn='success']):active {
+  color: #fffdf8 !important;
+  background-color: var(--rp-cc-status-success-text) !important;
+}
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']) {
-  color: var(--rp-cc-btn-danger-text) !important;
-  background-color: var(--rp-cc-btn-danger-bg) !important;
-  border-color: var(--rp-cc-btn-danger-border) !important;
+  color: var(--rp-cc-status-danger-text) !important;
+  background-color: var(--rp-cc-status-danger-bg) !important;
+  border-color: var(--rp-cc-status-danger-border) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']):hover {
-  background-color: var(--rp-cc-btn-danger-hover) !important;
+  background-color: var(--rp-cc-status-danger-border) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']):active {
-  background-color: var(--rp-cc-btn-danger-active) !important;
+  color: #fffdf8 !important;
+  background-color: var(--rp-cc-status-danger-text) !important;
 }
 ${P} :is([class*='Button__ghost'], [data-rp-btn='ghost']) {
   color: var(--rp-cc-btn-ghost-text) !important;
@@ -401,7 +448,7 @@ ${P} progress::-webkit-progress-bar {
   background-color: var(--rp-cc-control-track) !important;
 }
 ${P} :is([class*='ProgressBar__good'], [class*='ProgressBar__primary'])::-webkit-progress-value {
-  background-color: var(--rp-cc-cat-1-chart) !important;
+  background-color: var(--rp-cc-progress-primary) !important;
 }
 ${P} [class*='ProgressBar__warning']::-webkit-progress-value {
   background-color: var(--rp-cc-status-warning-text) !important;

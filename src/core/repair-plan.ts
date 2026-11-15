@@ -167,18 +167,22 @@ export function calculateOptimalRepair(units: RepairUnit[]): OptimalRepair | und
   return { optimalDay: bestDay };
 }
 
-// 为单个基地计算整站 optimalDay。
+// 维修间隔 sweep 的公共实现。ticker 省略 = 整站统一最优；传入建筑代号 =
+// 只把该类型的建筑纳入 sweep，得到该类型自有的最优维修间隔。
 // 严格沿用 REPP 算法的口径:per-building dailyRevenue − workforce share − constructionCost/180。
-// 仅当所有建筑都有价格/订单数据时返回数值,否则 undefined(调用方应回退为绿色)。
-export function calculateSiteOptimalDay(siteId: string): number | undefined {
-  const site = sitesStore.getById(siteId);
-  if (!site) {
-    return undefined;
-  }
+// 仅当所有建筑都有价格/订单数据时返回数值,否则 undefined(调用方应回退为固定天数)。
+function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): number | undefined {
   const repairable = site.platforms.filter(isRepairableBuilding);
   if (repairable.length === 0) {
     return undefined;
   }
+  const target =
+    ticker === undefined ? repairable : repairable.filter(b => b.module.reactorTicker === ticker);
+  if (target.length === 0) {
+    return undefined;
+  }
+  // 劳动力成本按「整站可维修建筑数」均摊：按类型算时与整站算保持同一口径，
+  // 差异只来自该类型自身的产能收益与建设成本，不因分组大小而漂移。
   const siteWorkforceCost = calcSiteWorkforceCost(site);
   const workforceShare =
     siteWorkforceCost !== undefined ? siteWorkforceCost / repairable.length : 0;
@@ -190,7 +194,7 @@ export function calculateSiteOptimalDay(siteId: string): number | undefined {
     ageDays: number;
   }
   const buildingDataList: BuildingData[] = [];
-  for (const building of repairable) {
+  for (const building of target) {
     const fullMaterials = getBuildingBuildMaterials(building, site);
     const lines = productionStore.getBySiteId(site.siteId);
     const line = lines?.find(l => l.type === building.module.reactorName);
@@ -218,4 +222,16 @@ export function calculateSiteOptimalDay(siteId: string): number | undefined {
       ageDays: b.ageDays,
     }));
   return calculateOptimalRepair(units)?.optimalDay;
+}
+
+// 整站统一最优间隔（左侧基地列表沿用）。
+export function calculateSiteOptimalDay(siteId: string): number | undefined {
+  const site = sitesStore.getById(siteId);
+  return site ? calculateOptimalDayFor(site) : undefined;
+}
+
+// 单一建筑类型自有的最优间隔（XIT REPD 右侧明细每行一个值）。
+export function calculateTypeOptimalDay(siteId: string, ticker: string): number | undefined {
+  const site = sitesStore.getById(siteId);
+  return site ? calculateOptimalDayFor(site, ticker) : undefined;
 }

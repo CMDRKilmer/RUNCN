@@ -176,10 +176,15 @@ export function computeComponents(
 
 // 计算各交易所总价、最便宜单交易所、最优混合总价。
 // 若传入 selectedTickers，只计算被选中配件的合计。
+// 若传入 amountByExchange（交易所 code → 物料 ticker → 该市场的实际采购量），
+// 每张卡片用自己的数量算总额：同一物料在不同市场的仓库库存不同，抵扣后的采购量
+// 也不同，复用同一个数量会让库存充足的市场漏算该物料、虚假地变成最便宜
+// （PR #60 审查）。
 export function computeTotals(
   components: BpcComponent[],
   exchanges: BpcExchange[],
   selectedTickers?: Set<string>,
+  amountByExchange?: ReadonlyMap<string, ReadonlyMap<string, number>>,
 ): BpcTotals {
   const selected = selectedTickers
     ? components.filter(c => selectedTickers.has(c.ticker))
@@ -188,13 +193,21 @@ export function computeTotals(
   const exchangeTotals: BpcExchangeTotal[] = exchanges.map(exchange => {
     let total = 0;
     let missing = 0;
+    const perTicker = amountByExchange?.get(exchange.code);
     for (const component of selected) {
+      // 该市场这件不用买（库存已覆盖 / 不需要运到基地）：既不计价也不算缺报价，
+      // 否则会把这个市场误判成「不完整」而排除在 cheapestSingle 之外。
+      const amount =
+        perTicker === undefined ? component.amount : (perTicker.get(component.ticker) ?? 0);
+      if (amount <= 0) {
+        continue;
+      }
       const point = component.prices.get(exchange.code);
       if (point === undefined || point === null) {
         missing++;
         continue;
       }
-      total += point.price * component.amount;
+      total += point.price * amount;
     }
     return {
       code: exchange.code,

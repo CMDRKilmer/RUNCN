@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
+import SearchInput from '@src/components/forms/SearchInput.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
@@ -175,10 +176,9 @@ function marginClass(margin: number) {
   <template v-else>
     <div :class="$style.searchBar">
       <label :class="$style.searchLabel">材料</label>
-      <input
+      <SearchInput
         v-model="materialSearch"
         :class="$style.searchInput"
-        type="text"
         placeholder="搜索材料代码…" />
     </div>
     <table :class="$style.table" cellspacing="0" cellpadding="0">
