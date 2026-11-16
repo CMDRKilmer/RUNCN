@@ -1,8 +1,10 @@
 import { getInvStore } from '@src/core/store-id';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { mountOnce } from '@src/utils/mount-ui-once';
 
 // 交易所仓库的 INV 里点物料图标，原生会打开 `MAT <ticker>`。这里改成打开该物料
 // 在本交易所的交易界面 `CXPO <ticker>.<exchange>`，省掉再输交易所代码。
@@ -26,29 +28,38 @@ function onTileReady(tile: PrunTile) {
     return;
   }
 
-  // capture 阶段拦截，抢在原生 onClick 之前。React 重渲染会替换图标节点，
-  // 所以监听挂在稳定的 frame 上，用事件委托命中当前图标。
-  tile.frame.addEventListener(
-    'click',
-    event => {
-      const target = event.target;
-      if (!(target instanceof Element)) {
-        return;
-      }
-      const icon = target.closest(`.${C.ColoredIcon.container}`);
-      if (!icon) {
-        return;
-      }
-      const tickerClass = Array.from(icon.classList).find(x => x.startsWith(TICKER_PREFIX));
-      if (!tickerClass) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      void showBuffer(`CXPO ${tickerClass.slice(TICKER_PREFIX.length)}.${code}`);
-    },
-    true,
-  );
+  // 切换标签会让同一 frame 断开再挂回、observer 重跑；mountOnce 保证每个 frame
+  // 只挂一个监听（标记随 frame 销毁而消失，重建后会正常重新挂载）。
+  mountOnce(tile.frame, 'inv-exchange-material-link', () => {
+    // capture 阶段拦截，抢在原生 onClick 之前。React 重渲染会替换图标节点，
+    // 所以监听挂在稳定的 frame 上，用事件委托命中当前图标。
+    tile.frame.addEventListener(
+      'click',
+      event => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const icon = target.closest(`.${C.ColoredIcon.container}`);
+        if (!icon) {
+          return;
+        }
+        const tickerClass = Array.from(icon.classList).find(x => x.startsWith(TICKER_PREFIX));
+        if (!tickerClass) {
+          return;
+        }
+        const ticker = tickerClass.slice(TICKER_PREFIX.length);
+        // SHPT / BLCK 等非物料物品也带 rp-ticker-*，放行会开出无效的 CXPO 命令。
+        if (materialsStore.getByTicker(ticker) === undefined) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        void showBuffer(`CXPO ${ticker}.${code}`);
+      },
+      true,
+    );
+  });
 }
 
 function init() {
