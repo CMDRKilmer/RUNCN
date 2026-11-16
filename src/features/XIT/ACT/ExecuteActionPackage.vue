@@ -15,6 +15,8 @@ import {
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
 import { completeActionPackage } from '@src/features/XIT/FLEET/action-completion';
+import { consumeReturnCommand } from '@src/features/XIT/ACT/return-to-source';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -109,6 +111,12 @@ const runner = new ActionRunner({
     getPackageFinished(pkg.global.name).value = true;
     if (success) {
       completeActionPackage(pkg);
+      // 从 SHP 生成维修 ACT 的场景：购物跑完后把来源飞船界面开回来，
+      // 省去手动重开去点维修。showBuffer 对已开窗口只做聚焦，不会重复开。
+      const returnCommand = consumeReturnCommand(pkg.global.name);
+      if (returnCommand) {
+        void showBuffer(returnCommand);
+      }
     }
   },
   onStatusChanged: (title, keepReady) => {

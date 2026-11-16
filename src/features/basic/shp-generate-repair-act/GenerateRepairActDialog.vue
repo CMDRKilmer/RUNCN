@@ -10,6 +10,7 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { userData } from '@src/store/user-data';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { setReturnCommand } from '@src/features/XIT/ACT/return-to-source';
 
 const { registration } = defineProps<{ registration?: string }>();
 
@@ -20,12 +21,14 @@ const exchangeStationMap: Record<string, string> = {
   CI1: 'Benten Station',
   IC1: 'Hortus Station',
   NC1: 'Moria Station',
-  CI2: 'Arclight Station',
-  NC2: 'Hubur Station',
 };
 
 const exchanges = Object.keys(exchangeStationMap);
 const exchange = persistedRef('genact-ship-exchange', exchanges[0]);
+// 旧版本持久化过 CI2 / NC2，选项移除后要回退到有效值，否则仓库名与 ACT 都会用到无效交易所。
+if (!exchanges.includes(exchange.value)) {
+  exchange.value = exchanges[0];
+}
 const useShipInv = persistedRef('genact-ship-use-inv', true);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
@@ -90,6 +93,8 @@ function onGenerateClick() {
     userData.actionPackages.push(pkg);
   }
 
+  // 登记来源飞船界面：ACT 自动跑完购物后据此跳回，方便直接点维修。
+  setReturnCommand(name, `SHP ${registration}`);
   showBuffer(`XIT ACT_${name.split(' ').join('_')}`);
 }
 </script>
