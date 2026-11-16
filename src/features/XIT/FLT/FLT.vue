@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { flightsStore } from '@src/infrastructure/prun-api/data/flights';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -7,6 +7,7 @@ import { getInvStore } from '@src/core/store-id';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import { shipConditionLevel } from '@src/utils/ship-condition';
+import { acquireRouteSpin, releaseRouteSpin } from './route-spin';
 
 // Status arrow icons (inlined from deleted ship-status-icons.ts). Arrow per
 // flight segment type; stationary (⦁) when docked or no active flight.
@@ -43,6 +44,8 @@ type FlightRow = {
   // 不涉及任何状态判断：航线执行状态只在服务端响应里，本地推不出来，
   // 主动拉取又违反「服务端通信必须玩家点击」，所以面板不展示状态指示。
   assigned: boolean;
+  // 是否在飞行中（ship.flightId 非空）。停靠时旋转图标原地停住。
+  flying: boolean;
 };
 
 const rawRows = computed<FlightRow[] | undefined>(() => {
@@ -63,6 +66,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
     const segment = flight?.segments[flight.currentSegmentIndex];
     const statusIcon = segment ? segStatusIcon(segment.type) : stationaryIcon;
     const assigned = ship.assignedRoute != null && ship.assignedRoute !== '';
+    const flying = ship.flightId != null && ship.flightId !== '';
 
     return {
       ship,
@@ -72,6 +76,7 @@ const rawRows = computed<FlightRow[] | undefined>(() => {
       isFtlCapable,
       statusIcon,
       assigned,
+      flying,
     };
   });
 });
@@ -88,6 +93,16 @@ const rows = computed(() => {
 
 // 燃料列（油条）显示开关。
 const showFuel = ref(true);
+
+// 旋转箭头圆圈由共享单例驱动（见 route-spin.ts）：所有 XIT FLT 实例共用一个定时器，
+// 停靠（data-flying=false）时不更新角度，原地停住；系统开启「减少动画」时同样停住。
+acquireRouteSpin();
+onBeforeUnmount(releaseRouteSpin);
+
+// 玩家点击或用键盘激活图标时打开游戏原生 RTE <船注册号>；不做任何自动请求。
+function openRoute(registration: string) {
+  showBuffer(`RTE ${registration}`);
+}
 
 // 缺油自动加油已迁移至全局 feature（src/features/basic/auto-refuel.ts）。
 // 此处仅负责 FLT 总览表的展示。
@@ -147,6 +162,24 @@ function onFuel(registration: string) {
             @click="showBuffer(`SHP ${x.ship.registration}`)">
             {{ x.ship.name || x.ship.registration }}
           </span>
+          <svg
+            v-if="x.assigned"
+            :class="$style.routeSpin"
+            viewBox="0 0 24 24"
+            role="button"
+            tabindex="0"
+            :aria-label="`RTE ${x.ship.registration}`"
+            :data-tooltip="`RTE ${x.ship.registration}`"
+            @click="openRoute(x.ship.registration)"
+            @keydown.enter="openRoute(x.ship.registration)"
+            @keydown.space.prevent="openRoute(x.ship.registration)">
+            <!-- 透明热区：SVG 根元素空白处不接收指针事件，铺满 24×24 才能保证整枚图标可点。 -->
+            <rect x="0" y="0" width="24" height="24" fill="none" pointer-events="all" />
+            <g data-route-spin :data-flying="x.flying ? 'true' : 'false'">
+              <circle :class="$style.routeSpinRing" cx="12" cy="12" r="8.6" />
+              <path :class="$style.routeSpinWing" d="M16.4 3.4 L10.7 0.4 L10.7 6.4 Z" />
+            </g>
+          </svg>
         </div>
 
         <div :class="[$style.bodyCell, $style.cargoCombinedCell]">
@@ -299,6 +332,30 @@ function onFuel(registration: string) {
   padding: 0 4px;
   margin-left: -5px;
   line-height: 1.4;
+}
+
+/* 虚线框右侧的旋转箭头圆圈：飞行中整枚图标绕圆心顺时针转，停靠时原地停住。
+   角度由脚本改写 <g> 的 transform 呈现属性（见 script），不走 CSS 合成动画。
+   点击打开游戏原生 RTE <船注册号>（玩家点击触发，不做任何自动请求）。
+   颜色一律走主题令牌，不写字面色（组件里的字面色会被主题引擎按皮肤重映射）。 */
+.routeSpin {
+  display: block;
+  width: 26px;
+  height: 26px;
+  margin-left: 6px;
+  flex: none;
+  cursor: pointer;
+}
+
+.routeSpinRing {
+  fill: none;
+  stroke: var(--rp-skin-border-strong, currentColor);
+  stroke-width: 1.7;
+  stroke-dasharray: 3.2 2.6;
+}
+
+.routeSpinWing {
+  fill: var(--rp-color-accent-primary, currentColor);
 }
 
 /* 耐久 80%~83% 时舰名变黄警示。 */
