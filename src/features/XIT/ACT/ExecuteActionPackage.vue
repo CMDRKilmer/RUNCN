@@ -15,7 +15,7 @@ import {
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
 import { completeActionPackage } from '@src/features/XIT/FLEET/action-completion';
-import { consumeReturnCommand } from '@src/features/XIT/ACT/return-to-source';
+import { takeReturnCommand } from '@src/features/XIT/ACT/return-to-source';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
@@ -27,6 +27,10 @@ const autoAct = ref(false);
 
 const tile = useTile();
 let goingToSplit = ref(false);
+
+// 本次执行认领的返回目标。只由手动「执行」认领：触发器静默跑同一个包时不去碰队列，
+// 否则上一次生成后放弃的登记会被这次运行的结束回调取走，凭空打开别人的飞船界面。
+let returnCommand: string | undefined;
 
 const config = ref({
   globalOptions: { skipMissingMaterials: false },
@@ -109,13 +113,15 @@ const runner = new ActionRunner({
     autoAct.value = false;
     // 触发器引擎静默打开的 ACT 窗口据此自动关窗（成功/失败/取消均关闭）。
     getPackageFinished(pkg.global.name).value = true;
+    // 返回目标只属于认领它的那次执行：失败或取消后立刻丢弃，不让下一次运行捡到。
+    const target = returnCommand;
+    returnCommand = undefined;
     if (success) {
       completeActionPackage(pkg);
       // 从 SHP 生成维修 ACT 的场景：购物跑完后把来源飞船界面开回来，
       // 省去手动重开去点维修。showBuffer 对已开窗口只做聚焦，不会重复开。
-      const returnCommand = consumeReturnCommand(pkg.global.name);
-      if (returnCommand) {
-        void showBuffer(returnCommand);
+      if (target !== undefined) {
+        void showBuffer(target);
       }
     }
   },
@@ -165,6 +171,8 @@ function onExecuteClick() {
   logScrolling.value = true;
   clearLog();
   actReady.value = false;
+  // 手动执行才认领来源飞船：认领后由这次执行独占，后续再生成的维修 ACT 排到它后面。
+  returnCommand = takeReturnCommand();
   runner.execute(pkg, config.value);
 }
 
