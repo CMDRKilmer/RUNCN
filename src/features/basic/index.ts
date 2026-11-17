@@ -77,6 +77,7 @@ import './inv-nx-buy-fuel-button';
 import './inv-search';
 import './inv-show-space-remaining';
 import './inv-warehouse-button';
+import './inv-exchange-material-link';
 import './item-icons';
 import './item-ticker-shadow';
 import './lead-per-day-column';
