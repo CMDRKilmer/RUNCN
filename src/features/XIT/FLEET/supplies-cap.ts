@@ -2,7 +2,7 @@
 // 汇总四处重复逻辑：
 //   - PlanetRow.vue 输入框 watch / inputDaysCap / daysTooltip
 //   - chain-data.ts 输入快照的目标天数
-//   - utils.ts computeResupplyBill / fitDaysForShip
+//   - utils.ts computeResupplyBill
 // 语义统一：cap 未定义或非有限数 → Infinity（不限制）；天数钳制为
 //   max(0, min(days, cap))。UI 输入框额外做两位小数向下截断（与适配精度对齐）。
 
@@ -24,7 +24,7 @@ export function clampTargetDays(days: number, capDays: number | undefined): numb
 }
 
 /**
- * UI 输入钳制：只在上限为正且超过时向下取两位小数截断（与 fitDaysForShip 精度一致）。
+ * UI 输入钳制：只在上限为正且超过时向下取两位小数截断。
  * cap <= 0 时不改动，保留用户输入（防止仓储被堆满时把天数锁死为 0）。
  */
 export function clampDaysInput(days: number, capDays: number | undefined): number {

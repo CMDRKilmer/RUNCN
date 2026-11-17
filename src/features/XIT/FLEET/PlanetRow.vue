@@ -41,6 +41,8 @@ const {
   showInv,
   showWar,
   showFill,
+  fillInventory,
+  effectiveDays,
   storeId,
   warehouseStoreId,
   analysis,
@@ -55,6 +57,8 @@ const {
   showInv: boolean;
   showWar: boolean;
   showFill: boolean;
+  fillInventory: boolean;
+  effectiveDays?: number;
   storeId: string;
   warehouseStoreId?: string;
   analysis?: BaseStorageAnalysis;
@@ -76,7 +80,7 @@ const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined
 watch(
   [() => config.days, () => analysis?.suppliesCapDays],
   ([daysVal, capDays]) => {
-    // 截断到上限,向下取两位小数(与适配 fitDaysForShip 的精度一致)。
+    // 截断到上限,向下取两位小数。
     config.days = clampDaysInput(daysVal, capDays);
   },
   { immediate: true },
@@ -170,8 +174,30 @@ const inputDaysCap = computed(() => {
   return Math.max(0, cap);
 });
 
+const daysModel = computed({
+  get: () => {
+    if (!fillInventory) {
+      return config.days;
+    }
+    return effectiveDays ?? config.days;
+  },
+  set: value => {
+    if (!fillInventory) {
+      config.days = value;
+    }
+  },
+});
+
 const daysTooltip = computed(() => {
   const capDays = analysis?.suppliesCapDays;
+  if (fillInventory) {
+    if (effectiveDays === undefined) {
+      return '填满库存：仓储分析未加载，暂用当前天数';
+    }
+    const capText =
+      capDays === undefined || !isFinite(capDays) ? '' : `，仓储上限 ${formatBurnDays(capDays)} 天`;
+    return `填满库存：目标 ${formatBurnDays(effectiveDays)} 天（按船只容量适配${capText}）`;
+  }
   if (capDays === undefined) {
     return '天数上限: -- (仓储分析未加载)';
   }
@@ -375,7 +401,8 @@ const barAlarmReason = computed(() =>
     <td :class="$style.inputCell">
       <Tooltip no-icon position="top" :tooltip="daysTooltip">
         <NumberInput
-          v-model="config.days"
+          v-model="daysModel"
+          :disabled="fillInventory"
           :min="0"
           :max="inputDaysCap"
           :class="$style.faintInput" />
