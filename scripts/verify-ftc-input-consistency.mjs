@@ -1,3 +1,4 @@
+import './lib/register-flight-formula.mjs';
 // FTC 输入完整性 + 两路径一致性回归脚本 —— 带退出码，可自动判定成败。
 //
 // 背景（2026-09-23 修复的 bug）：用户实测「SFC 里自动拉条和 FTC 计算出来的不一致」。
@@ -45,13 +46,8 @@
 // 门控集成用例额外用 module.register 钩子替换编排层的浏览器依赖（见文件末尾注释），
 // 生产代码与真实模型本身零改动。
 import { register } from 'node:module';
-import {
-  autoFuelGrid,
-  computeFuelOption,
-  findBalanceOption,
-  missingModelInputs,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, computeFuelOption, findBalanceOption, missingModelInputs, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 import { SHIP, DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 
 const summary = { pass: 0, fail: 0 };

@@ -1,3 +1,4 @@
+import './lib/register-flight-formula.mjs';
 // FTC 邻档对比（fuel-model.nearbyFuelOptions）纯函数回归脚本 —— 带退出码，可自动判定成败。
 //
 // 背景（2026-09-24 需求）：FTC 面板原来只显示「最优燃料方案」单行，玩家无法评估
@@ -27,13 +28,8 @@
 //   里不可加载，由代码审查覆盖；② 飞船/航线夹具是**合成**的（本脚本只断言筛选与截断的
 //   结构性行为，不断言任何实测数值，故不需要真实标定数据）；③ 不引入 register/@src loader：
 //   fuel-model.ts 无任何 import（纯函数模块，与 verify-ftc-balance-degenerate.mjs 同一路）。
-import {
-  autoFuelGrid,
-  computeFuelOption,
-  nearbyFuelOptions,
-  scanFuelOptions,
-  NEARBY_FUEL_SPAN,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, computeFuelOption, nearbyFuelOptions, scanFuelOptions, NEARBY_FUEL_SPAN } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 
 const summary = { pass: 0, fail: 0 };
 

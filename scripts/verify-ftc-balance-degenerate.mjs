@@ -1,15 +1,11 @@
+import './lib/register-flight-formula.mjs';
 // FTC 平衡点退化保护回归。
 // 契约：退化输入选最省油方案；正常输入保持 Pareto 选优；任意输入不抛异常。
 // 用法：node scripts/verify-ftc-balance-degenerate.mjs
 // 退出码：0 = 全部通过；1 = 存在失败。
 
-import {
-  autoFuelGrid,
-  autoReactorGrid,
-  findBalanceOption,
-  paretoFrontier,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, autoReactorGrid, findBalanceOption, paretoFrontier, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 
 // ---- 断言框架：失败收集到场景级，末行打印 PASS n/n 或 FAIL，退出码区分成败 ----
 const summary = { pass: 0, fail: 0 };

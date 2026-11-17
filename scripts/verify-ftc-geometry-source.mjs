@@ -1,3 +1,4 @@
+import './lib/register-flight-formula.mjs';
 // FTC 几何来源回归脚本（**只用服务器原生记录，无回退**）—— 带退出码，可自动判定成败。
 //
 // 背景（2026-09-23 修复 → 同日二次修订）：SFC 联动路径（browse:false，设计上不许开星系
@@ -51,12 +52,8 @@
 // ⑤ 组驱动的是真实状态机模块，但**不**覆盖 sfc-auto-fuel-settings.ts 的 DOM 接线
 // （该文件依赖 vue/DOM，Node 里加载不了）：接线由代码审查 + 注释锁定。
 import { register } from 'node:module';
-import {
-  autoFuelGrid,
-  findBalanceOption,
-  missingModelInputs,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, findBalanceOption, missingModelInputs, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 import { SHIP, DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 // 命名空间导入：既取 RoutePushGate，又可在用例里断言旧导出（MAX_ROUTE_ATTEMPTS）确已删除。
 import * as gateModule from '../src/features/basic/sfc-route-push-gate.ts';
@@ -126,9 +123,7 @@ try {
 
 const api = await import('../src/infrastructure/prun-api/data/api-messages.ts');
 const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/system-bodies.ts');
-const { routeMetrics, estimateRouteStl } = await import(
-  '../src/features/XIT/FTC/route-planner.ts'
-);
+const { routeMetrics, estimateRouteStl } = await import('../src/features/XIT/FTC/route-planner.ts');
 const { computeFtcPlan } = await import('../src/features/XIT/FTC/ftc-compute.ts');
 const stub = await import('./lib/ftc-geometry-stub.mjs');
 

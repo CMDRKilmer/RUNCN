@@ -1,0 +1,5210 @@
+[
+  {
+    "source": "2026-11-16-stl-blind-vh241a-vh241b-standard-retest-250t-cond075.json",
+    "request": {
+      "missionId": "79dc5cf2-6646-42fc-830f-6f9ac10241c7",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "1b510c248767e5f252fd4b253b2061fd|PLA,28451bbd680ffec198a77074b4670590",
+      "destination": "1b510c248767e5f252fd4b253b2061fd|PLA,f809cadc0d90bda7f03f7d04a552f2bf",
+      "landing": false,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.5,
+      "payload": 250,
+      "condition": 0.75,
+      "stlFuel": 1500,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": false
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794819644446,
+      "environment": [
+        {
+          "naturalId": "VH-241a",
+          "systemId": "VH-241",
+          "env": {
+            "radiusKm": 3535,
+            "pressure": 0.00007272525544976816
+          }
+        },
+        {
+          "naturalId": "VH-241b",
+          "systemId": "VH-241",
+          "env": {
+            "radiusKm": 7150,
+            "pressure": 12.695181846618652
+          }
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "VH-241a",
+            "systemId": "VH-241",
+            "orbit": {
+              "semiMajorAxis": 24879275000,
+              "eccentricity": 0.0040884315967559814,
+              "inclination": -0.05807633325457573,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 7.728937888760812e23
+            },
+            "parentMassKg": 5.839691993132074e29
+          },
+          {
+            "naturalId": "VH-241b",
+            "systemId": "VH-241",
+            "orbit": {
+              "semiMajorAxis": 32645857000,
+              "eccentricity": 0.01344211120158434,
+              "inclination": 0.005538565572351217,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 5.844641604501785e24
+            },
+            "parentMassKg": 5.839691993132074e29
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "1b510c248767e5f252fd4b253b2061fd",
+          "naturalId": "VH-241",
+          "position": {
+            "x": -208.3023651852285,
+            "y": -101.54630749156692,
+            "z": 66.91017251172198
+          },
+          "connections": [
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "76d510474a9d78920d5eacd864170df9",
+            "32295417acebae37ad46ba5621afa750"
+          ],
+          "neighbors": ["GY-919", "VH-043", "VH-503"]
+        }
+      ],
+      "gateways": [],
+      "gatewayConnections": [],
+      "gatewayEndpoints": {}
+    },
+    "gameTimeMs": 1794819646973,
+    "actual": {
+      "seconds": 7028,
+      "stlFuel": 95,
+      "ftlFuel": 0
+    },
+    "segments": [
+      {
+        "type": "TAKE_OFF",
+        "arrival": {
+          "timestamp": 1794819777230
+        },
+        "departure": {
+          "timestamp": 1794819647230
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794826675230
+        },
+        "departure": {
+          "timestamp": 1794819777230
+        },
+        "stlFuelConsumption": 80,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      }
+    ],
+    "actualRoute": []
+  },
+  {
+    "source": "2026-11-16-stl-blind-vh241a-vh241b-standard-landing-250t-cond075.json",
+    "request": {
+      "missionId": "7afdd2fe-275f-48ec-b1f9-5ef8e3f7527b",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "1b510c248767e5f252fd4b253b2061fd|PLA,28451bbd680ffec198a77074b4670590",
+      "destination": "1b510c248767e5f252fd4b253b2061fd|PLA,f809cadc0d90bda7f03f7d04a552f2bf",
+      "landing": true,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.5,
+      "payload": 250,
+      "condition": 0.75,
+      "stlFuel": 1500,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": true
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794822660474,
+      "environment": [
+        {
+          "naturalId": "VH-241a",
+          "systemId": "VH-241",
+          "env": {
+            "radiusKm": 3535,
+            "pressure": 0.00007272525544976816
+          }
+        },
+        {
+          "naturalId": "VH-241b",
+          "systemId": "VH-241",
+          "env": {
+            "radiusKm": 7150,
+            "pressure": 12.695181846618652
+          }
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "VH-241a",
+            "systemId": "VH-241",
+            "orbit": {
+              "semiMajorAxis": 24879275000,
+              "eccentricity": 0.0040884315967559814,
+              "inclination": -0.05807633325457573,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 7.728937888760812e23
+            },
+            "parentMassKg": 5.839691993132074e29
+          },
+          {
+            "naturalId": "VH-241b",
+            "systemId": "VH-241",
+            "orbit": {
+              "semiMajorAxis": 32645857000,
+              "eccentricity": 0.01344211120158434,
+              "inclination": 0.005538565572351217,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 5.844641604501785e24
+            },
+            "parentMassKg": 5.839691993132074e29
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "1b510c248767e5f252fd4b253b2061fd",
+          "naturalId": "VH-241",
+          "position": {
+            "x": -208.3023651852285,
+            "y": -101.54630749156692,
+            "z": 66.91017251172198
+          },
+          "connections": [
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "76d510474a9d78920d5eacd864170df9",
+            "32295417acebae37ad46ba5621afa750"
+          ],
+          "neighbors": ["GY-919", "VH-043", "VH-503"]
+        }
+      ],
+      "gateways": [],
+      "gatewayConnections": [],
+      "gatewayEndpoints": {}
+    },
+    "gameTimeMs": 1794822662975,
+    "actual": {
+      "seconds": 7280,
+      "stlFuel": 123,
+      "ftlFuel": 0
+    },
+    "segments": [
+      {
+        "type": "TAKE_OFF",
+        "arrival": {
+          "timestamp": 1794822793253
+        },
+        "departure": {
+          "timestamp": 1794822663253
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794829690253
+        },
+        "departure": {
+          "timestamp": 1794822793253
+        },
+        "stlFuelConsumption": 79,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "LANDING",
+        "arrival": {
+          "timestamp": 1794829943253
+        },
+        "departure": {
+          "timestamp": 1794829690253
+        },
+        "stlFuelConsumption": 29,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      }
+    ],
+    "actualRoute": []
+  },
+  {
+    "source": "2026-11-16-natural-blind-vh241c-vh331c-standard-surface-v2-250t-cond075.json",
+    "request": {
+      "missionId": "1086bede-418b-4c1d-9d36-9850658c47ee",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "1b510c248767e5f252fd4b253b2061fd|PLA,217608a114d4bb0bf78f07c39b96069f",
+      "destination": "f2f57766ebaca9d69efae41ccf4d8853|PLA,e842f09f5fa417a27984ea441b9cf566",
+      "landing": true,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.5,
+      "payload": 250,
+      "condition": 0.75,
+      "stlFuel": 1500,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": false
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794825898493,
+      "environment": [
+        {
+          "naturalId": "VH-241c",
+          "systemId": "VH-241",
+          "env": {
+            "radiusKm": 7268,
+            "pressure": 9.667292594909668
+          }
+        },
+        {
+          "naturalId": "VH-331c",
+          "systemId": "VH-331",
+          "env": {
+            "radiusKm": 8502,
+            "pressure": 29.5714111328125
+          }
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "VH-241c",
+            "systemId": "VH-241",
+            "orbit": {
+              "semiMajorAxis": 50439892000,
+              "eccentricity": 0.046840850263834,
+              "inclination": -0.013877510093152523,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 5.815359704127781e24
+            },
+            "parentMassKg": 5.839691993132074e29
+          },
+          {
+            "naturalId": "VH-331c",
+            "systemId": "VH-331",
+            "orbit": {
+              "semiMajorAxis": 51012969000,
+              "eccentricity": 0.036814287290248326,
+              "inclination": 0.023364533105581693,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 9.930105949696825e24
+            },
+            "parentMassKg": 5.451043501996131e29
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "b327eee7710ef5b77fb3656d1224ac52",
+          "naturalId": "VH-043",
+          "position": {
+            "x": -163.203343866155,
+            "y": -132.7984107446046,
+            "z": 100.14421332805522
+          },
+          "connections": [
+            "1b510c248767e5f252fd4b253b2061fd",
+            "6164359edc05c084251cd7bc75cb126a",
+            "f2f57766ebaca9d69efae41ccf4d8853"
+          ],
+          "neighbors": ["VH-241", "VH-331", "VH-874"]
+        },
+        {
+          "systemId": "f2f57766ebaca9d69efae41ccf4d8853",
+          "naturalId": "VH-331",
+          "position": {
+            "x": -123.46186721097881,
+            "y": -99.32084354422284,
+            "z": 92.70283805793765
+          },
+          "connections": [
+            "8de3101e1865b4bb7edad269a4b0dda7",
+            "6164359edc05c084251cd7bc75cb126a",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "2318bd4539e5a2119d81212478520b22"
+          ],
+          "neighbors": ["SB-838", "VH-043", "VH-192", "VH-778", "VH-874"]
+        },
+        {
+          "systemId": "1b510c248767e5f252fd4b253b2061fd",
+          "naturalId": "VH-241",
+          "position": {
+            "x": -208.3023651852285,
+            "y": -101.54630749156692,
+            "z": 66.91017251172198
+          },
+          "connections": [
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "76d510474a9d78920d5eacd864170df9",
+            "32295417acebae37ad46ba5621afa750"
+          ],
+          "neighbors": ["GY-919", "VH-043", "VH-503"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-BDG-566",
+          "name": "Promitor -> Doujiang",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-KZD-715",
+          "name": "Promitor -> Amethyst B",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-PGG-155",
+          "name": "Promitor -> Berthier",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        }
+      ],
+      "gatewayConnections": [],
+      "gatewayEndpoints": {
+        "GTW-BDG-566": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-KZD-715": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-PGG-155": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794825900329,
+    "actual": {
+      "seconds": 42682,
+      "stlFuel": 160,
+      "ftlFuel": 34
+    },
+    "segments": [
+      {
+        "type": "TAKE_OFF",
+        "arrival": {
+          "timestamp": 1794826352247
+        },
+        "departure": {
+          "timestamp": 1794825901247
+        },
+        "stlFuelConsumption": 51,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794838383247
+        },
+        "departure": {
+          "timestamp": 1794826352247
+        },
+        "stlFuelConsumption": 37,
+        "ftlFuelConsumption": 19,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794847397247
+        },
+        "departure": {
+          "timestamp": 1794838383247
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794847622247
+        },
+        "departure": {
+          "timestamp": 1794847397247
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 15,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794854998247
+        },
+        "departure": {
+          "timestamp": 1794847622247
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1794868311247
+        },
+        "departure": {
+          "timestamp": 1794854998247
+        },
+        "stlFuelConsumption": 41,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "LANDING",
+        "arrival": {
+          "timestamp": 1794868583247
+        },
+        "departure": {
+          "timestamp": 1794868311247
+        },
+        "stlFuelConsumption": 31,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      }
+    ],
+    "actualRoute": [
+      ["VH-241", "VH-043", null],
+      ["VH-043", "VH-331", null]
+    ]
+  },
+  {
+    "source": "2026-11-16-natural-blind-ant-mor-qtmm-2500t-cond050-r47.json",
+    "request": {
+      "missionId": "81b9d30f-8a0e-4c32-a629-1bea19d4a879",
+      "blueprintId": "b98581373f5c01c2cf9235603492a4dc",
+      "origin": "8ecf9670ba070d78cfb5537e8d9f1b6c|STA,1deca369a92788b8079e7ac245be66f7",
+      "destination": "49b6615d39ccba05752b3be77b2ebf36|STA,299e4c9b1d2d9fc0f45340cf7e54e005",
+      "landing": false,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.47,
+      "payload": 2500,
+      "condition": 0.5,
+      "stlFuel": 6000,
+      "ftlFuel": 1500,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": false
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 6231,
+        "operatingEmptyMass": 2067.8,
+        "maxGFactor": 10,
+        "acceleration": 48.36057645807138,
+        "accelerationMax": 48.36057645807138,
+        "emitterChargeTime": 55.625,
+        "maxOverchargeTime": 64.375,
+        "ftlMaxSpeed": 0.0006021902546713134,
+        "minReactorUsage": 0.4635416666666667,
+        "storeCapacityWeight": 5000,
+        "storeCapacityVolume": 5000,
+        "stlFuelCapacity": 8000,
+        "ftlFuelCapacity": 2000,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_FUEL_SAVING",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.0075
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_LARGE",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 8000
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_HIGH_POWER",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 4800
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 15
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_HUGE",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 5000
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 5000
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 164,
+          "option": "HULL_PLATES_LIGHTWEIGHT",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": -0.1
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 10
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 1,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 1,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 1,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 297,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK2",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_STANDARD",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 5,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794837210328,
+      "environment": [
+        {
+          "naturalId": "ANT",
+          "systemId": "ZV-307"
+        },
+        {
+          "naturalId": "MOR",
+          "systemId": "OT-580"
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "ANT",
+            "systemId": "ZV-307",
+            "orbit": {
+              "semiMajorAxis": 33603417000,
+              "eccentricity": 0.00144911481704531,
+              "inclination": 0.02535479317874627,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 2.817252601192869e30
+          },
+          {
+            "naturalId": "MOR",
+            "systemId": "OT-580",
+            "orbit": {
+              "semiMajorAxis": 198222970002.51038,
+              "eccentricity": 0.01901245158584988,
+              "inclination": 0.019057268366314654,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 2.1616441920857102e30
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "66a9e561febf0198334ee2fa29299440",
+          "naturalId": "LS-934",
+          "position": {
+            "x": 233.02310040686163,
+            "y": -48.94144300169286,
+            "z": 84.97564214201111
+          },
+          "connections": [
+            "c931ae8fc5e18e32d82a28c7b4715476",
+            "3371e0e67802ac410ce0f1b0c1340e04",
+            "95d4975f992a70a802bd2f19553c25d4",
+            "35ea90a22a12427cf9143d25b6d1d2e5",
+            "ac35dd2a980e53fedd1a4fe87a909972"
+          ],
+          "neighbors": ["IA-603", "LS-014", "LS-300", "LS-746", "ZV-194"]
+        },
+        {
+          "systemId": "035ad3faf26116c79564de65f85c83ee",
+          "naturalId": "KW-602",
+          "position": {
+            "x": 308.6671641308594,
+            "y": 149.60767156138033,
+            "z": 98.0665393886604
+          },
+          "connections": [
+            "239e36f2a61041e0952d9c9741c195c9",
+            "4e23607021b138482a1b1246c1950e9f",
+            "e2e004d158202f9fa4a1cd4f3434e8bd",
+            "2487e5f06075e7472185f5d6d2754298"
+          ],
+          "neighbors": ["KW-358", "KW-688", "KW-976", "LS-231"]
+        },
+        {
+          "systemId": "4e23607021b138482a1b1246c1950e9f",
+          "naturalId": "KW-976",
+          "position": {
+            "x": 205.37601884516428,
+            "y": 170.24806674785697,
+            "z": 101.72481443429305
+          },
+          "connections": [
+            "035ad3faf26116c79564de65f85c83ee",
+            "11966178feb8bc3ff30426fbf527b8d0",
+            "239e36f2a61041e0952d9c9741c195c9",
+            "3ccf1ec43745f90d7f4ecc374304fe18"
+          ],
+          "neighbors": ["KW-602", "KW-626", "KW-688", "XH-400"]
+        },
+        {
+          "systemId": "f02f1292a7520f7bc96453010102f8c1",
+          "naturalId": "ZV-759",
+          "position": {
+            "x": 262.134699347303,
+            "y": -153.92017947469756,
+            "z": 61.68777096658184
+          },
+          "connections": [
+            "ac35dd2a980e53fedd1a4fe87a909972",
+            "8ecf9670ba070d78cfb5537e8d9f1b6c",
+            "ad1291e7bd5bbab1edebd67500c22150"
+          ],
+          "neighbors": ["ZV-194", "ZV-307", "ZV-896"]
+        },
+        {
+          "systemId": "49b6615d39ccba05752b3be77b2ebf36",
+          "naturalId": "OT-580",
+          "position": {
+            "x": -93.3297105926653,
+            "y": 377.8741507714726,
+            "z": 111.61970185336173
+          },
+          "connections": [
+            "965cf574ab5a6f84aacba848b246aeb0",
+            "e7b81360554cfd1e10977d34a3e2b53a",
+            "1f87982f87b1988866cebffe3208019e"
+          ],
+          "neighbors": ["DW-739", "OT-442", "TO-392", "LB-476", "XH-594", "WB-675", "QQ-001"]
+        },
+        {
+          "systemId": "8ecf9670ba070d78cfb5537e8d9f1b6c",
+          "naturalId": "ZV-307",
+          "position": {
+            "x": 276.089535527458,
+            "y": -189.5445236189404,
+            "z": 89.24495915011897
+          },
+          "connections": [
+            "f02f1292a7520f7bc96453010102f8c1",
+            "76efb33ed2c068611e880b02ef2b700a",
+            "7776f57dc2d58f3e51279ee68b5c102f"
+          ],
+          "neighbors": ["QJ-684", "ZV-639", "ZV-759", "YK-649", "IA-158", "LS-300"]
+        },
+        {
+          "systemId": "3ccf1ec43745f90d7f4ecc374304fe18",
+          "naturalId": "XH-400",
+          "position": {
+            "x": 126.07214392279779,
+            "y": 237.3897795648811,
+            "z": 89.13186752614925
+          },
+          "connections": [
+            "84b30ff594e60c1a5ef064a7afa29126",
+            "735b3ea872edcffa95a44a582c849f84",
+            "4e23607021b138482a1b1246c1950e9f"
+          ],
+          "neighbors": ["KW-976", "XH-594", "XH-807"]
+        },
+        {
+          "systemId": "1f87982f87b1988866cebffe3208019e",
+          "naturalId": "DW-739",
+          "position": {
+            "x": -7.8372991739972,
+            "y": 341.9632880378347,
+            "z": 83.61170891060213
+          },
+          "connections": [
+            "10327276bf2bfebeb89a00b71f6b1ffd",
+            "6d625391a6c1c8b18172917ffdb90e7b",
+            "13c5855261c46cdb093f05ff68e30b42",
+            "49b6615d39ccba05752b3be77b2ebf36"
+          ],
+          "neighbors": ["DW-161", "DW-419", "DW-835", "OT-580"]
+        },
+        {
+          "systemId": "95d4975f992a70a802bd2f19553c25d4",
+          "naturalId": "LS-300",
+          "position": {
+            "x": 244.25966682425752,
+            "y": -13.0901009249412,
+            "z": 67.2354283032036
+          },
+          "connections": [
+            "c931ae8fc5e18e32d82a28c7b4715476",
+            "2487e5f06075e7472185f5d6d2754298",
+            "66a9e561febf0198334ee2fa29299440"
+          ],
+          "neighbors": ["LS-231", "LS-746", "LS-934", "KW-688", "ZV-307"]
+        },
+        {
+          "systemId": "2487e5f06075e7472185f5d6d2754298",
+          "naturalId": "LS-231",
+          "position": {
+            "x": 333.67205931027485,
+            "y": 82.5373867606704,
+            "z": 103.1583234395996
+          },
+          "connections": [
+            "ba7cd5859833d6035d305fb691e08af3",
+            "c931ae8fc5e18e32d82a28c7b4715476",
+            "95d4975f992a70a802bd2f19553c25d4",
+            "34bd78ba1ae1ad1961eabe17400ce28e",
+            "035ad3faf26116c79564de65f85c83ee"
+          ],
+          "neighbors": ["KW-602", "LE-137", "LS-300", "LS-746", "LS-828"]
+        },
+        {
+          "systemId": "6d625391a6c1c8b18172917ffdb90e7b",
+          "naturalId": "DW-161",
+          "position": {
+            "x": 75.482641842167,
+            "y": 343.86483034625576,
+            "z": 87.38649286486141
+          },
+          "connections": [
+            "1f87982f87b1988866cebffe3208019e",
+            "84b30ff594e60c1a5ef064a7afa29126",
+            "9fe6ac66ba8786ece36c85fa013bd6f3",
+            "a8d28a22eed92d260030cb92d79a6982"
+          ],
+          "neighbors": ["DW-739", "RC-796", "XH-556", "XH-594"]
+        },
+        {
+          "systemId": "84b30ff594e60c1a5ef064a7afa29126",
+          "naturalId": "XH-594",
+          "position": {
+            "x": 121.93708067938334,
+            "y": 290.90439819965616,
+            "z": 73.18503481629139
+          },
+          "connections": [
+            "9fe6ac66ba8786ece36c85fa013bd6f3",
+            "3ccf1ec43745f90d7f4ecc374304fe18",
+            "c31542afe57817b1574b051661cbdc48",
+            "6d625391a6c1c8b18172917ffdb90e7b"
+          ],
+          "neighbors": ["DW-161", "XH-083", "XH-400", "XH-556", "OT-580", "KW-688"]
+        },
+        {
+          "systemId": "ac35dd2a980e53fedd1a4fe87a909972",
+          "naturalId": "ZV-194",
+          "position": {
+            "x": 295.96154347241304,
+            "y": -145.76136752572128,
+            "z": 75.75311866137588
+          },
+          "connections": ["f02f1292a7520f7bc96453010102f8c1", "66a9e561febf0198334ee2fa29299440"],
+          "neighbors": ["LS-934", "ZV-759"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-OWP-442",
+          "name": "Griff -> Heph",
+          "systemId": "LS-300",
+          "planetId": "LS-300c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-OFM-256",
+          "name": "Griff -> Etherwind",
+          "systemId": "LS-300",
+          "planetId": "LS-300c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-ZQA-824",
+          "name": "Montem -> Kiruna",
+          "systemId": "OT-580",
+          "planetId": "OT-580b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-SAG-542",
+          "name": "Montem -> Sand",
+          "systemId": "OT-580",
+          "planetId": "OT-580b",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-AYW-107",
+          "name": "Montem -> LB-476b",
+          "systemId": "OT-580",
+          "planetId": "OT-580b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-PMQ-170",
+          "name": "Montem -> Circe",
+          "systemId": "OT-580",
+          "planetId": "OT-580b",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-ZLZ-756",
+          "name": "Kiruna -> Montem",
+          "systemId": "XH-594",
+          "planetId": "XH-594b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-HLP-373",
+          "name": "Kiruna -> Etherwind",
+          "systemId": "XH-594",
+          "planetId": "XH-594b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-AXH-868",
+          "name": "Heph -> Griff",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-BYP-857",
+          "name": "Heph -> Amethyst B",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-CCL-447",
+          "name": "Eos->Norwick- Circuitus Cibarius",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307a",
+          "operational": true,
+          "maxShipVolume": 3000
+        }
+      ],
+      "gatewayConnections": [
+        {
+          "fromSystem": "OT-580",
+          "toSystem": "XH-594",
+          "fromGatewayId": "GTW-ZQA-824",
+          "toGatewayId": "GTW-ZLZ-756",
+          "seen": 3
+        },
+        {
+          "fromSystem": "LS-300",
+          "toSystem": "ZV-307",
+          "fromGatewayId": "GTW-OWP-442",
+          "toGatewayId": "GTW-AXH-868",
+          "ftlDistance": 15.054005391247216,
+          "seen": 13
+        }
+      ],
+      "gatewayEndpoints": {
+        "GTW-OWP-442": {
+          "parentMassKg": 2.0984236678887653e30,
+          "orbit": {
+            "semiMajorAxis": 147845117000,
+            "eccentricity": 0.023696480318903923,
+            "inclination": -0.05478772148489952,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 9.011859363462613e24
+          }
+        },
+        "GTW-OFM-256": {
+          "parentMassKg": 2.0984236678887653e30,
+          "orbit": {
+            "semiMajorAxis": 147845117000,
+            "eccentricity": 0.023696480318903923,
+            "inclination": -0.05478772148489952,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 9.011859363462613e24
+          }
+        },
+        "GTW-ZQA-824": {
+          "parentMassKg": 2.1616441413940574e30,
+          "orbit": {
+            "semiMajorAxis": 139417977000,
+            "eccentricity": 0.03147958219051361,
+            "inclination": 0.04501096159219742,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.797300945837227e24
+          }
+        },
+        "GTW-SAG-542": {
+          "parentMassKg": 2.1616441413940574e30,
+          "orbit": {
+            "semiMajorAxis": 139417977000,
+            "eccentricity": 0.03147958219051361,
+            "inclination": 0.04501096159219742,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.797300945837227e24
+          }
+        },
+        "GTW-AYW-107": {
+          "parentMassKg": 2.1616441413940574e30,
+          "orbit": {
+            "semiMajorAxis": 139417977000,
+            "eccentricity": 0.03147958219051361,
+            "inclination": 0.04501096159219742,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.797300945837227e24
+          }
+        },
+        "GTW-PMQ-170": {
+          "parentMassKg": 2.1616441413940574e30,
+          "orbit": {
+            "semiMajorAxis": 139417977000,
+            "eccentricity": 0.03147958219051361,
+            "inclination": 0.04501096159219742,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.797300945837227e24
+          }
+        },
+        "GTW-ZLZ-756": {
+          "parentMassKg": 1.7060420101535353e30,
+          "orbit": {
+            "semiMajorAxis": 76287421000,
+            "eccentricity": 0.01673269458115101,
+            "inclination": 0.015665555372834206,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.666301825143343e23
+          }
+        },
+        "GTW-HLP-373": {
+          "parentMassKg": 1.7060420101535353e30,
+          "orbit": {
+            "semiMajorAxis": 76287421000,
+            "eccentricity": 0.01673269458115101,
+            "inclination": 0.015665555372834206,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.666301825143343e23
+          }
+        },
+        "GTW-AXH-868": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-BYP-857": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-CCL-447": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 67291581000,
+            "eccentricity": 0.04988761618733406,
+            "inclination": 0.0205453559756279,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.099792082461369e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794837212637,
+    "actual": {
+      "seconds": 236211.4,
+      "stlFuel": 314,
+      "ftlFuel": 541
+    },
+    "segments": [
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794840002979
+        },
+        "departure": {
+          "timestamp": 1794837212979
+        },
+        "stlFuelConsumption": 150,
+        "ftlFuelConsumption": 26,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794851203979
+        },
+        "departure": {
+          "timestamp": 1794840002979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794851260379
+        },
+        "departure": {
+          "timestamp": 1794851203979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 21,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794860176379
+        },
+        "departure": {
+          "timestamp": 1794851260379
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794860232779
+        },
+        "departure": {
+          "timestamp": 1794860176379
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 65,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794887752779
+        },
+        "departure": {
+          "timestamp": 1794860232779
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794887809179
+        },
+        "departure": {
+          "timestamp": 1794887752779
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 23,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794897679179
+        },
+        "departure": {
+          "timestamp": 1794887809179
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794897735579
+        },
+        "departure": {
+          "timestamp": 1794897679179
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 76,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794929985579
+        },
+        "departure": {
+          "timestamp": 1794897735579
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794930041979
+        },
+        "departure": {
+          "timestamp": 1794929985579
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 40,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794947088979
+        },
+        "departure": {
+          "timestamp": 1794930041979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794947145379
+        },
+        "departure": {
+          "timestamp": 1794947088979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 59,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794972183379
+        },
+        "departure": {
+          "timestamp": 1794947145379
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794972239779
+        },
+        "departure": {
+          "timestamp": 1794972183379
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 59,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794997104779
+        },
+        "departure": {
+          "timestamp": 1794972239779
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794997161179
+        },
+        "departure": {
+          "timestamp": 1794997104779
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 31,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1795010462179
+        },
+        "departure": {
+          "timestamp": 1794997161179
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1795010518579
+        },
+        "departure": {
+          "timestamp": 1795010462179
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 40,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1795027590579
+        },
+        "departure": {
+          "timestamp": 1795010518579
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1795027646979
+        },
+        "departure": {
+          "timestamp": 1795027590579
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 47,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1795047465979
+        },
+        "departure": {
+          "timestamp": 1795027646979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1795047522379
+        },
+        "departure": {
+          "timestamp": 1795047465979
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 54,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1795070533379
+        },
+        "departure": {
+          "timestamp": 1795047522379
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1795073424379
+        },
+        "departure": {
+          "timestamp": 1795070533379
+        },
+        "stlFuelConsumption": 164,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      }
+    ],
+    "actualRoute": [
+      ["ZV-307", "ZV-759", null],
+      ["ZV-759", "ZV-194", null],
+      ["ZV-194", "LS-934", null],
+      ["LS-934", "LS-300", null],
+      ["LS-300", "LS-231", null],
+      ["LS-231", "KW-602", null],
+      ["KW-602", "KW-976", null],
+      ["KW-976", "XH-400", null],
+      ["XH-400", "XH-594", null],
+      ["XH-594", "DW-161", null],
+      ["DW-161", "DW-739", null],
+      ["DW-739", "OT-580", null]
+    ]
+  },
+  {
+    "source": "2026-11-16-gateway-blind-hrt-ant-standard-station-250t-cond075.json",
+    "request": {
+      "missionId": "63799e77-23b3-410b-8abc-2dd8199d7bde",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "f2f57766ebaca9d69efae41ccf4d8853|STA,0deca369a92788b8079e7ac245be66f7",
+      "destination": "8ecf9670ba070d78cfb5537e8d9f1b6c|STA,1deca369a92788b8079e7ac245be66f7",
+      "landing": false,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.5,
+      "payload": 250,
+      "condition": 0.75,
+      "stlFuel": 750,
+      "ftlFuel": 0,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": true
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794834338046,
+      "environment": [
+        {
+          "naturalId": "HRT",
+          "systemId": "VH-331"
+        },
+        {
+          "naturalId": "ANT",
+          "systemId": "ZV-307"
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "HRT",
+            "systemId": "VH-331",
+            "orbit": {
+              "semiMajorAxis": 46807737537.4384,
+              "eccentricity": 0.031190710459171492,
+              "inclination": 0.005501308286269612,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 5.451043501996131e29
+          },
+          {
+            "naturalId": "ANT",
+            "systemId": "ZV-307",
+            "orbit": {
+              "semiMajorAxis": 33603417000,
+              "eccentricity": 0.00144911481704531,
+              "inclination": 0.02535479317874627,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 2.817252601192869e30
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "8ecf9670ba070d78cfb5537e8d9f1b6c",
+          "naturalId": "ZV-307",
+          "position": {
+            "x": 276.089535527458,
+            "y": -189.5445236189404,
+            "z": 89.24495915011897
+          },
+          "connections": [
+            "f02f1292a7520f7bc96453010102f8c1",
+            "76efb33ed2c068611e880b02ef2b700a",
+            "7776f57dc2d58f3e51279ee68b5c102f"
+          ],
+          "neighbors": ["QJ-684", "ZV-639", "ZV-759", "YK-649", "IA-158", "LS-300"]
+        },
+        {
+          "systemId": "f2f57766ebaca9d69efae41ccf4d8853",
+          "naturalId": "VH-331",
+          "position": {
+            "x": -123.46186721097881,
+            "y": -99.32084354422284,
+            "z": 92.70283805793765
+          },
+          "connections": [
+            "8de3101e1865b4bb7edad269a4b0dda7",
+            "6164359edc05c084251cd7bc75cb126a",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "2318bd4539e5a2119d81212478520b22"
+          ],
+          "neighbors": [
+            "SB-838",
+            "VH-043",
+            "VH-192",
+            "VH-778",
+            "VH-874",
+            "BS-658",
+            "IA-158",
+            "OF-375"
+          ]
+        },
+        {
+          "systemId": "415431ee32ddfce24e12b6557ce139bc",
+          "naturalId": "IA-158",
+          "position": {
+            "x": 80.45163186892724,
+            "y": -128.64857392359306,
+            "z": 95.75599759442477
+          },
+          "connections": [
+            "835f10e219434edce7bd2a0364228603",
+            "8fcd2841a6ee2d457340eca05b459513",
+            "d90e4fd15bc9a072dda3410feb983df6"
+          ],
+          "neighbors": ["IA-093", "IA-151", "UB-402", "VH-331", "ZV-307"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-KZD-715",
+          "name": "Promitor -> Amethyst B",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-BDG-566",
+          "name": "Promitor -> Doujiang",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-PGG-155",
+          "name": "Promitor -> Berthier",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-QET-721",
+          "name": "Amethyst B -> Heph",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-FMX-128",
+          "name": "Amethyst B -> Promitor",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-AXH-868",
+          "name": "Heph -> Griff",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-BYP-857",
+          "name": "Heph -> Amethyst B",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-CCL-447",
+          "name": "Eos->Norwick- Circuitus Cibarius",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307a",
+          "operational": true,
+          "maxShipVolume": 3000
+        }
+      ],
+      "gatewayConnections": [
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "VH-331",
+          "fromGatewayId": "GTW-FMX-128",
+          "toGatewayId": "GTW-KZD-715",
+          "ftlDistance": 17.16952902094837,
+          "seen": 83
+        },
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "ZV-307",
+          "fromGatewayId": "GTW-QET-721",
+          "toGatewayId": "GTW-BYP-857",
+          "ftlDistance": 17.083312938773613,
+          "seen": 83
+        }
+      ],
+      "gatewayEndpoints": {
+        "GTW-KZD-715": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-BDG-566": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-PGG-155": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-QET-721": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-FMX-128": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-AXH-868": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-BYP-857": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-CCL-447": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 67291581000,
+            "eccentricity": 0.04988761618733406,
+            "inclination": 0.0205453559756279,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.099792082461369e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794834340397,
+    "actual": {
+      "seconds": 117406.409,
+      "stlFuel": 121,
+      "ftlFuel": 0
+    },
+    "segments": [
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794851653761
+        },
+        "departure": {
+          "timestamp": 1794834340761
+        },
+        "stlFuelConsumption": 24,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794851663761
+        },
+        "departure": {
+          "timestamp": 1794851653761
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794852263761
+        },
+        "departure": {
+          "timestamp": 1794851663761
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794872867195
+        },
+        "departure": {
+          "timestamp": 1794852263761
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794873467195
+        },
+        "departure": {
+          "timestamp": 1794872867195
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794873477195
+        },
+        "departure": {
+          "timestamp": 1794873467195
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794874077195
+        },
+        "departure": {
+          "timestamp": 1794873477195
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794894577170
+        },
+        "departure": {
+          "timestamp": 1794874077195
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794895177170
+        },
+        "departure": {
+          "timestamp": 1794894577170
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794895187170
+        },
+        "departure": {
+          "timestamp": 1794895177170
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794951747170
+        },
+        "departure": {
+          "timestamp": 1794895187170
+        },
+        "stlFuelConsumption": 32,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      }
+    ],
+    "actualRoute": [
+      ["VH-331", "IA-158", "GTW-KZD-715"],
+      ["IA-158", "ZV-307", "GTW-QET-721"]
+    ]
+  },
+  {
+    "source": "2026-11-16-mixed-blind-hrt-zv194b-standard-surface-v3-250t-cond075.json",
+    "request": {
+      "missionId": "bc7355cd-4304-4360-bfe4-c9eb80ccee0e",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "f2f57766ebaca9d69efae41ccf4d8853|STA,0deca369a92788b8079e7ac245be66f7",
+      "destination": "ac35dd2a980e53fedd1a4fe87a909972|PLA,965284695b0c13bc7ec131724227d815",
+      "landing": true,
+      "fuelUsageFactor": 0.05,
+      "reactorUsageFactor": 0.5,
+      "payload": 250,
+      "condition": 0.75,
+      "stlFuel": 1500,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": true
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794833545563,
+      "environment": [
+        {
+          "naturalId": "HRT",
+          "systemId": "VH-331"
+        },
+        {
+          "naturalId": "ZV-194b",
+          "systemId": "ZV-194",
+          "env": {
+            "radiusKm": 5493,
+            "pressure": 0.9624947309494019
+          }
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "HRT",
+            "systemId": "VH-331",
+            "orbit": {
+              "semiMajorAxis": 46807737537.4384,
+              "eccentricity": 0.031190710459171492,
+              "inclination": 0.005501308286269612,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 5.451043501996131e29
+          },
+          {
+            "naturalId": "ZV-194b",
+            "systemId": "ZV-194",
+            "orbit": {
+              "semiMajorAxis": 31412590000,
+              "eccentricity": 0.03171837580180715,
+              "inclination": 0.01770088451584251,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 4.5745899864402596e24
+            },
+            "parentMassKg": 5.387043150137199e29
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "f02f1292a7520f7bc96453010102f8c1",
+          "naturalId": "ZV-759",
+          "position": {
+            "x": 262.134699347303,
+            "y": -153.92017947469756,
+            "z": 61.68777096658184
+          },
+          "connections": [
+            "ac35dd2a980e53fedd1a4fe87a909972",
+            "8ecf9670ba070d78cfb5537e8d9f1b6c",
+            "ad1291e7bd5bbab1edebd67500c22150"
+          ],
+          "neighbors": ["ZV-194", "ZV-307", "ZV-896"]
+        },
+        {
+          "systemId": "8ecf9670ba070d78cfb5537e8d9f1b6c",
+          "naturalId": "ZV-307",
+          "position": {
+            "x": 276.089535527458,
+            "y": -189.5445236189404,
+            "z": 89.24495915011897
+          },
+          "connections": [
+            "f02f1292a7520f7bc96453010102f8c1",
+            "76efb33ed2c068611e880b02ef2b700a",
+            "7776f57dc2d58f3e51279ee68b5c102f"
+          ],
+          "neighbors": ["QJ-684", "ZV-639", "ZV-759", "YK-649", "IA-158", "LS-300"]
+        },
+        {
+          "systemId": "f2f57766ebaca9d69efae41ccf4d8853",
+          "naturalId": "VH-331",
+          "position": {
+            "x": -123.46186721097881,
+            "y": -99.32084354422284,
+            "z": 92.70283805793765
+          },
+          "connections": [
+            "8de3101e1865b4bb7edad269a4b0dda7",
+            "6164359edc05c084251cd7bc75cb126a",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "2318bd4539e5a2119d81212478520b22"
+          ],
+          "neighbors": [
+            "SB-838",
+            "VH-043",
+            "VH-192",
+            "VH-778",
+            "VH-874",
+            "BS-658",
+            "IA-158",
+            "OF-375"
+          ]
+        },
+        {
+          "systemId": "415431ee32ddfce24e12b6557ce139bc",
+          "naturalId": "IA-158",
+          "position": {
+            "x": 80.45163186892724,
+            "y": -128.64857392359306,
+            "z": 95.75599759442477
+          },
+          "connections": [
+            "835f10e219434edce7bd2a0364228603",
+            "8fcd2841a6ee2d457340eca05b459513",
+            "d90e4fd15bc9a072dda3410feb983df6"
+          ],
+          "neighbors": ["IA-093", "IA-151", "UB-402", "VH-331", "ZV-307"]
+        },
+        {
+          "systemId": "ac35dd2a980e53fedd1a4fe87a909972",
+          "naturalId": "ZV-194",
+          "position": {
+            "x": 295.96154347241304,
+            "y": -145.76136752572128,
+            "z": 75.75311866137588
+          },
+          "connections": ["f02f1292a7520f7bc96453010102f8c1", "66a9e561febf0198334ee2fa29299440"],
+          "neighbors": ["LS-934", "ZV-759"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-KZD-715",
+          "name": "Promitor -> Amethyst B",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-BDG-566",
+          "name": "Promitor -> Doujiang",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-PGG-155",
+          "name": "Promitor -> Berthier",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-QET-721",
+          "name": "Amethyst B -> Heph",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-FMX-128",
+          "name": "Amethyst B -> Promitor",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true,
+          "maxShipVolume": 3000
+        },
+        {
+          "naturalId": "GTW-AXH-868",
+          "name": "Heph -> Griff",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-BYP-857",
+          "name": "Heph -> Amethyst B",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true,
+          "maxShipVolume": 6000
+        },
+        {
+          "naturalId": "GTW-CCL-447",
+          "name": "Eos->Norwick- Circuitus Cibarius",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307a",
+          "operational": true,
+          "maxShipVolume": 3000
+        }
+      ],
+      "gatewayConnections": [
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "VH-331",
+          "fromGatewayId": "GTW-FMX-128",
+          "toGatewayId": "GTW-KZD-715",
+          "ftlDistance": 17.16952902094837,
+          "seen": 43
+        },
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "ZV-307",
+          "fromGatewayId": "GTW-QET-721",
+          "toGatewayId": "GTW-BYP-857",
+          "ftlDistance": 17.083312938773613,
+          "seen": 43
+        }
+      ],
+      "gatewayEndpoints": {
+        "GTW-KZD-715": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-BDG-566": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-PGG-155": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-QET-721": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-FMX-128": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-AXH-868": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-BYP-857": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-CCL-447": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 67291581000,
+            "eccentricity": 0.04988761618733406,
+            "inclination": 0.0205453559756279,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.099792082461369e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794833547960,
+    "actual": {
+      "seconds": 101157.409,
+      "stlFuel": 183,
+      "ftlFuel": 25
+    },
+    "segments": [
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794847819246
+        },
+        "departure": {
+          "timestamp": 1794833548246
+        },
+        "stlFuelConsumption": 31,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794847829246
+        },
+        "departure": {
+          "timestamp": 1794847819246
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794848429246
+        },
+        "departure": {
+          "timestamp": 1794847829246
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794869032680
+        },
+        "departure": {
+          "timestamp": 1794848429246
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794869632680
+        },
+        "departure": {
+          "timestamp": 1794869032680
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794869642680
+        },
+        "departure": {
+          "timestamp": 1794869632680
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794870242680
+        },
+        "departure": {
+          "timestamp": 1794869642680
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794890742655
+        },
+        "departure": {
+          "timestamp": 1794870242680
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794891342655
+        },
+        "departure": {
+          "timestamp": 1794890742655
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794891352655
+        },
+        "departure": {
+          "timestamp": 1794891342655
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794908380655
+        },
+        "departure": {
+          "timestamp": 1794891352655
+        },
+        "stlFuelConsumption": 24,
+        "ftlFuelConsumption": 14,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794915005655
+        },
+        "departure": {
+          "timestamp": 1794908380655
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "CHARGE",
+        "arrival": {
+          "timestamp": 1794915230655
+        },
+        "departure": {
+          "timestamp": 1794915005655
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": 11,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794920503655
+        },
+        "departure": {
+          "timestamp": 1794915230655
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1794934419655
+        },
+        "departure": {
+          "timestamp": 1794920503655
+        },
+        "stlFuelConsumption": 30,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "LANDING",
+        "arrival": {
+          "timestamp": 1794934705655
+        },
+        "departure": {
+          "timestamp": 1794934419655
+        },
+        "stlFuelConsumption": 33,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      }
+    ],
+    "actualRoute": [
+      ["VH-331", "IA-158", "GTW-KZD-715"],
+      ["IA-158", "ZV-307", "GTW-QET-721"],
+      ["ZV-307", "ZV-759", null],
+      ["ZV-759", "ZV-194", null]
+    ]
+  },
+  {
+    "source": "2026-11-15-mixed-zv759b-hrt-1500.json",
+    "request": {
+      "missionId": "daba9b8d-b557-47d0-839f-476e6486da5b",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "f02f1292a7520f7bc96453010102f8c1|PLA,18e09634754ddf9e63b76089b79176e2",
+      "destination": "f2f57766ebaca9d69efae41ccf4d8853|STA,0deca369a92788b8079e7ac245be66f7",
+      "landing": true,
+      "fuelUsageFactor": 0.1,
+      "reactorUsageFactor": 0.5,
+      "payload": 0,
+      "condition": 1,
+      "stlFuel": 1500,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": true
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794731651239,
+      "environment": [
+        {
+          "naturalId": "ZV-759b",
+          "systemId": "ZV-759",
+          "env": {
+            "radiusKm": 7699,
+            "pressure": 2.0237467288970947
+          }
+        },
+        {
+          "naturalId": "HRT",
+          "systemId": "VH-331"
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "ZV-759b",
+            "systemId": "ZV-759",
+            "orbit": {
+              "semiMajorAxis": 62419619000,
+              "eccentricity": 0.009293373925635475,
+              "inclination": 0.017167502106156658,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 1.0785567891711707e25
+            },
+            "parentMassKg": 1.5846139046978604e30
+          },
+          {
+            "naturalId": "HRT",
+            "systemId": "VH-331",
+            "orbit": {
+              "semiMajorAxis": 46807737537.4384,
+              "eccentricity": 0.031190710459171492,
+              "inclination": 0.005501308286269612,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 0
+            },
+            "parentMassKg": 5.451043501996131e29
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "f02f1292a7520f7bc96453010102f8c1",
+          "naturalId": "ZV-759",
+          "position": {
+            "x": 262.134699347303,
+            "y": -153.92017947469756,
+            "z": 61.68777096658184
+          },
+          "connections": [
+            "ac35dd2a980e53fedd1a4fe87a909972",
+            "8ecf9670ba070d78cfb5537e8d9f1b6c",
+            "ad1291e7bd5bbab1edebd67500c22150"
+          ],
+          "neighbors": ["ZV-194", "ZV-307", "ZV-896"]
+        },
+        {
+          "systemId": "8ecf9670ba070d78cfb5537e8d9f1b6c",
+          "naturalId": "ZV-307",
+          "position": {
+            "x": 276.089535527458,
+            "y": -189.5445236189404,
+            "z": 89.24495915011897
+          },
+          "connections": [
+            "f02f1292a7520f7bc96453010102f8c1",
+            "76efb33ed2c068611e880b02ef2b700a",
+            "7776f57dc2d58f3e51279ee68b5c102f"
+          ],
+          "neighbors": ["QJ-684", "ZV-639", "ZV-759", "YK-649", "IA-158", "LS-300"]
+        },
+        {
+          "systemId": "f2f57766ebaca9d69efae41ccf4d8853",
+          "naturalId": "VH-331",
+          "position": {
+            "x": -123.46186721097881,
+            "y": -99.32084354422284,
+            "z": 92.70283805793765
+          },
+          "connections": [
+            "8de3101e1865b4bb7edad269a4b0dda7",
+            "6164359edc05c084251cd7bc75cb126a",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "2318bd4539e5a2119d81212478520b22"
+          ],
+          "neighbors": [
+            "SB-838",
+            "VH-043",
+            "VH-192",
+            "VH-778",
+            "VH-874",
+            "BS-658",
+            "IA-158",
+            "OF-375"
+          ]
+        },
+        {
+          "systemId": "415431ee32ddfce24e12b6557ce139bc",
+          "naturalId": "IA-158",
+          "position": {
+            "x": 80.45163186892724,
+            "y": -128.64857392359306,
+            "z": 95.75599759442477
+          },
+          "connections": [
+            "835f10e219434edce7bd2a0364228603",
+            "8fcd2841a6ee2d457340eca05b459513",
+            "d90e4fd15bc9a072dda3410feb983df6"
+          ],
+          "neighbors": ["IA-093", "IA-151", "UB-402", "VH-331", "ZV-307"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-FMX-128",
+          "name": "Amethyst B -> Promitor",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-QET-721",
+          "name": "Amethyst B -> Heph",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-KZD-715",
+          "name": "Promitor -> Amethyst B",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-BDG-566",
+          "name": "Promitor -> Doujiang",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-PGG-155",
+          "name": "Promitor -> Berthier",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-CCL-447",
+          "name": "Eos->Norwick- Circuitus Cibarius",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-AXH-868",
+          "name": "Heph -> Griff",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-BYP-857",
+          "name": "Heph -> Amethyst B",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true
+        }
+      ],
+      "gatewayConnections": [
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "VH-331",
+          "fromGatewayId": "GTW-FMX-128",
+          "toGatewayId": "GTW-KZD-715",
+          "ftlDistance": 17.16952902094837,
+          "seen": 4
+        },
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "ZV-307",
+          "fromGatewayId": "GTW-QET-721",
+          "toGatewayId": "GTW-BYP-857",
+          "ftlDistance": 17.083312938773613,
+          "seen": 4
+        }
+      ],
+      "gatewayEndpoints": {
+        "GTW-FMX-128": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-QET-721": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-KZD-715": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-BDG-566": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-PGG-155": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-CCL-447": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 67291581000,
+            "eccentricity": 0.04988761618733406,
+            "inclination": 0.0205453559756279,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.099792082461369e24
+          }
+        },
+        "GTW-AXH-868": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-BYP-857": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794731651472,
+    "actual": {
+      "seconds": 79514.409,
+      "stlFuel": 257,
+      "ftlFuel": 14
+    },
+    "segments": [
+      {
+        "type": "TAKE_OFF",
+        "arrival": {
+          "timestamp": 1794732027775
+        },
+        "departure": {
+          "timestamp": 1794731654775
+        },
+        "stlFuelConsumption": 42,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794740350775
+        },
+        "departure": {
+          "timestamp": 1794732027775
+        },
+        "stlFuelConsumption": 47,
+        "ftlFuelConsumption": 14,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794746644775
+        },
+        "departure": {
+          "timestamp": 1794740350775
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1794754302775
+        },
+        "departure": {
+          "timestamp": 1794746644775
+        },
+        "stlFuelConsumption": 52,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794754312775
+        },
+        "departure": {
+          "timestamp": 1794754302775
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794754912775
+        },
+        "departure": {
+          "timestamp": 1794754312775
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794775412750
+        },
+        "departure": {
+          "timestamp": 1794754912775
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794776012750
+        },
+        "departure": {
+          "timestamp": 1794775412750
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794776022750
+        },
+        "departure": {
+          "timestamp": 1794776012750
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794776622750
+        },
+        "departure": {
+          "timestamp": 1794776022750
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794797226184
+        },
+        "departure": {
+          "timestamp": 1794776622750
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794797826184
+        },
+        "departure": {
+          "timestamp": 1794797226184
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794797836184
+        },
+        "departure": {
+          "timestamp": 1794797826184
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794811169184
+        },
+        "departure": {
+          "timestamp": 1794797836184
+        },
+        "stlFuelConsumption": 51,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      }
+    ],
+    "actualRoute": [
+      ["ZV-759", "ZV-307", null],
+      ["ZV-307", "IA-158", "GTW-BYP-857"],
+      ["IA-158", "VH-331", "GTW-FMX-128"]
+    ]
+  },
+  {
+    "source": "2026-11-15-mixed-vh874a-zv759b-750.json",
+    "request": {
+      "missionId": "80b6ac37-f58e-4bc3-8fd7-b86e4057b08c",
+      "blueprintId": "5439eb7f54110cc7639950e692146eea",
+      "origin": "6164359edc05c084251cd7bc75cb126a|PLA,ca0a863db096a34e61e52ac288035de3",
+      "destination": "f02f1292a7520f7bc96453010102f8c1|PLA,18e09634754ddf9e63b76089b79176e2",
+      "landing": true,
+      "fuelUsageFactor": 0.1,
+      "reactorUsageFactor": 0.5,
+      "payload": 0,
+      "condition": 1,
+      "stlFuel": 750,
+      "ftlFuel": 300,
+      "preferences": {
+        "ftlPreference": "LEAST_JUMPS",
+        "useGateways": true
+      }
+    },
+    "blueprint": {
+      "performance": {
+        "totalVolume": 963,
+        "operatingEmptyMass": 827.8,
+        "maxGFactor": 8,
+        "acceleration": 151.0026576467746,
+        "accelerationMax": 78.48,
+        "emitterChargeTime": 135.9375,
+        "maxOverchargeTime": 314.0625,
+        "ftlMaxSpeed": 0.0010936963431707758,
+        "minReactorUsage": 0.3020833333333333,
+        "storeCapacityWeight": 500,
+        "storeCapacityVolume": 500,
+        "stlFuelCapacity": 1500,
+        "ftlFuelCapacity": 300,
+        "ftlFuelMaterial": {
+          "name": "ftlFuel",
+          "id": "7a2a12cd6872b89a6b97532618788a4d",
+          "ticker": "FF",
+          "category": "ba98fa0cf77040a96cd8a608ad0d08e9",
+          "weight": 0.05,
+          "volume": 0.01,
+          "resource": false,
+          "tradable": true
+        }
+      },
+      "selections": [
+        {
+          "type": "STL_ENGINE",
+          "amount": 1,
+          "option": "STL_ENGINE_STANDARD",
+          "modifiers": [
+            {
+              "type": "STL_USAGE",
+              "value": 0.015
+            }
+          ]
+        },
+        {
+          "type": "STL_FUEL_TANK",
+          "amount": 1,
+          "option": "STL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "STL_FUEL_CAPACITY",
+              "value": 1500
+            }
+          ]
+        },
+        {
+          "type": "FTL_REACTOR",
+          "amount": 1,
+          "option": "FTL_REACTOR_STANDARD",
+          "modifiers": [
+            {
+              "type": "FTL_POWER",
+              "value": 2400
+            },
+            {
+              "type": "FTL_CHARGE_FACTOR",
+              "value": 2
+            }
+          ]
+        },
+        {
+          "type": "FTL_FUEL_TANK",
+          "amount": 1,
+          "option": "FTL_FUEL_TANK_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_FUEL_CAPACITY",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "VORTEX_REACTOR",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "VORTEX_FUEL_TANK",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "CARGO_BAY",
+          "amount": 1,
+          "option": "CARGO_BAY_SMALL",
+          "modifiers": [
+            {
+              "type": "CARGO_CAPACITY_VOLUME",
+              "value": 500
+            },
+            {
+              "type": "CARGO_CAPACITY_WEIGHT",
+              "value": 500
+            }
+          ]
+        },
+        {
+          "type": "HULL_TYPE",
+          "amount": 48,
+          "option": "HULL_PLATES_BASIC",
+          "modifiers": [
+            {
+              "type": "SHIELDING_GENERAL",
+              "value": 0
+            },
+            {
+              "type": "MAX_G_FACTOR",
+              "value": 8
+            }
+          ]
+        },
+        {
+          "type": "HEAT_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "WHIPPLE_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "GRAVITY_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "RADIATION_SHIELD",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "REPAIR_DRONES",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "HIGH_G_SEATS",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        },
+        {
+          "type": "STRUCTURE",
+          "amount": 46,
+          "option": "STRUCTURAL_SPACECRAFT_COMPONENT",
+          "modifiers": []
+        },
+        {
+          "type": "COMMAND_BRIDGE",
+          "amount": 1,
+          "option": "COMMAND_BRIDGE_MK1",
+          "modifiers": []
+        },
+        {
+          "type": "CREW_QUARTERS",
+          "amount": 1,
+          "option": "CREW_QUARTERS_SMALL",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_CONTROLLER",
+          "amount": 1,
+          "option": "FTL_FIELD_CONTROLLER",
+          "modifiers": []
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_SMALL",
+          "amount": 2,
+          "option": "FTL_FIELD_EMITTER_SMALL",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 250
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 100
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_MEDIUM",
+          "amount": 3,
+          "option": "FTL_FIELD_EMITTER_MEDIUM",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 500
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 175
+            }
+          ]
+        },
+        {
+          "type": "FTL_FIELD_EMITTER_LARGE",
+          "amount": 0,
+          "option": "FTL_FIELD_EMITTER_LARGE",
+          "modifiers": [
+            {
+              "type": "FTL_VOLUME_SPAN",
+              "value": 1000
+            },
+            {
+              "type": "POWER_REQUIREMENT",
+              "value": 300
+            }
+          ]
+        },
+        {
+          "type": "HABITATION_MODULE",
+          "amount": 0,
+          "option": "NONE",
+          "modifiers": []
+        }
+      ]
+    },
+    "flightInputs": {
+      "capturedAt": 1794740565623,
+      "environment": [
+        {
+          "naturalId": "VH-874a",
+          "systemId": "VH-874",
+          "env": {
+            "radiusKm": 4406,
+            "pressure": 0.006661968771368265
+          }
+        },
+        {
+          "naturalId": "ZV-759b",
+          "systemId": "ZV-759",
+          "env": {
+            "radiusKm": 7699,
+            "pressure": 2.0237467288970947
+          }
+        }
+      ],
+      "orbit": {
+        "motionFactor": 20,
+        "simulationIntervalS": 86400,
+        "endpoints": [
+          {
+            "naturalId": "VH-874a",
+            "systemId": "VH-874",
+            "orbit": {
+              "semiMajorAxis": 33189166000,
+              "eccentricity": 0.011157500267872347,
+              "inclination": -0.019308078982761923,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 1.9559521961932633e24
+            },
+            "parentMassKg": 5.838626966702591e29
+          },
+          {
+            "naturalId": "ZV-759b",
+            "systemId": "ZV-759",
+            "orbit": {
+              "semiMajorAxis": 62419619000,
+              "eccentricity": 0.009293373925635475,
+              "inclination": 0.017167502106156658,
+              "rightAscension": 0,
+              "periapsis": 0,
+              "mass": 1.0785567891711707e25
+            },
+            "parentMassKg": 1.5846139046978604e30
+          }
+        ]
+      },
+      "stars": [
+        {
+          "systemId": "f02f1292a7520f7bc96453010102f8c1",
+          "naturalId": "ZV-759",
+          "position": {
+            "x": 262.134699347303,
+            "y": -153.92017947469756,
+            "z": 61.68777096658184
+          },
+          "connections": [
+            "ac35dd2a980e53fedd1a4fe87a909972",
+            "8ecf9670ba070d78cfb5537e8d9f1b6c",
+            "ad1291e7bd5bbab1edebd67500c22150"
+          ],
+          "neighbors": ["ZV-194", "ZV-307", "ZV-896"]
+        },
+        {
+          "systemId": "6164359edc05c084251cd7bc75cb126a",
+          "naturalId": "VH-874",
+          "position": {
+            "x": -110.08460727615649,
+            "y": -136.75701048439782,
+            "z": 83.9696997371478
+          },
+          "connections": [
+            "f2f57766ebaca9d69efae41ccf4d8853",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52"
+          ],
+          "neighbors": ["VH-043", "VH-192", "VH-331"]
+        },
+        {
+          "systemId": "8ecf9670ba070d78cfb5537e8d9f1b6c",
+          "naturalId": "ZV-307",
+          "position": {
+            "x": 276.089535527458,
+            "y": -189.5445236189404,
+            "z": 89.24495915011897
+          },
+          "connections": [
+            "f02f1292a7520f7bc96453010102f8c1",
+            "76efb33ed2c068611e880b02ef2b700a",
+            "7776f57dc2d58f3e51279ee68b5c102f"
+          ],
+          "neighbors": ["QJ-684", "ZV-639", "ZV-759", "YK-649", "IA-158", "LS-300"]
+        },
+        {
+          "systemId": "f2f57766ebaca9d69efae41ccf4d8853",
+          "naturalId": "VH-331",
+          "position": {
+            "x": -123.46186721097881,
+            "y": -99.32084354422284,
+            "z": 92.70283805793765
+          },
+          "connections": [
+            "8de3101e1865b4bb7edad269a4b0dda7",
+            "6164359edc05c084251cd7bc75cb126a",
+            "3834168e01b65c072b16092903be423b",
+            "b327eee7710ef5b77fb3656d1224ac52",
+            "2318bd4539e5a2119d81212478520b22"
+          ],
+          "neighbors": [
+            "SB-838",
+            "VH-043",
+            "VH-192",
+            "VH-778",
+            "VH-874",
+            "BS-658",
+            "IA-158",
+            "OF-375"
+          ]
+        },
+        {
+          "systemId": "415431ee32ddfce24e12b6557ce139bc",
+          "naturalId": "IA-158",
+          "position": {
+            "x": 80.45163186892724,
+            "y": -128.64857392359306,
+            "z": 95.75599759442477
+          },
+          "connections": [
+            "835f10e219434edce7bd2a0364228603",
+            "8fcd2841a6ee2d457340eca05b459513",
+            "d90e4fd15bc9a072dda3410feb983df6"
+          ],
+          "neighbors": ["IA-093", "IA-151", "UB-402", "ZV-307", "VH-331"]
+        }
+      ],
+      "gateways": [
+        {
+          "naturalId": "GTW-QET-721",
+          "name": "Amethyst B -> Heph",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-FMX-128",
+          "name": "Amethyst B -> Promitor",
+          "systemId": "IA-158",
+          "planetId": "IA-158b",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-PGG-155",
+          "name": "Promitor -> Berthier",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-BDG-566",
+          "name": "Promitor -> Doujiang",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-KZD-715",
+          "name": "Promitor -> Amethyst B",
+          "systemId": "VH-331",
+          "planetId": "VH-331a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-CCL-447",
+          "name": "Eos->Norwick- Circuitus Cibarius",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307a",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-AXH-868",
+          "name": "Heph -> Griff",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true
+        },
+        {
+          "naturalId": "GTW-BYP-857",
+          "name": "Heph -> Amethyst B",
+          "systemId": "ZV-307",
+          "planetId": "ZV-307c",
+          "operational": true
+        }
+      ],
+      "gatewayConnections": [
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "ZV-307",
+          "fromGatewayId": "GTW-QET-721",
+          "toGatewayId": "GTW-BYP-857",
+          "ftlDistance": 17.083312938773613,
+          "seen": 10
+        },
+        {
+          "fromSystem": "IA-158",
+          "toSystem": "VH-331",
+          "fromGatewayId": "GTW-FMX-128",
+          "toGatewayId": "GTW-KZD-715",
+          "ftlDistance": 17.16952902094837,
+          "seen": 10
+        }
+      ],
+      "gatewayEndpoints": {
+        "GTW-QET-721": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-FMX-128": {
+          "parentMassKg": 6.0997126696759306e29,
+          "orbit": {
+            "semiMajorAxis": 50192213000,
+            "eccentricity": 0.009128352627158165,
+            "inclination": 0.05231945961713791,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 2.478062676576975e24
+          }
+        },
+        "GTW-PGG-155": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-BDG-566": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-KZD-715": {
+          "parentMassKg": 5.451043498327814e29,
+          "orbit": {
+            "semiMajorAxis": 23844056000,
+            "eccentricity": 0.049147967249155045,
+            "inclination": -0.016744812950491905,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.812682071630187e24
+          }
+        },
+        "GTW-CCL-447": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 67291581000,
+            "eccentricity": 0.04988761618733406,
+            "inclination": 0.0205453559756279,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 7.099792082461369e24
+          }
+        },
+        "GTW-AXH-868": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        },
+        "GTW-BYP-857": {
+          "parentMassKg": 2.817252622504626e30,
+          "orbit": {
+            "semiMajorAxis": 173992340000,
+            "eccentricity": 0.0013491148129105568,
+            "inclination": 0.04535479471087456,
+            "rightAscension": 0,
+            "periapsis": 0,
+            "mass": 6.884378499158369e24
+          }
+        }
+      }
+    },
+    "gameTimeMs": 1794740568794,
+    "actual": {
+      "seconds": 157034.409,
+      "stlFuel": 198,
+      "ftlFuel": 26
+    },
+    "segments": [
+      {
+        "type": "TAKE_OFF",
+        "arrival": {
+          "timestamp": 1794740737075
+        },
+        "departure": {
+          "timestamp": 1794740569075
+        },
+        "stlFuelConsumption": 19,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794769963075
+        },
+        "departure": {
+          "timestamp": 1794740737075
+        },
+        "stlFuelConsumption": 16,
+        "ftlFuelConsumption": 12,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794775396075
+        },
+        "departure": {
+          "timestamp": 1794769963075
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1794800077075
+        },
+        "departure": {
+          "timestamp": 1794775396075
+        },
+        "stlFuelConsumption": 23,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794800087075
+        },
+        "departure": {
+          "timestamp": 1794800077075
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794800687075
+        },
+        "departure": {
+          "timestamp": 1794800087075
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794821290509
+        },
+        "departure": {
+          "timestamp": 1794800687075
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794821890509
+        },
+        "departure": {
+          "timestamp": 1794821290509
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794821900509
+        },
+        "departure": {
+          "timestamp": 1794821890509
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "LOCK",
+        "arrival": {
+          "timestamp": 1794822500509
+        },
+        "departure": {
+          "timestamp": 1794821900509
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "JUMP_GATEWAY",
+        "arrival": {
+          "timestamp": 1794843000484
+        },
+        "departure": {
+          "timestamp": 1794822500509
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DECAY",
+        "arrival": {
+          "timestamp": 1794843600484
+        },
+        "departure": {
+          "timestamp": 1794843000484
+        },
+        "stlFuelConsumption": 5,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "TRANSIT",
+        "arrival": {
+          "timestamp": 1794843610484
+        },
+        "departure": {
+          "timestamp": 1794843600484
+        },
+        "stlFuelConsumption": 15,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "DEPARTURE",
+        "arrival": {
+          "timestamp": 1794867826484
+        },
+        "departure": {
+          "timestamp": 1794843610484
+        },
+        "stlFuelConsumption": 16,
+        "ftlFuelConsumption": 14,
+        "transferEllipse": {}
+      },
+      {
+        "type": "JUMP",
+        "arrival": {
+          "timestamp": 1794874120484
+        },
+        "departure": {
+          "timestamp": 1794867826484
+        },
+        "stlFuelConsumption": null,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      },
+      {
+        "type": "APPROACH",
+        "arrival": {
+          "timestamp": 1794897285484
+        },
+        "departure": {
+          "timestamp": 1794874120484
+        },
+        "stlFuelConsumption": 23,
+        "ftlFuelConsumption": null,
+        "transferEllipse": {}
+      },
+      {
+        "type": "LANDING",
+        "arrival": {
+          "timestamp": 1794897603484
+        },
+        "departure": {
+          "timestamp": 1794897285484
+        },
+        "stlFuelConsumption": 36,
+        "ftlFuelConsumption": null,
+        "transferEllipse": null
+      }
+    ],
+    "actualRoute": [
+      ["VH-874", "VH-331", null],
+      ["VH-331", "IA-158", "GTW-KZD-715"],
+      ["IA-158", "ZV-307", "GTW-QET-721"],
+      ["ZV-307", "ZV-759", null]
+    ]
+  }
+]

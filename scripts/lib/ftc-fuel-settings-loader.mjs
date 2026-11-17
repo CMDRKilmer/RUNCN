@@ -1,3 +1,5 @@
+import { resolveTsRelative } from './resolve-ts-relative.mjs';
+
 // 测试用模块解析替身（Node module.register 钩子），服务 scripts/verify-ftc-slider-cache.mjs。
 //
 // 只替换 'vue'（浏览器侧依赖 → scripts/lib/ftc-vue-ref-stub.mjs），
@@ -13,6 +15,10 @@ export function resolve(specifier, context, nextResolve) {
   if (specifier === '@src/utils/persisted-ref') {
     // 不指定 format：让 Node 按 .ts 扩展名走原生类型剥离。
     return { url: PERSISTED_REF, shortCircuit: true };
+  }
+  const relative = resolveTsRelative(specifier, context);
+  if (relative !== undefined) {
+    return { url: relative, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }

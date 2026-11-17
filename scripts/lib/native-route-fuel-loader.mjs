@@ -4,6 +4,18 @@
 const STUB = new URL('./native-route-fuel-stub.mjs', import.meta.url).href;
 
 export function resolve(specifier, context, nextResolve) {
+  if (
+    specifier === '@src/core/flight/fuel-options' ||
+    specifier === '@src/infrastructure/fio/planet-environment'
+  ) {
+    return {
+      url: new URL('../../src/' + specifier.slice(5) + '.ts', import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
+  if (specifier === '@src/features/XIT/FTC/formula-plan') {
+    return { url: STUB, shortCircuit: true };
+  }
   if (specifier === '@src/features/XIT/FTC/ftc-compute') {
     return { url: STUB, shortCircuit: true };
   }

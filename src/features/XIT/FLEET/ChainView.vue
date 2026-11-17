@@ -977,7 +977,7 @@ function arrivalClockText(ms: number): string {
 }
 
 // 判缺段的固定文案（与 chain-flight-time 落地的 leg.error 一致；成因全文走 data-tooltip）。
-const MISSING_STL_RECORD = '缺原生 STL 段记录';
+const MISSING_INPUT = '缺规划输入';
 
 // 「飞行」列的显示态。判定条件与重构前的 flightCellText 逐字一致，只是搬移：
 // - done：已完成阶段（含归航段）；
@@ -1040,12 +1040,12 @@ function flightCellText(
     // 输入残缺（成因全文见 flightCellTitle）：显式标缺。
     // 写成「--（…）」而不是「0 小时」——否则会被读成「与出发同一时刻到达」。
     if (leg.missingInputs !== undefined && leg.missingInputs.length > 0) {
-      return `--（${leg.error ?? MISSING_STL_RECORD}）`;
+      return `--（${leg.error ?? MISSING_INPUT}）`;
     }
     return leg.error ? `（${leg.error}）` : '';
   }
-  // 近似段（时长按轨道几何公式估算）：前缀 ≈ 标明不是原生前向记录。
-  const approx = leg.approximated !== undefined ? '≈' : '';
+  // 时长按公式模型预测（不是原生前向记录），前缀 ≈ 标明是预估值。
+  const approx = '≈';
   return ` · ${approx}${formatFlightDuration(leg.hours * 3600000)}（${arrivalClockText(leg.arriveAtMs)}到达）`;
 }
 
@@ -1055,8 +1055,7 @@ function flightCellText(
 // 为什么无文案必须返回 undefined 而不是 ''：空串会渲染成一个空白 tooltip 框；
 // Vue 3 对非布尔属性的 undefined 会直接移除该属性（同 CopyButton.vue 的写法）。
 // 为什么必须与显示态一致：只有预估态的正文才是「预估」，才需要补充说明：
-// - 判缺段 → fuel-model.missingModelInputs 的成因全文（含可操作指引），不截断、不改写；
-// - 近似段 → 说明时长按轨道几何公式估算 + 为何是近似值；
+// - 判缺段 → formula-plan 的成因全文（含可操作指引），不截断、不改写；
 // - 已完成 / 在途 / 无数据 → undefined：正文是真实数据或本就无正文，
 //   此时再挂预估成因会与同一行的正文自相矛盾。
 function flightCellTitle(
@@ -1075,11 +1074,7 @@ function flightCellTitle(
       ? leg.missingInputs.join('；')
       : undefined;
   }
-  const a = leg.approximated;
-  if (a === undefined) {
-    return undefined;
-  }
-  return '本段时长按轨道几何公式估算；弧长为均值圆弧初版，与服务器原生 TRANSIT 弧长存在相位偏差';
+  return undefined;
 }
 
 // 归航段（表格末行）的段序号 = 站点数；末行两个分支（plan / progress）在此合并，
@@ -1097,9 +1092,7 @@ function flightTotalText(shipId: string): string {
   if (!est.ok) {
     return '（部分航段无法计算）';
   }
-  // 有近似段时必须标注：总时长不是全部来自原生记录。
-  const approx = est.approximatedLegs > 0 ? `（含 ${est.approximatedLegs} 段公式估算）` : '';
-  return `约 ${formatFlightDuration(est.totalHours * 3600000)}${approx}`;
+  return `约 ${formatFlightDuration(est.totalHours * 3600000)}`;
 }
 </script>
 

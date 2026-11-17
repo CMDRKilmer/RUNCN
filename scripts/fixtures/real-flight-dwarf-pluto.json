@@ -1,0 +1,159 @@
+{
+  "recordedLocal": "2026-11-17 17:04:25 +08:00",
+  "source": {
+    "serverLog": "prun-log.json",
+    "clientLog": "prun-client-log.json",
+    "note": "单程实船记录：HRT 空间站 → VH-192c 行星，自然跃迁一次，开启着陆。原始日志含大量交易/仓储噪声，此处只保留与飞行相关的消息字段。"
+  },
+  "ship": {
+    "registration": "AVI-06JVV",
+    "name": "Dwarf-PLUTO",
+    "blueprintNaturalId": "BP-XZWK-1228",
+    "id": "91f6dd5861ac151592aa29396f85e240",
+    "operatingEmptyMass": 1271,
+    "thrust": 125000,
+    "volume": 1632,
+    "reactorPower": 2400,
+    "emitterPower": 750,
+    "stlFuelFlowRate": 0.015,
+    "condition": 0.9297209746588769,
+    "stlFuelLimit": 3500,
+    "ftlFuelLimit": 2000,
+    "storeCapacityWeight": 3000
+  },
+  "preFlightSnapshot": {
+    "mass": 1835.76,
+    "acceleration": 68.09168954547435,
+    "condition": 0.9299407504517987
+  },
+  "inFlightSnapshot": {
+    "mass": 2377.973,
+    "acceleration": 52.565777660217336,
+    "condition": 0.9297209746588769
+  },
+  "request": {
+    "missionId": "6c8b2309-3f67-4f24-9dc2-61cb0a6ea218",
+    "origin": "f2f57766ebaca9d69efae41ccf4d8853|STA,0deca369a92788b8079e7ac245be66f7",
+    "destination": "3834168e01b65c072b16092903be423b|PLA,53b074a4b928fadf766417ddc780e70c",
+    "landing": true,
+    "fuelUsageFactor": 0.05,
+    "reactorUsageFactor": 0.65625,
+    "preferences": {
+      "ftlPreference": "LEAST_JUMPS",
+      "useGateways": true
+    }
+  },
+  "destinationBody": {
+    "naturalId": "VH-192c",
+    "systemNaturalId": "VH-192"
+  },
+  "departure": {
+    "atMs": 1794906265414,
+    "stlFuel": 3500,
+    "ftlFuel": 1974,
+    "payload": 803.493
+  },
+  "flown": {
+    "missionId": "6c8b2309-3f67-4f24-9dc2-61cb0a6ea218",
+    "stlFuelConsumption": 211,
+    "ftlFuelConsumption": 26,
+    "ftlDistance": 5.692910420994661,
+    "etaMs": 19467000,
+    "chargeTimeMs": 0,
+    "minReactorUsageFactor": 0.313,
+    "maxReactorUsageFactor": 1,
+    "segments": [
+      {
+        "type": "DEPARTURE",
+        "departureMs": 1794906265414,
+        "arrivalMs": 1794908885414,
+        "stlDistance": 22316106.930075005,
+        "stlFuelConsumption": 87,
+        "ftlDistance": null,
+        "ftlFuelConsumption": 26
+      },
+      {
+        "type": "JUMP",
+        "departureMs": 1794908885414,
+        "arrivalMs": 1794917954414,
+        "stlDistance": null,
+        "stlFuelConsumption": null,
+        "ftlDistance": 5.692910420994661,
+        "ftlFuelConsumption": null
+      },
+      {
+        "type": "APPROACH",
+        "departureMs": 1794917954414,
+        "arrivalMs": 1794925465414,
+        "stlDistance": 71431125.51459546,
+        "stlFuelConsumption": 93,
+        "ftlDistance": null,
+        "ftlFuelConsumption": null
+      },
+      {
+        "type": "LANDING",
+        "departureMs": 1794925465414,
+        "arrivalMs": 1794925732414,
+        "stlDistance": 1867.3407047332469,
+        "stlFuelConsumption": 31,
+        "ftlDistance": null,
+        "ftlFuelConsumption": null
+      }
+    ]
+  },
+  "superseded": {
+    "missionId": "6c8b2309-3f67-4f24-9dc2-61cb0a6ea218",
+    "stlFuelConsumption": 207,
+    "ftlFuelConsumption": 26,
+    "ftlDistance": 5.692910420994661,
+    "etaMs": 19647000,
+    "chargeTimeMs": 0,
+    "minReactorUsageFactor": 0.313,
+    "maxReactorUsageFactor": 1,
+    "segments": [
+      {
+        "type": "DEPARTURE",
+        "departureMs": 1794906265414,
+        "arrivalMs": 1794908932414,
+        "stlDistance": 22316106.93007501,
+        "stlFuelConsumption": 85,
+        "ftlDistance": null,
+        "ftlFuelConsumption": 26
+      },
+      {
+        "type": "JUMP",
+        "departureMs": 1794908932414,
+        "arrivalMs": 1794918001414,
+        "stlDistance": null,
+        "stlFuelConsumption": null,
+        "ftlDistance": 5.692910420994661,
+        "ftlFuelConsumption": null
+      },
+      {
+        "type": "APPROACH",
+        "departureMs": 1794918001414,
+        "arrivalMs": 1794925645414,
+        "stlDistance": 71395663.40269092,
+        "stlFuelConsumption": 91,
+        "ftlDistance": null,
+        "ftlFuelConsumption": null
+      },
+      {
+        "type": "LANDING",
+        "departureMs": 1794925645414,
+        "arrivalMs": 1794925912414,
+        "stlDistance": 1867.3407047332469,
+        "stlFuelConsumption": 31,
+        "ftlDistance": null,
+        "ftlFuelConsumption": null
+      }
+    ]
+  },
+  "flightRecord": {
+    "id": "b8d48a05bea98f1ac4a5525ec36951a7",
+    "shipId": "91f6dd5861ac151592aa29396f85e240",
+    "departureMs": 1794906265414,
+    "arrivalMs": 1794925732414,
+    "aborted": false
+  }
+}

@@ -8,6 +8,7 @@ import {
 } from '@src/infrastructure/prun-api/data/addresses';
 import { gameClockOffsetMs } from '@src/infrastructure/prun-api/data/system-bodies';
 import { sleep } from '@src/utils/sleep';
+import { predictWithGameModel, type PlanetOrbit } from './orbit-position';
 
 // FIO 轨道数据 + 开普勒位置预测。
 //
@@ -25,15 +26,6 @@ import { sleep } from '@src/utils/sleep';
 // ② 同天体两次以上观测互相回验（误差 >25% 轨道半径拒绝）。任一失败即
 // 降级为静态位置（调用方处理）。
 
-interface PlanetOrbit {
-  semiMajorAxis: number; // m
-  eccentricity: number;
-  inclination: number; // rad
-  rightAscension: number; // rad
-  periapsis: number; // rad
-  mass: number; // kg（天体自身质量，作为卫星轨道中心时使用）
-}
-
 interface StarInfo {
   mass: number; // kg
 }
@@ -41,17 +33,9 @@ interface StarInfo {
 const DEFAULT_MOTION_FACTOR = 20;
 const DEFAULT_SIMULATION_INTERVAL_S = 86400;
 const CACHE_KEY = 'rprun.fio.orbit.v1';
-// 游戏轨道模型（从游戏 bundle 逆向 + 日志观测验证）：
-// - M0 = 0：所有天体在世界时间 0 时平近点角为 0。
-// - worldTime = GAME_REF + (t_s - GAME_REF) * GAME_MOTION_FACTOR。
-// - M = n * worldTime，n = √(G*M_center / a³)，G = 6.67384e-11。
-// - 输出：轨道面 → R3(-Ω)·R1(-i)·R3(-ω) → /1e3（米→千米）+ x/y 交换，
-//   与服务器 transferEllipse 坐标同一坐标系（日志观测验证误差 <1%）。
-const GAME_G = 6.67384e-11;
-const GAME_REF = 1451690603; // 游戏世界时间参考历元（Unix 秒）
-
 const orbitVersion = ref(0);
 const planets = new Map<string, PlanetOrbit>();
+const nativePlanetEnvironments = new Map<string, { radiusKm: number; pressure: number }>();
 const stars = new Map<string, StarInfo>();
 let motionFactor = DEFAULT_MOTION_FACTOR;
 let simulationIntervalS = DEFAULT_SIMULATION_INTERVAL_S;
@@ -474,82 +458,6 @@ export async function ensureOrbitData(naturalIds: string[]) {
   persist();
 }
 
-// ---- 开普勒数学 ----
-
-// 牛顿迭代解开普勒方程 M = E - e·sin(E)。
-function solveKepler(meanAnomaly: number, e: number) {
-  const M = meanAnomaly % (2 * Math.PI);
-  let E = e < 0.8 ? M : Math.PI;
-  for (let i = 0; i < 16; i++) {
-    const d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E));
-    E -= d;
-    if (Math.abs(d) < 1e-10) {
-      break;
-    }
-  }
-  return E;
-}
-
-function trueAnomalyFromEccentric(E: number, e: number) {
-  return Math.atan2(Math.sqrt(1 - e * e) * Math.sin(E), Math.cos(E) - e);
-}
-
-// 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(+inc)·R3(-ra)。
-// 注意：历史 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，
-// 是旧相位标定不准的根源。
-// 出发时刻戳）验证：inclination 需**正向**旋转（R1(+i)），否则 z 分量符号相反
-// （反推恒星位置误差 5~10M km，翻转后 <1.7M）。FIO 与 DATA_DATA 的 inclination
-// 约定一致（可为负），配合 R1(+i) 后与服务器坐标完全对齐。
-function gameOrbitalToWorld(
-  p: { x: number; y: number; z: number },
-  orbit: PlanetOrbit,
-): PrunApi.Position {
-  const { inclination: i, rightAscension: o, periapsis: w } = orbit;
-  const rotZ = (v: { x: number; y: number; z: number }, th: number) => {
-    const c = Math.cos(th);
-    const s = Math.sin(th);
-    return { x: c * v.x - s * v.y, y: s * v.x + c * v.y, z: v.z };
-  };
-  const rotX = (v: { x: number; y: number; z: number }, th: number) => {
-    const c = Math.cos(th);
-    const s = Math.sin(th);
-    return { x: v.x, y: c * v.y - s * v.z, z: s * v.y + c * v.z };
-  };
-  let v = rotZ(p, -w);
-  v = rotX(v, i);
-  return rotZ(v, -o);
-}
-
-// ---- 游戏轨道模型预测 ----
-
-// 用游戏同款公式预测天体在指定游戏世界时刻的位置（相对其轨道中心，千米）。
-// 依赖：轨道根数 + 中心天体质量。与服务器 transferEllipse 坐标同一坐标系，
-// 无需观测标定即可全量离线预测。
-function predictWithGameModel(
-  orbit: PlanetOrbit,
-  parentMassKg: number,
-  timestampMs: number,
-): PrunApi.Position {
-  const t_s = timestampMs / 1000;
-  const worldTime = GAME_REF + (t_s - GAME_REF) * (simulationIntervalS / 86400) * motionFactor;
-  const n = Math.sqrt((GAME_G * parentMassKg) / Math.pow(orbit.semiMajorAxis, 3));
-  const M = n * worldTime;
-  const e = orbit.eccentricity;
-  const E = solveKepler(M, e);
-  const nu = trueAnomalyFromEccentric(E, e);
-  const radiusM = orbit.semiMajorAxis * (1 - e * Math.cos(E));
-  const offset = gameOrbitalToWorld(
-    { x: radiusM * Math.cos(nu), y: radiusM * Math.sin(nu), z: 0 },
-    orbit,
-  );
-  // 游戏输出：x/y 交换 + /1e3（米 → 千米）。
-  return {
-    x: offset.y / 1e3,
-    y: offset.x / 1e3,
-    z: offset.z / 1e3,
-  };
-}
-
 // 预测天体在指定游戏世界时刻的位置（游戏轨道模型，无需观测）。
 // 任何环节缺失返回 undefined，调用方降级为最近静态观测。
 export function predictPosition(
@@ -570,12 +478,29 @@ export function predictPosition(
   if (parentMass === undefined || parentMass <= 0) {
     return undefined;
   }
-  return predictWithGameModel(orbit, parentMass, timestampMs);
+  return predictWithGameModel(orbit, parentMass, timestampMs, motionFactor, simulationIntervalS);
 }
 
 // 当前游戏世界时刻（本地时钟 + 偏差，偏差由飞行计划标定）。
 export function gameNow() {
   return Date.now() + gameClockOffsetMs.value;
+}
+
+export function snapshotOrbitInputs(endpoints: { naturalId: string; systemId: string }[]) {
+  return {
+    motionFactor,
+    simulationIntervalS,
+    endpoints: endpoints.map(({ naturalId, systemId }) => ({
+      naturalId,
+      systemId,
+      orbit: planets.get(naturalId.toUpperCase()),
+      parentMassKg: stars.get(systemId.toUpperCase())?.mass,
+    })),
+  };
+}
+
+export function getNativePlanetEnvironment(naturalId: string) {
+  return nativePlanetEnvironments.get(naturalId.toUpperCase());
 }
 
 // ---- 轨道数据被动积累与全量预取 ----
@@ -650,11 +575,28 @@ onApiMessage({
         data?: {
           orbit?: DataDataSystemPlanet['orbit'];
           mass?: number;
+          radius?: number;
+          pressure?: number;
         };
       };
       const orbit = body.data?.orbit;
       if (body.naturalId && orbit?.semiMajorAxis !== undefined && orbit.semiMajorAxis > 0) {
         setPlanetOrbit(body.naturalId, orbit, body.data?.mass ?? 0);
+      }
+      const { radius, pressure } = body.data ?? {};
+      if (
+        body.naturalId &&
+        typeof radius === 'number' &&
+        Number.isFinite(radius) &&
+        radius > 0 &&
+        typeof pressure === 'number' &&
+        Number.isFinite(pressure) &&
+        pressure >= 0
+      ) {
+        nativePlanetEnvironments.set(body.naturalId.toUpperCase(), {
+          radiusKm: radius / 1000,
+          pressure: Math.fround(pressure),
+        });
       }
     }
   },

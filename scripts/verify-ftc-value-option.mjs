@@ -1,3 +1,4 @@
+import './lib/register-flight-formula.mjs';
 // FTC「最优性价比」选点（fuel-model.pickBestValueOption）纯函数回归脚本 —— 带退出码。
 //
 // 锁定的行为契约：
@@ -13,7 +14,7 @@
 // 用法：node scripts/verify-ftc-value-option.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：只到纯函数层；面板/向导接线与真实服务器数值不在本脚本范围内。
-import { pickBestValueOption } from '../src/features/XIT/FTC/fuel-model.ts';
+const { pickBestValueOption } = await import('../src/features/XIT/FTC/fuel-model.ts');
 
 const summary = { pass: 0, fail: 0 };
 

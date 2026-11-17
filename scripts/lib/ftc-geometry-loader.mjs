@@ -1,3 +1,5 @@
+import { resolveTsRelative } from './resolve-ts-relative.mjs';
+
 // 测试用模块解析替身（Node module.register 钩子）。
 //
 // 服务 scripts/verify-ftc-geometry-source.mjs：把 route-planner / route-model /
@@ -16,6 +18,15 @@ const REAL = {
 };
 
 export function resolve(specifier, context, nextResolve) {
+  if (
+    specifier === '@src/core/flight/fuel-options' ||
+    specifier === '@src/infrastructure/fio/planet-environment'
+  ) {
+    return {
+      url: new URL('../../src/' + specifier.slice(5) + '.ts', import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
   if (specifier === 'vue' || specifier.startsWith('@src/')) {
     return { url: STUB, format: 'module', shortCircuit: true };
   }
@@ -28,6 +39,10 @@ export function resolve(specifier, context, nextResolve) {
   if (REAL[specifier] !== undefined) {
     // 不指定 format：让 Node 按扩展名 .ts 走原生类型剥离（显式写 'module' 会当纯 JS 解析）。
     return { url: REAL[specifier], shortCircuit: true };
+  }
+  const relative = resolveTsRelative(specifier, context);
+  if (relative !== undefined) {
+    return { url: relative, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }

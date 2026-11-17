@@ -2,6 +2,16 @@
   padding: 4px 8px;
 }
 
+.calculatorFields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 8px 0;
+  min-width: 0;
+}
+
 .warning {
   color: #e88a3a;
   font-weight: bold;
@@ -34,6 +44,24 @@
 .fieldRow {
   display: flex;
   gap: 8px;
+}
+
+.scanFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 144px), 1fr));
+  gap: 8px;
+
+  & input:not([type='checkbox']) {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.scanActions {
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  white-space: nowrap;
 }
 
 .select {
@@ -71,6 +99,7 @@
 .actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
