@@ -29,9 +29,6 @@ export function stubSetOption(option) {
   optionFixture = option;
 }
 
-// 兼容旧用例里的调用（离港饱和点已不属于新公式模型，这里不产生任何效果）。
-export function stubSetFlowRate() {}
-
 // ---- 以下为被替换模块的导出面 ----
 
 // '@src/features/XIT/FTC/ftc-compute'

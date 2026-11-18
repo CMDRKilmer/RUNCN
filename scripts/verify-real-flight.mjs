@@ -12,6 +12,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  approachTransferFuel,
+  departureTransferFuel,
   flightConditionMultiplier,
   missionParkingAltitudeRatio,
   stlAcceleration,
@@ -137,11 +139,9 @@ const circularSpeed = gameCircularOrbitSpeedKmS(
 );
 const targetMinimum = stlMinimumTransferFuel(orbitalSpeed, acceleration, flow);
 const circularMinimum = stlMinimumTransferFuel(circularSpeed, acceleration, flow);
-const orbitalBase = ((departure.stlFuel - surfaceFuel) * tier) / 2;
-const departureFuel = Math.floor(
-  ((departure.stlFuel - surfaceFuel - targetMinimum + 2) * tier) / 2 + 1 + 1e-10,
-);
-const approachFuel = Math.floor(orbitalBase + (1 - tier) * circularMinimum + 1e-10);
+// 分配规律直接用生产实现（src/core/flight/stl.ts），脚本不再复刻这两条公式。
+const departureFuel = departureTransferFuel(departure.stlFuel, surfaceFuel, targetMinimum, tier);
+const approachFuel = approachTransferFuel(departure.stlFuel, surfaceFuel, tier, circularMinimum);
 equals('departure fuel', departureFuel, segment(flown, 'DEPARTURE').stlFuelConsumption);
 equals('approach fuel', approachFuel, segment(flown, 'APPROACH').stlFuelConsumption);
 equals(

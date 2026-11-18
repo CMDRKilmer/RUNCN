@@ -2,10 +2,10 @@
 // 燃料单价四市场均价（真实模块 src/features/XIT/FTC/fuel-prices.ts，数据源 FIO）。
 // 退出码：0 = 全通过（末行 PASS n/n）；1 = 有失败（FAIL <场景> expected=… actual=…）。
 //
-// 覆盖：① 每市场取 FIO `PriceAverage`，四市场取简单平均；② `PriceAverage` 缺失回退 `Ask`、
-//      再回退 `Bid`；③ 只认 SF/FF × AI1/CI1/IC1/NC1（其它物料与交易所忽略）；
-//      ④ 缺价市场不参与平均；⑤ 缓存 10 分钟内不重复请求、force 强制重取；
-//      ⑥ 请求失败时保留上一次结果并记录错误；⑦ 并发调用只发一次请求。
+// 覆盖（6 个场景）：① 每市场取 FIO `PriceAverage`，四市场取简单平均（缺价市场不参与平均）；
+//      ② `PriceAverage` 缺失回退 `Ask`、再回退 `Bid`；③ 只认 SF/FF × AI1/CI1/IC1/NC1
+//      （其它物料与交易所忽略）；④ 缓存 10 分钟内不重复请求、force 强制重取；
+//      ⑤ 请求失败时保留上一次结果并记录错误；⑥ 并发调用只发一次请求。
 // 局限：不触发真实 FIO 请求（fetch 由用例注入），也不覆盖面板渲染。
 import { register } from 'node:module';
 

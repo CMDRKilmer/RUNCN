@@ -8,22 +8,23 @@ import {
   naturalJumpFuel,
   naturalJumpSpeed,
 } from '../src/core/flight/ftl.ts';
+import { findFlightRoute } from '../src/core/flight/route.ts';
 
-function shortestPath(stars, from, to) {
-  const queue = [[from]];
-  const seen = new Set([from]);
-  for (const path of queue) {
-    const last = path.at(-1);
-    if (last === to) {
-      return path;
-    }
-    for (const next of stars.get(last)?.connections ?? []) {
-      if (stars.has(next) && !seen.has(next)) {
-        seen.add(next);
-        queue.push([...path, next]);
-      }
-    }
+// 寻路用真实实现（src/core/flight/route.ts 的 findFlightRoute），不在脚本里复刻 BFS：
+// 复刻版一走样，脚本验的就是脚本自己，而不是插件实际给出的航线。
+function naturalPath(flightInputs, origin, destination) {
+  const starBySystemId = new Map(flightInputs.stars.map(x => [x.systemId, x]));
+  const from = starBySystemId.get(origin.split('|')[0]);
+  const to = starBySystemId.get(destination.split('|')[0]);
+  if (from === undefined || to === undefined) {
+    return undefined;
   }
+  const legs = findFlightRoute(flightInputs.stars, [], from.naturalId, to.naturalId, 'LEAST_JUMPS');
+  if (legs === undefined || legs.length === 0) {
+    return undefined;
+  }
+  // 返回 naturalId 序列（与 legs 的 from/to 同口径）。
+  return [legs[0].from, ...legs.map(x => x.to)];
 }
 
 const seconds = x => (x.arrival.timestamp - x.departure.timestamp) / 1000;
@@ -38,8 +39,8 @@ for (const { blueprint, request, response, flightInputs } of readFlightObservati
   assert.equal(response.missionId, request.missionId);
   assert.equal(blueprint.id, request.blueprintId);
   assert.deepEqual(request.preferences, { ftlPreference: 'LEAST_JUMPS', useGateways: false });
-  const stars = new Map(flightInputs.stars.map(x => [x.systemId, x]));
-  const path = shortestPath(stars, request.origin.split('|')[0], request.destination.split('|')[0]);
+  const stars = new Map(flightInputs.stars.map(x => [x.naturalId, x]));
+  const path = naturalPath(flightInputs, request.origin, request.destination);
   assert(path?.length > 2, '试飞前星图缺少一条多跳自然跃迁路径');
   const { ftlMaxSpeed, minReactorUsage, emitterChargeTime, maxOverchargeTime } =
     blueprint.performance;
@@ -61,8 +62,8 @@ for (const { blueprint, request, response, flightInputs } of readFlightObservati
     response.ftlFuelConsumption,
   );
   const distances = jumps.map((jump, i) => {
-    assert.equal(system(jump.origin), path[i]);
-    assert.equal(system(jump.destination), path[i + 1]);
+    assert.equal(system(jump.origin), stars.get(path[i]).systemId);
+    assert.equal(system(jump.destination), stars.get(path[i + 1]).systemId);
     const a = stars.get(path[i]).position;
     const b = stars.get(path[i + 1]).position;
     const distance = Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) / 12;
@@ -73,7 +74,7 @@ for (const { blueprint, request, response, flightInputs } of readFlightObservati
   });
   const chargeSeconds = naturalChargeSeconds(emitterChargeTime, maxOverchargeTime, r);
   for (const [i, charge] of charges.entries()) {
-    assert.equal(system(charge.origin), path[i + 1]);
+    assert.equal(system(charge.origin), stars.get(path[i + 1]).systemId);
     assert(Math.abs(seconds(charge) - chargeSeconds) < 1e-9);
   }
   assert(Math.abs(response.chargeTime.millis / 1000 - chargeSeconds * charges.length) < 1e-9);

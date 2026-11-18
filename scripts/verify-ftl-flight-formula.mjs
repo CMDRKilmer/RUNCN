@@ -51,6 +51,8 @@ for (const file of files) {
     );
     const fuelBasis = distancePc * power * r;
     const fuelWithSingleFloor = naturalJumpFuel(distancePc, power, r);
+    // 被否定的候选模型：燃料预算先按旧口径 0.003 四舍五入，再乘档位。真实速率是
+    // ftl.ts 的 fuelPerPowerPc（0.003003），所以这里保留独立的候选常数、不引用生产实现。
     const fuelWithRoundedBudget = Math.floor(Math.round(0.003 * distancePc * power) * r);
     results.push({
       blueprint: blueprint.naturalId,

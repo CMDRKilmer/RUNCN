@@ -1,11 +1,12 @@
 // 用法：node --experimental-strip-types scripts/verify-sfc-formula-plan.mjs
 // SFC 自动联动（src/features/XIT/FTC/formula-compute.ts）的行为契约，退出码检查。
-// 覆盖：
+// 覆盖（6 个场景）：
 //   ① 输入完整 → 按航线键写入燃料/反应堆参数，lastFtcCompute.complete = true；
 //   ② 输入残缺 → 一个参数都不写，lastFtcCompute.complete = false（SFC 沿用玩家当前设置）；
 //   ③ publish = false（假设性计算）→ 既不写参数也不写完成信号；
-//   ④ 起终点相同/空 → ok = false，不调模型；
-//   ⑤ 航线键格式与 ftc-fuel-settings 的 ftcRouteKey 逐位一致（写入键 = 等待键）。
+//   ④ 起终点相同 → ok = false，不调模型；
+//   ⑤ 空输入 → ok = false，不调模型；
+//   ⑥ 网关航线用独立键，直飞参数不串到网关航线（键格式与 ftcRouteKey 逐位一致）。
 //
 // 局限：模型本身（planFormulaFlight）由替身按用例脚本返回，真实公式数值见
 // verify-ftc-formula.mjs / verify-real-flight.mjs；本脚本只锁「什么时候写、写到哪个键」。

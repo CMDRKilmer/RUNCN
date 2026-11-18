@@ -32,21 +32,43 @@ function verify(row) {
     estimate.route.map(x => [x.from, x.to, x.gate?.a.naturalId ?? null]),
     actualRoute,
   );
-  assert(scoreFlight(estimate, actual).passed, `whole flight ${request.missionId}`);
+  const whole = scoreFlight(estimate, actual);
+  assert(whole.passed, `whole flight ${request.missionId}`);
   const scores = scoreFlightSegments(estimate.segments, segments);
   assert(
     scores.every(x => x.passed),
     `phase ${request.missionId}: ${JSON.stringify(scores.filter(x => !x.passed))}`,
   );
-  assert.equal(estimate.stlRemaining, request.stlFuel - estimate.stlFuel);
-  assert.equal(estimate.ftlRemaining, request.ftlFuel - estimate.ftlFuel);
+  // 余油要对着**记录里的实际消耗**核，而不是拿 estimate 自己减自己的消耗（那样恒真、等于没查）。
+  // 容差与整飞校验同一口径（5% 或 1 u）。
+  const remaining = [
+    ['STL', estimate.stlRemaining, request.stlFuel - actual.stlFuel, whole.checks.stlFuel],
+    ['FTL', estimate.ftlRemaining, request.ftlFuel - actual.ftlFuel, whole.checks.ftlFuel],
+  ];
+  for (const [kind, predicted, observed, check] of remaining) {
+    assert(
+      Math.abs(predicted - observed) <= check.tolerance,
+      `${kind} 余油 ${predicted} 与实测余油 ${observed} 相差超过容差 ${check.tolerance}（${request.missionId}）`,
+    );
+  }
   checks++;
   return estimate;
 }
+const failures = [];
 for (const row of fixtures) {
-  verify(row);
+  try {
+    verify(row);
+  } catch (error) {
+    failures.push(`${row.request?.missionId ?? 'fixture'}: ${error.message}`);
+  }
 }
-console.log(`PASS recorded fixtures ${fixtures.length}/${fixtures.length}`);
+console.log(`PASS recorded fixtures ${fixtures.length - failures.length}/${fixtures.length}`);
+if (failures.length > 0) {
+  for (const failure of failures) {
+    console.log(`FAIL ${failure}`);
+  }
+  process.exit(1);
+}
 
 const same = fixtures.find(
   x =>

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  allocateTransferFuel,
   stlAcceleration,
   stlLandingDistanceKm,
   stlSurfaceFlight,
@@ -235,10 +236,13 @@ for (const file of files) {
         }
       }
       if (type === 'TRANSIT' && !hasJump) {
-        const minimumFuel = (4 * flow) / 0.015;
-        const f = request.fuelUsageFactor;
-        const predictedFuel = Math.floor(
-          minimumFuel * (1 - f) + (request.stlFuel - surfaceFuel) * f + 1e-10,
+        // 分配规律用生产实现；这里的「最小转移燃料」是本文件按采集数据拟合的经验下限
+        // （stlMinimumTransferFuel 需要目标轨道速度，而本诊断不重建星历），不是游戏公式。
+        const empiricalMinimumFuel = (4 * flow) / 0.015;
+        const predictedFuel = allocateTransferFuel(
+          empiricalMinimumFuel,
+          request.fuelUsageFactor,
+          request.stlFuel - surfaceFuel,
         );
         recordFuel(fuelDiagnostics.transitUsingObservedSurfaceFuel, fuel, predictedFuel);
         transit.push({

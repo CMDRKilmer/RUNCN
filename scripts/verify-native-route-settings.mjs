@@ -15,7 +15,7 @@
 // 覆盖的是编排层的油量初始化、作废范围与档位写入，不覆盖 FTC 模型数值与真实试飞。
 import { register } from 'node:module';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
-const { stubSetFuel, stubSetOption, stubSetFlowRate, ftcCalls, btfCalls } =
+const { stubSetFuel, stubSetOption, ftcCalls, btfCalls } =
   await import('./lib/native-route-fuel-stub.mjs');
 const { computeNativeRouteFuel } = await import('../src/features/XIT/FLEET/native-route-fuel.ts');
 const { hoursInvalidatedBySettingChange, percentAtLeast } =
@@ -65,7 +65,7 @@ const refuelAtOrigin = [
   },
   { location: 'B', steps: [] },
 ];
-// 替身 computeFtcPlan 恒失败：每段的调用顺序是 FTC → BTF → 公式估算，override 全程必须一致。
+// 替身 computeFtcPlan 恒失败：每段的调用顺序是 FTC → BTF 试飞（没有第三条估算路径），override 全程必须一致。
 async function runFuel(waypoints) {
   await computeNativeRouteFuel(candidate, waypoints, new AbortController().signal, () => {});
   return {
@@ -164,10 +164,10 @@ await check('反应堆档被向上取整时要按写入的档位重算', async f
   expectEqual(failures, '写入的反应堆百分比', 66, result.legs[1]?.reactorPercent);
 });
 
-await check('离港饱和点不再砍档：选中的高档位原样写入', async failures => {
+// 旧口径的「离港饱和点」已随新公式模型删除，编排层没有任何砍档逻辑：
+// 这一条只锁定「选中多少就写多少、不报封顶」，不再假装喂流量（旧代码用空函数喂流量，断言恒真）。
+await check('选中档位原样写入：不砍档、不报封顶', async failures => {
   stubSetFuel({ stlRemaining: 3000, ftlRemaining: 500, stlCap: 3000, ftlCap: 500 });
-  // 流量 0.0075 → 旧口径的离港饱和点是 8%，会把这一段砍到 8%。
-  stubSetFlowRate(0.0075);
   stubSetOption({
     reactorRelevant: false,
     best: { fuel: 0.3, reactor: 0.5, totalHours: 2, stlFuel: 200, ftlFuel: 0 },
