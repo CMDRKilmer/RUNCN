@@ -23,10 +23,9 @@ on:
 permissions:
   contents: write
 jobs:
-  # 三个商店提交 job 默认「暂停」：job 定义、environment、凭据引用全部保留，
-  # 只是默认不执行，避免这个 fork 因缺少商店 API 凭据而在每次 push / release
-  # 显示红色失败。需要恢复时，到仓库 Settings → Secrets and variables →
-  # Actions → Variables 新建仓库变量 ENABLE_STORE_SUBMIT=true；删掉即重新暂停。
+  # 三个商店提交 job 由仓库变量 ENABLE_STORE_SUBMIT 门控（当前已开启）。
+  # job 定义、environment、凭据引用全部保留；把变量改为非 'true' 或删除即整体暂停。
+  # 开启后每次基于 CHANGELOG 的发布都会自动提交到商店，没有人工审批闸门。
 
   build:
     name: Build
