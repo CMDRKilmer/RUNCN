@@ -395,10 +395,11 @@ async function startMatrixScan() {
 function stopMatrixScan() {
   matrixCancelled.value = true;
 }
-// ---- 系内转移段 f 曲线扫描（2026-10-13）----
-// 目的：补齐 STL_INTRA_TRANSIT_SPEED_KM_S 缺失的地面真值 —— 该常数来自
-// VH-331g → HRT 的 BTF 样本（599,220,390 km / 21,780 s），而**那个样本没记 f**。
-// 全模型的 f 依赖只有这一点 + 一条假设的曲线形状；本扫描固定船/航线/罐只变 f。
+// ---- 系内转移段 f 曲线扫描 ----
+// 目的：补齐系内转移段速度里「档位 f」这一维的地面真值 —— 旧口径的锚点来自
+// VH-331g → HRT 的 BTF 样本（599,220,390 km / 21,780 s），而**那个样本没记 f**，
+// 那套模型的 f 依赖只有这一点 + 一条假设的曲线形状（当前口径见 src/core/flight/stl.ts，
+// 不再使用这条速度曲线）。本扫描固定船/航线/罐只变 f。
 // ⚠️ 会向服务器发多笔计算请求（每档 1 次），仅用户点按钮时触发。
 const fScanning = ref(false);
 const fScanCancelled = ref(false);
@@ -594,7 +595,7 @@ function stopFScan() {
           </PrunButton>
           <PrunButton
             neutral
-            data-tooltip="网关在打开星图（星系地图）后自动读取，名称配对/飞行计划自动记录连接。检查当前已加载状态。"
+            data-tooltip="点这里向服务器请求一次网关快照（8 秒等待、60 秒内不重复请求），不需要打开星图；入库后公式模型即可用网关连接。面板其它路径只读已入库数据。"
             @click="checkGateways">
             网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
           </PrunButton>

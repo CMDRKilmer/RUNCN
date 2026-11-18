@@ -4,12 +4,12 @@
 //
 // 覆盖：① 已有网关连接 → 直接返回 true，不发请求、不开窗口（零副作用）；
 //      ② 无连接 → 直接向服务器发 DATA_GET_DATA{path:['gateways']}（原生星图发的同一条请求），
-//         回包即返回 true，且**不打开星图窗口**（这是本回归的核心：曾因开隐藏星图而失败）；
-//      ③ socket 未就绪 → 立刻退回开一次隐藏星图（MAP）兜底；
-//      ④ 请求发出但没回包 → 等 requestTimeoutMs 后仍退回隐藏星图兜底；
-//      ⑤ 超时仍无数据 → 返回 false；
-//      ⑥ 冷却期内不重复请求（避免每次输入都打服务器）。
-// 局限：不触发真实游戏 socket；回包由替身的 deliverOnRequest / deliverOnOpen 模拟。
+//         回包即返回 true，且**不打开星图窗口**；
+//      ③ socket 未就绪 → 请求发不出去，返回 false，同样不开窗口；
+//      ④ 请求发出但没回包 → 等到 timeoutMs 后返回 false，**不退回隐藏星图**（早期实现会在
+//         这里自动开 MAP；隐藏 buffer 是开发者特批例外，不得扩展）；
+//      ⑤ 冷却期内不重复请求（避免连点把请求打得太密）。
+// 局限：不触发真实游戏 socket；回包由替身的 deliverOnRequest 模拟。
 import { register } from 'node:module';
 
 register('./lib/gateway-loader-loader.mjs', import.meta.url);
@@ -66,51 +66,21 @@ await check('无连接：直接请求网关数据（不开星图），回包即�
   expectEqual(failures, 'actionId 是 UUID', true, typeof message.payload?.actionId === 'string');
 });
 
-await check('socket 未就绪：退回打开隐藏星图兜底', async failures => {
+await check('socket 未就绪：返回 false，不发请求不开窗口', async failures => {
   stub.stubReset();
   stub.state.socketReady = false;
-  stub.state.deliverOnOpen = true;
   const ok = await ensureGatewayConnections({ timeoutMs: 1000, pollMs: 1, cooldownMs: 0 });
-  expectEqual(failures, '返回值', true, ok);
-  expectEqual(
-    failures,
-    '窗口命令',
-    ['MAP'],
-    stub.buffers.map(x => x.command),
-  );
-  expectEqual(failures, '自动关闭', true, stub.buffers[0]?.options?.autoClose);
+  expectEqual(failures, '返回值', false, ok);
+  expectEqual(failures, '请求数', 0, stub.requests.length);
+  expectEqual(failures, '窗口数', 0, stub.buffers.length);
 });
 
-await check('请求发出但没回包：等 requestTimeoutMs 后退回隐藏星图兜底', async failures => {
+await check('请求发出但没回包：等到超时返回 false，不开隐藏星图', async failures => {
   stub.stubReset();
-  stub.state.deliverOnOpen = true;
-  const ok = await ensureGatewayConnections({
-    timeoutMs: 1000,
-    requestTimeoutMs: 0,
-    pollMs: 1,
-    cooldownMs: 0,
-  });
-  expectEqual(failures, '返回值', true, ok);
-  expectEqual(failures, '请求数', 1, stub.requests.length);
-  expectEqual(
-    failures,
-    '窗口命令',
-    ['MAP'],
-    stub.buffers.map(x => x.command),
-  );
-});
-
-await check('超时仍无数据：返回 false', async failures => {
-  stub.stubReset();
-  const ok = await ensureGatewayConnections({ timeoutMs: 0, requestTimeoutMs: 0, cooldownMs: 0 });
+  const ok = await ensureGatewayConnections({ timeoutMs: 0, pollMs: 1, cooldownMs: 0 });
   expectEqual(failures, '返回值', false, ok);
   expectEqual(failures, '请求数', 1, stub.requests.length);
-  expectEqual(
-    failures,
-    '窗口命令',
-    ['MAP'],
-    stub.buffers.map(x => x.command),
-  );
+  expectEqual(failures, '窗口数', 0, stub.buffers.length);
 });
 
 await check('冷却期内不重复请求', async failures => {

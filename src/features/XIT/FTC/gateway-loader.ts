@@ -1,13 +1,16 @@
 // 网关数据运行时加载：网关实体只由服务器在收到 DATA_GET_DATA{path:['gateways']}
 // 时下发（DATA_DATA["gateways"]）——原生星图窗口打开时发的就是这一条请求，
-// 所以插件直接发同一条请求即可拿到数据，**不需要真的把星图开出来**
-// （早期实现用隐藏 MAP 窗口，实测拿不到数据，玩家仍要手动开星图）。
+// 所以插件发同一条请求即可拿到数据，不需要真的把星图开出来。
 //
-// 只有「玩家需要走网关 + 目前一条连接都没有」时才触发；带冷却，避免每次输入都请求一遍。
-// 直接请求 2.5 s 内没回包（或被服务器忽略）时，才退回「开一次隐藏星图」兜底。
-import { computed } from 'vue';
+// 触发条件受 ToS 硬规则约束（docs/contributing.md：触发服务器通信的动作必须来自玩家点击）：
+// **只有玩家的显式点击可以调用本模块**（FTC 面板的「网关」按钮 / 导出按钮）。
+// 本模块不开任何窗口——早期实现曾在请求没回包时退回「开一次隐藏 MAP」，而隐藏 buffer 是
+// 开发者特批的单点例外，不得扩展；把兜底留在这里等于让任何无点击路径都能开窗口。
+// 没有点击的路径（SFC 滑块联动、FLEET 重算）只读已入库的数据，缺数据时由
+// flight-formula 的 warning 说明成因。
+//
+// 同一会话内带冷却，避免连点把请求打得太密。
 import { routesStore } from '@src/infrastructure/fio/routes';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sendServerMessage } from '@src/infrastructure/prun-api/socket-io-middleware';
 import { companyContextId } from '@src/infrastructure/prun-api/data/user-data';
 import { sleep } from '@src/utils/sleep';
@@ -20,8 +23,6 @@ let lastAttemptAt = 0;
 export interface EnsureGatewaysOptions {
   // 等待网关连接入库的总时长；超时后返回 false（调用方按「仍不可达」处理）。
   timeoutMs?: number;
-  // 直接请求的回包等待窗口：超时后才退回「开隐藏星图」兜底。
-  requestTimeoutMs?: number;
   // 冷却（两次请求之间的最小间隔）。
   cooldownMs?: number;
   pollMs?: number;
@@ -46,24 +47,12 @@ async function waitForConnections(deadline: number, pollMs: number) {
   return routesStore.gatewayConnectionCount > 0;
 }
 
-function openHiddenStarMap() {
-  // 让游戏自己发那条 DATA_GET_DATA；数据到达后自动关闭。
-  void showBuffer('MAP', {
-    autoClose: true,
-    closeWhen: computed(() => routesStore.gatewayConnectionCount > 0),
-  });
-}
-
 // 返回是否已有可用的网关连接。已有数据时完全无副作用（不发请求）。
+// 只能由玩家点击触发（见文件头）。
 export async function ensureGatewayConnections(
   options: EnsureGatewaysOptions = {},
 ): Promise<boolean> {
-  const {
-    timeoutMs = 8000,
-    requestTimeoutMs = 2500,
-    cooldownMs = RETRY_COOLDOWN_MS,
-    pollMs = 200,
-  } = options;
+  const { timeoutMs = 8000, cooldownMs = RETRY_COOLDOWN_MS, pollMs = 200 } = options;
   if (routesStore.gatewayConnectionCount > 0) {
     return true;
   }
@@ -72,10 +61,9 @@ export async function ensureGatewayConnections(
     return routesStore.gatewayConnectionCount > 0;
   }
   lastAttemptAt = now;
-  // 首选：自己发一条 DATA_GET_DATA（不开窗口）。只有它没回包时才退回开隐藏星图。
-  const sent = requestGatewayData() && (await waitForConnections(now + requestTimeoutMs, pollMs));
-  if (!sent) {
-    openHiddenStarMap();
+  // socket 未就绪时发不出去：直接返回 false，不重试也不开窗口。
+  if (!requestGatewayData()) {
+    return false;
   }
   return waitForConnections(now + timeoutMs, pollMs);
 }
