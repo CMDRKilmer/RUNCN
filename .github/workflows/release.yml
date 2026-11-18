@@ -120,7 +120,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 本 fork 自己生成的独立 CRX 私钥（与上游官方密钥无关），固定扩展 ID
-          # fenmnigpimmoiiohcdfllgccjkklhemf；私钥只存在 Actions Secret 里。
+          # nbnhagjjnjeiohkhilenonngedcdlffe；私钥只存在 Actions Secret 里。
+          # 26.11.18 重建密钥：原私钥丢失，扩展 ID 随之改变
+          # （原 fenmnigpimmoiiohcdfllgccjkklhemf），老用户需重新安装。
           CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
         run: |
           VERSION="${{ steps.parse.outputs.VERSION }}"
