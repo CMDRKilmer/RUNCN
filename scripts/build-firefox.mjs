@@ -3,7 +3,15 @@
  * - Reuses Chrome build output (dist/).
  * - Assembles dist-firefox/ with the Firefox manifest.json and icons.
  */
-import { rmSync, mkdirSync, copyFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'fs';
+import {
+  rmSync,
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -48,7 +56,7 @@ copyDirContents(srcDist, outDir, new Set(['manifest.json', 'manifest.firefox.jso
 // - add the Firefox-specific browser_specific_settings
 const manifest = JSON.parse(readFileSync(join(srcDist, 'manifest.json'), 'utf8'));
 delete manifest.minimum_chrome_version;
-manifest.host_permissions = manifest.host_permissions.map((p) =>
+manifest.host_permissions = manifest.host_permissions.map(p =>
   p === '<all_urls>' || p.endsWith('/*') ? p : p.endsWith('/') ? `${p}*` : `${p}/*`,
 );
 manifest.browser_specific_settings = {

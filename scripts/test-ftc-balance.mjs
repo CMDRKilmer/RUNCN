@@ -50,7 +50,9 @@ console.log('Pareto 前沿:');
 for (const o of pareto) {
   console.log(`  f=${o.fuel} r=${o.reactor} t=${o.totalHours}h fuel=${totalFuelOf(o)}`);
 }
-console.log(`平衡点: f=${best.fuel} r=${best.reactor} t=${best.totalHours}h fuel=${totalFuelOf(best)}`);
+console.log(
+  `平衡点: f=${best.fuel} r=${best.reactor} t=${best.totalHours}h fuel=${totalFuelOf(best)}`,
+);
 console.log(`最快: f=${fastest.fuel} t=${fastest.totalHours}h fuel=${totalFuelOf(fastest)}`);
 console.log(`最省油: f=${cheapest.fuel} t=${cheapest.totalHours}h fuel=${totalFuelOf(cheapest)}`);
 if (pareto.length !== 7) {

@@ -38,7 +38,10 @@ for (const p of data) {
   });
 }
 const out = pretty ? JSON.stringify(rows, null, 1) : JSON.stringify(rows);
-const outPath = new URL('../public/json/planets-orbit.json', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1');
+const outPath = new URL('../public/json/planets-orbit.json', import.meta.url).pathname.replace(
+  /^\/([A-Z]:)/,
+  '$1',
+);
 writeFileSync(outPath, out);
 console.log(`写入 ${outPath}`);
 console.log(`行星 ${rows.length} 个，跳过 ${skipped}，大小 ${(out.length / 1024).toFixed(1)} KB`);

@@ -126,9 +126,7 @@ try {
 
 const api = await import('../src/infrastructure/prun-api/data/api-messages.ts');
 const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/system-bodies.ts');
-const { routeMetrics, estimateRouteStl } = await import(
-  '../src/features/XIT/FTC/route-planner.ts'
-);
+const { routeMetrics, estimateRouteStl } = await import('../src/features/XIT/FTC/route-planner.ts');
 const { computeFtcPlan } = await import('../src/features/XIT/FTC/ftc-compute.ts');
 const stub = await import('./lib/ftc-geometry-stub.mjs');
 

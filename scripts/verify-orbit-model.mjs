@@ -118,10 +118,7 @@ function backoutM0(orbit, centerMass, obs, center) {
   if (!(len > 0)) {
     return undefined;
   }
-  const dir = worldToOrbital(
-    { x: offset.x / len, y: offset.y / len, z: offset.z / len },
-    orbit,
-  );
+  const dir = worldToOrbital({ x: offset.x / len, y: offset.y / len, z: offset.z / len }, orbit);
   if (Math.abs(dir.z) > 0.05) {
     return undefined; // 偏离轨道面 → 帧/根数不一致
   }
@@ -194,7 +191,7 @@ for (const obs of observations) {
     continue;
   }
   checked++;
-  const errDeg = Math.abs(best.M0) * 180 / Math.PI;
+  const errDeg = (Math.abs(best.M0) * 180) / Math.PI;
   if (errDeg < 20) {
     matched++;
   } else {
@@ -202,7 +199,7 @@ for (const obs of observations) {
   }
   if (detail) {
     console.log(
-      `${obs.id} (${obs.kind}) M0=${(best.M0 * 180 / Math.PI).toFixed(2)}° ` +
+      `${obs.id} (${obs.kind}) M0=${((best.M0 * 180) / Math.PI).toFixed(2)}° ` +
         `| 半径=${best.rLen.toExponential(2)} 单位, n=${best.n.toExponential(2)} rad/s`,
     );
   }
