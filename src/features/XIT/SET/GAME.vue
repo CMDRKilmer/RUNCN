@@ -213,10 +213,14 @@ function openDesktopNotifications() {
   </form>
   <SectionHeader>消耗品预警</SectionHeader>
   <form>
-    <Active label="红色" tooltip="消耗品报告中红色预警等级的天数阈值。">
+    <Active
+      label="红色"
+      tooltip="消耗品剩余天数低于该值时显示红色（XIT BURN 与 FLEET 基地天数同用）。">
       <NumberInput v-model="userData.settings.burn.red" />
     </Active>
-    <Active label="黄色" tooltip="消耗品报告中黄色预警等级的天数阈值。">
+    <Active
+      label="黄色"
+      tooltip="消耗品剩余天数低于该值时显示黄色（XIT BURN 与 FLEET 基地天数同用）。">
       <NumberInput v-model="userData.settings.burn.yellow" />
     </Active>
     <Active label="补给" tooltip="XIT BURN 中'需要'列的目标补给天数。">
