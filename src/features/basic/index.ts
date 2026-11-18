@@ -74,6 +74,7 @@ import './inv-compress-inventory-info';
 import './inv-custom-item-sorting/inv-custom-item-sorting';
 import './inv-item-markers/inv-item-markers';
 import './inv-nx-buy-fuel-button';
+import './inv-precise-warehouse';
 import './inv-search';
 import './inv-show-space-remaining';
 import './inv-warehouse-button';
