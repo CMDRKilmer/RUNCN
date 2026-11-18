@@ -42,6 +42,8 @@ const {
   routeStopStates,
   withoutRouteDefinition,
 } = await import('../src/features/XIT/FLEET/native-route-game.ts');
+const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage } =
+  await import('../src/features/XIT/FLEET/native-route-purchase.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -57,6 +59,8 @@ async function check(name, fn) {
     production: {},
     analyses: {},
     materials: {},
+    stations: {},
+    exchanges: {},
   });
   Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
@@ -65,6 +69,7 @@ async function check(name, fn) {
   estimation.pending = null;
   estimation.result = null;
   shipsStore.fetched.value = true;
+  shipsStore.all.value = [];
   sitesStore.all.value = [];
   flightsStore.all.value = [];
   await fn();
@@ -1559,6 +1564,137 @@ await check('native RT listing: an executing route wins over its local copy', as
   // 执行中的卡片用游戏里的档位，本地那条仍保留自己的值。
   assert.equal(rows[0].record.waypoints[0].fuelPercent, 60);
   assert.equal(rows[1].record.waypoints[0].fuelPercent, 35);
+});
+
+// ---- 「运行中」的船来自推送的 assignedRoute（不依赖 RTE 窗口渲染）----
+function assignedShip(assignedRoute) {
+  const ship = {
+    id: 'S1',
+    registration: 'AVI-06AGK',
+    name: 'Planet-EARTH',
+    assignedRoute,
+    address: null,
+  };
+  fixture.ships[ship.id] = ship;
+  shipsStore.all.value = [ship];
+  return ship;
+}
+
+await check('native RT listing: assignedRoute marks the route as executing', async () => {
+  const ship = assignedShip('route-1');
+  // 游戏 UI 手动创建的航线没有本地记录：只能靠分配把它挂到船上。
+  const rows = collectNativeRoutes({}, undefined, [
+    nativeRouteServer([
+      { location: 'A', fuelPercent: 50 },
+      { location: 'B', fuelPercent: 50 },
+    ]),
+  ]);
+  assert.deepEqual(
+    rows.map(x => `${x.record.naturalId}|${x.shipId}`),
+    ['RT-A-1|S1'],
+  );
+  // 有船才能按航班定位：A→B 在飞 = 第 2 站 / 共 2 站。
+  flightsStore.all.value = [
+    { shipId: ship.id, origin: { id: 'A' }, destination: { id: 'B' }, aborted: false },
+  ];
+  assert.equal(routeProgressText(rows[0].record, shipsStore.getById(rows[0].shipId)), '2/2');
+});
+
+await check('native RT listing: assignedRoute may hold the RT number', async () => {
+  assignedShip('rt-a-1');
+  const rows = collectNativeRoutes(listingRecords(), undefined);
+  // 本地记录上记的旧船 S 被推送的分配取代，另一条没有分配的记录不受影响。
+  assert.deepEqual(
+    rows.map(x => `${x.record.naturalId}|${x.shipId}`),
+    ['RT-A-1|S1', 'RT-A-2|S2'],
+  );
+  assert.equal(rows[0].record.shipId, 'S1');
+});
+
+await check('native RT progress: a route without a ship has no position', async () => {
+  const rows = collectNativeRoutes({}, undefined, [
+    nativeRouteServer([
+      { location: 'A', fuelPercent: 50 },
+      { location: 'B', fuelPercent: 50 },
+    ]),
+  ]);
+  assert.equal(rows[0].shipId, '');
+  // 没有船就无法定位：不能显示 1/N 假装还没出发。
+  assert.equal(routeProgressText(rows[0].record, undefined), '—');
+});
+
+// ---- 未运行的航线：按出发地装载清单备货 ----
+function purchaseRecord(originSteps, stopSteps = []) {
+  return {
+    routeId: 'route-p',
+    naturalId: 'RT-A-P',
+    name: 'RT-A-P',
+    shipId: '',
+    shipLabel: '',
+    chainName: '',
+    createdAt: 1,
+    waypoints: [
+      { location: 'HRT', fuelPercent: 50, steps: originSteps },
+      { location: 'B', fuelPercent: 50, steps: stopSteps },
+    ],
+  };
+}
+
+await check('native RT purchase: only the origin load steps are bought', async () => {
+  const record = purchaseRecord(
+    [
+      { kind: 'load', ticker: 'RAT', amount: 100 },
+      { kind: 'load', ticker: 'DW', amount: 40 },
+      { kind: 'unload', ticker: 'OVE', amount: 5 },
+      { kind: 'refuel', tank: 'STL' },
+      { kind: 'load', ticker: 'FE', amount: 900, capacity: true },
+    ],
+    [{ kind: 'load', ticker: 'HE3', amount: 7 }],
+  );
+  // 中途站装的货不在这里买；按容量装载没有确定数量，不能下单。
+  assert.deepEqual(nativeRouteOriginBill(record), { RAT: 100, DW: 40 });
+});
+
+await check('native RT purchase: the bill is reduced by the origin stock', async () => {
+  assert.deepEqual(billShortfall({ RAT: 100, DW: 40 }, { RAT: 60, DW: 40, OVE: 99 }), {
+    RAT: 40,
+  });
+  assert.deepEqual(billShortfall({ RAT: 100 }, { RAT: 120 }), {});
+});
+
+await check('native RT purchase: an unplanned route gets a CX Buy package', async () => {
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.exchanges.HRT = { code: 'IC1' };
+  fixture.stores.wh = {
+    id: 'wh',
+    items: [{ quantity: { material: { ticker: 'RAT' }, amount: 30 } }],
+  };
+  const pkg = nativeRoutePurchasePackage(
+    purchaseRecord([
+      { kind: 'load', ticker: 'RAT', amount: 100 },
+      { kind: 'load', ticker: 'DW', amount: 40 },
+    ]),
+  );
+  assert.deepEqual(pkg.groups[0].materials, { RAT: 70, DW: 40 });
+  assert.deepEqual(pkg.actions[0], {
+    type: 'CX Buy',
+    name: '购买 IC1',
+    group: '购买 IC1',
+    exchange: 'IC1',
+    useCXInv: false,
+  });
+});
+
+await check('native RT purchase: no package outside a CX or with full stock', async () => {
+  const record = purchaseRecord([{ kind: 'load', ticker: 'RAT', amount: 100 }]);
+  assert.equal(nativeRoutePurchasePackage(record), undefined);
+  fixture.exchanges.HRT = { code: 'IC1' };
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.stores.wh = {
+    id: 'wh',
+    items: [{ quantity: { material: { ticker: 'RAT' }, amount: 100 } }],
+  };
+  assert.equal(nativeRoutePurchasePackage(record), undefined);
 });
 
 // ---- 「填满库存」：按船适配天数 → 每基地天数（FLEET.vue planConfig 的口径）----

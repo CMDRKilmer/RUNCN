@@ -56,6 +56,8 @@ import {
   type RunningRoutes,
 } from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
+import { stagedDispatch } from './staged';
+import { nativeRoutePurchasePackage } from './native-route-purchase';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -261,6 +263,10 @@ interface NativeRouteView {
   ship: PrunApi.Ship | undefined;
   loads: NativeRouteLoad[];
   capacity: { weight: number; volume: number };
+  // 有船按游戏里的分配在跑（`ship.assignedRoute` / RTE 命中）。
+  running: boolean;
+  // 未运行时的备货采购包：出发地装载清单扣掉仓库现有库存。
+  purchase: UserData.ActionPackageData | undefined;
 }
 
 // 同一条航线可能同时被两艘船执行：key 必须带上船，否则 Vue 会报重复 key。
@@ -280,20 +286,51 @@ const nativeRoutes = computed<NativeRouteView[]>(() =>
       ship,
       loads: nativeRouteLoads(row.record),
       capacity: nativeRouteCapacity(ship),
+      running: row.running,
+      purchase: row.running ? undefined : nativeRoutePurchasePackage(row.record),
     };
   }),
 );
 
+// 未运行的航线：先备齐出发地物料，再去原生 RT 分配船只（分配即开始执行）。
+function openRoutePurchase(entry: NativeRouteView) {
+  if (entry.purchase === undefined) {
+    return;
+  }
+  stagedDispatch.value = { pkg: entry.purchase };
+  void showBuffer('XIT FLEETACT');
+}
+
 // 用游戏里的真实航线列表校准本地记录：游戏里已经没有的航线（在游戏 UI 里删掉、没写成、
-// 早期版本残留）直接丢弃，不再出现在「运行中」。同时读一次原生 RTE，拿到
-// 「哪些船正在跑哪条航线」——游戏报文里没有分配关系，只能看执行窗口。
+// 早期版本残留）直接丢弃，不再出现在「运行中」。船的分配优先用 `ship.assignedRoute`
+// （随船下发），RTE 行只补充旧版游戏缺失该字段时的执行状态。
 // 写航线期间不发请求——socket 响应没有 actionId，只能靠 FIFO 顺序匹配，
-// 插一条就会让向导的对位错乱。
+// 插一条就会让向导的对位错乱；被延后的这次校准（触发它的那次打开/点击）稍后自动补做，
+// 不必再点一次页签。
 let refreshingGameRoutes = false;
+let gameRouteRetry: ReturnType<typeof setTimeout> | undefined;
 // 航线增删的序号：刷新期间删掉航线后，旧快照会把已删除的航线写回列表，序号不一致就重拉。
 let routeMutationSeq = 0;
+function scheduleGameRouteRetry() {
+  if (gameRouteRetry !== undefined) {
+    return;
+  }
+  gameRouteRetry = setTimeout(() => {
+    gameRouteRetry = undefined;
+    void refreshGameRoutes();
+  }, 1000);
+}
+onScopeDispose(() => {
+  if (gameRouteRetry !== undefined) {
+    clearTimeout(gameRouteRetry);
+  }
+});
 async function refreshGameRoutes() {
-  if (refreshingGameRoutes || hasPendingRouteRequest()) {
+  if (refreshingGameRoutes) {
+    return;
+  }
+  if (hasPendingRouteRequest()) {
+    scheduleGameRouteRetry();
     return;
   }
   refreshingGameRoutes = true;
@@ -306,8 +343,6 @@ async function refreshGameRoutes() {
       // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
       // 打乱按 FIFO 对位的响应匹配。
       const routes = await socketGetRoutes();
-      // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
-      const executions = chainTab.value === 'running' ? await readRouteExecutions() : undefined;
       // 等待期间删过航线：这份快照已经过期，重拉一次；仍未稳定就放弃发布。
       if (seq !== routeMutationSeq) {
         continue;
@@ -330,7 +365,17 @@ async function refreshGameRoutes() {
           continue;
         }
       }
+      // 定义先发布：航线卡片不必等 RTE 窗口读完执行状态。
       gameRouteDefinitions.value = routes;
+      // 只有「运行中」页需要执行状态；计划页不做这次窗口操作。
+      if (chainTab.value !== 'running') {
+        break;
+      }
+      const executions = await readRouteExecutions();
+      // 读执行状态期间删过航线：这份执行状态对不上已发布的列表，重拉一份。
+      if (seq !== routeMutationSeq) {
+        continue;
+      }
       gameRunningRoutes.value =
         executions === undefined ? undefined : matchRunningRoutes(routes, executions);
       break;
@@ -755,9 +800,9 @@ const visibleTables = computed<ChainTableRow[]>(() =>
   chainTab.value === 'plan' ? planTables.value : runningTables.value,
 );
 
-// 「运行中」页里原生 RT 也占一张卡：玩家点页签时用游戏里的航线列表校准本地记录。
-// 只在点击里发起——磁贴恢复成上次的「运行中」页时不能自动发请求 / 开隐藏窗口
-// （contributing.md：服务端通信必须由玩家点击触发）。
+// 「运行中」页里原生 RT 也占一张卡：点页签时用游戏里的航线列表校准本地记录。
+// 面板打开时就停在这页也自动校准一次——contributing.md「Server Communication & ToS」
+// 里批准的例外（原先只有点击能发请求）。
 function selectChainTab(tab: 'plan' | 'running') {
   chainTab.value = tab;
   if (tab === 'running') {
@@ -769,6 +814,12 @@ watch(
   () => Object.keys(nativeRouteRecords.value).sort().join(','),
   () => void refreshGameRoutes(),
 );
+// 打开面板/切回环线视图时自动校准一次：游戏里新建的航线不必先点页签。
+onMounted(() => {
+  if (chainTab.value === 'running') {
+    void refreshGameRoutes();
+  }
+});
 
 // 运行中环线折叠状态：按 shipId 持久化（跨面板重挂载保持），折叠后仅隐藏
 // 明细表格/汇总（船头内的航线概览仍显示）。只对运行行生效——规划中卡片始终展开。
@@ -1543,6 +1594,18 @@ function flightTotalText(shipId: string): string {
               </template>
             </div>
             <div :class="$style.shipActions">
+              <PrunButton
+                v-if="!entry.running"
+                dark
+                :disabled="!entry.purchase"
+                :data-tooltip="
+                  entry.purchase
+                    ? '按出发地装载清单扣掉仓库现有库存，生成 CX 采购包'
+                    : '出发地已备齐（或不在交易所），无需采购'
+                "
+                @click="openRoutePurchase(entry)"
+                >购买补给</PrunButton
+              >
               <PrunButton dark @click="openNativeRoute(entry.record)">查看原生 RT</PrunButton>
               <PrunButton dark @click="onDeleteNativeRouteClick($event, entry.record)"
                 >删除</PrunButton
