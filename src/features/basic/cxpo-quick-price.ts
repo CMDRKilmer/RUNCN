@@ -4,4 +4,4 @@ function init() {
   setQuickPriceEnabled(true);
 }
 
-features.add(import.meta.url, init, 'CXPO：在订单簿中显示幽灵价格行，以便快速压价/抬价。');
+features.add(import.meta.url, init, 'CXPO：在订单簿中显示快捷改价行，以便快速压价/抬价。');

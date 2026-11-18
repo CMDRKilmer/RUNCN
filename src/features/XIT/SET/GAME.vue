@@ -211,12 +211,12 @@ function openDesktopNotifications() {
       <SelectInput v-model="currencySettings.spacing" :options="currencySpacing" />
     </Active>
   </form>
-  <SectionHeader>燃烧设置</SectionHeader>
+  <SectionHeader>消耗品预警</SectionHeader>
   <form>
-    <Active label="红色" tooltip="燃烧计算中红色消耗品等级的阈值（天数）。">
+    <Active label="红色" tooltip="消耗品报告中红色预警等级的天数阈值。">
       <NumberInput v-model="userData.settings.burn.red" />
     </Active>
-    <Active label="黄色" tooltip="燃烧计算中黄色消耗品等级的阈值（天数）。">
+    <Active label="黄色" tooltip="消耗品报告中黄色预警等级的天数阈值。">
       <NumberInput v-model="userData.settings.burn.yellow" />
     </Active>
     <Active label="补给" tooltip="XIT BURN 中'需要'列的目标补给天数。">
