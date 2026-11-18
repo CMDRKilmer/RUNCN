@@ -413,6 +413,25 @@ function changedRefuelTanks(a: NativeRouteWaypointRecord, b: NativeRouteWaypoint
   return changed;
 }
 
+// 船的航线分配随 `SHIP_SHIPS` / `SHIP_DATA` 下发（与 SHP 窗口「航线分配」同一字段），
+// 不需要等 RTE 窗口渲染。值可能是服务端 id 或 RT 号，两种都保留、按航线两边比对。
+interface ShipRouteAssignment {
+  key: string;
+  shipId: string;
+}
+
+function shipRouteAssignments(): ShipRouteAssignment[] {
+  const assignments: ShipRouteAssignment[] = [];
+  for (const ship of shipsStore.all.value ?? []) {
+    const assigned = typeof ship.assignedRoute === 'string' ? ship.assignedRoute.trim() : '';
+    if (assigned === '') {
+      continue;
+    }
+    assignments.push({ key: assigned.toUpperCase(), shipId: ship.id });
+  }
+  return assignments;
+}
+
 // 「运行中」要展示的航线：**所有创建过的原生 RT**。顺序 = 执行中的在前，其余按创建时间
 // 倒序；每条航线只出现一次，航点/步骤/档位一律以**游戏里的定义**为准（玩家可能在原生 RT
 // 里改过，改完即使还没分配船只也要跟着变），本地记录只补仍然匹配的预计时长与船/产业链名。
@@ -422,23 +441,48 @@ export function collectNativeRoutes(
   running: RunningRoutes | undefined,
   definitions: readonly RouteData[] = [],
 ) {
-  const rows: { record: NativeRouteRecord; shipId: string }[] = [];
+  const rows: { record: NativeRouteRecord; shipId: string; running: boolean }[] = [];
   // 同一条航线可能同时被两艘船执行：执行行按「航线 + 船」去重，两艘船各占一张卡；
   // 而定义行/本地行按航线去重，避免给执行中的航线再补一张「未分配」的重复卡。
   const executing = new Set<string>();
   const executingRows = new Set<string>();
-  for (const entry of running?.entries ?? []) {
-    const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
-    const record = mergeRouteRecord(entry.route, entry.shipId, local);
+  // 一条分配只认领一次：认领过的船不会再从别的来源补出第二张卡。
+  const assignments = shipRouteAssignments();
+  const takeAssignedShips = (routeId: string, naturalId: string | undefined) => {
+    const keys = [routeId, naturalId ?? ''].map(x => x.trim().toUpperCase()).filter(x => x !== '');
+    if (keys.length === 0) {
+      return [];
+    }
+    const ships: string[] = [];
+    for (let index = assignments.length - 1; index >= 0; index--) {
+      if (keys.includes(assignments[index]!.key)) {
+        ships.unshift(assignments.splice(index, 1)[0]!.shipId);
+      }
+    }
+    return ships;
+  };
+  const pushExecuting = (record: NativeRouteRecord, shipId: string) => {
     const identity = routeIdentity(record.routeId, record.naturalId);
-    const shipId = entry.shipId ?? record.shipId;
     const key = `${identity}|${shipId}`;
     if (executingRows.has(key)) {
-      continue;
+      return;
     }
     executingRows.add(key);
     executing.add(identity);
-    rows.push({ record, shipId });
+    rows.push({ record, shipId, running: true });
+  };
+  for (const entry of running?.entries ?? []) {
+    const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
+    // RTE 行里的船名可能配不上（或已经换船）：推送的分配才是权威答案。
+    const assignedShips = takeAssignedShips(entry.route.id, entry.route.naturalId);
+    const shipIds =
+      assignedShips.length > 0 ? assignedShips : [entry.shipId ?? local?.shipId ?? ''];
+    for (const shipId of shipIds) {
+      pushExecuting(
+        mergeRouteRecord(entry.route, shipId === '' ? undefined : shipId, local),
+        shipId,
+      );
+    }
   }
   const shown = new Set<string>();
   const addUnassigned = (record: NativeRouteRecord, shipId: string) => {
@@ -447,7 +491,7 @@ export function collectNativeRoutes(
       return;
     }
     shown.add(identity);
-    rows.push({ record, shipId });
+    rows.push({ record, shipId, running: false });
   };
   // 游戏里的全部航线定义：覆盖「还没分配船只 / 已经跑完」的航线（RTE 里看不到它们）。
   const ordered = definitions
@@ -457,15 +501,47 @@ export function collectNativeRoutes(
     }))
     .sort((a, b) => (b.local?.createdAt ?? 0) - (a.local?.createdAt ?? 0));
   for (const { definition, local } of ordered) {
-    const record = mergeRouteRecord(definition, undefined, local);
-    addUnassigned(record, local?.shipId ?? '');
+    const assignedShips = takeAssignedShips(definition.id, definition.naturalId);
+    if (assignedShips.length === 0) {
+      addUnassigned(mergeRouteRecord(definition, undefined, local), local?.shipId ?? '');
+      continue;
+    }
+    for (const shipId of assignedShips) {
+      pushExecuting(mergeRouteRecord(definition, shipId, local), shipId);
+    }
   }
   const sorted = Object.values(records).sort((a, b) => b.createdAt - a.createdAt);
   for (const record of sorted) {
-    // 刷新失败（没拿到定义）时仍然把本地记录显示出来，游戏里已删除的由校准负责清理。
-    addUnassigned(record, record.shipId);
+    // 还没拿到航线定义时也要按分配把执行中的卡片列出来。
+    const assignedShips = takeAssignedShips(record.routeId, record.naturalId);
+    if (assignedShips.length === 0) {
+      // 刷新失败（没拿到定义）时仍然把本地记录显示出来，游戏里已删除的由校准负责清理。
+      addUnassigned(record, record.shipId);
+      continue;
+    }
+    for (const shipId of assignedShips) {
+      pushExecuting(withAssignedShip(record, shipId), shipId);
+    }
   }
-  return rows;
+  // 执行中的卡片排在最前：分配可能落在任意一条定义/记录上。
+  return rows.sort((a, b) => Number(b.running) - Number(a.running));
+}
+
+// 航线改派给别的船后，按旧船算出来的各段预计时长不再成立。
+function withAssignedShip(record: NativeRouteRecord, shipId: string) {
+  if (record.shipId === shipId) {
+    return record;
+  }
+  const ship = shipsStore.getById(shipId);
+  return {
+    ...record,
+    shipId,
+    shipLabel: ship === undefined ? '' : ship.name || ship.registration,
+    waypoints:
+      record.shipId === ''
+        ? record.waypoints
+        : record.waypoints.map(x => ({ ...x, flightHours: undefined })),
+  };
 }
 
 // 删除成功后要清掉的本地记录：**只清被删的那条航线**。同一艘船 + 同一产业链可以有
@@ -587,7 +663,11 @@ export function routeStopStates(
 }
 
 // 「当前/总站数」进度文本：由逐站状态推出，与表格标记同一口径。
+// 没有船就不知道它在哪一站：不要用「1/N」假装还没出发。
 export function routeProgressText(record: NativeRouteRecord, ship: PrunApi.Ship | undefined) {
+  if (ship === undefined) {
+    return '—';
+  }
   const states = routeStopStates(record, ship);
   const index = states.findIndex(x => x === 'arrived' || x === 'transit');
   const reached = states.filter(x => x === 'done').length;

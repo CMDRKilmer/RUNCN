@@ -18,6 +18,7 @@ const adapters = new Set([
   '@src/infrastructure/prun-api/data/flights',
   '@src/infrastructure/prun-api/data/stations',
   '@src/infrastructure/prun-api/data/stars',
+  '@src/infrastructure/prun-api/data/exchanges',
   '@src/infrastructure/prun-api/data/warehouses',
   '@src/infrastructure/prun-api/data/flight-test-collector',
   '@src/features/XIT/FLEET/utils',

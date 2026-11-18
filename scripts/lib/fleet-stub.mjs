@@ -10,6 +10,8 @@ export const fixture = {
   production: {},
   analyses: {},
   materials: {},
+  stations: {},
+  exchanges: {},
 };
 export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: [] });
 export const sitesStore = {
@@ -18,7 +20,14 @@ export const sitesStore = {
 };
 export const shipsStore = { all: ref([]), fetched: ref(true), getById: id => fixture.ships[id] };
 export const flightsStore = { all: ref([]), getById: () => undefined };
-export const stationsStore = { all: ref([]), getByNaturalId: () => undefined };
+export const stationsStore = {
+  all: ref([]),
+  getByNaturalId: id => fixture.stations[id],
+};
+export const exchangesStore = {
+  all: ref([]),
+  getByNaturalId: id => fixture.exchanges[id],
+};
 export const starsStore = { all: ref([]) };
 export const warehousesStore = { all: ref([]) };
 export const getStarNaturalId = star => star.systemId;
