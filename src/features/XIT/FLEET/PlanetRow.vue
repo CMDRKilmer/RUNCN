@@ -43,6 +43,7 @@ const {
   showFill,
   fillInventory,
   effectiveDays,
+  fittedDays,
   storeId,
   warehouseStoreId,
   analysis,
@@ -59,6 +60,8 @@ const {
   showFill: boolean;
   fillInventory: boolean;
   effectiveDays?: number;
+  // effectiveDays 是否真的来自「按该船剩余容量适配」（false = 退回仓储上限或手填天数）。
+  fittedDays?: boolean;
   storeId: string;
   warehouseStoreId?: string;
   analysis?: BaseStorageAnalysis;
@@ -80,6 +83,11 @@ const days = computed(() => (burn.value ? countDays(burn.value.burn) : undefined
 watch(
   [() => config.days, () => analysis?.suppliesCapDays],
   ([daysVal, capDays]) => {
+    // 「填满库存」开启时输入框是只读展示，这里再改写 config.days 只会让用户关掉开关后
+    // 看到一个自己没设过的数字（旧 fitShip 路径靠这道钳制收尾，现在不再需要）。
+    if (fillInventory) {
+      return;
+    }
     // 截断到上限,向下取两位小数。
     config.days = clampDaysInput(daysVal, capDays);
   },
@@ -182,6 +190,7 @@ const daysModel = computed({
     return effectiveDays ?? config.days;
   },
   set: value => {
+    // 只读展示期间丢弃写入（输入框已禁用，这里只是防御性判断）。
     if (!fillInventory) {
       config.days = value;
     }
@@ -195,8 +204,14 @@ const daysTooltip = computed(() => {
       return '填满库存：仓储分析未加载，暂用当前天数';
     }
     const capText =
-      capDays === undefined || !isFinite(capDays) ? '' : `，仓储上限 ${formatBurnDays(capDays)} 天`;
-    return `填满库存：目标 ${formatBurnDays(effectiveDays)} 天（按船只容量适配${capText}）`;
+      capDays === undefined || !isFinite(capDays)
+        ? ''
+        : `，本基地仓储上限 ${formatBurnDays(capDays)} 天`;
+    if (!fittedDays) {
+      // 未分配船只 / 船不在 CX 列表 / 缺 cargoStore：天数是仓储上限，不是按船算出来的。
+      return `填满库存：目标 ${formatBurnDays(effectiveDays)} 天（该行未按船只容量适配${capText}）`;
+    }
+    return `填满库存：目标 ${formatBurnDays(effectiveDays)} 天（按该船剩余容量适配${capText}）`;
   }
   if (capDays === undefined) {
     return '天数上限: -- (仓储分析未加载)';
@@ -624,6 +639,19 @@ const barAlarmReason = computed(() =>
   outline: none;
   color: #ccc;
   border-bottom-color: #666;
+}
+
+/* 「填满库存」的只读天数：全局禁用规则（refined-prun.css:539-546，带 !important 的
+   「浅底 + 次要深字 + 浅边框」）会把这个行内淡框变成实心按钮，方向上正好相反。
+   用同等特异度（重复主题属性选择器）把它拉回透明底、淡字：这里的语义是「固定值」，
+   不是「可点控件」。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  :global(.rp-command-XIT)
+  .faintInput
+  :global(input:disabled) {
+  background-color: transparent !important;
+  border-bottom-color: transparent !important;
+  color: #888 !important;
 }
 
 .faintSelect {

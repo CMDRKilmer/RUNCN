@@ -40,7 +40,7 @@ import {
   getShipsAtCX,
   regroupByShip,
 } from '@src/features/XIT/FLEET/utils';
-import { getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
+import { fillInventoryDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 
 interface BaseEntry {
   siteId: string;
@@ -144,12 +144,8 @@ function planConfig(config: DispatchBaseConfig, site: PrunApi.Site): DispatchBas
   if (!fillInventory.value) {
     return base;
   }
-  const cap = getSuppliesCap(site);
   const fitted = config.ship ? fittedDaysByShip.value.get(config.ship) : undefined;
-  return {
-    ...base,
-    days: fitted ?? (Number.isFinite(cap) ? cap : config.days),
-  };
+  return { ...base, days: fillInventoryDays(fitted, getSuppliesCap(site), config.days) };
 }
 
 // 环线有自身的多船容量试算，这里只给目标上限。
@@ -158,11 +154,7 @@ function chainConfig(config: DispatchBaseConfig, site: PrunApi.Site): DispatchBa
   if (!fillInventory.value) {
     return base;
   }
-  const cap = getSuppliesCap(site);
-  return {
-    ...base,
-    days: Number.isFinite(cap) ? cap : config.days,
-  };
+  return { ...base, days: fillInventoryDays(undefined, getSuppliesCap(site), config.days) };
 }
 
 function burnDaysRemaining(siteId: string) {
@@ -431,10 +423,16 @@ const fittedDaysByShip = computed(() => {
   return map;
 });
 
+// 每行实际使用的计划天数，以及它是否真的来自「按该船剩余容量适配」
+// （未分配船只/船不在 CX 列表/缺 cargoStore 时退回仓储上限，PlanetRow 据此分叉文案）。
 const rowPlannedDays = computed(() => {
-  const map = new Map<string, number>();
+  const map = new Map<string, { days: number; fitted: boolean }>();
   for (const { base, config } of rows.value) {
-    map.set(base.naturalId, planConfig(config, base.site).days);
+    const planned = planConfig(config, base.site);
+    map.set(base.naturalId, {
+      days: planned.days,
+      fitted: config.ship !== undefined && fittedDaysByShip.value.has(config.ship),
+    });
   }
   return map;
 });
@@ -660,7 +658,7 @@ onUnmounted(() => clearTimeout(noticeTimer));
         <Tooltip
           no-icon
           position="top"
-          tooltip="开启后各基地按仓储安全上限补满库存，并按每艘船剩余容量适配补给天数。">
+          tooltip="开启后各基地按仓储安全上限补满库存，并按每艘船剩余容量适配补给天数；关闭时沿用每基地手填天数，改派船只也不会再自动改天数。">
           <RadioItem v-model="fillInventory" horizontal>填满库存</RadioItem>
         </Tooltip>
         <!-- 自动发船 / 到港卸货 属同一组，中间不放分隔线，
@@ -723,7 +721,8 @@ onUnmounted(() => clearTimeout(noticeTimer));
                   :show-war="showWar"
                   :show-fill="showFill"
                   :fill-inventory="fillInventory"
-                  :effective-days="rowPlannedDays.get(id)"
+                  :effective-days="rowPlannedDays.get(id)?.days"
+                  :fitted-days="rowPlannedDays.get(id)?.fitted ?? false"
                   :overloaded="
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)

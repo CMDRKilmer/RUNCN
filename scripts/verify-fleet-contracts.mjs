@@ -2,6 +2,7 @@
 // Usage: node scripts/verify-fleet-contracts.mjs. Exit 0 = PASS; assertions fail with exit 1.
 // Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
 // Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
+// The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
 import { register } from 'node:module';
@@ -12,6 +13,7 @@ const { fixture, userData, sitesStore, shipsStore, flightsStore, transport, wind
 const { collectChainPlanningSnapshot } = await import('../src/features/XIT/FLEET/chain-data.ts');
 const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-core.ts');
 const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-planning.ts');
+const { fillInventoryDays } = await import('../src/features/XIT/FLEET/supplies-cap.ts');
 const { executeChainPlans, clearShipChainPlan } =
   await import('../src/features/XIT/FLEET/chain-commands.ts');
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
@@ -1556,6 +1558,20 @@ await check('native RT listing: an executing route wins over its local copy', as
   // 执行中的卡片用游戏里的档位，本地那条仍保留自己的值。
   assert.equal(rows[0].record.waypoints[0].fuelPercent, 60);
   assert.equal(rows[1].record.waypoints[0].fuelPercent, 35);
+});
+
+// ---- 「填满库存」：按船适配天数 → 每基地天数（FLEET.vue planConfig 的口径）----
+await check('fill inventory: fitted days clamp to each base cap', () => {
+  // 单基地：适配值在 cap 内 → 用适配值。
+  assert.equal(fillInventoryDays(40, 40, 10), 40);
+  // 一船挂多个补给基地：fitDaysForShip 的饱和点取各基地 cap 的最大值，
+  // cap 较小的基地必须被钳回自己的上限，否则「目标 40 天 > 仓储上限 25 天」。
+  assert.equal(fillInventoryDays(40, 25, 10), 25);
+  assert.equal(fillInventoryDays(40, Infinity, 10), 40);
+  // 未适配（无船/船不在 CX/缺货舱）：退回仓储上限；无上限则保留手填天数。
+  assert.equal(fillInventoryDays(undefined, 25, 10), 25);
+  assert.equal(fillInventoryDays(undefined, Infinity, 10), 10);
+  assert.equal(fillInventoryDays(undefined, 0, 10), 0);
 });
 
 console.log(`PASS ${passes}/${passes}`);
