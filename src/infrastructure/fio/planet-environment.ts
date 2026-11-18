@@ -2,18 +2,28 @@
 type PlanetEnvEntry = { r: number; p?: number };
 let planetEnvData: Record<string, PlanetEnvEntry> | undefined;
 let planetEnvLoading: Promise<void> | undefined;
+let warnedFailure = false;
 
 async function loadPlanetEnv(): Promise<void> {
-  if (planetEnvData !== undefined || planetEnvLoading !== undefined) {
+  if (planetEnvData !== undefined) {
+    return;
+  }
+  if (planetEnvLoading !== undefined) {
     return planetEnvLoading;
   }
   planetEnvLoading = (async () => {
     try {
       const resp = await fetch(config.url.planetEnv);
       planetEnvData = (await resp.json()) as Record<string, PlanetEnvEntry>;
-    } catch {
-      // Missing bundled data is reported to callers as an absent environment.
-      planetEnvData = {};
+    } catch (error) {
+      // 失败**不**永久缓存：数据文件可能只是暂时读不到（离线安装、热重载），
+      // 下一次调用重新尝试。缺数据对调用方仍表现为「没有环境」。
+      if (!warnedFailure) {
+        warnedFailure = true;
+        console.warn('Failed to load planet environment data:', error);
+      }
+    } finally {
+      planetEnvLoading = undefined;
     }
   })();
   return planetEnvLoading;

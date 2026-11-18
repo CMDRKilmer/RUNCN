@@ -1,9 +1,11 @@
-// 受控 BTF 扫描：系内转移段 f 曲线（2026-10-13）。
+// 受控 BTF 扫描：系内转移段 f 曲线。
 //
-// 目的：补齐 `STL_INTRA_TRANSIT_SPEED_KM_S` 缺失的地面真值。
-//   `fuel-model.ts` 的系内转移段速度 = 27,512 ,km/s × (质量幂律) × (引擎 f 曲线)，
-//   而 27,512 这个锚点来自 BTF 样本 `VH-331g → HRT`（599,220,390 km / 21,780 s），
-//   **该样本没有记录 f** —— 全模型的 f 依赖只有这一个点 + 一条假设的曲线形状。
+// 目的：补齐系内转移段速度里「档位 f」这一维的地面真值。
+//   旧口径（`fuel-model.ts` 的 `STL_INTRA_TRANSIT_SPEED_KM_S`，已停用）曾把速度写成
+//   27,512 km/s × 质量幂律 × 引擎 f 曲线，锚点来自 BTF 样本 `VH-331g → HRT`
+//   （599,220,390 km / 21,780 s），而**该样本没有记录 f** —— 那套模型的 f 依赖只有
+//   这一个点 + 一条假设的曲线形状。当前公式口径（`src/core/flight/stl.ts`）不再用这条
+//   速度曲线；保留本扫描是为了继续收 f 维度的原生时长/燃料真值。
 //   本扫描固定船/航线/罐，只变 f，逐点取服务器原生时长与燃料作真值。
 //
 // 与 `flight-test-collector` 共用同一条服务器通道（socket.io 直接发
@@ -124,7 +126,7 @@ export interface TransitFScanOptions {
   payload?: number;
   // 船体状况。缺省 1。
   condition?: number;
-  // 反应堆使用量。缺省 0.6510416666666667。
+  // 反应堆使用量。缺省 125/192（≈0.651，与 buildTestFlightPayload 同一取值）。
   reactorUsageFactor?: number;
   // 变体标签：随结果回传，供矩阵扫描区分「这套配件测出来的是哪组数据」。
   // 例：'STL=SAVING,TANK=MED,REACTOR=STD'。同一次扫描内不变。
@@ -385,6 +387,12 @@ export interface TransitMatrixScanOptions {
   payload?: number;
   condition?: number;
   reactorUsageFactor?: number;
+  // 以下四项对矩阵内所有变体取同一值：矩阵扫的是「配件 × f 档」，其余飞行条件固定，
+  // 否则变体之间不可比。缺省值沿用 scanTransitFuelCurve 的默认。
+  ftlFuel?: number;
+  landing?: boolean;
+  useGateways?: boolean;
+  ftlPreference?: ScanFtlPreference;
   onVariantStart?: (info: { index: number; total: number; variant: string }) => void;
   onProgress?: (info: {
     variant: string;
@@ -432,6 +440,10 @@ export async function scanTransitMatrix(
       payload: options.payload,
       condition: options.condition,
       reactorUsageFactor: options.reactorUsageFactor,
+      ftlFuel: options.ftlFuel,
+      landing: options.landing,
+      useGateways: options.useGateways,
+      ftlPreference: options.ftlPreference,
       variant: entry.variant,
       onProgress: info => {
         options.onProgress?.({ variant: entry.variant, ...info });

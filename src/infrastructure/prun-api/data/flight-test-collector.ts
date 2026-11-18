@@ -112,7 +112,9 @@ export function buildTestFlightPayload(
     destination,
     landing: options?.landing ?? true,
     fuelUsageFactor: options?.fuelUsageFactor ?? 0.05,
-    reactorUsageFactor: options?.reactorUsageFactor ?? 0.6510416666666667,
+    // 试飞默认反应堆档 125/192 ≈ 0.651：沿用 main 里内联调用的取值（既有采集样本都是这一档），
+    // 写成分数是为了让来源可见，不要当成标定出来的最优值。
+    reactorUsageFactor: options?.reactorUsageFactor ?? 125 / 192,
     payload: options?.payload ?? 0,
     condition: options?.condition ?? 1,
     stlFuel: options?.stlFuel ?? 1500,

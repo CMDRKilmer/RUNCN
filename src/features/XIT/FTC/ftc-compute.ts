@@ -377,6 +377,9 @@ export interface FtcComputeOutput {
 }
 
 // 计算最优燃料方案并写入共享参数（ftc-fuel-settings），无需 FTC 面板打开。
+// ⚠️ 旧口径编排层：SFC 联动、DEPART 出手、公式面板都已改走 formula-compute /
+// planFormulaFlight，本函数在 src/ 内已无调用方（保留是 docs/spec/26-11-14-flight-formula-
+// remeasurement.md 的明确决定），现仅由 verify-ftc-*.mjs 驱动以锁住旧路径契约。
 export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcComputeOutput> {
   const from = input.from.trim();
   const to = input.to.trim();

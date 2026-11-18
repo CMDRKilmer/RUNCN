@@ -26,6 +26,9 @@ interface SameSystemStlFlightInput {
   landing: StlSurfacePhase;
 }
 
+// 1 u STL 燃料的质量（t）。飞船总质量 = 空重 + 载重 + 燃料质量，见 stlAcceleration。
+export const stlFuelMassPerUnit = 0.06;
+
 export function flightConditionMultiplier(condition: number) {
   return Math.min(1, condition + 0.2);
 }
@@ -33,7 +36,8 @@ export function flightConditionMultiplier(condition: number) {
 export function stlAcceleration(performance: StlPerformance, departure: StlDeparture) {
   const { acceleration, accelerationMax, operatingEmptyMass, ftlFuelMaterial } = performance;
   const { payload, stlFuel, ftlFuel, condition } = departure;
-  const mass = operatingEmptyMass + payload + 0.06 * stlFuel + ftlFuelMaterial.weight * ftlFuel;
+  const mass =
+    operatingEmptyMass + payload + stlFuelMassPerUnit * stlFuel + ftlFuelMaterial.weight * ftlFuel;
   return (
     Math.min(accelerationMax, (acceleration * operatingEmptyMass) / mass) *
     flightConditionMultiplier(condition)
@@ -46,6 +50,34 @@ export function stlMinimumTransferFuel(
   flow: number,
 ) {
   return Math.ceil((1.5 * targetOrbitSpeedKmS * flow) / (0.03 * acceleration));
+}
+
+// STL 余油在出发/到站转移段之间的分配（游戏实测规律，见
+// docs/spec/26-11-14-flight-formula-remeasurement.md）。抽成导出函数是为了让回归脚本
+// 直接调用生产实现，而不是各自复刻公式后走样。
+export function departureTransferFuel(
+  stlFuel: number,
+  surfaceFuel: number,
+  targetMinimumFuel: number,
+  tier: number,
+) {
+  return Math.floor(((stlFuel - surfaceFuel - targetMinimumFuel + 2) * tier) / 2 + 1 + 1e-10);
+}
+
+export function approachTransferFuel(
+  stlFuel: number,
+  surfaceFuel: number,
+  tier: number,
+  circularMinimumFuel: number,
+) {
+  return Math.floor(
+    ((stlFuel - surfaceFuel) * tier) / 2 + (1 - tier) * circularMinimumFuel + 1e-10,
+  );
+}
+
+// 同星系单段转移：在「最小转移燃料」与「余油全给」之间按档位线性插值。
+export function allocateTransferFuel(minimumFuel: number, tier: number, availableFuel: number) {
+  return Math.floor(minimumFuel * (1 - tier) + availableFuel * tier + 1e-10);
 }
 
 export function stlTransferSeconds(
@@ -189,7 +221,7 @@ export function predictSameSystemStlFlight(
 ) {
   const { departureTimeMs, departureFuel, tier, minimumTransferFuel, takeoff, landing } = input;
   const availableFuel = departureFuel - takeoff.fuel - landing.fuel;
-  const transferFuel = Math.floor(minimumTransferFuel * (1 - tier) + availableFuel * tier + 1e-10);
+  const transferFuel = allocateTransferFuel(minimumTransferFuel, tier, availableFuel);
   if (!(transferFuel > 0)) {
     throw new Error('STL transfer requires positive fuel');
   }

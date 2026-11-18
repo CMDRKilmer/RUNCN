@@ -1,5 +1,6 @@
 import { findBalanceOption } from '@src/core/flight/fuel-options';
 import {
+  FlightInputError,
   predictFormulaFlight,
   selectFormulaRoute,
   type FlightBlueprint,
@@ -81,7 +82,7 @@ export function calculateFormulaOptions(
     ? candidates.reduce((a, b) => (b.totalCost! < a.totalCost! ? b : a))
     : findBalanceOption(candidates);
   if (best === undefined) {
-    throw new Error('当前输入没有可计算方案');
+    throw new FlightInputError('当前输入没有可计算方案');
   }
   return { best, options, costBased, feasibleCount: feasible.length, timeMs, request, prices };
 }

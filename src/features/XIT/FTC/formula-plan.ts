@@ -8,6 +8,8 @@
 // 判缺口径：几何、环境或星图不全时**返回 inputIncomplete 而不是退化数值** ——
 // SFC 按此跳过滑块写入（宁可不动，也不写错值），FLEET 按此标缺。
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
+import { stlFuelMassPerUnit } from '@src/core/flight/stl';
+import { FlightInputError } from '@src/infrastructure/fio/flight-formula';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { gameNow } from '@src/infrastructure/fio/orbit';
 import { sleep } from '@src/utils/sleep';
@@ -88,7 +90,7 @@ async function blueprintOf(ship: PrunApi.Ship): Promise<FlightBlueprint | undefi
 
 // 飞船当前质量减去空重与两类燃料重量 = 已装货重量（t）。
 function payloadOf(ship: PrunApi.Ship, stlFuel: number, ftlFuel: number, ftlWeight: number) {
-  const fuelMass = 0.06 * stlFuel + ftlWeight * ftlFuel;
+  const fuelMass = stlFuelMassPerUnit * stlFuel + ftlWeight * ftlFuel;
   return Math.max(0, ship.mass - ship.operatingEmptyMass - fuelMass);
 }
 
@@ -160,13 +162,13 @@ export async function planFormulaFlight(input: FormulaPlanRequest): Promise<Form
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return {
-      ok: false,
-      message,
-      inputIncomplete: [message],
-      reactorRelevant: false,
-      remaining,
-    };
+    if (error instanceof FlightInputError) {
+      return { ok: false, message, inputIncomplete: [message], reactorRelevant: false, remaining };
+    }
+    // 编程错误不是「缺输入」：不能让它变成 inputIncomplete，否则 SFC 静默跳过、FLEET 标缺，
+    // 真正的 bug 就没人看见。这里如实报告失败并留一条控制台记录。
+    console.error('[rprun] planFormulaFlight 计算失败', error);
+    return { ok: false, message: `公式计算失败：${message}`, reactorRelevant: false, remaining };
   }
 }
 

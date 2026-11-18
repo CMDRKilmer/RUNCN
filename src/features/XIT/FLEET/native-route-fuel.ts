@@ -172,6 +172,14 @@ export async function computeNativeRouteFuel(
       consume(chosen);
       continue;
     }
+    if (result.inputIncomplete === undefined || result.inputIncomplete.length === 0) {
+      // 不是「缺输入」而是公式计算失败：别用 BTF 试飞去掩盖一个代码 bug。
+      warnings.push(`FTC 计算失败 ${from} → ${to}：${result.message}`);
+      warnings.push(
+        `${from} → ${to} 的燃料消耗保留 ${DEFAULT_WAYPOINT_FUEL_PERCENT}%（公式模型失败）。`,
+      );
+      continue;
+    }
     warnings.push(`FTC 跳过 ${from} → ${to}：${skipReason(result)}`);
     // 该段缺模型输入：用 BTF 试飞实测，油量用当前航段出发时的剩余量。
     try {

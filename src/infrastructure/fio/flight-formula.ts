@@ -1,4 +1,6 @@
 import {
+  approachTransferFuel,
+  departureTransferFuel,
   flightConditionMultiplier,
   missionParkingAltitudeRatio,
   predictSameSystemStlFlight,
@@ -106,9 +108,19 @@ export interface FormulaSegment {
   ftlFuel: number;
 }
 
+// 「输入不全」专用错误：只有这类错误才算 inputIncomplete。
+// 调用方（formula-plan）据此区分「缺数据」与「代码炸了」——编程错误若也伪装成缺输入，
+// SFC 会静默跳过滑块、FLEET 会标缺，真正的 bug 就永远看不见。
+export class FlightInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FlightInputError';
+  }
+}
+
 function requireInput(ok: boolean, message: string): asserts ok {
   if (!ok) {
-    throw new Error(message);
+    throw new FlightInputError(message);
   }
 }
 
@@ -395,13 +407,11 @@ export function predictFormulaFlight(
     const tier = q.fuelUsageFactor;
     const base = ((q.stlFuel - surfaceFuel) * tier) / 2;
     const targetMinimum = minimum(destination);
-    let departureFuel = Math.floor(
-      ((q.stlFuel - surfaceFuel - targetMinimum + 2) * tier) / 2 + 1 + 1e-10,
-    );
+    let departureFuel = departureTransferFuel(q.stlFuel, surfaceFuel, targetMinimum, tier);
     let approachFuel =
       kind(q.destination) === 'STA'
         ? Math.ceil(base + targetMinimum * (1 - 0.75 * tier)) - 1
-        : Math.floor(base + (1 - tier) * minimum(destination, true) + 1e-10);
+        : approachTransferFuel(q.stlFuel, surfaceFuel, tier, minimum(destination, true));
     let firstFuel = 0;
     let lastFuel = 0;
     // 网关母星就是起点/终点天体时，该端不需要 STL 转移（原生 SFC 实测：
@@ -525,7 +535,7 @@ export function predictFormulaFlight(
     // 勾了网关却按纯自然跃迁算：把原因说出来，别让玩家以为网关生效了。
     warnings.push(
       input.gatewayConnections.length === 0
-        ? `已勾选网关，但本地没有网关连接数据（网关实体 ${input.gateways.length} 个）：请在游戏里打开一次星图后重试`
+        ? `已勾选网关，但本地没有网关连接数据（网关实体 ${input.gateways.length} 个）：请点 FTC 面板的「网关」按钮获取网关快照后重试`
         : gatewayRouteAvailable(q, bp, input)
           ? '已勾选网关，但按当前跃迁偏好（最少跳数/最短 FTL）自然航线更优，所以没走网关'
           : '已勾选网关，但此航线按当前偏好不需要网关；当前按纯自然跃迁计算',
@@ -536,7 +546,7 @@ export function predictFormulaFlight(
     (route.at(-1)?.gate !== undefined && kind(q.destination) === 'PLA');
   if (endpointGateway) {
     warnings.push(
-      '网关段位于航线首/末段且端点是行星：该形状只经 1 条原生样本核对（HRT → OF-375b），请按原生计划确认。',
+      '网关段位于航线首/末段且端点是行星：该形状只有单条原生样本核对过，请按原生计划确认。',
     );
   }
   if (estimatedLanding) {

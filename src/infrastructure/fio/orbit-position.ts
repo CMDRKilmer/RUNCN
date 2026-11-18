@@ -70,10 +70,10 @@ function trueAnomalyFromEccentric(E: number, e: number) {
 }
 
 // 游戏 forward 旋转（轨道面 → 世界）：R3(-per)·R1(+inc)·R3(-ra)。
-// 注意：历史 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，
-// 是旧相位标定不准的根源。
-// 出发时刻戳）验证：inclination 需**正向**旋转（R1(+i)），否则 z 分量符号相反
-// （反推恒星位置误差 5~10M km，翻转后 <1.7M）。FIO 与 DATA_DATA 的 inclination
+// 注意：旧 FTC 的 orbitalToWorld 用了正角（等价逆旋转），方向与游戏相反，是旧相位
+// 标定不准的根源。
+// inclination 的正负号由 BTF 样本（起飞时刻戳）验证：需**正向**旋转 R1(+i)，否则 z 分量
+// 符号相反（反推恒星位置误差 5~10M km，翻转后 <1.7M）。FIO 与 DATA_DATA 的 inclination
 // 约定一致（可为负），配合 R1(+i) 后与服务器坐标完全对齐。
 function gameOrbitalToWorld(
   p: { x: number; y: number; z: number },

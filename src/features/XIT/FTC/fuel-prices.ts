@@ -81,7 +81,8 @@ function averageOf(rows: FioExchangeRow[], ticker: string): FuelAveragePrice {
   return { average: sum / markets.length, markets };
 }
 
-// 同步读取当前均价（面板渲染用；数据由 ensureFuelPrices 填充）。
+// 同步读取当前均价（数据由 ensureFuelPrices 填充）。
+// 仅供 verify-fuel-average.mjs 断言均价；面板用的是 fuelPrices 这个 ref 本身。
 export function readFuelAverages() {
   return { stl: fuelPrices.value.stl, ftl: fuelPrices.value.ftl };
 }

@@ -409,12 +409,12 @@ export function stlApproachSpeedFor(ship: ShipPerformance, fuel: number): number
 // 系内「转移」（TRANSIT）段平均速度（km/s @ f）：引擎表 × f 曲线 × 质量曲线
 // （标定块见 STL_TRANSIT_F_SAT 上方）。空载（m = 整备质量）时质量因子 = 1；
 // f ≥ 0.5 饱和（与燃料同拐点）。引擎未标定时回退标准引擎参数。
-// ⚠️ 本函数的**绝对**速度在 500M km 量级被证伪（高估 ~2×，见 STL_INTRA_TRANSIT_SPEED_KM_S
-// 上方），故不能直接当速度用；它只承载「引擎 f 曲线」这一形状信息。
-// 现状：`computeFuelOption()` 经 `stlIntraTransitSpeedFor` **以比值形式**使用它
-// （curve(f)/curve(0.05)，锚定 BTF 参考速度，f=0.05 时比值 = 1）→ 只取 f 依赖，不引入被
-// 证伪的绝对量级。保留本函数还因为 STL_TRANSIT_SPEED / DEFAULT_STL_TRANSIT_SPEED /
-// STL_TRANSIT_MASS_EXP 三个常量挂在这里。
+// ⚠️ 本函数属于**已停用**的旧口径：它的绝对速度在 500M km 量级被证伪（高估 ~2×），
+// 现行公式模型（`src/core/flight/stl.ts`）不用速度曲线算转移段，而是解
+// `burn = 0.03 f/流量` 与距离/加速度的关系。
+// 仅存的用途：`computeFuelOption()`（只有 BTF 采集与旧 `verify-ftc-*.mjs` 走）经
+// `stlIntraTransitSpeedFor` **以比值形式**取 f 依赖（curve(f)/curve(0.05)），不引入被证伪的
+// 绝对量级；STL_TRANSIT_SPEED / DEFAULT_STL_TRANSIT_SPEED / STL_TRANSIT_MASS_EXP 也挂在这里。
 export function stlTransitSpeedFor(ship: ShipPerformance, fuel: number): number {
   const p = STL_TRANSIT_SPEED[ship.stlEngineOption ?? ''] ?? DEFAULT_STL_TRANSIT_SPEED;
   const f = Math.min(Math.max(fuel, 0.01), STL_TRANSIT_F_SAT);
