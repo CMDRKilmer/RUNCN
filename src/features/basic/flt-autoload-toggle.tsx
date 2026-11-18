@@ -50,17 +50,40 @@ function onTileReady(tile: PrunTile) {
     </button>
   )).appendTo(tile.frame);
 
-  const controls = tile.frame.querySelector<HTMLElement>('[class*="TileFrame__controls"]');
-  const measure = () => {
-    const width = controls === null ? 0 : Math.round(controls.getBoundingClientRect().width);
+  const controlsOf = () => _$(tile.frame, C.TileFrame.controls) as HTMLElement | undefined;
+  const measure = (controls: HTMLElement | undefined) => {
+    const width = controls === undefined ? 0 : Math.round(controls.getBoundingClientRect().width);
     tile.frame.style.setProperty('--rp-flt-controls-width', `${width}px`);
   };
-  measure();
-  if (controls !== null) {
-    const observer = new ResizeObserver(measure);
+
+  // 注入这一刻原生控件可能还没渲染（窗口首帧、FB 异步搬移）：此时 width 记 0
+  // 会把按钮压到设置/最大化/关闭图标下面，而控件出现后没有任何回调来纠正。
+  // 因此找不到控件就按帧重试（最多约 2 秒），找到后再挂 ResizeObserver 跟进
+  // 控件显隐与窗口缩放；磁贴销毁时同时停掉重试与观察器。
+  let retry: number | undefined;
+  let observer: ResizeObserver | undefined;
+  let attempts = 120;
+  const attach = () => {
+    retry = undefined;
+    const controls = controlsOf();
+    measure(controls);
+    if (controls === undefined) {
+      if (attempts > 0 && tile.anchor.isConnected) {
+        attempts -= 1;
+        retry = requestAnimationFrame(attach);
+      }
+      return;
+    }
+    observer = new ResizeObserver(() => measure(controls));
     observer.observe(controls);
-    onNodeDisconnected(tile.anchor, () => observer.disconnect());
-  }
+  };
+  attach();
+  onNodeDisconnected(tile.anchor, () => {
+    if (retry !== undefined) {
+      cancelAnimationFrame(retry);
+    }
+    observer?.disconnect();
+  });
 }
 
 function init() {
