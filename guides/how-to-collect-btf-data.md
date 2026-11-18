@@ -36,9 +36,9 @@
   转移段距离是**转移路径的弧长、随计划时刻（相位）漂移**，不是航线常数（同航线同船同 f 也会变）。
 - **系内航线的路程与是否勾选「使用跃迁点」无关**（结论保留，但判据换成代码事实）：`route-planner.planRoutes()`
   把起终点都解析成**星系 id**（`resolveSystemId`）后跑两次 Dijkstra；系内航线 `from === to` → Dijkstra 在
-  `cur === to` 处立即 break（`route-planner.ts` 第 96–98 行），两种模式都是单元素路径 → `buildRoute` 的
-  `for (i < path.length - 1)` 不执行（第 138 行，函数体 129–150 行）⇒ `legs = []`、`gatewayCount = 0`
-  → `planRoutes` 只返回 `natural`，`gateway` 候选恒空（第 172–181 行；`gatewayCount > 0` 不成立）；`ftc-compute.ts` 第 395–396 行的
+  `cur === to` 处立即 break，两种模式都是单元素路径 → `buildRoute` 的
+  `for (i < path.length - 1)` 不执行（`buildRoute()` 里 `path.length === 1`）⇒ `legs = []`、`gatewayCount = 0`
+  → `planRoutes` 只返回 `natural`，`gateway` 候选恒空（`gatewayCount > 0` 不成立）；`ftc-compute.ts` 的
   `planned.gateway ?? planned.natural` 两种模式取到**同一个** route 对象。原生侧只有**勾选态**这一条样本，
   **不存在**直飞态原生样本（见下条）。
 - **⚠️ 旧「两者差 0.05% / 两种模式路程相同」已作废（跨样本无效）**：`101.7053M km`（= 68.0562M + 33.6491M）
@@ -58,11 +58,11 @@
 
 - 记录：蓝图配置（引擎/油箱/货舱/船板/整备质量/推力/G）、f/r、载重、各段耗时/距离/燃料。
 - 采集后**恢复蓝图原始配置**（改回原引擎/货舱等）并保存，避免影响用户蓝图。
-- 历史数据见 `data/ftc-calibration/btf-load-sweep-2026-08-29.md`；拟合脚本 `scripts/analyze-btf-load.py`。
+- 历史数据集（原 `data/ftc-calibration/btf-load-sweep-2026-08-29.md` 等）已移出仓库，需要时从 git 历史取回；拟合脚本 `scripts/analyze-btf-load.py` 仍在。
 
-## 转移段口径标定结论（2026-09-23 完成；原「待办实测」）
+## 转移段口径标定结论（旧 `fuel-model.ts` 口径，已停用；当前口径见 `src/core/flight/stl.ts`）
 
-- **燃料口径 = 罐口径（已完成，2026-09-23）**：`F = 0.98 × 罐 × min(f, 0.5)`（= 两段 `0.49×罐×f`），
+- **燃料口径 = 罐口径（已完成标定）**：`F = 0.98 × 罐 × min(f, 0.5)`（= 两段 `0.49×罐×f`），
   **与距离无关、与载重无关、f ≥ 0.5 饱和**；BTF 28 点最大误差 **3.3%**。判据就是原先设计的
   「换罐实验」（只看燃料是否随罐变、不看距离）；`C_F×f×d` 口径**已证伪**：同航线罐 1500 高 **10.0×**。
 - **时长口径也已标定（同批）**：`t = d / (V_SAT(引擎) × (min(f,0.5)/0.5)^k(引擎) × (整备质量/当前质量)^0.75 × 3600) / 状况`
@@ -75,6 +75,6 @@
 - **⚠️ 罐容量读数存疑（未修）**：FTC 面板读的是蓝图 `performance.stlFuelCapacity`；用户船样本 2655u
   需 **罐 8000 + f≈0.34** 才能解释（面板显示 3500）。罐是乘性因子，不影响选出的最优 f，但影响燃料总量
   显示与缺口判断 —— 见 `docs/feature-patterns.md` 「系内「转移」段几何 + 燃料口径标定 + 星系 id 反查」末项。
-- 口径细节与完整数字见 `docs/feature-patterns.md` 的 FTC 条目（基准数据：
-  `data/ftc-calibration/btf-load-sweep-2026-08-29.md`；拟合脚本 `scripts/analyze-btf-load.py`；
-  对应实现：`fuel-model.ts` 的 `STL_TRANSIT_*` 标定块与 `computeFuelOption()` 的系内分支）。
+- 口径细节与完整数字见 `docs/feature-patterns.md` 的 FTC 条目（拟合脚本 `scripts/analyze-btf-load.py`；
+  对应实现（旧口径，已停用）：`fuel-model.ts` 的 `STL_TRANSIT_SPEED`／`STL_TRANSIT_F_SAT`／`STL_TRANSIT_MASS_EXP` 标定块与 `stlIntraTransitSpeedFor()`；
+  当前口径见 `src/core/flight/stl.ts` 与本仓库 `docs/game/game-concepts.md`）。

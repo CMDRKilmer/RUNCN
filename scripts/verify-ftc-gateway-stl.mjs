@@ -53,7 +53,7 @@
 //   - 网关跃迁边不是手写的：由**真实** infrastructure/fio/routes.ts 观测本脚本派发的
 //     JUMP_GATEWAY 段得出（⑥⑦）—— 段地址形状本身因此也被测到。
 //
-// 用法：node scripts/verify-ftc-gateway-stl.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-gateway-stl.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：SFC 磁贴的 DOM 接线（真正把值写进 rc-slider）在 Node 里不可加载 —— 本脚本断言到
 // `setFtcFuelSlider`（替身记录写入的航线键与值）为止；替换几何替身
@@ -305,32 +305,126 @@ const mixedPlan = {
   missionId: 'STUB-MISSION-MIXED',
   segments: [
     // 0 起飞：ZV-194h 地表 → 其环绕轨道。
-    segment('TAKE_OFF', planetAddress(MIX_FROM_SYS, MIX_FROM_BODY), planetAddress(MIX_FROM_SYS, MIX_FROM_BODY), 41300, 1178 * 1000),
+    segment(
+      'TAKE_OFF',
+      planetAddress(MIX_FROM_SYS, MIX_FROM_BODY),
+      planetAddress(MIX_FROM_SYS, MIX_FROM_BODY),
+      41300,
+      1178 * 1000,
+    ),
     // 1 离港：ZV-194h → 本星系跃迁点（Antares III = 起点恒星）。
-    segment('DEPARTURE', planetAddress(MIX_FROM_SYS, MIX_FROM_BODY), starAddress(MIX_FROM_SYS), 69165500, 11944 * 1000),
+    segment(
+      'DEPARTURE',
+      planetAddress(MIX_FROM_SYS, MIX_FROM_BODY),
+      starAddress(MIX_FROM_SYS),
+      69165500,
+      11944 * 1000,
+    ),
     // 2 跃迁（**自然**）：Antares III → Antares II。
-    segment('JUMP', starAddress(MIX_FROM_SYS), starAddress(MIX_NAT2_SYS), null, 4982 * 1000, MIX_FTL_NAT1_PC),
+    segment(
+      'JUMP',
+      starAddress(MIX_FROM_SYS),
+      starAddress(MIX_NAT2_SYS),
+      null,
+      4982 * 1000,
+      MIX_FTL_NAT1_PC,
+    ),
     // 3 充能。
     segment('CHARGE', starAddress(MIX_NAT2_SYS), starAddress(MIX_NAT2_SYS), null, 295 * 1000),
     // 4 跃迁（**自然**）：Antares II → Antares I（= ZV-307）。
-    segment('JUMP', starAddress(MIX_NAT2_SYS), starAddress('ZV-307'), null, 6259 * 1000, MIX_FTL_NAT2_PC),
+    segment(
+      'JUMP',
+      starAddress(MIX_NAT2_SYS),
+      starAddress('ZV-307'),
+      null,
+      6259 * 1000,
+      MIX_FTL_NAT2_PC,
+    ),
     // 5 进近：Antares I → `Antares I - Hephaestus`（**不是**最终目标 —— 本轮的核心证据）。
-    segment('APPROACH', starAddress('ZV-307'), planetAddress('ZV-307', MIX_APPROACH_BODY), 67472800, 10048 * 1000),
-    segment('TRANSIT', planetAddress('ZV-307', MIX_APPROACH_BODY), planetAddress('ZV-307', MIX_APPROACH_BODY), 10000, 10000),
+    segment(
+      'APPROACH',
+      starAddress('ZV-307'),
+      planetAddress('ZV-307', MIX_APPROACH_BODY),
+      67472800,
+      10048 * 1000,
+    ),
+    segment(
+      'TRANSIT',
+      planetAddress('ZV-307', MIX_APPROACH_BODY),
+      planetAddress('ZV-307', MIX_APPROACH_BODY),
+      10000,
+      10000,
+    ),
     // ⚠️ 夹具重抄（2026-09-24）：锁定/衰变时长 = 10 分钟（600,000 ms）。原值 10,000 ms 源自那次
     // 「各 10 秒」误读，与服务器 BTF 实测不符；km 不变（转移段的 km/时长保持原表值）。
-    segment('LOCK', starAddress('ZV-307'), planetAddress('ZV-307', MIX_APPROACH_BODY), 10000, 600_000),
+    segment(
+      'LOCK',
+      starAddress('ZV-307'),
+      planetAddress('ZV-307', MIX_APPROACH_BODY),
+      10000,
+      600_000,
+    ),
     // 8 网关跃迁：Antares I 端网关 → Amethyst 端网关。
-    segment('JUMP_GATEWAY', gatewayAddress('ZV-307', MIX_GW_LOCAL), gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE), null, 20499 * 1000, MIX_FTL_GW1_PC),
-    segment('DECAY', gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 600_000),
-    segment('TRANSIT', planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 10000),
-    segment('LOCK', planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`), 10000, 600_000),
+    segment(
+      'JUMP_GATEWAY',
+      gatewayAddress('ZV-307', MIX_GW_LOCAL),
+      gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE),
+      null,
+      20499 * 1000,
+      MIX_FTL_GW1_PC,
+    ),
+    segment(
+      'DECAY',
+      gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE),
+      planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`),
+      10000,
+      600_000,
+    ),
+    segment(
+      'TRANSIT',
+      planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`),
+      planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`),
+      10000,
+      10000,
+    ),
+    segment(
+      'LOCK',
+      planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`),
+      planetAddress(MIX_GW2_SYS, `${MIX_GW2_SYS}B`),
+      10000,
+      600_000,
+    ),
     // 12 网关跃迁：Amethyst 端网关 → Hortus（VH-331）端网关。
-    segment('JUMP_GATEWAY', gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE2), gatewayAddress(MIX_TO_SYS, MIX_GW_END), null, 20603 * 1000, MIX_FTL_GW2_PC),
-    segment('DECAY', gatewayAddress(MIX_TO_SYS, MIX_GW_END), planetAddress(MIX_TO_SYS, 'VH-331a'), 10000, 600_000),
-    segment('TRANSIT', planetAddress(MIX_TO_SYS, 'VH-331a'), planetAddress(MIX_TO_SYS, 'VH-331a'), 10000, 10000),
+    segment(
+      'JUMP_GATEWAY',
+      gatewayAddress(MIX_GW2_SYS, MIX_GW_REMOTE2),
+      gatewayAddress(MIX_TO_SYS, MIX_GW_END),
+      null,
+      20603 * 1000,
+      MIX_FTL_GW2_PC,
+    ),
+    segment(
+      'DECAY',
+      gatewayAddress(MIX_TO_SYS, MIX_GW_END),
+      planetAddress(MIX_TO_SYS, 'VH-331a'),
+      10000,
+      600_000,
+    ),
+    segment(
+      'TRANSIT',
+      planetAddress(MIX_TO_SYS, 'VH-331a'),
+      planetAddress(MIX_TO_SYS, 'VH-331a'),
+      10000,
+      10000,
+    ),
     // 15 转移：→ Hortus Station（**真正到站的 STL 段**）。
-    segment('TRANSIT', planetAddress(MIX_TO_SYS, 'VH-331a'), stationAddress(MIX_TO_SYS, MIX_TO_BODY), 93425100, 14366 * 1000),
+    segment(
+      'TRANSIT',
+      planetAddress(MIX_TO_SYS, 'VH-331a'),
+      stationAddress(MIX_TO_SYS, MIX_TO_BODY),
+      93425100,
+      14366 * 1000,
+    ),
   ],
 };
 
@@ -379,7 +473,12 @@ check('① 纯网关计划派发 → 真实 store 写入（回退键带 `#gw` + 
     exportedApproachKeys.has(GW_APPROACH_KEY),
     true,
   );
-  expectExact(f, `航线级键 ${'ZV-307A|MOR#gw'} 已写入`, exportedRouteKeys.has('ZV-307A|MOR#gw'), true);
+  expectExact(
+    f,
+    `航线级键 ${'ZV-307A|MOR#gw'} 已写入`,
+    exportedRouteKeys.has('ZV-307A|MOR#gw'),
+    true,
+  );
   // 不带后缀的自然键**不应**被这次派发写入（否则两套几何会互相覆盖）。
   expectExact(
     f,
@@ -605,8 +704,18 @@ check('⑥ routeMetrics(网关航线) → 回退表取 `#gw` 记录值（不是�
   });
   const m = routeMetrics(gatewayRoute);
   expectExact(f, 'departKm = 网关回退记录值', m.departKm, GW_DEPART_KM);
-  expectExact(f, 'approachKm = 网关回退记录值（末跳【起点】星系查表）', m.approachKm, GW_APPROACH_KM);
-  expectExact(f, 'stlDistanceKm = 两段之和（无航线级记录时的回退口径）', m.stlDistanceKm, GW_DEPART_KM + GW_APPROACH_KM);
+  expectExact(
+    f,
+    'approachKm = 网关回退记录值（末跳【起点】星系查表）',
+    m.approachKm,
+    GW_APPROACH_KM,
+  );
+  expectExact(
+    f,
+    'stlDistanceKm = 两段之和（无航线级记录时的回退口径）',
+    m.stlDistanceKm,
+    GW_DEPART_KM + GW_APPROACH_KM,
+  );
   expectExact(f, 'routeKm（无航线级记录）', m.routeKm, undefined);
   expectExact(f, 'stlRecorded', m.stlRecorded, true);
   expectExact(f, 'departSeconds = 网关记录时长', m.departSeconds, GW_DEPART_SECONDS);
@@ -623,7 +732,12 @@ check('⑥ routeMetrics(网关航线) → 回退表取 `#gw` 记录值（不是�
   });
   const preferred = routeMetrics(gatewayRoute);
   expectExact(f, '首选：routeKm = 航线级记录值', preferred.routeKm, MIX_ROUTE_KM);
-  expectExact(f, '首选：stlDistanceKm = routeKm（压过两段之和）', preferred.stlDistanceKm, MIX_ROUTE_KM);
+  expectExact(
+    f,
+    '首选：stlDistanceKm = routeKm（压过两段之和）',
+    preferred.stlDistanceKm,
+    MIX_ROUTE_KM,
+  );
   expectCondition(
     f,
     '首选：stlDistanceKm ≠ 两段之和（证明不是拼出来的）',
@@ -747,7 +861,9 @@ await checkAsync(
     expectExact(
       f,
       '目标边在观测集合里恰好 1 条',
-      observedGatewayConnections.filter(c => [c.fromSystem, c.toSystem].join('|') === TARGET_GW_EDGE).length,
+      observedGatewayConnections.filter(
+        c => [c.fromSystem, c.toSystem].join('|') === TARGET_GW_EDGE,
+      ).length,
       1,
     );
     const conn = observedTargetConn;
@@ -777,11 +893,26 @@ await checkAsync(
     expectExact(f, 'inputIncomplete（网关几何齐备 → 不判缺）', out.inputIncomplete, undefined);
     expectExact(f, '选中的路线', out.route?.label, '网关');
     expectExact(f, 'metrics.departKm = 网关记录值', out.metrics?.departKm, GW_DEPART_KM);
-    expectExact(f, 'metrics.approachKm = 网关记录值（末跳【起点】星系侧）', out.metrics?.approachKm, GW_APPROACH_KM);
+    expectExact(
+      f,
+      'metrics.approachKm = 网关记录值（末跳【起点】星系侧）',
+      out.metrics?.approachKm,
+      GW_APPROACH_KM,
+    );
     // 首选几何 = 航线级记录（= 本计划所有 STL 段之和 = 离港 + 进近，此处两者数值相同，
     // 但来源不同：routeKm 有值是路线级表命中的证据）。
-    expectExact(f, 'metrics.routeKm = 航线级记录值', out.metrics?.routeKm, GW_DEPART_KM + GW_APPROACH_KM);
-    expectExact(f, 'metrics.stlDistanceKm = routeKm', out.metrics?.stlDistanceKm, out.metrics?.routeKm);
+    expectExact(
+      f,
+      'metrics.routeKm = 航线级记录值',
+      out.metrics?.routeKm,
+      GW_DEPART_KM + GW_APPROACH_KM,
+    );
+    expectExact(
+      f,
+      'metrics.stlDistanceKm = routeKm',
+      out.metrics?.stlDistanceKm,
+      out.metrics?.routeKm,
+    );
     expectExact(f, 'metrics.stlRecorded', out.metrics?.stlRecorded, true);
     expectExact(f, '滑块写入次数', stub.sliderWrites.length, 1);
     expectExact(f, '写入的航线键（gw 口径）', stub.sliderWrites[0]?.key, 'STUB-01|ZV-307A|MOR|gw');
@@ -881,9 +1012,8 @@ const {
 const STL_INTRA_TRANSIT_SPEED_KM_S = 27512;
 const STL_INTRA_TRANSIT_SPEED_REF_MASS_T = 1271;
 const STL_INTRA_TRANSIT_MASS_EXP = 0.78;
-const { findNativeFlightPlan, buildNativeSegmentRows, buildEstimatedSegmentRows } = await import(
-  '../src/features/XIT/FTC/route-planner.ts'
-);
+const { findNativeFlightPlan, buildNativeSegmentRows, buildEstimatedSegmentRows } =
+  await import('../src/features/XIT/FTC/route-planner.ts');
 // 截图实测船（fixtures 单一来源）+ 蓝图侧充能参数（同 stubBlueprint：0.3 / 135s）。
 const PERF = { ...SHIP, minReactorUsage: 0.3, emitterChargeTime: 135 };
 // 本脚本所有 ⑨/⑩ 用例的转移段速度（PERF.mass = 2,140t → 18,324.5 km/s）。
@@ -939,7 +1069,12 @@ check('⑨ 混合航线 STL 时长 = 离港段 + 进近段 + 其余（按航线�
     1,
     NO_PRICES,
   );
-  expectExact(f, '对照：只算离港段（逐位）', departOnly.stlHours, MIX_DEPART_KM / (vDep * 3600) / COND);
+  expectExact(
+    f,
+    '对照：只算离港段（逐位）',
+    departOnly.stlHours,
+    MIX_DEPART_KM / (vDep * 3600) / COND,
+  );
   // 其余段确实计入：差值 = restKm / (vTransit(f) × 3600) / COND（旧实现漏段 → 差值恒 0）。
   expectCondition(
     f,
@@ -1005,12 +1140,7 @@ check('⑨ 等价性：纯自然（depart + approach === 总路程）与系内�
     1,
     NO_PRICES,
   ).stlHours;
-  expectExact(
-    f,
-    '系内逐位一致（旧 else-if）',
-    transitHours,
-    101655808 / (vTransit * 3600) / COND,
-  );
+  expectExact(f, '系内逐位一致（旧 else-if）', transitHours, 101655808 / (vTransit * 3600) / COND);
   // 残缺（缺总路程、只有离港段）：沿用旧的单段口径，**不得**静默归零
   // （该输入会被 missingModelInputs 拦下、不写滑块，但面板仍会显示它）。
   const partial = computeFuelOption(
@@ -1087,7 +1217,14 @@ check('⑪ 网关时长 = gwPc/3.0 + gwCount × 20/60（锁定 10min + 衰变 10
   // 单段也按同一常数（gwCount = 1 → 20 分钟）。
   const single = computeFuelOption(
     PERF,
-    { ...mixMetrics, stlDistanceKm: undefined, departKm: undefined, natPc: 0, natJumpCount: 0, gwCount: 1 },
+    {
+      ...mixMetrics,
+      stlDistanceKm: undefined,
+      departKm: undefined,
+      natPc: 0,
+      natJumpCount: 0,
+      gwCount: 1,
+    },
     0.5,
     1,
     NO_PRICES,
@@ -1099,7 +1236,12 @@ check('⑫ 网关费 6,000 ICA/段 计入 totalCost（不随 f 变）', f => {
   const prices = { stlPrice: 12000, ftlPrice: 30000, timeValue: 2500 };
   const o = computeFuelOption(PERF, mixMetrics, 0.5, 1, prices);
   expectExact(f, 'gatewayCost = 2 × 6,000', o.gatewayCost, 2 * 6000);
-  expectExact(f, 'totalCost = 燃料费 + 时间成本 + 网关费', o.totalCost, o.fuelCost + o.timeCost + o.gatewayCost);
+  expectExact(
+    f,
+    'totalCost = 燃料费 + 时间成本 + 网关费',
+    o.totalCost,
+    o.fuelCost + o.timeCost + o.gatewayCost,
+  );
   expectExact(f, '含网关费（旧实现恒 0）', o.totalCost - (o.fuelCost + o.timeCost), 12000);
   // 与 f 无关：换燃料滑块网关费不变、只有燃料费变。
   const atLowFuel = computeFuelOption(PERF, mixMetrics, 0.1, 1, prices);
@@ -1152,12 +1294,21 @@ check('⑬ 原生计划匹配用反查键（metrics.fromLookup/toLookup）命中
     undefined,
   );
   // 新调用口径（FTC.vue）：命中原生计划，段表 = 16 段（与游戏 SFC 表格一致）。
-  const plan = findNativeFlightPlan(m.fromLookup ?? userRoute.fromBody, m.toLookup ?? userRoute.toBody);
+  const plan = findNativeFlightPlan(
+    m.fromLookup ?? userRoute.fromBody,
+    m.toLookup ?? userRoute.toBody,
+  );
   expectCondition(f, '反查键命中原生计划', plan !== undefined, '计划', 'undefined');
   if (plan !== undefined) {
     const rows = buildNativeSegmentRows(plan);
     expectExact(f, '段数 = 16（原生计划）', rows.length, 16);
-    expectCondition(f, '全部为原生段', rows.every(r => r.native), 'true', 'false');
+    expectCondition(
+      f,
+      '全部为原生段',
+      rows.every(r => r.native),
+      'true',
+      'false',
+    );
     expectExact(f, '首段 = 起飞', rows[0]?.typeKey, 'TAKE_OFF');
     // 充能口径的真实依据：16 段里 CHARGE 恰好 = 自然跳数 − 1（1 次），网关跃迁前无充能。
     const charges = rows.filter(r => r.typeKey === 'CHARGE').length;
@@ -1179,7 +1330,9 @@ check('⑬ 原生计划匹配用反查键（metrics.fromLookup/toLookup）命中
       locks.map(r => r.durationMs).join(','),
     );
   }
-  console.log(`[证据] ⑬ 反查键匹配：fromLookup=${m.fromLookup} toLookup=${m.toLookup} → 16 段原生计划`);
+  console.log(
+    `[证据] ⑬ 反查键匹配：fromLookup=${m.fromLookup} toLookup=${m.toLookup} → 16 段原生计划`,
+  );
 });
 
 // ⑭ 估算分段表（无原生计划时的回退展示）：**网关跃迁行的时长口径**。
@@ -1192,13 +1345,7 @@ check('⑭ 估算分段：网关跃迁行时长用固定 3.0 pc/h，自然跃迁
   const r = 1;
   const vFtl = ftlSpeedFor(PERF, r);
   // 守卫：本用例的反应堆档位下两种速度必须**不同**，否则下面正/负断言同时成立（假绿）。
-  expectCondition(
-    f,
-    '守卫 vFtl ≠ 3.0（否则两类段无法区分）',
-    vFtl !== 3.0,
-    '≠ 3.0',
-    String(vFtl),
-  );
+  expectCondition(f, '守卫 vFtl ≠ 3.0（否则两类段无法区分）', vFtl !== 3.0, '≠ 3.0', String(vFtl));
   // 与 ⑬ 同形状的混合航线（自然 ×2 + 网关 ×1），但不给原生计划 → 走估算分段分支。
   const route = {
     label: '网关',

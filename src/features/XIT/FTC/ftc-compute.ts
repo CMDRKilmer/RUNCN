@@ -1,7 +1,8 @@
+import { fetchPlanetEnv } from '@src/infrastructure/fio/planet-environment';
+export { fetchPlanetEnv } from '@src/infrastructure/fio/planet-environment';
 import { ref } from 'vue';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
-import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { testFlightSample } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { sleep } from '@src/utils/sleep';
@@ -67,9 +68,10 @@ export async function waitForFtcCompute(
   return 'timeout';
 }
 
-// FTC 最优燃料计算的共享编排层：不依赖 FTC 面板（Vue 组件），
-// SFC 自动设置（features/basic/sfc-auto-fuel-settings）与 FTC 面板共用。
-// 计算成功后把最优参数写入 ftc-fuel-settings 的共享 ref，SFC 滑块自动跟随。
+// Legacy orchestration (旧燃料模型 + 原生 STL 段几何)。
+// ⚠️ 2026-11-17 起 SFC 联动改走 formula-compute.ts（公式模型），FLEET 改走 formula-plan.ts；
+// 本模块不再被这两条路径调用，保留是因为旧 FTC 采集/诊断脚本与 fuel-model 仍引用它。
+// `lastFtcCompute` / `waitForFtcCompute` 仍是 SFC 完成信号的唯一来源（新路径同样写这个 ref）。
 
 // ⚠️ 曾经有过「航线几何缓存」（面板算完存 metrics，SFC 联动复用），2026-09-23 复核
 // 后删除：不可达 + 键/TTL 有缺陷。三条几何来源全部是进程内共享且跨会话持久化的
@@ -192,36 +194,9 @@ export function shipPerformanceFor(s: PrunApi.Ship): ShipPerformance {
   };
 }
 
-// 飞船当前剩余 STL / FTL 燃料（从飞船油罐 store 实测）。
-// 油罐 store 含 INVENTORY 项，quantity.amount 即剩余单位数（与 BTF 滑块同单位）。
-// 飞船未停靠或油罐 store 暂不可用时返回 0（避免误报）。
-export interface ShipFuelRemaining {
-  stlRemaining: number;
-  ftlRemaining: number;
-  stlCap: number;
-  ftlCap: number;
-}
-
-export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
-  // ⚠️ 必须用 getById（键 = store id），**不是** getByAddressableId（键 = 仓库可寻址地址 /
-  // siteId / warehouseId）：两者键类型不同，传 store id 进后者永远查不到 → 余量恒 0
-  // （用户 2026-09-25 实测症状「当前油量 STL 0/0 ｜ FTL 0/0」+ 假缺口警告的根因）。
-  // 飞船同时有 stlFuelStoreId 与 idStlFuelStore 两个字段（见 ships.types.d.ts），与
-  // QuickRefuelDialog.vue 同口径：优先前者、回退后者（实测两者都下发，留回退防缺字段）。
-  // getById 对 undefined/未 fetched 入参安全（create-entity-store.ts 内 `!id` 判空）。
-  const stlStore = storagesStore.getById(s.stlFuelStoreId ?? s.idStlFuelStore);
-  const ftlStore = storagesStore.getById(s.ftlFuelStoreId ?? s.idFtlFuelStore);
-  const sumQty = (store?: PrunApi.Store) =>
-    store?.items
-      .filter(i => i.type === 'INVENTORY')
-      .reduce((sum, i) => sum + (i.quantity?.amount ?? 0), 0) ?? 0;
-  return {
-    stlRemaining: sumQty(stlStore),
-    ftlRemaining: sumQty(ftlStore),
-    stlCap: stlStore?.weightCapacity ?? 0,
-    ftlCap: ftlStore?.weightCapacity ?? 0,
-  };
-}
+// 飞船当前剩余 STL / FTL 燃料（实现见 ./ship-fuel；此处保留原导出，旧调用方无需改动）。
+export { shipFuelRemainingFor, type ShipFuelRemaining } from './ship-fuel';
+import { shipFuelRemainingFor } from './ship-fuel';
 
 // 等待飞船蓝图加载：FTL 航速/充能时间/燃料罐容量/STL 引擎/最大 G 等性能全部来自蓝图
 // （blueprintsStore 只含公司蓝图列表，首次访问 getByNaturalId 会触发 BLU 窗口请求，
@@ -330,39 +305,6 @@ function collectBrowseTargets(
   };
 }
 
-// 行星环境数据（半径 km / 气压）内置静态 JSON（FIO 全量导出，避免运行时查询）。
-type PlanetEnvEntry = { r: number; p?: number };
-let planetEnvData: Record<string, PlanetEnvEntry> | undefined;
-let planetEnvLoading: Promise<void> | undefined;
-
-async function loadPlanetEnv(): Promise<void> {
-  if (planetEnvData !== undefined || planetEnvLoading !== undefined) {
-    return planetEnvLoading;
-  }
-  planetEnvLoading = (async () => {
-    try {
-      const resp = await fetch(config.url.planetEnv);
-      planetEnvData = (await resp.json()) as Record<string, PlanetEnvEntry>;
-    } catch {
-      // 内置文件加载失败：回退常数近似（无起降精确项）。
-      planetEnvData = {};
-    }
-  })();
-  return planetEnvLoading;
-}
-
-// 从内置数据查行星环境（半径 km + 气压）。找不到（空间站/星系/无数据）返回 undefined。
-export async function fetchPlanetEnv(
-  naturalId: string,
-): Promise<{ radiusKm: number; pressure?: number } | undefined> {
-  await loadPlanetEnv();
-  const env = planetEnvData?.[naturalId.toUpperCase()];
-  if (env === undefined) {
-    return undefined;
-  }
-  return { radiusKm: env.r, pressure: env.p };
-}
-
 // ---- 计算入口 ----
 
 export interface FtcComputeInput {
@@ -392,16 +334,16 @@ export interface FtcComputeInput {
   fixedReactor?: number;
   // 缺服务器原生 STL 段记录时按公式估算起降几何（`route-planner.estimateRouteStl`）。
   // 仅 FLEET 原生 RT 生成等「宁可给估算值也不要空等」的流程开启；缺省 false = 维持
-  // missingModelInputs 的严格判缺（FTC 面板、SFC 联动不写估算值）。
+  // missingModelInputs 的严格判缺（SFC 联动不写估算值）。
   estimateGeometry?: boolean;
   // 选点口径：true = 最优性价比（`pickBestValueOption`：多烧的燃料换回的时间跌破首档一半即停），
-  // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优（FTC 面板口径）。
+  // 原生 RT 生成用它；缺省 false = Pareto 拐点 / 时间价值最优。
   valueOptimal?: boolean;
   // 是否把结果发布给 SFC（共享滑块参数 + lastFtcCompute 完成信号）。原生 RT 向导是
   // **假设性**计算——规划载重、未来出发油量、按实际写入档位重算的档位都不代表当前 SFC 航班，
   // 同键写入会覆盖玩家正在用的实时参数，所以传 false。缺省 true。
   publish?: boolean;
-  // 进度提示回调（可选：FTC 面板用它更新状态栏；SFC 自动计算时忽略）。
+  // 进度提示回调（可选；SFC 自动计算时忽略）。
   onProgress?: (message: string) => void;
 }
 
@@ -435,6 +377,9 @@ export interface FtcComputeOutput {
 }
 
 // 计算最优燃料方案并写入共享参数（ftc-fuel-settings），无需 FTC 面板打开。
+// ⚠️ 旧口径编排层：SFC 联动、DEPART 出手、公式面板都已改走 formula-compute /
+// planFormulaFlight，本函数在 src/ 内已无调用方（保留是 docs/spec/26-11-14-flight-formula-
+// remeasurement.md 的明确决定），现仅由 verify-ftc-*.mjs 驱动以锁住旧路径契约。
 export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcComputeOutput> {
   const from = input.from.trim();
   const to = input.to.trim();
@@ -552,7 +497,7 @@ export async function computeFtcPlan(input: FtcComputeInput): Promise<FtcCompute
   // （全程系内/纯网关飞行没有自然跃迁，反应堆不影响时长与燃料，无需计算）。
   const reactorRelevant = (metrics.natPc ?? 0) > 0 || (metrics.natJumpCount ?? 0) > 0;
   // 读飞船当前剩余 STL/FTL 燃料（油罐 store 实测）。后续给每条方案算缺口，
-  // FTC 面板显示「当前油够不够这趟飞」。
+  // 调用方可据此显示当前油量是否足够。
   const remaining = shipFuelRemainingFor(s);
   const options = scanFuelOptions(
     perf,

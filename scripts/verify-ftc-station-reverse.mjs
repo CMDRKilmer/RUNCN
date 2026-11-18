@@ -1,6 +1,6 @@
 // 星系 id 到唯一空间站 id 的反查回归。
 // 契约：仅唯一候选可反查；反查只改变记录键，不改变路线对外语义。
-// 用法：node scripts/verify-ftc-station-reverse.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-station-reverse.mjs
 // 退出码：0 = 全部通过；1 = 存在失败。
 // 局限：几何 store 使用受控替身，DOM 接线由真实日志和代码审查覆盖。
 

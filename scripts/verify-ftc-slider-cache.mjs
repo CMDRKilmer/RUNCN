@@ -1,6 +1,6 @@
 // FTC 参数持久化版本与航线级键回归。
 // 契约：只读写当前版本；键包含船、起点、终点和模式；旧版本不可回退读取。
-// 用法：node scripts/verify-ftc-slider-cache.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-slider-cache.mjs
 // 退出码：0 = 全部通过；1 = 存在失败。
 // 局限：只覆盖持久化键空间，DOM 写入由其他回归覆盖。
 

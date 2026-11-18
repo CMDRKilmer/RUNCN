@@ -2,37 +2,27 @@
 //
 // 仅服务于 scripts/verify-native-route-settings.mjs：
 // scripts/lib/native-route-fuel-loader.mjs 的 resolve 钩子把
-// '@src/features/XIT/FTC/ftc-compute' 与 './native-route-btf' 重定向到本文件，
-// fuel-model / native-route-plan 保留真实实现（纯函数，无浏览器依赖）。
+// '@src/features/XIT/FTC/ftc-compute' 与 '@src/features/XIT/FTC/formula-plan'
+// 以及 './native-route-btf' 重定向到本文件，native-route-plan 保持真实实现。
 //
 // ⚠️ 明确的局限性（避免误读测试结论）：
-//   - computeFtcPlan 替身恒失败（inputIncomplete），覆盖的是「stlFuelOverride 初始化」
-//     这段编排逻辑——0（真空罐）必须原样透传，不能变成 undefined（回退满罐）；
-//     **不**覆盖 FTC 模型本身（由 verify-ftc-*.mjs 负责）。
-//   - measureNativeRouteFuel 替身恒返回空结果，只记录收到的出发油量参数；
-//     真实 BTF 对 0 油量的处理（试飞全部被拒 → 兜底）不在本脚本范围。
-//   - 生产代码**没有**为可测性做任何改动（无注入点、无测试开关）。
+//   - planFormulaFlight 替身由用例脚本控制：默认恒失败（inputIncomplete），覆盖的是
+//     「stlFuel 初始化 / 档位取整改重算 / 油量不足警告」这段编排逻辑；
+//     **不**覆盖公式模型本身（由 verify-ftc-formula.mjs / verify-real-flight.mjs 负责）。
+//   - measureNativeRouteFuel 替身恒返回空结果，只记录收到的出发油量参数。
+//   - 生产代码**没有**为可测性做任何改动（无注入口、无测试开关）。
 
 let fuelFixture = { stlRemaining: 0, ftlRemaining: 0, stlCap: 0, ftlCap: 0 };
-// 非 null 时 computeFtcPlan 返回这个最优方案（用例用它覆盖「档位取整改重算」「油量不够」两支）。
+// 非 null 时 planFormulaFlight 返回这个最优方案（用例用它覆盖「档位取整改重算」「油量不够」两支）。
 let optionFixture = null;
-// 离港饱和点只取决于 STL 流量：旧口径会在 10.96×0.0075 ≈ 8% 处砍档，用例据此验证「不再砍」。
-let flowRate = 0.5;
 export const ftcCalls = [];
 export const btfCalls = [];
-export const fuelModelCalls = [];
 
 export function stubSetFuel(fixture) {
   fuelFixture = fixture;
   optionFixture = null;
-  flowRate = 0.5;
   ftcCalls.length = 0;
   btfCalls.length = 0;
-  fuelModelCalls.length = 0;
-}
-
-export function stubSetFlowRate(value) {
-  flowRate = value;
 }
 
 export function stubSetOption(option) {
@@ -42,24 +32,26 @@ export function stubSetOption(option) {
 // ---- 以下为被替换模块的导出面 ----
 
 // '@src/features/XIT/FTC/ftc-compute'
-export const shipPerformanceFor = () => ({
-  stlFuelFlowRate: flowRate,
-  stlFuelCapacity: 3500,
-});
 export const shipFuelRemainingFor = () => fuelFixture;
-export const computeFtcPlan = async input => {
-  ftcCalls.push({
-    stlFuelOverride: input.stlFuelOverride,
-    estimateGeometry: input.estimateGeometry,
-    fixedFuel: input.fixedFuel,
-    fixedReactor: input.fixedReactor,
-  });
+export const blueprintInfoFor = () => ({
+  stlFuelCapacity: 3500,
+  minReactorUsage: 0.653,
+});
+
+// '@src/features/XIT/FTC/formula-plan'
+export const planFormulaFlight = async input => {
+  ftcCalls.push({ stlFuel: input.stlFuel, fuel: input.fuel, reactor: input.reactor });
   if (optionFixture === null) {
-    return { ok: false, message: 'stub：判缺', inputIncomplete: ['stub'] };
+    return {
+      ok: false,
+      message: 'stub：判缺',
+      inputIncomplete: ['stub'],
+      reactorRelevant: false,
+    };
   }
   return {
     ok: true,
-    message: 'stub',
+    message: '',
     best: optionFixture.best,
     reactorRelevant: optionFixture.reactorRelevant,
   };

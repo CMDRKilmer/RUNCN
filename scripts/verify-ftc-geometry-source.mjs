@@ -15,7 +15,7 @@
 // 全部删除 —— `liftOffKmAt`（自建轨道模型）与 `STL_EST_*`（统计中位数常数）不再作为几何
 // 来源；记录查不到就是 `undefined` → 判缺 → 不写滑块 → 等服务器下发。
 //
-// 锁定的行为契约：
+// 覆盖清单（共 21 条 check，按 ①–⑥ 分组；分组条数以实跑输出为准）：
 //   ① 记录（真实 system-bodies.ts）：无 JUMP 计划 → 同星系表（键 出发天体|目标天体，
 //      全大写）；跨星系 → 按（出发天体｜首跳目标星系 / 末跳**起点**星系｜目标天体）记录。
 //      ⚠️ 第 5 轮（2026-09-23）：第 4 轮曾把进近键的星系分量改成「末跳**到达**星系」，
@@ -43,20 +43,18 @@
 //      T3（tile ready 首推，服务器计划未到 → 必然残缺）→ 'debug' 不刷屏；T1（MissionPlan
 //      表格刷新过 = 服务器计划已到）仍残缺 → 'warn'。语义不变：任一情形都不写滑块。
 //
-// 用法：node scripts/verify-ftc-geometry-source.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-geometry-source.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：几何来源组用受控替身 store（真实 store 的内容来自服务器消息，由 ① 覆盖）；
 // 浏览星系/行星环境 JSON/蓝图异步等待走替身（与 verify-ftc-input-consistency.mjs 同源）。
 // system-bodies 的段记录持久化有 1000ms 防抖，脚本用 settlePersist() 等它落盘后再断言缓存。
 // ⑤ 组驱动的是真实状态机模块，但**不**覆盖 sfc-auto-fuel-settings.ts 的 DOM 接线
 // （该文件依赖 vue/DOM，Node 里加载不了）：接线由代码审查 + 注释锁定。
+
+import './lib/register-flight-formula.mjs';
 import { register } from 'node:module';
-import {
-  autoFuelGrid,
-  findBalanceOption,
-  missingModelInputs,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, findBalanceOption, missingModelInputs, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 import { SHIP, DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 // 命名空间导入：既取 RoutePushGate，又可在用例里断言旧导出（MAX_ROUTE_ATTEMPTS）确已删除。
 import * as gateModule from '../src/features/basic/sfc-route-push-gate.ts';
@@ -126,9 +124,7 @@ try {
 
 const api = await import('../src/infrastructure/prun-api/data/api-messages.ts');
 const { stlSegmentsStore } = await import('../src/infrastructure/prun-api/data/system-bodies.ts');
-const { routeMetrics, estimateRouteStl } = await import(
-  '../src/features/XIT/FTC/route-planner.ts'
-);
+const { routeMetrics, estimateRouteStl } = await import('../src/features/XIT/FTC/route-planner.ts');
 const { computeFtcPlan } = await import('../src/features/XIT/FTC/ftc-compute.ts');
 const stub = await import('./lib/ftc-geometry-stub.mjs');
 

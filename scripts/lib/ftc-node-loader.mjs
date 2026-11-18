@@ -1,3 +1,5 @@
+import { resolveTsRelative } from './resolve-ts-relative.mjs';
+
 // 测试用模块解析替身（Node module.register 钩子）。
 //
 // 只为 scripts/verify-ftc-input-consistency.mjs 的「门控集成用例」服务：把生产代码
@@ -18,11 +20,24 @@ const LOCAL_DEPS = new Set([
 const FUEL_MODEL = new URL('./ftc-node-fuel-model.mjs', import.meta.url).href;
 
 export function resolve(specifier, context, nextResolve) {
+  if (
+    specifier === '@src/core/flight/fuel-options' ||
+    specifier === '@src/infrastructure/fio/planet-environment'
+  ) {
+    return {
+      url: new URL('../../src/' + specifier.slice(5) + '.ts', import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
   if (specifier === 'vue' || specifier.startsWith('@src/') || LOCAL_DEPS.has(specifier)) {
     return { url: STUB, format: 'module', shortCircuit: true };
   }
   if (specifier === './fuel-model') {
     return { url: FUEL_MODEL, format: 'module', shortCircuit: true };
+  }
+  const relative = resolveTsRelative(specifier, context);
+  if (relative !== undefined) {
+    return { url: relative, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }

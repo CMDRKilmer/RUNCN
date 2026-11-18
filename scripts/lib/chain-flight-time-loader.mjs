@@ -1,93 +1,70 @@
 // 测试用模块解析替身（Node module.register 钩子），服务 scripts/verify-chain-flight-time.mjs。
 //
-// 目标：在 Node 里驱动**真实的** `src/features/XIT/FLEET/chain-flight-time.ts`
-// （estimateChainFlightTimes —— 环线各段飞行时间），以及它整条链路里除「浏览器侧/编排侧」
-// 以外的全部生产实现：
-//   chain-flight-time.ts（真实，被测）
-//     ├─ @src/.../FTC/route-planner.ts（真实：planRoutes / routeMetrics 的几何来源与查表键）
-//     ├─ @src/.../FTC/route-model.ts（真实：resolveSystemId / isSystemId / 空间站反查）
-//     ├─ @src/.../FTC/fuel-model.ts（真实，经 shim：纯函数模型）
-//     ├─ @src/.../FTC/ftc-compute.ts（真实：shipPerformanceFor / ensureShipBlueprint）
-//     ├─ @src/.../FTC/transfer-geometry.ts（真实：A1 几何预测，预测函数的可控输入来自
-//     │    systemBodiesStore / predictPosition 替身，见下）
-//     └─ @src/.../data/system-bodies.ts（真实，**通过 stub 再导出**：stlSegmentsStore
-//          的写入/查表保持真实链路，systemBodiesStore.getPosition 由 stub 提供可注入
-//          的观测位置供 transfer-geometry.ts 使用 —— 见 stub 文件头）。
-// 只有以下位置被替换：
-//   vue / ships / blueprints / storage / buffers / sleep / orbit / routes / stars / stations /
-//   flight-plans / ftc-fuel-settings → chain-flight-time-stub.mjs（用例可控的假数据与空实现）
+// 目标：在 Node 里驱动**真实的** `src/features/XIT/FLEET/chain-flight-time.ts` 与它下面的
+// 真实公式链路（formula-plan → formula-options → flight-formula → core/flight）。
+// 只有「浏览器侧 / 游戏侧」依赖走替身（见 STUBBED）：
+//   - store：ships / blueprints / 油缸读数（ship-fuel）
+//   - 世界时钟：fio/orbit 的 gameNow
+//   - 地址与星图快照：formula-inputs 的 loadFormulaInputs（真实实现会向游戏发 NOMENCLATURE
+//     查询并读 route/stars store，脚本里改为直接注入 FlightInputs）
 //
-// 为什么 system-bodies.ts 走 stub（但保留真实再导出）：A1 路径在系内航线缺前向记录时调
-// predictTransferGeometry，它**优先**用离线轨道模型 predictPosition(t0Ms) 取两端天体的
-// 位置，模型无数据时才回退到 systemBodiesStore.getPosition 的静态观测。该观测来自过去
-// 飞行计划 transferEllipse —— 测试不能去触发真实飞行来填表，于是 stub 提供两条可注入面
-// （stubSetOrbit / stubSetBodyObservation），同时保留真实 stlSegmentsStore 让本脚本既有
-// 的 SHIP_FLIGHT_MISSION 派发断言不变。这是「真实 store 子集可注入」的标准做法
-// （见 docs/contributing.md「写路径与查表路径同错则恒绿」的延伸）。
+// 局限：本脚本覆盖的是「环线编排 + 与真实公式模型接线」，不覆盖公式数值本身
+// （数值由 verify-ftc-formula.mjs / verify-real-flight.mjs 负责），也不覆盖滑块写入
+// （chain-flight-time.ts 从不写滑块，写入面在 FTC / SFC）。
 //
-// 局限：未映射的 '@src/*' 会显式报错（而不是静默走替身），避免新增依赖时替身掩盖问题。
-const STUB = new URL('./chain-flight-time-stub.mjs', import.meta.url).href;
-// fuel-model 的 shim（值 + 类型位混在一个 import 里时 Node 会报缺导出，见该文件注释）。
-const FUEL_MODEL = new URL('./chain-flight-time-fuel-model.mjs', import.meta.url).href;
+// '@src/*' 一律查本文件的 REAL / STUBBED 映射：命中 REAL 走真实 .ts，命中 STUBBED 走替身，
+// 两者都没有就抛错 —— 新增依赖必须在这里显式登记，不能被替身静默吞掉。
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-// 走真实实现的模块（显式 URL：Node 解析不了 '@src' 别名；不写 format，让 Node 按 .ts
-// 扩展名走原生类型剥离）。
+const STUB = new URL('./chain-flight-time-stub.mjs', import.meta.url).href;
+
+// 走真实实现的依赖（specifier → 相对 src/ 的路径）。
 const REAL = {
-  '@src/features/XIT/FTC/route-planner': '../../src/features/XIT/FTC/route-planner.ts',
-  '@src/features/XIT/FTC/route-model': '../../src/features/XIT/FTC/route-model.ts',
-  '@src/features/XIT/FTC/ftc-compute': '../../src/features/XIT/FTC/ftc-compute.ts',
-  // A1 几何预测入口：保留真实实现，由 stub 提供可控的输入（位置/恒星/状况）。
-  '@src/features/XIT/FTC/transfer-geometry': '../../src/features/XIT/FTC/transfer-geometry.ts',
-  '@src/infrastructure/prun-api/data/api-messages':
-    '../../src/infrastructure/prun-api/data/api-messages.ts',
-  '@src/infrastructure/prun-api/data/addresses':
-    '../../src/infrastructure/prun-api/data/addresses.ts',
-  './route-planner': '../../src/features/XIT/FTC/route-planner.ts',
-  './route-model': '../../src/features/XIT/FTC/route-model.ts',
-  // ftc-compute.ts 内部用 './transfer-geometry'（FTC 面板回退几何）。
-  './transfer-geometry': '../../src/features/XIT/FTC/transfer-geometry.ts',
-  // transfer-geometry.ts 内部用 './route-model' / './fuel-model'，二者各自映射。
-  './fuel-model': '../../src/features/XIT/FTC/fuel-model.ts',
+  '@src/core/flight/ftl': 'core/flight/ftl.ts',
+  '@src/core/flight/fuel-options': 'core/flight/fuel-options.ts',
+  '@src/core/flight/gateway': 'core/flight/gateway.ts',
+  '@src/core/flight/route': 'core/flight/route.ts',
+  '@src/core/flight/stl': 'core/flight/stl.ts',
+  '@src/core/flight/transfer-ellipse': 'core/flight/transfer-ellipse.ts',
+  '@src/features/XIT/FTC/formula-plan': 'features/XIT/FTC/formula-plan.ts',
+  '@src/infrastructure/fio/flight-formula': 'infrastructure/fio/flight-formula.ts',
 };
 
-// 走替身的依赖（production 侧的无扩展名相对导入与 @src 别名都要列全）。
+// 走替身的依赖（模块内的所有导出都由 chain-flight-time-stub.mjs 提供）。
 const STUBBED = new Set([
-  'vue',
-  '@src/utils/sleep',
+  '@src/infrastructure/fio/orbit',
   '@src/infrastructure/prun-api/data/ships',
   '@src/infrastructure/prun-api/data/blueprints',
-  '@src/infrastructure/prun-api/data/storage',
-  '@src/infrastructure/prun-api/data/stars',
-  '@src/infrastructure/prun-api/data/stations',
-  '@src/infrastructure/prun-api/data/flight-plans',
-  // ftc-compute 用它的试飞质量标记（本脚本无试飞路径，替身恒 undefined）。
-  '@src/infrastructure/prun-api/data/flight-test-collector',
-  '@src/infrastructure/prun-ui/buffers',
-  '@src/infrastructure/fio/orbit',
-  '@src/infrastructure/fio/routes',
-  // system-bodies 走 stub：stub `export *` 再导出真实的 stlSegmentsStore（保留记录/查表
-  // 链路），同时用本地的 systemBodiesStore / predictPosition 提供可控的位置输入（让
-  // transfer-geometry.ts 在没有真实 FIO 观测的情况下也能被驱动）。这是 A1 路径唯一新增的
-  // 替身面 —— 见 stub 文件头的解释。
-  '@src/infrastructure/prun-api/data/system-bodies',
-  './ftc-fuel-settings',
+  '@src/features/XIT/FTC/ship-fuel',
+  '@src/features/XIT/FTC/formula-inputs',
+  '@src/utils/sleep',
+  './ship-fuel',
+  './formula-inputs',
 ]);
 
 export function resolve(specifier, context, nextResolve) {
-  if (specifier === './fuel-model' || specifier === '@src/features/XIT/FTC/fuel-model') {
-    return { url: FUEL_MODEL, format: 'module', shortCircuit: true };
-  }
   if (STUBBED.has(specifier)) {
     return { url: STUB, format: 'module', shortCircuit: true };
   }
-  if (REAL[specifier] !== undefined) {
-    return { url: new URL(REAL[specifier], import.meta.url).href, shortCircuit: true };
-  }
   if (specifier.startsWith('@src/')) {
-    throw new Error(
-      `chain-flight-time-loader: '@src' 依赖未映射 → ${specifier}` +
-        '（请显式加入 STUBBED 或 REAL，勿让替身静默吞掉新依赖）',
-    );
+    const target = REAL[specifier];
+    if (target === undefined) {
+      throw new Error(
+        `未映射的依赖 '${specifier}'（发起模块 ${context.parentURL ?? '未知'}）：` +
+          '在 scripts/lib/chain-flight-time-loader.mjs 的 REAL/STUBBED 映射里补一条。',
+      );
+    }
+    // 不指定 format：让 Node 按扩展名 .ts 走原生类型剥离。
+    return { url: new URL('../../src/' + target, import.meta.url).href, shortCircuit: true };
+  }
+  // 生产代码用打包器解析的无扩展名相对导入；Node ESM 需要显式补扩展名。
+  if (specifier.startsWith('.') && context.parentURL !== undefined) {
+    const base = new URL(specifier, context.parentURL);
+    const ts = base.href.endsWith('.ts') ? base.href : `${base.href}.ts`;
+    if (existsSync(fileURLToPath(ts))) {
+      return { url: ts, shortCircuit: true };
+    }
   }
   return nextResolve(specifier, context);
 }

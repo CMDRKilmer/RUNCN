@@ -15,7 +15,7 @@
 // 覆盖的是编排层的油量初始化、作废范围与档位写入，不覆盖 FTC 模型数值与真实试飞。
 import { register } from 'node:module';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
-const { stubSetFuel, stubSetOption, stubSetFlowRate, ftcCalls, btfCalls } =
+const { stubSetFuel, stubSetOption, ftcCalls, btfCalls } =
   await import('./lib/native-route-fuel-stub.mjs');
 const { computeNativeRouteFuel } = await import('../src/features/XIT/FLEET/native-route-fuel.ts');
 const { hoursInvalidatedBySettingChange, percentAtLeast } =
@@ -65,11 +65,11 @@ const refuelAtOrigin = [
   },
   { location: 'B', steps: [] },
 ];
-// 替身 computeFtcPlan 恒失败：每段的调用顺序是 FTC → BTF → 公式估算，override 全程必须一致。
+// 替身 computeFtcPlan 恒失败：每段的调用顺序是 FTC → BTF 试飞（没有第三条估算路径），override 全程必须一致。
 async function runFuel(waypoints) {
   await computeNativeRouteFuel(candidate, waypoints, new AbortController().signal, () => {});
   return {
-    overrides: ftcCalls.map(x => x.stlFuelOverride),
+    overrides: ftcCalls.map(x => x.stlFuel),
     btf: btfCalls.map(x => ({ stlFuel: x.stlFuel, ftlFuel: x.ftlFuel })),
   };
 }
@@ -77,28 +77,28 @@ async function runFuel(waypoints) {
 await check('空罐已知：余量 0 原样透传给 FTC 与 BTF（不回退满罐）', async failures => {
   stubSetFuel({ stlRemaining: 0, ftlRemaining: 0, stlCap: 3000, ftlCap: 500 });
   const { overrides, btf } = await runFuel(noRefuel);
-  expectEqual(failures, 'FTC/估算 override', [0, 0], overrides);
+  expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [0], overrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 0, ftlFuel: 0 }], btf);
 });
 
 await check('油罐读不出（容量也 0）：按未知处理（override = undefined）', async failures => {
   stubSetFuel({ stlRemaining: 0, ftlRemaining: 0, stlCap: 0, ftlCap: 0 });
   const { overrides, btf } = await runFuel(noRefuel);
-  expectEqual(failures, 'FTC/估算 override', [undefined, undefined], overrides);
+  expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [undefined], overrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: undefined, ftlFuel: undefined }], btf);
 });
 
 await check('出发地补油：按罐容量起飞，与当前余量无关', async failures => {
   stubSetFuel({ stlRemaining: 0, ftlRemaining: 0, stlCap: 3000, ftlCap: 500 });
   const { overrides, btf } = await runFuel(refuelAtOrigin);
-  expectEqual(failures, 'FTC/估算 override', [3000, 3000], overrides);
+  expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [3000], overrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 3000, ftlFuel: 500 }], btf);
 });
 
 await check('非零余量透传（控制组）', async failures => {
   stubSetFuel({ stlRemaining: 123, ftlRemaining: 45, stlCap: 3000, ftlCap: 500 });
   const { overrides, btf } = await runFuel(noRefuel);
-  expectEqual(failures, 'FTC/估算 override', [123, 123], overrides);
+  expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [123], overrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 123, ftlFuel: 45 }], btf);
 });
 
@@ -159,15 +159,15 @@ await check('反应堆档被向上取整时要按写入的档位重算', async f
     () => {},
   );
   expectEqual(failures, 'FTC 调用次数', 2, ftcCalls.length);
-  expectEqual(failures, '重算用的反应堆档', 0.66, ftcCalls[1]?.fixedReactor);
-  expectEqual(failures, '重算用的燃料档', 0.04, ftcCalls[1]?.fixedFuel);
+  expectEqual(failures, '重算用的反应堆档', 0.66, ftcCalls[1]?.reactor);
+  expectEqual(failures, '重算用的燃料档', 0.04, ftcCalls[1]?.fuel);
   expectEqual(failures, '写入的反应堆百分比', 66, result.legs[1]?.reactorPercent);
 });
 
-await check('离港饱和点不再砍档：选中的高档位原样写入', async failures => {
+// 旧口径的「离港饱和点」已随新公式模型删除，编排层没有任何砍档逻辑：
+// 这一条只锁定「选中多少就写多少、不报封顶」，不再假装喂流量（旧代码用空函数喂流量，断言恒真）。
+await check('选中档位原样写入：不砍档、不报封顶', async failures => {
   stubSetFuel({ stlRemaining: 3000, ftlRemaining: 500, stlCap: 3000, ftlCap: 500 });
-  // 流量 0.0075 → 旧口径的离港饱和点是 8%，会把这一段砍到 8%。
-  stubSetFlowRate(0.0075);
   stubSetOption({
     reactorRelevant: false,
     best: { fuel: 0.3, reactor: 0.5, totalHours: 2, stlFuel: 200, ftlFuel: 0 },

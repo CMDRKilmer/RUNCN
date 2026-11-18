@@ -1,15 +1,37 @@
-// FTC 平衡点退化保护回归。
+// FTC 平衡点退化保护回归 —— 带退出码，可自动判定成败。
+//
 // 契约：退化输入选最省油方案；正常输入保持 Pareto 选优；任意输入不抛异常。
-// 用法：node scripts/verify-ftc-balance-degenerate.mjs
-// 退出码：0 = 全部通过；1 = 存在失败。
+//
+// 覆盖清单（20 条，每条 = 一个 check，直接驱动真实 fuel-model.ts 的纯函数）：
+//   a  燃料恒定 + 时间随 f 递减（合成）
+//   a2 同星系 + 进近缺失（罐 8000；燃料 = 0.98×罐×min(f,0.5)，与 d 无关）
+//   a3 同星系 + 进近缺失（离港距离 12000km 对照）→ 燃料不受 d 影响
+//   b  同星系 + 进近缺失 + 罐 1500（用户现象路径）
+//   c  时间恒定 + 燃料随 f 递增（合成）
+//   c2 时间恒定 + 燃料递增（逆序输入）
+//   d  全等（逆序输入）
+//   d2 全等（正序输入，顺序无关性对照）
+//   e  全字段 NaN（stlFuel/totalHours 均 NaN）
+//   e2 半数方案 NaN
+//   e3 全字段 NaN（逆序输入）
+//   k  空候选集
+//   l  严格支配点（燃料与时间同向递减）
+//   f  同星系两段都有（标准引擎 + 罐 8000）
+//   g  跨星系正常（natPc>0，全反应堆网格）
+//   h  跨星系 + 罐数据缺失（cF×f×d 回退）
+//   i  纯网关（时间与 f 无关、燃料线性）
+//   j  跨星系 + 进近缺失（罐正常，非退化对照）
+//   m  系内整段 TRANSIT = 参考速度 27512 × (1271/质量)^0.78 × f 曲线（锚点 f=0.05，误差 < 1s）
+//   m2 用户实测黄金样本（2,727t / 619.3M km → 40,781 s ±2%，锚点 f=0.05）
+//
+// 用法：node --experimental-strip-types scripts/verify-ftc-balance-degenerate.mjs
+// 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
+// 局限：只到纯函数层；面板/向导接线与真实服务器数值不在本脚本范围内。
 
-import {
-  autoFuelGrid,
-  autoReactorGrid,
-  findBalanceOption,
-  paretoFrontier,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+import './lib/register-flight-formula.mjs';
+
+const { autoFuelGrid, autoReactorGrid, findBalanceOption, paretoFrontier, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 
 // ---- 断言框架：失败收集到场景级，末行打印 PASS n/n 或 FAIL，退出码区分成败 ----
 const summary = { pass: 0, fail: 0 };

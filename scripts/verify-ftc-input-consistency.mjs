@@ -17,7 +17,7 @@
 // 但「残缺」的成因口径已变：不再是「空间站轨道未积累」，而是「服务器尚未下发该航线的
 // 原生 STL 段记录」。
 //
-// 锁定的行为契约：
+// 锁定的行为契约（28 条 check 按 ①–⑤ 分组，逐条见下方「覆盖清单」）：
 //   ① missingModelInputs 判定「模型必需输入」：**无条件**缺 stlDistanceKm（undefined 或 0
 //      —— 两条分支都消费它，跨星系时它是 stlHours 的回退项，缺了 STL 时长被静默记 0；
 //      系内时它是「转移」段时长 d/v_转移 的唯一来源）、缺 STL 罐余量/容量（跨星系离港/进近
@@ -39,19 +39,31 @@
 //      后者键类型不匹配 → 余量/容量恒 0（用户实测「当前油量 STL 0/0 ｜ FTL 0/0」+ 假缺口），
 //      并连带把 ShipPerformance.stlRemaining（转移段燃料/速度的乘性基准）打回 0。
 //
-// 用法：node scripts/verify-ftc-input-consistency.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-input-consistency.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
-// 直接导入真实模型（Node ≥ 22.18 原生 TS 类型剥离），避免手抄公式引入偏差。
-// 门控集成用例额外用 module.register 钩子替换编排层的浏览器依赖（见文件末尾注释），
+// 局限：直接导入真实模型（`--experimental-strip-types` 原生剥离 TS 类型），避免手抄公式
+// 引入偏差；门控集成用例用 module.register 钩子替换编排层的浏览器依赖（见文件末尾注释），
 // 生产代码与真实模型本身零改动。
+//
+// 覆盖清单（28 条，每条 = 一个 check）：
+//   missingModelInputs 判缺（7 条）：同星系几何完整不报缺 / 缺进近 / 缺离港 / d=0 /
+//     跨星系缺罐容量 / 跨星系有罐余量 / 跨星系有蓝图罐容量；
+//   一致性（3 条）：完整几何下 best.fuel = 0.15 且燃料 = 0.98×罐×min(f,0.5) /
+//     质量从空重到满载 best.fuel 恒 0.15 / 几何相同、实体文本不同 → 输出逐位相同；
+//   敏感性（1 条）：系内燃料与 d 无关（罐口径），时长在固定 f 下随 d 线性；
+//   残缺（3 条）：缺进近 / 缺离港 / d 全缺 → 拦下不写；
+//   退化（1 条）：退化输入不抛异常且仍返回可用结构；
+//   门控（5 条）：几何完整写入一次 / d=undefined 不写 / 跨星系缺罐容量不写 /
+//     跨星系几何完整写入 / publish=false 不写不发完成信号；
+//   油罐查表（4 条）：stlFuelStoreId 优先 / 余量传导到 ShipPerformance.stlRemaining /
+//     idStlFuelStore 回退分支 / 两字段都缺时余量容量为 0；
+//   样本（4 条）：原生样本出发油量不受规划 override 影响 / 试飞样本按自身出发油量校准 /
+//     样本按自身船况还原速度 / 样本速度曲线按样本油量评估。
+
+import './lib/register-flight-formula.mjs';
 import { register } from 'node:module';
-import {
-  autoFuelGrid,
-  computeFuelOption,
-  findBalanceOption,
-  missingModelInputs,
-  scanFuelOptions,
-} from '../src/features/XIT/FTC/fuel-model.ts';
+const { autoFuelGrid, computeFuelOption, findBalanceOption, missingModelInputs, scanFuelOptions } =
+  await import('../src/features/XIT/FTC/fuel-model.ts');
 import { SHIP, DEPART_KM, APPROACH_KM } from './lib/ftc-node-fixtures.mjs';
 
 const summary = { pass: 0, fail: 0 };
