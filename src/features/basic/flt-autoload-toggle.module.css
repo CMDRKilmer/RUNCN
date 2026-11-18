@@ -4,14 +4,17 @@
    正好与「舰队总览」标题同一行垂直居中，又不碰下方上下文命令行。
 
    不在 TileFrame.controls 里：FB 面板把内嵌磁贴的控件区整个隐藏了。
-   显隐由 refined-prun.css 按 [data-rp-fb-panel] 祖先控制，本文件只管外观。
+   显隐由 refined-prun.css 的全局规则控制，FB 面板与独立窗口都显示。
+   独立窗口的原生控件（设置 / 最大化 / 关闭）还在，按钮要用
+   --rp-flt-controls-width（由 flt-autoload-toggle 实测写入 frame）向右让开；
+   FB 内嵌磁贴的控件被隐藏，该变量为 0，按钮仍贴标题栏最右。
    选中态按用户要求只有一条下划线，不加底色、不改文字颜色；规则统一写在
    refined-prun.css 的共用选中态段，用高特异性压住三套自定义主题对
    原生 Button__btn 的 !important 覆盖。 */
 .toggle {
   position: absolute;
   top: 7px;
-  right: 6px;
+  right: calc(6px + var(--rp-flt-controls-width, 0px));
   z-index: 5;
   height: 15px;
   min-width: 56px;
