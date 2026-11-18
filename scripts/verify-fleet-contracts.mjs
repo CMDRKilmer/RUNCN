@@ -1,5 +1,6 @@
 // Real FLEET planning, package generation, completion, recovery, sync and native RT record regressions.
-// Usage: node scripts/verify-fleet-contracts.mjs. Exit 0 = PASS; assertions fail with exit 1.
+// Usage: node --experimental-strip-types scripts/verify-fleet-contracts.mjs.
+// Exit 0 = PASS (last line PASS n/n); assertions fail with exit 1.
 // Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
 // Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
 // This does not execute browser actions or contact a server.

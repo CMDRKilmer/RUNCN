@@ -1,4 +1,3 @@
-import './lib/register-flight-formula.mjs';
 // FTC 邻档对比（fuel-model.nearbyFuelOptions）纯函数回归脚本 —— 带退出码，可自动判定成败。
 //
 // 背景（2026-09-24 需求）：FTC 面板原来只显示「最优燃料方案」单行，玩家无法评估
@@ -22,12 +21,17 @@ import './lib/register-flight-formula.mjs';
 //   ⑥ 真实 computeFuelOption 生成的 options（同一 metrics/ship）：含 best 行，且该行
 //      totalCost 与 best 逐位相同（筛选时不会把 best 换成「同燃料的另一条方案」）。
 //
-// 用法：node scripts/verify-ftc-nearby-fuels.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-nearby-fuels.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：① 只到纯函数层 —— 面板 DOM 接线（`<details open>`、差额文案「—」/带符号）在 Node
 //   里不可加载，由代码审查覆盖；② 飞船/航线夹具是**合成**的（本脚本只断言筛选与截断的
-//   结构性行为，不断言任何实测数值，故不需要真实标定数据）；③ 不引入 register/@src loader：
-//   fuel-model.ts 无任何 import（纯函数模块，与 verify-ftc-balance-degenerate.mjs 同一路）。
+//   结构性行为，不断言任何实测数值，故不需要真实标定数据）；③ fuel-model.ts 只 import
+//   `@src/core/flight/fuel-options`（同为真实模块，无替身），本脚本在注释块之后 import
+//   `./lib/register-flight-formula.mjs`（scripts/lib/flight-formula-loader.mjs）把 `@src/*`
+//   解析到 src/ 下的真实 .ts，真实模块本身零改动。
+
+import './lib/register-flight-formula.mjs';
+
 const { autoFuelGrid, computeFuelOption, nearbyFuelOptions, scanFuelOptions, NEARBY_FUEL_SPAN } =
   await import('../src/features/XIT/FTC/fuel-model.ts');
 
