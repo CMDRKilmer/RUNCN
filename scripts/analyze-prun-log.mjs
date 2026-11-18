@@ -21,9 +21,11 @@ if (!file) {
 }
 
 // 轨道根数字段（大小写变体）。
-const ORBIT_KEY = /semiMajorAxis|semiMinorAxis|eccentricity|inclination|rightAscension|periapsis|SemiMajor|Eccentricity|Inclination|RightAscension|Periapsis|orbitalPeriod|OrbitPeriod/i;
+const ORBIT_KEY =
+  /semiMajorAxis|semiMinorAxis|eccentricity|inclination|rightAscension|periapsis|SemiMajor|Eccentricity|Inclination|RightAscension|Periapsis|orbitalPeriod|OrbitPeriod/i;
 // 相位/历元字段。
-const PHASE_KEY = /phase|epoch|meanAnomaly|MeanAnomaly|anomaly|trueAnomaly|eccentricAnomaly|M0\b|\bM\b|argumentOfPeriapsis|longitudeOfAscendingNode/i;
+const PHASE_KEY =
+  /phase|epoch|meanAnomaly|MeanAnomaly|anomaly|trueAnomaly|eccentricAnomaly|M0\b|\bM\b|argumentOfPeriapsis|longitudeOfAscendingNode/i;
 // 轨道任意字段（宽泛）。
 const ORBIT_ANY = /orbit/i;
 // 行星 naturalId 特征：结尾小写字母（恒星 id 结尾数字）。

@@ -68,7 +68,13 @@ const withMass = results.filter(x => x.m);
 const failed = results.filter(x => !x.m);
 console.log(`有质量: ${withMass.length}，失败: ${failed.length}`);
 if (failed.length) {
-  console.log('失败示例:', failed.slice(0, 5).map(x => x.n).join(', '));
+  console.log(
+    '失败示例:',
+    failed
+      .slice(0, 5)
+      .map(x => x.n)
+      .join(', '),
+  );
 }
 
 const out = JSON.stringify(withMass);

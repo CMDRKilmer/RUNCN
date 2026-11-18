@@ -29,19 +29,52 @@ console.log(`文件大小: ${(code.length / 1024 / 1024).toFixed(2)} MB\n`);
 const GROUPS = [
   {
     label: '开普勒/轨道数学',
-    keys: ['meanAnomaly', 'trueAnomaly', 'eccentricAnomaly', 'kepler', 'solveKepler', 'KeplerEquation'],
+    keys: [
+      'meanAnomaly',
+      'trueAnomaly',
+      'eccentricAnomaly',
+      'kepler',
+      'solveKepler',
+      'KeplerEquation',
+    ],
   },
   {
     label: '轨道根数',
-    keys: ['semiMajorAxis', 'semiMinorAxis', 'eccentricity', 'inclination', 'rightAscension', 'periapsis', 'orbitalPeriod', 'OrbitPeriod'],
+    keys: [
+      'semiMajorAxis',
+      'semiMinorAxis',
+      'eccentricity',
+      'inclination',
+      'rightAscension',
+      'periapsis',
+      'orbitalPeriod',
+      'OrbitPeriod',
+    ],
   },
   {
     label: '相位/历元',
-    keys: ['phase', 'epoch', 'M0', 'meanAnomaly0', 'initialAnomaly', 'argumentOfPeriapsis', 'longitudeOfAscendingNode', 'seedPhase'],
+    keys: [
+      'phase',
+      'epoch',
+      'M0',
+      'meanAnomaly0',
+      'initialAnomaly',
+      'argumentOfPeriapsis',
+      'longitudeOfAscendingNode',
+      'seedPhase',
+    ],
   },
   {
     label: '位置计算',
-    keys: ['planetPosition', 'orbitPosition', 'positionAtTime', 'positionAt', 'getPositionAt', 'celestialPosition', 'bodyPosition'],
+    keys: [
+      'planetPosition',
+      'orbitPosition',
+      'positionAtTime',
+      'positionAt',
+      'getPositionAt',
+      'celestialPosition',
+      'bodyPosition',
+    ],
   },
   {
     label: '天体数据',

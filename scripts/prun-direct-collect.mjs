@@ -52,16 +52,23 @@ async function createSession(userCookie) {
   };
 
   // 1. handshake
-  const hr = await fetch(BASE + '?EIO=4&transport=polling&t=' + Date.now(), { headers: headers(userCookie) });
+  const hr = await fetch(BASE + '?EIO=4&transport=polling&t=' + Date.now(), {
+    headers: headers(userCookie),
+  });
   absorb(hr);
   const hb = await hr.text();
   const sid = JSON.parse(hb.slice(1)).sid;
 
-  const url = () => BASE + '?EIO=4&transport=polling&t=' + Date.now() + '&sid=' + encodeURIComponent(sid);
+  const url = () =>
+    BASE + '?EIO=4&transport=polling&t=' + Date.now() + '&sid=' + encodeURIComponent(sid);
   const post = async body => {
     const r = await fetch(url(), {
       method: 'POST',
-      headers: { ...headers(userCookie), Cookie: cookieHeader(), 'Content-Type': 'text/plain;charset=UTF-8' },
+      headers: {
+        ...headers(userCookie),
+        Cookie: cookieHeader(),
+        'Content-Type': 'text/plain;charset=UTF-8',
+      },
       body,
     });
     absorb(r);
@@ -74,21 +81,29 @@ async function createSession(userCookie) {
     const ac = new AbortController();
     const to = setTimeout(() => ac.abort(), timeoutMs);
     try {
-      const r = await fetch(url(), { headers: { ...headers(userCookie), Cookie: cookieHeader() }, signal: ac.signal });
+      const r = await fetch(url(), {
+        headers: { ...headers(userCookie), Cookie: cookieHeader() },
+        signal: ac.signal,
+      });
       absorb(r);
       return { status: r.status, text: await r.text() };
     } catch (e) {
       return { status: 0, text: '', error: e.name === 'AbortError' ? 'timeout' : String(e) };
-    } finally { clearTimeout(to); }
+    } finally {
+      clearTimeout(to);
+    }
   };
 
   // 2. socket.io CONNECT
   const enc = new Encoder();
   const sioConnect = enc.encode({ type: PacketType.CONNECT, nsp: '/', data: undefined })[0];
   let connectEio;
-  encodePayload([{ type: 'message', data: sioConnect }], d => { connectEio = d; });
+  encodePayload([{ type: 'message', data: sioConnect }], d => {
+    connectEio = d;
+  });
   const cr = await post(connectEio);
-  if (cr.status !== 200) throw new Error('CONNECT failed: ' + cr.status + ' ' + cr.text.slice(0, 120));
+  if (cr.status !== 200)
+    throw new Error('CONNECT failed: ' + cr.status + ' ' + cr.text.slice(0, 120));
 
   return { sid, post, poll, enc, cookieHeader, userCookie };
 }
@@ -101,14 +116,27 @@ function parseFrames(text) {
     if (!chunk) continue;
     const t = chunk[0];
     const rest = chunk.slice(1);
-    if (t === '2') { out.push({ eio: 'ping' }); continue; }
-    if (t === '6') { out.push({ eio: 'noop' }); continue; }
-    if (t === '1') { out.push({ eio: 'close' }); continue; }
+    if (t === '2') {
+      out.push({ eio: 'ping' });
+      continue;
+    }
+    if (t === '6') {
+      out.push({ eio: 'noop' });
+      continue;
+    }
+    if (t === '1') {
+      out.push({ eio: 'close' });
+      continue;
+    }
     if (t === '4') {
       // socket.io packet 在 rest 里
       const st = rest[0];
       let data;
-      try { data = JSON.parse(rest.slice(1)); } catch { data = rest.slice(1); }
+      try {
+        data = JSON.parse(rest.slice(1));
+      } catch {
+        data = rest.slice(1);
+      }
       out.push({ eio: 'message', sioType: st, data });
       continue;
     }
@@ -122,7 +150,13 @@ function logFrame(f) {
     const ev = Array.isArray(f.data) ? f.data[0] : undefined;
     const payload = Array.isArray(f.data) ? f.data[1] : undefined;
     const inner = payload?.payload?.messageType ?? payload?.messageType;
-    console.log('    sio=' + f.sioType + ' event=' + JSON.stringify(ev) + (inner ? ' messageType=' + inner : ''));
+    console.log(
+      '    sio=' +
+        f.sioType +
+        ' event=' +
+        JSON.stringify(ev) +
+        (inner ? ' messageType=' + inner : ''),
+    );
     return { ev, payload };
   }
   console.log('    eio=' + f.eio + (f.raw ? ' raw=' + f.raw : ''));
@@ -151,7 +185,17 @@ async function requestFlight(s, opts) {
     },
   };
   let body;
-  encodePayload([{ type: 'message', data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0] }], d => { body = d; });
+  encodePayload(
+    [
+      {
+        type: 'message',
+        data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0],
+      },
+    ],
+    d => {
+      body = d;
+    },
+  );
   const pr = await s.post(body);
   console.log('    → POST status=' + pr.status + ' body=' + JSON.stringify(pr.text.slice(0, 120)));
 
@@ -161,7 +205,10 @@ async function requestFlight(s, opts) {
     const r = await s.poll(6000);
     if (r.error === 'timeout') continue;
     for (const f of parseFrames(r.text)) {
-      if (f.eio === 'ping') { await s.post('3'); continue; }
+      if (f.eio === 'ping') {
+        await s.post('3');
+        continue;
+      }
       if (f.eio === 'close') return { error: 'server closed session' };
       if (f.eio !== 'message') continue;
       const d = f.data;
@@ -169,10 +216,14 @@ async function requestFlight(s, opts) {
       if (!payload) continue;
       // ACTION_COMPLETED 里再包一层
       const inner = payload.payload ?? payload;
-      const type = payload.messageType === 'ACTION_COMPLETED' ? (inner.messageType ?? inner?.payload?.messageType) : payload.messageType;
+      const type =
+        payload.messageType === 'ACTION_COMPLETED'
+          ? (inner.messageType ?? inner?.payload?.messageType)
+          : payload.messageType;
       const plan = payload.messageType === 'ACTION_COMPLETED' ? (inner.payload ?? inner) : payload;
       if (type === 'SHIP_FLIGHT_MISSION' && plan?.missionId === missionId) return { plan };
-      if (type === 'ACTION_ERROR' || payload.messageType === 'ACTION_ERROR') return { error: JSON.stringify(payload).slice(0, 300) };
+      if (type === 'ACTION_ERROR' || payload.messageType === 'ACTION_ERROR')
+        return { error: JSON.stringify(payload).slice(0, 300) };
       console.log('    (其它消息 ' + (type ?? '?') + ')');
     }
   }
@@ -182,15 +233,38 @@ async function requestFlight(s, opts) {
 // ---- 通用：发一条业务消息并等待匹配的响应 ----
 async function sendAndWait(s, msg, match, label, timeoutMs = 15000) {
   let body;
-  encodePayload([{ type: 'message', data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0] }], d => { body = d; });
+  encodePayload(
+    [
+      {
+        type: 'message',
+        data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0],
+      },
+    ],
+    d => {
+      body = d;
+    },
+  );
   const pr = await s.post(body);
-  console.log('    → POST ' + label + ' status=' + pr.status + ' body=' + JSON.stringify(pr.text.slice(0, 100)));
+  console.log(
+    '    → POST ' +
+      label +
+      ' status=' +
+      pr.status +
+      ' body=' +
+      JSON.stringify(pr.text.slice(0, 100)),
+  );
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const r = await s.poll(5000);
-    if (r.error === 'timeout') { process.stdout.write('.'); continue; }
+    if (r.error === 'timeout') {
+      process.stdout.write('.');
+      continue;
+    }
     for (const f of parseFrames(r.text)) {
-      if (f.eio === 'ping') { await s.post('3'); continue; }
+      if (f.eio === 'ping') {
+        await s.post('3');
+        continue;
+      }
       if (f.eio === 'close') return { error: 'closed' };
       if (f.eio !== 'message') continue;
       const payload = Array.isArray(f.data) ? f.data[1] : undefined;
@@ -208,7 +282,9 @@ async function sendAndWait(s, msg, match, label, timeoutMs = 15000) {
 // ================= 主流程 =================
 const userCookie = process.env.PRUN_COOKIE || undefined;
 console.log('=== PrUn 直连采集探测 ===');
-console.log('cookie: ' + (userCookie ? '已提供(' + userCookie.length + ' 字符)' : '未提供（匿名）'));
+console.log(
+  'cookie: ' + (userCookie ? '已提供(' + userCookie.length + ' 字符)' : '未提供（匿名）'),
+);
 console.log('contextId: ' + (process.env.PRUN_CONTEXT_ID || '(空)'));
 
 const s = await createSession(userCookie);
@@ -237,7 +313,17 @@ const msg = {
   },
 };
 let body;
-encodePayload([{ type: 'message', data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0] }], d => { body = d; });
+encodePayload(
+  [
+    {
+      type: 'message',
+      data: s.enc.encode({ type: PacketType.EVENT, nsp: '/', data: ['message', msg] })[0],
+    },
+  ],
+  d => {
+    body = d;
+  },
+);
 const pr = await s.post(body);
 console.log('POST status=' + pr.status + ' body=' + JSON.stringify(pr.text.slice(0, 120)));
 
@@ -245,12 +331,28 @@ const deadline = Date.now() + 60000;
 let got = null;
 while (Date.now() < deadline && !got) {
   const r = await s.poll(25000);
-  if (r.error === 'timeout') { process.stdout.write('.'); continue; }
-  if (r.status === 400) { console.log('\n✗ 会话 400: ' + r.text.slice(0, 120)); break; }
+  if (r.error === 'timeout') {
+    process.stdout.write('.');
+    continue;
+  }
+  if (r.status === 400) {
+    console.log('\n✗ 会话 400: ' + r.text.slice(0, 120));
+    break;
+  }
   for (const f of parseFrames(r.text)) {
-    if (f.eio === 'ping') { await s.post('3'); process.stdout.write('p'); continue; }
-    if (f.eio === 'close') { console.log('\n✗ 服务器 CLOSE'); break; }
-    if (f.eio !== 'message') { console.log('\n  eio=' + f.eio + ' raw=' + (f.raw ?? '')); continue; }
+    if (f.eio === 'ping') {
+      await s.post('3');
+      process.stdout.write('p');
+      continue;
+    }
+    if (f.eio === 'close') {
+      console.log('\n✗ 服务器 CLOSE');
+      break;
+    }
+    if (f.eio !== 'message') {
+      console.log('\n  eio=' + f.eio + ' raw=' + (f.raw ?? ''));
+      continue;
+    }
     const payload = Array.isArray(f.data) ? f.data[1] : undefined;
     if (!payload) continue;
     const isCompleted = payload.messageType === 'ACTION_COMPLETED';
@@ -271,9 +373,16 @@ if (!got) {
   console.log('\n✓ FlightPlan segments=' + (plan.segments?.length ?? '?'));
   for (const seg of plan.segments ?? []) {
     const secs = ((seg.arrival?.timestamp ?? 0) - (seg.departure?.timestamp ?? 0)) / 1000;
-    console.log('   ' + String(seg.type).padEnd(12) + ' secs=' + String(Math.round(secs)).padStart(7) +
-      ' stlKm=' + String(Math.round(seg.stlDistance ?? 0)).padStart(12) +
-      ' stlFuel=' + String(seg.stlFuelConsumption ?? 0).padStart(6));
+    console.log(
+      '   ' +
+        String(seg.type).padEnd(12) +
+        ' secs=' +
+        String(Math.round(secs)).padStart(7) +
+        ' stlKm=' +
+        String(Math.round(seg.stlDistance ?? 0)).padStart(12) +
+        ' stlFuel=' +
+        String(seg.stlFuelConsumption ?? 0).padStart(6),
+    );
   }
 }
 console.log('\n[结束] 未改动生产代码；未写数据文件。');

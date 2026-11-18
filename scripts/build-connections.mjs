@@ -37,9 +37,7 @@ const adj = new Map();
 for (const s of stars) {
   const a = natBySystem.get(s.systemId);
   if (!a) continue;
-  const conns = new Set(
-    (s.connections || []).map(c => natBySystem.get(c)).filter(Boolean),
-  );
+  const conns = new Set((s.connections || []).map(c => natBySystem.get(c)).filter(Boolean));
   if (conns.size > 0) {
     adj.set(a, [...conns]);
   }
@@ -62,7 +60,9 @@ for (const [a, conns] of [...adj]) {
 const sorted = [...adj.entries()]
   .map(([k, v]) => [k, [...v].sort()])
   .sort((x, y) => x[0].localeCompare(y[0]));
-const out = pretty ? JSON.stringify(Object.fromEntries(sorted), null, 1) : JSON.stringify(Object.fromEntries(sorted));
+const out = pretty
+  ? JSON.stringify(Object.fromEntries(sorted), null, 1)
+  : JSON.stringify(Object.fromEntries(sorted));
 
 const outPath = new URL('../public/json/star-connections.json', import.meta.url).pathname.replace(
   /^\/([A-Z]:)/,
@@ -70,4 +70,6 @@ const outPath = new URL('../public/json/star-connections.json', import.meta.url)
 );
 writeFileSync(outPath, out);
 console.log(`写入 ${outPath}`);
-console.log(`星系 ${sorted.length} 个，总连接 ${sorted.reduce((a, [, v]) => a + v.length, 0)} 条，大小 ${(out.length / 1024).toFixed(1)} KB`);
+console.log(
+  `星系 ${sorted.length} 个，总连接 ${sorted.reduce((a, [, v]) => a + v.length, 0)} 条，大小 ${(out.length / 1024).toFixed(1)} KB`,
+);

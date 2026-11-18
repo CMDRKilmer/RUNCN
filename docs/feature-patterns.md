@@ -839,10 +839,11 @@ return formatCurrency(price, format);
 
 - **FTC「转移速度查询表超出可靠范围」的自愈**：`public/json/transit-speed-table.json` 的 aEff 覆盖极窄（`STL_ENGINE_FUEL_SAVING` / `STL_ENGINE_HYPERTHRUST` 各只有**单一** aEff 行），质量比不同的船会让 `stlTransitTableReliableFor` 对整个燃料网格判「超出可靠范围」→ 整段跳过 FTC（用户实测：某船三段全跳过）。原生 RT 生成的 BTF 试飞顺带把每条 OK 计划的 TRANSIT 段转成 `(q, aEff, v)` 样本写进查询表：`q = 0.98×罐×min(f,0.5)`、`aEff = 加速度×空重/(船质量+计划新增载重)`（`ship.mass` 已含船上现有货物，只叠加 `legLoadWeight`；试飞请求的 `payload` 另加现有货物交给服务器；速度**除以** `conditionFactor` 还原成健康船速度（乘回去等于把惩罚算两次：40% 船况的 2.78h 会被放大到 11h）），段时长 <60s 或距离 <1000km 不入表（噪声大）；样本由 `transit-speed-samples`（`native-route-btf` 调用）落盘 `rprun.ftc.transit-samples.v1`，`fuel-model` 在远端表加载后再叠加（`addTransitSpeedSample` / `restoreTransitSpeedSamples`）。采到该船自己的 aEff 行后，同船后续的 FTC 计算就能通过可靠区间检查——BTF 本来就是因为 FTC 算不了才跑的，等于自我修复。
 
-FLEET 基地规划在拖放分配船只后，按剩余载重、容积和维修占用重算同船基地的补给天数（`utils.fitDaysForShip`，由 `FLEET.vue` 调用；天数上限统一由 `supplies-cap.fitTargetDays` / `clampTargetDays` 收紧）。
+FLEET 基地规划的计划天数有两个来源，由第二行工具栏的全局「填满库存」开关选择（默认关）：
+关闭时沿用每基地手填天数（改派船只**不会**再自动改写天数——旧的写回路径 `fitShip`/`pendingShipFits` 已删除）；开启后各基地按仓储安全上限补满，并优先取该船按剩余载重、容积和维修占用能装的补给天数（`FLEET.vue` 的 `fittedDaysByShip` 逐船调 `utils.fitDaysForShip`；天数上限统一由 `supplies-cap` 按各基地 cap 收紧——`clampTargetDays` 用于补给账单、`fitTargetDays` 用于环线试算）。
 基地规划和环线补给都计算消耗品和原料，顶部「CX 购买」控制两种规划生成的采购步骤。
 环线规划使用自身勾选的船只和基地试算补给天数，并按分段结果检查每艘船的舱容。
-两种规划都应用各基地的仓储上限，环线试算不写回主页面的天数。
+两种规划都应用各基地的仓储上限：适配值还要按本基地 cap 再钳一次（`supplies-cap.fillInventoryDays`——一船挂多个补给基地时 `fitDaysForShip` 的饱和点取各基地 cap 的最大值，不钳会显示「目标 40 天 > 本基地上限 25 天」）；环线试算不写回主页面的天数；开关打开期间天数输入框只读，`PlanetRow` 的 clamp watch 也不再回写 `config.days`（否则关掉开关会跳出一个用户没设过的数字）。
 
 环线单船规划入口在 `chain-planner.ts`，`chain-data.ts` 采集输入快照，`chain-plan-core.ts` 负责计算；多船分配在 `chain-allocation.ts`，ACT 构造在 `chain-actions.ts`，`use-chain-planning.ts` 编排响应式规划与异步估时，`chain-commands.ts` 写入运行记录和脚本，UI 在 `ChainView.vue`。模块边界见 `docs/architecture.md` 的 FLEET 小节。
 

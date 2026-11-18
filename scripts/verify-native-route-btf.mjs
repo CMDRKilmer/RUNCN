@@ -105,7 +105,10 @@ await check('载荷 = 计划舱载 + 船上现有货物；反应堆不低于蓝�
 });
 
 await check('全部被拒：状态进警告并在第 2 档后停止扫描', async failures => {
-  stubReset({}, Array.from({ length: 10 }, () => rejectedPlan));
+  stubReset(
+    {},
+    Array.from({ length: 10 }, () => rejectedPlan),
+  );
   const result = await measure({});
   expectEqual(failures, '请求数', 2, requests.length);
   expectEqual(failures, '实测航段', 0, result.legs.size);
@@ -138,5 +141,7 @@ await check('有样本时照旧扫完整网格', async failures => {
   );
 });
 
-console.log(`\n${summary.fail === 0 ? 'PASS' : 'FAIL'} ${summary.pass}/${summary.pass + summary.fail}`);
+console.log(
+  `\n${summary.fail === 0 ? 'PASS' : 'FAIL'} ${summary.pass}/${summary.pass + summary.fail}`,
+);
 process.exitCode = summary.fail === 0 ? 0 : 1;

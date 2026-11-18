@@ -51,4 +51,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const outPath = join(root, 'public', 'json', 'stations.json');
 writeFileSync(outPath, json);
 console.log(`写入 ${outPath}`);
-console.log(`空间站 ${withOrbit + mappingOnly} 个（含轨道 ${withOrbit}、仅归属 ${mappingOnly}），大小 ${(json.length / 1024).toFixed(1)} KB`);
+console.log(
+  `空间站 ${withOrbit + mappingOnly} 个（含轨道 ${withOrbit}、仅归属 ${mappingOnly}），大小 ${(json.length / 1024).toFixed(1)} KB`,
+);

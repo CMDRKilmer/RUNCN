@@ -40,6 +40,7 @@ import {
   getShipsAtCX,
   regroupByShip,
 } from '@src/features/XIT/FLEET/utils';
+import { fillInventoryDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 
 interface BaseEntry {
   siteId: string;
@@ -90,6 +91,8 @@ const exchangeFilter = useTileState<string | undefined>('exchangeFilter', undefi
 const autoUnloadTrigger = useTileState<boolean>('autoUnloadTrigger', true);
 // 自动发船：在每个 OPEN SFC 步骤后追加 DEPART，执行时自动点击「开始」。
 const autoLaunch = useTileState<boolean>('autoLaunch', false);
+// 全局「填满库存」：按仓储安全上限补满，并按飞船剩余容量适配天数。
+const fillInventory = useTileState<boolean>('fillInventory', false);
 
 // Column visibility。「消耗」列常驻且可排序，因此不提供开关；
 // 「维修」开关同时控制 维修 / 维护 / 提前 三列。
@@ -125,13 +128,33 @@ function createBaseConfig(naturalId: string): DispatchBaseConfig {
 }
 
 // 计划口径：忽略已下线的每基地物资开关（材料全量参与），采购跟随顶部「CX 购买」。
-function planConfig(config: DispatchBaseConfig): DispatchBaseConfig {
+function basePlanConfig(config: DispatchBaseConfig): DispatchBaseConfig {
   return {
     ...config,
     consumablesOnly: true,
     includeConsumables: true,
     cxBuy: planCxBuy.value,
   };
+}
+
+// 「填满库存」开启时优先使用该船可装的补给天数（不超过仓储上限）；
+// 未分配船只或数据未加载时退回仓储上限。关闭时保留每基地手填天数。
+function planConfig(config: DispatchBaseConfig, site: PrunApi.Site): DispatchBaseConfig {
+  const base = basePlanConfig(config);
+  if (!fillInventory.value) {
+    return base;
+  }
+  const fitted = config.ship ? fittedDaysByShip.value.get(config.ship) : undefined;
+  return { ...base, days: fillInventoryDays(fitted, getSuppliesCap(site), config.days) };
+}
+
+// 环线有自身的多船容量试算，这里只给目标上限。
+function chainConfig(config: DispatchBaseConfig, site: PrunApi.Site): DispatchBaseConfig {
+  const base = basePlanConfig(config);
+  if (!fillInventory.value) {
+    return base;
+  }
+  return { ...base, days: fillInventoryDays(undefined, getSuppliesCap(site), config.days) };
 }
 
 function burnDaysRemaining(siteId: string) {
@@ -220,7 +243,7 @@ const chainBases = computed<ChainPlannerBase[]>(() =>
     naturalId: base.naturalId,
     planetName: base.planetName,
     site: base.site,
-    config: planConfig(config),
+    config: chainConfig(config, base.site),
   })),
 );
 
@@ -295,7 +318,7 @@ const billByBase = computed(() => {
     if (!config.resupply && !config.repair) {
       continue;
     }
-    const bill = combinedBaseBill(base.naturalId, planConfig(config), base.site);
+    const bill = combinedBaseBill(base.naturalId, planConfig(config, base.site), base.site);
     if (bill) {
       map.set(base.naturalId, bill);
     }
@@ -370,6 +393,46 @@ const cxShipById = computed(() => {
   const map = new Map<string, DispatchShip>();
   for (const entry of cxShips.value) {
     map.set(entry.ship.id, entry);
+  }
+  return map;
+});
+
+const fittedDaysByShip = computed(() => {
+  const map = new Map<string, number>();
+  if (!fillInventory.value) {
+    return map;
+  }
+  const sharingBases = rows.value.map(x => ({
+    naturalId: x.base.naturalId,
+    config: basePlanConfig(x.config!),
+    site: x.base.site,
+  }));
+  const assignedShipIds = new Set(
+    sharingBases.filter(x => x.config.resupply && x.config.ship).map(x => x.config.ship!),
+  );
+  for (const shipId of assignedShipIds) {
+    const cargoStore = cxShipById.value.get(shipId)?.cargoStore;
+    if (!cargoStore) {
+      continue;
+    }
+    const days = fitDaysForShip(shipId, sharingBases, cargoStore);
+    if (days !== undefined) {
+      map.set(shipId, days);
+    }
+  }
+  return map;
+});
+
+// 每行实际使用的计划天数，以及它是否真的来自「按该船剩余容量适配」
+// （未分配船只/船不在 CX 列表/缺 cargoStore 时退回仓储上限，PlanetRow 据此分叉文案）。
+const rowPlannedDays = computed(() => {
+  const map = new Map<string, { days: number; fitted: boolean }>();
+  for (const { base, config } of rows.value) {
+    const planned = planConfig(config, base.site);
+    map.set(base.naturalId, {
+      days: planned.days,
+      fitted: config.ship !== undefined && fittedDaysByShip.value.has(config.ship),
+    });
   }
   return map;
 });
@@ -449,39 +512,12 @@ const includedBases = computed(() => {
       naturalId: base.naturalId,
       planetName: base.planetName,
       site: base.site,
-      config: planConfig(config),
+      config: planConfig(config, base.site),
       dispatchShip,
     });
   }
   return result;
 });
-
-function fitShip(shipId: string) {
-  const dispatchShip = cxShipById.value.get(shipId);
-  if (!dispatchShip?.cargoStore) {
-    return false;
-  }
-
-  const sharingBases = rows.value.map(x => ({
-    naturalId: x.base.naturalId,
-    config: planConfig(x.config!),
-    site: x.base.site,
-  }));
-
-  const days = fitDaysForShip(shipId, sharingBases, dispatchShip.cargoStore);
-  if (days === undefined) {
-    return false;
-  }
-
-  for (const { config } of rows.value) {
-    if (config.ship === shipId && config.resupply) {
-      config.days = days;
-    }
-  }
-  return true;
-}
-
-const pendingShipFits = reactive(new Map<string, string>());
 
 function assignShip(naturalId: string, shipId: string) {
   const config = baseConfigs.value[naturalId];
@@ -489,16 +525,7 @@ function assignShip(naturalId: string, shipId: string) {
     return;
   }
   config.ship = shipId;
-  pendingShipFits.set(naturalId, shipId);
 }
-
-watchEffect(() => {
-  for (const [naturalId, shipId] of pendingShipFits) {
-    if (baseConfigs.value[naturalId]?.ship !== shipId || fitShip(shipId)) {
-      pendingShipFits.delete(naturalId);
-    }
-  }
-});
 
 function execute() {
   if (includedBases.value.length === 0) {
@@ -543,6 +570,7 @@ function execute() {
 function reset() {
   baseConfigs.value = {};
   planCxBuy.value = true;
+  fillInventory.value = false;
   baseOrder.value = [];
   manualOrder.value = false;
 }
@@ -627,6 +655,12 @@ onUnmounted(() => clearTimeout(noticeTimer));
         </RadioItem>
         <div :class="$style.separator" />
         <RadioItem v-model="planCxBuy" horizontal>CX 购买</RadioItem>
+        <Tooltip
+          no-icon
+          position="top"
+          tooltip="开启后各基地按仓储安全上限补满库存，并按每艘船剩余容量适配补给天数；关闭时沿用每基地手填天数，改派船只也不会再自动改天数。">
+          <RadioItem v-model="fillInventory" horizontal>填满库存</RadioItem>
+        </Tooltip>
         <!-- 自动发船 / 到港卸货 属同一组，中间不放分隔线，
              只沿用 .filterRow 的 3px gap，与第一行同组选项一致。 -->
         <RadioItem v-model="autoLaunch" horizontal>自动发船</RadioItem>
@@ -686,6 +720,9 @@ onUnmounted(() => clearTimeout(noticeTimer));
                   :show-inv="showInv"
                   :show-war="showWar"
                   :show-fill="showFill"
+                  :fill-inventory="fillInventory"
+                  :effective-days="rowPlannedDays.get(id)?.days"
+                  :fitted-days="rowPlannedDays.get(id)?.fitted ?? false"
                   :overloaded="
                     !!rowById.get(id)!.config.ship &&
                     overloadedShips.has(rowById.get(id)!.config.ship!)

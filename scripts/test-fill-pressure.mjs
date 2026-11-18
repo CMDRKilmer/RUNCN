@@ -12,58 +12,88 @@
 
 const materials = {
   H2O: { weight: 1.0, volume: 1.0 },
-  O2:  { weight: 1.0, volume: 1.0 },
+  O2: { weight: 1.0, volume: 1.0 },
   RTA: { weight: 1.0, volume: 1.0 },
-  DW:  { weight: 1.0, volume: 1.0 },
+  DW: { weight: 1.0, volume: 1.0 },
 };
 
 const cases = [
   {
     name: '弱装填: 出口 ≫ 进口',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  200, v:  200 },
-    burn: { H2O: { daily: 50, inv: 25 }, O2: { daily: 50, inv: 25 }, RTA: { daily: -5, inv: 50 }, DW: { daily: 0, inv: 0 } },
+    load: { w: 200, v: 200 },
+    burn: {
+      H2O: { daily: 50, inv: 25 },
+      O2: { daily: 50, inv: 25 },
+      RTA: { daily: -5, inv: 50 },
+      DW: { daily: 0, inv: 0 },
+    },
   },
   {
     name: '强装填: 出口 100, 进口 1',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  400, v:  400 },
-    burn: { H2O: { daily: 50, inv: 100 }, O2: { daily: 50, inv: 100 }, RTA: { daily: -1, inv: 5 }, DW: { daily: 0, inv: 0 } },
+    load: { w: 400, v: 400 },
+    burn: {
+      H2O: { daily: 50, inv: 100 },
+      O2: { daily: 50, inv: 100 },
+      RTA: { daily: -1, inv: 5 },
+      DW: { daily: 0, inv: 0 },
+    },
   },
   {
     name: '极端: 当前 90% 满, 出口 100, 进口 1',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  900, v:  900 },
-    burn: { H2O: { daily: 50, inv: 200 }, O2: { daily: 50, inv: 200 }, RTA: { daily: -1, inv: 5 }, DW: { daily: 0, inv: 0 } },
+    load: { w: 900, v: 900 },
+    burn: {
+      H2O: { daily: 50, inv: 200 },
+      O2: { daily: 50, inv: 200 },
+      RTA: { daily: -1, inv: 5 },
+      DW: { daily: 0, inv: 0 },
+    },
   },
   {
     name: '纯消耗(消耗型,应该不卡)',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  300, v:  300 },
-    burn: { H2O: { daily: 0, inv: 0 }, O2: { daily: 0, inv: 0 }, RTA: { daily: -10, inv: 50 }, DW: { daily: -5, inv: 50 } },
+    load: { w: 300, v: 300 },
+    burn: {
+      H2O: { daily: 0, inv: 0 },
+      O2: { daily: 0, inv: 0 },
+      RTA: { daily: -10, inv: 50 },
+      DW: { daily: -5, inv: 50 },
+    },
   },
   {
     name: '体积压力: 大体积产物 + 小仓库',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  600, v:  600 },
+    load: { w: 600, v: 600 },
     burn: {
       H2O: { daily: 200, inv: 50 },
-      O2:  { daily: 100, inv: 50 },
-      RTA: { daily: -5,  inv: 10 },
-      DW:  { daily: -2,  inv: 20 },
+      O2: { daily: 100, inv: 50 },
+      RTA: { daily: -5, inv: 10 },
+      DW: { daily: -2, inv: 20 },
     },
   },
   {
     name: '大库存消耗品 + 高产出(周期短于库存天数)',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  900, v:  900 },
-    burn: { H2O: { daily: 50, inv: 10 }, O2: { daily: 50, inv: 10 }, RTA: { daily: -5, inv: 500 }, DW: { daily: 0, inv: 0 } },
+    load: { w: 900, v: 900 },
+    burn: {
+      H2O: { daily: 50, inv: 10 },
+      O2: { daily: 50, inv: 10 },
+      RTA: { daily: -5, inv: 500 },
+      DW: { daily: 0, inv: 0 },
+    },
   },
   {
     name: '模型外: 80% 满 + 高产出 + ship-out 只带走一半',
     capacity: { w: 1000, v: 1000 },
-    load:     { w:  800, v:  800 },
-    burn: { H2O: { daily: 80, inv: 200 }, O2: { daily: 80, inv: 200 }, RTA: { daily: -2, inv: 10 }, DW: { daily: 0, inv: 0 } },
+    load: { w: 800, v: 800 },
+    burn: {
+      H2O: { daily: 80, inv: 200 },
+      O2: { daily: 80, inv: 200 },
+      RTA: { daily: -2, inv: 10 },
+      DW: { daily: 0, inv: 0 },
+    },
     shipOutRatio: 0.5,
     outOfModel: true,
   },
@@ -89,9 +119,14 @@ function capDaysForPeak(reserved, idle, consumerInv, importRate, exportRate) {
 // ---------- 复刻 computeAnalysis(单维度) ----------
 function analyse(c) {
   const { capacity, load, burn } = c;
-  let importW = 0, exportW = 0, shippedOutW = 0, consumerInvW = 0;
+  let importW = 0,
+    exportW = 0,
+    shippedOutW = 0,
+    consumerInvW = 0;
   for (const t of Object.keys(burn)) {
-    const m = materials[t]; const b = burn[t]; const daily = b.daily;
+    const m = materials[t];
+    const b = burn[t];
+    const daily = b.daily;
     if (daily < 0) {
       importW += -daily * m.weight;
       consumerInvW += b.inv * m.weight;
@@ -103,7 +138,7 @@ function analyse(c) {
   const netW = exportW - importW;
   const availW = Math.max(capacity.w - load.w, 0);
   const daysUntilFull = netW > 0 ? availW / netW : Infinity;
-  const reserve = daysUntilFull === Infinity ? 0.05 : 0.20;
+  const reserve = daysUntilFull === Infinity ? 0.05 : 0.2;
   const idleNonW = Math.max(load.w - shippedOutW - consumerInvW, 0);
 
   const consumableCapW = Math.max(capacity.w * (1 - reserve) - idleNonW, 0);
@@ -113,7 +148,18 @@ function analyse(c) {
   const reservedW = capacity.w * (1 - reserve);
   const suppliesCapDays = capDaysForPeak(reservedW, idleNonW, consumerInvW, importW, exportW);
 
-  return { importW, exportW, netW, shippedOutW, idleNonW, consumerInvW, reserve, daysUntilFull, daysOfSuppliesFit, suppliesCapDays };
+  return {
+    importW,
+    exportW,
+    netW,
+    shippedOutW,
+    idleNonW,
+    consumerInvW,
+    reserve,
+    daysUntilFull,
+    daysOfSuppliesFit,
+    suppliesCapDays,
+  };
 }
 
 // ---------- 周期模拟 ----------
@@ -121,7 +167,8 @@ function simulate(c, capOf) {
   const a = analyse(c);
   const totalCap = capOf(a);
   const consumers = Object.values(c.burn).filter(b => b.daily < 0);
-  const minDaysLeft = consumers.length === 0 ? 1000 : Math.min(...consumers.map(b => b.inv / -b.daily));
+  const minDaysLeft =
+    consumers.length === 0 ? 1000 : Math.min(...consumers.map(b => b.inv / -b.daily));
   const inv = Math.min(minDaysLeft, totalCap);
   const fillTons = Math.max(0, (totalCap - inv) * a.importW);
 
@@ -133,8 +180,12 @@ function simulate(c, capOf) {
   const peak = a.netW > 0 ? atNextVisit : afterFill;
 
   return {
-    cap: totalCap, inv, fillTons,
-    afterFill, atNextVisit, peak,
+    cap: totalCap,
+    inv,
+    fillTons,
+    afterFill,
+    atNextVisit,
+    peak,
     capacity: c.capacity.w,
     stuck: peak > c.capacity.w + 1e-9,
   };
@@ -143,19 +194,25 @@ function simulate(c, capOf) {
 const formulas = {
   before: a => a.daysOfSuppliesFit + 1,
   minfix: a => Math.min(a.daysOfSuppliesFit + 1, a.daysUntilFull + 1),
-  planA:  a => a.suppliesCapDays,
+  planA: a => a.suppliesCapDays,
 };
 
 let allPass = true;
 for (const c of cases) {
   console.log(`\n=== ${c.name}${c.outOfModel ? '(不计入判定)' : ''} ===`);
   const a = analyse(c);
-  console.log(`  进口 ${a.importW} t/d, 出口 ${a.exportW} t/d, idleNon ${a.idleNonW} t, 消耗品库存 ${a.consumerInvW} t, reserve ${a.reserve}`);
-  console.log(`  daysUntilFull=${fmt(a.daysUntilFull)} daysOfSuppliesFit=${fmt(a.daysOfSuppliesFit)} suppliesCapDays=${fmt(a.suppliesCapDays)}`);
+  console.log(
+    `  进口 ${a.importW} t/d, 出口 ${a.exportW} t/d, idleNon ${a.idleNonW} t, 消耗品库存 ${a.consumerInvW} t, reserve ${a.reserve}`,
+  );
+  console.log(
+    `  daysUntilFull=${fmt(a.daysUntilFull)} daysOfSuppliesFit=${fmt(a.daysOfSuppliesFit)} suppliesCapDays=${fmt(a.suppliesCapDays)}`,
+  );
   for (const [k, f] of Object.entries(formulas)) {
     const s = simulate(c, f);
     if (k === 'planA' && s.stuck && !c.outOfModel) allPass = false;
-    console.log(`  [${k.padEnd(6)}] 上限=${fmt(s.cap)} 天 补货=${s.fillTons.toFixed(0)} t 卸货后=${s.afterFill.toFixed(0)} 下次到港=${fmt(s.atNextVisit)} 峰值=${s.peak.toFixed(0)}/${s.capacity} → ${s.stuck ? '❌ 卡住' : '✅ OK'}`);
+    console.log(
+      `  [${k.padEnd(6)}] 上限=${fmt(s.cap)} 天 补货=${s.fillTons.toFixed(0)} t 卸货后=${s.afterFill.toFixed(0)} 下次到港=${fmt(s.atNextVisit)} 峰值=${s.peak.toFixed(0)}/${s.capacity} → ${s.stuck ? '❌ 卡住' : '✅ OK'}`,
+    );
   }
 }
 console.log(`\n${allPass ? '✅ 方案 A(suppliesCapDays)全部场景通过' : '❌ 方案 A 存在卡住场景'}`);

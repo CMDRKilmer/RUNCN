@@ -1,9 +1,10 @@
 <script setup lang="ts">
-const { max, min, optional, integer } = defineProps<{
+const { max, min, optional, integer, disabled } = defineProps<{
   max?: number;
   min?: number;
   optional?: boolean;
   integer?: boolean;
+  disabled?: boolean;
 }>();
 
 const model = defineModel<number | undefined>();
@@ -66,6 +67,7 @@ function commitIntegerInput(event: Event) {
       :inputmode="integer ? 'numeric' : 'decimal'"
       :min="min"
       :max="max"
+      :disabled="disabled"
       autocomplete="off"
       data-1p-ignore="true"
       data-lpignore="true"
