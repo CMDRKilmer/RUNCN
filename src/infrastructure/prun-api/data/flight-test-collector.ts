@@ -88,28 +88,49 @@ function queryAddresses(query: string, timeoutMs = 12000): Promise<PrunApi.Addre
   });
 }
 
-// 请求一次测试飞行计划（BTF 等价），返回响应或超时 undefined。
-// `overrides` 用于受控实验：按请求覆盖 payload 里的飞行参数（燃料系数、罐容量、
-// 载重、状况、反应堆用量）。缺省字段保留原有默认值，因此不带 overrides 的调用
-// 行为与之前完全一致。
-export function calculateTestFlight(
+export interface TestFlightOptions {
+  fuelUsageFactor?: number;
+  stlFuel?: number;
+  ftlFuel?: number;
+  payload?: number;
+  condition?: number;
+  reactorUsageFactor?: number;
+  landing?: boolean;
+  preferences?: { ftlPreference: string; useGateways: boolean };
+}
+
+export function buildTestFlightPayload(
   origin: string,
   destination: string,
   blueprintId: string,
-  timeoutMs = 15000,
-  overrides?: {
-    fuelUsageFactor?: number;
-    stlFuel?: number;
-    ftlFuel?: number;
-    payload?: number;
-    condition?: number;
-    reactorUsageFactor?: number;
-    landing?: boolean;
-    preferences?: { ftlPreference: string; useGateways: boolean };
-  },
+  options?: TestFlightOptions,
+) {
+  return {
+    missionId: crypto.randomUUID(),
+    blueprintId,
+    origin,
+    destination,
+    landing: options?.landing ?? true,
+    fuelUsageFactor: options?.fuelUsageFactor ?? 0.05,
+    // 试飞默认反应堆档 125/192 ≈ 0.651：沿用 main 里内联调用的取值（既有采集样本都是这一档），
+    // 写成分数是为了让来源可见，不要当成标定出来的最优值。
+    reactorUsageFactor: options?.reactorUsageFactor ?? 125 / 192,
+    payload: options?.payload ?? 0,
+    condition: options?.condition ?? 1,
+    stlFuel: options?.stlFuel ?? 1500,
+    ftlFuel: options?.ftlFuel ?? 300,
+    preferences: options?.preferences ?? { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+  };
+}
+
+export type TestFlightRequest = ReturnType<typeof buildTestFlightPayload>;
+
+export function sendTestFlightPlan(
+  payload: TestFlightRequest,
+  timeoutMs: number,
 ): Promise<PrunApi.FlightPlan | undefined> {
-  const missionId = crypto.randomUUID();
-  return new Promise(resolve => {
+  const { missionId } = payload;
+  return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingMissions.delete(missionId);
       resolve(undefined);
@@ -119,25 +140,27 @@ export function calculateTestFlight(
       pendingMissions.delete(missionId);
       resolve(data);
     });
-    sendMessage({
-      messageType: 'SHIP_FLIGHT_CALCULATE_TEST_FLIGHT',
-      payload: {
-        missionId,
-        blueprintId,
-        origin,
-        destination,
-        landing: true,
-        fuelUsageFactor: 0.05,
-        reactorUsageFactor: 0.6510416666666667,
-        payload: 0,
-        condition: 1,
-        stlFuel: 1500,
-        ftlFuel: 300,
-        preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
-        ...overrides,
-      },
-    });
+    try {
+      sendMessage({ messageType: 'SHIP_FLIGHT_CALCULATE_TEST_FLIGHT', payload });
+    } catch (error) {
+      clearTimeout(timer);
+      pendingMissions.delete(missionId);
+      reject(error);
+    }
   });
+}
+
+export function calculateTestFlight(
+  origin: string,
+  destination: string,
+  blueprintId: string,
+  timeoutMs = 15000,
+  overrides?: TestFlightOptions,
+): Promise<PrunApi.FlightPlan | undefined> {
+  return sendTestFlightPlan(
+    buildTestFlightPayload(origin, destination, blueprintId, overrides),
+    timeoutMs,
+  );
 }
 
 // 试飞计划是按**请求参数**算的，和飞船当前状态不是一回事：飞行质量（payload）与出发

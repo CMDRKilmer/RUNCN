@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue';
-import SectionHeader from '@src/components/SectionHeader.vue';
+import { ref, computed } from 'vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
-import NumberInput from '@src/components/forms/NumberInput.vue';
-import LoadingSpinner from '@src/components/LoadingSpinner.vue';
-import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { requestStars, starsStore, starsVersion } from '@src/infrastructure/prun-api/data/stars';
-import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
-import { getPrice } from '@src/infrastructure/fio/cx';
+import {
+  getEntityNaturalIdFromAddress,
+  getSystemLineFromAddress,
+} from '@src/infrastructure/prun-api/data/addresses';
 import { exportStlSegments } from '@src/infrastructure/prun-api/data/system-bodies';
 import {
   collectAllPlanetStl,
@@ -21,44 +19,30 @@ import {
   prefetchAllOrbits,
   exportAllPlanetData,
   exportStationOrbits,
+  getNativePlanetEnvironment,
+  snapshotOrbitInputs,
 } from '@src/infrastructure/fio/orbit';
 import { routesStore } from '@src/infrastructure/fio/routes';
+import { ensureGatewayConnections } from './gateway-loader';
 import { downloadFile } from '@src/utils/dom';
 import {
   scanTransitFuelCurve,
   scanTransitMatrix,
   listBlueprintIds,
+  type ScanFtlPreference,
 } from '@src/infrastructure/prun-api/data/transit-f-scan';
 import {
   resolveEntity,
   encodeAddress,
 } from '@src/infrastructure/prun-api/data/flight-test-collector';
-import { stlTransitTableReady } from './fuel-model';
 import ProgressBar from '@src/components/ProgressBar.vue';
-import { formatCurrency, fixed2, fixed4 } from '@src/utils/format';
-import {
-  PlannedRoute,
-  RouteSegmentRow,
-  buildNativeSegmentRows,
-  buildEstimatedSegmentRows,
-  summarizeNativeFlightPlan,
-} from './route-planner';
-import {
-  computeFtcPlan,
-  shipPerformanceFor,
-  blueprintInfoFor,
-  FtcComputeOutput,
-} from './ftc-compute';
-import { FuelOption, GW_COST_PER_JUMP } from './fuel-model';
+import { fetchPlanetEnv } from '@src/infrastructure/fio/planet-environment';
+import FlightCalculator from './FlightCalculator.vue';
 import $style from './FTC.module.css';
 
-// XIT FTC：飞船性能驱动的飞行燃料性价比计算器。
-// - 输入起终点 + 网关开关（玩家自选），规划航线（自然/网关）
-// - 用飞船实时性能（质量/加速度/船体条件）+ 经验模型扫描燃料/反应堆滑块
-// - 输出最优最性价比的燃料消耗方案（燃料费 + 时间价值）
-// - 保留星球/网关数据获取与导出工具
+const calculatorBlueprintId = ref('');
 
-// ---- 数据工具（保留）----
+// Data collection remains separate from formula-based calculations.
 const prefetching = ref(false);
 const requestingStars = ref(false);
 const starsMessage = ref<string | undefined>(undefined);
@@ -126,13 +110,26 @@ async function exportPlanets() {
   }
 }
 const gatewayMessage = ref<string | undefined>(undefined);
-function checkGateways() {
+let loadingGateways = false;
+// 「网关」按钮：本地没有网关数据时立刻向服务器请求一次（与原生星图发出的
+// DATA_GET_DATA{path:['gateways']} 相同），不需要玩家手动打开星图。
+async function checkGateways() {
+  if (
+    !loadingGateways &&
+    routesStore.gatewayCount === 0 &&
+    routesStore.gatewayConnectionCount === 0
+  ) {
+    loadingGateways = true;
+    gatewayMessage.value = '正在向服务器请求网关数据…';
+    await ensureGatewayConnections({ cooldownMs: 0 });
+    loadingGateways = false;
+  }
   const n = routesStore.gatewayCount;
   const c = routesStore.gatewayConnectionCount;
   if (n > 0 || c > 0) {
     const parts: string[] = [];
     if (n > 0) {
-      parts.push(`已加载 ${n} 个网关（打开星图后自动读取）`);
+      parts.push(`已加载 ${n} 个网关`);
     }
     if (c > 0) {
       parts.push(`已提取 ${c} 条网关连接（飞行计划/名称配对自动记录）`);
@@ -141,12 +138,15 @@ function checkGateways() {
     return;
   }
   gatewayMessage.value =
-    '暂无网关数据：请打开一次星图（星系地图）读取网关实体，或执行一次网关飞行（自动记录网关连接）';
+    '暂无网关数据：请求未拿到响应，请刷新游戏页面后重试，或执行一次网关飞行（自动记录网关连接）';
 }
-function exportGateways() {
+async function exportGateways() {
+  if (routesStore.gatewayCount === 0) {
+    await ensureGatewayConnections({ cooldownMs: 0 });
+  }
   const data = routesStore.getAllGateways();
   if (data.length === 0) {
-    gatewayMessage.value = '暂无网关数据：请先打开一次星图（星系地图），再导出';
+    gatewayMessage.value = '暂无网关数据：请求未拿到响应，请刷新游戏页面后重试';
     return;
   }
   downloadFile(data, 'prun-gateways.json', true);
@@ -166,8 +166,7 @@ function exportStations() {
   gatewayMessage.value = `已导出 ${data.length} 个空间站（轨道+归属星系）；运行 build-station-data.mjs 精简后内置`;
 }
 // 导出已积累的 STL 段数据（原生离港/进近段距离，SFC/BTF 计划时自动记录），
-// 供 build-stl-data.mjs 精简内置到 public/json/stl-segments.json。内置后 FTC
-// 对所有已采集航线精确复现原生 STL 路程，运行中记录继续校准。
+// 供旧模型的数据表与离线诊断使用。新 FTC 计算器直接预测轨道几何。
 function exportStlSegmentsData() {
   const data = exportStlSegments();
   if (data.depart.length === 0 && data.approach.length === 0 && data.sameSystem.length === 0) {
@@ -237,9 +236,7 @@ function resetCollectProgress() {
  * 矩阵扫描用它做 stlFuel，保证「扫描传的罐」=「蓝图真实的罐」。
  * 取不到返回 0（调用方据此判定该行无效）。
  */
-// 扫描用的蓝图：显式选择。缺省跟随面板选中的飞船（ship.blueprintNaturalId），
-// 因为部件是在**蓝图**上编辑的 —— 上次数据不可比的次要原因就是扫描走了 blueprints[0]，
-// 而我在编辑器里改的是另一份蓝图。
+// Explicit scan selections override the calculator blueprint.
 const scanBlueprintId = ref('');
 
 // 蓝图下拉选项：直接读 blueprintsStore.all（响应式）。
@@ -256,13 +253,52 @@ function blueprintIdOfSelection(): string {
   if (scanBlueprintId.value.trim() !== '') {
     return scanBlueprintId.value.trim();
   }
-  return ship.value?.blueprintNaturalId ?? '';
+  return calculatorBlueprintId.value;
 }
 
 function blueprintStlCapacityOf(blueprintNaturalId: string): number {
   const bp = blueprintsStore.getByNaturalId(blueprintNaturalId);
   const cap = bp?.performance?.stlFuelCapacity;
   return typeof cap === 'number' && cap > 0 ? cap : 0;
+}
+
+async function snapshotFlightInputs(origin: PrunApi.Address, destination: PrunApi.Address) {
+  const endpoints = [origin, destination].map(address => ({
+    naturalId: getEntityNaturalIdFromAddress(address),
+    systemId: getSystemLineFromAddress(address)?.entity.naturalId,
+  }));
+  const environment = await Promise.all(
+    endpoints.map(async ({ naturalId, systemId }) => {
+      if (naturalId === undefined) {
+        return { naturalId, systemId };
+      }
+      const nativeEnv = getNativePlanetEnvironment(naturalId);
+      const env = nativeEnv ? { ...nativeEnv, source: 'native' } : await fetchPlanetEnv(naturalId);
+      return { naturalId, systemId, env };
+    }),
+  );
+  const stars = (starsStore.all.value ?? []).map(({ systemId, address, position, connections }) => {
+    const naturalId = getSystemLineFromAddress(address)?.entity.naturalId;
+    return {
+      systemId,
+      naturalId,
+      position: { ...position },
+      connections: [...connections],
+      neighbors: naturalId === undefined ? [] : routesStore.getNeighbors(naturalId),
+    };
+  });
+  return {
+    capturedAt: Date.now(),
+    environment,
+    orbit: snapshotOrbitInputs(
+      endpoints.flatMap(({ naturalId, systemId }) =>
+        naturalId === undefined || systemId === undefined ? [] : [{ naturalId, systemId }],
+      ),
+    ),
+    stars,
+    gateways: routesStore.getAllGateways().map(x => ({ ...x })),
+    gatewayConnections: routesStore.getGatewayConnections().map(x => ({ ...x })),
+  };
 }
 // ---- 配件矩阵扫描（2026-10-14）----
 // 单变量隔离每个可配置部件：每套配件对应**一份蓝图**，各自跑完整 f 档位。
@@ -327,6 +363,7 @@ async function startMatrixScan() {
       matrixMessage.value = '这些行的罐容量无效：' + bad.map(b => b.variant).join('、');
       return;
     }
+    const flightInputs = await snapshotFlightInputs(probeAddr, targetAddr);
     const result = await scanTransitMatrix({
       probe: from,
       target: to,
@@ -337,7 +374,7 @@ async function startMatrixScan() {
       },
       shouldCancel: () => matrixCancelled.value,
     });
-    downloadFile(result, 'prun-transit-matrix.json', true);
+    downloadFile({ ...result, flightInputs }, 'prun-transit-matrix.json', true);
     const done = result.variants.filter(v => v.samples.length > 0).length;
     const pts = result.variants.reduce((a, v) => a + v.samples.length, 0);
     matrixMessage.value =
@@ -358,10 +395,11 @@ async function startMatrixScan() {
 function stopMatrixScan() {
   matrixCancelled.value = true;
 }
-// ---- 系内转移段 f 曲线扫描（2026-10-13）----
-// 目的：补齐 STL_INTRA_TRANSIT_SPEED_KM_S 缺失的地面真值 —— 该常数来自
-// VH-331g → HRT 的 BTF 样本（599,220,390 km / 21,780 s），而**那个样本没记 f**。
-// 全模型的 f 依赖只有这一点 + 一条假设的曲线形状；本扫描固定船/航线/罐只变 f。
+// ---- 系内转移段 f 曲线扫描 ----
+// 目的：补齐系内转移段速度里「档位 f」这一维的地面真值 —— 旧口径的锚点来自
+// VH-331g → HRT 的 BTF 样本（599,220,390 km / 21,780 s），而**那个样本没记 f**，
+// 那套模型的 f 依赖只有这一点 + 一条假设的曲线形状（当前口径见 src/core/flight/stl.ts，
+// 不再使用这条速度曲线）。本扫描固定船/航线/罐只变 f。
 // ⚠️ 会向服务器发多笔计算请求（每档 1 次），仅用户点按钮时触发。
 const fScanning = ref(false);
 const fScanCancelled = ref(false);
@@ -375,16 +413,12 @@ const fScanFactors = ref('0.05,0.1,0.2,0.3,0.4,0.5');
 // 填值 = 固定蓝图（质量/部件都不变）只改请求里的段可用 STL 燃料，
 // 用来分离「罐」与「质量」两个变量 —— 矩阵扫描做不到这点，它强制用各蓝图自己的罐。
 const fScanStlFuelOverride = ref('');
-// 系内转移段速度模型来源提示（走实测查询表「表已装载」还是回退旧式）。
-// 外推区（罐 500 / a_eff 两端）粗估可达 ±60%，内部区间（a_eff 50–120）实测 ~1%。
-// 面板把这句话摆出来，避免用户把外推区粗估当同精度看。
-const stlSpeedSourceNote = computed(() =>
-  stlTransitTableReady()
-    ? '转移段速度：实测查询表（372 点，整体平均 1.2%；内部区间平均 1.0%）。' +
-      '可靠性区间为 a_eff 50–120，罐 500 与 a_eff 两端属外推区（误差可达 ±60%）。' +
-      '有原生飞行计划时优先用原生数据。'
-    : '转移段速度：实测查询表尚未加载（估算值沿用旧式，轻船/大罐区间已知高估约 2.8×）。',
-);
+const fScanFtlFuelOverride = ref('');
+const fScanReactor = ref('');
+const fScanCondition = ref('1');
+const fScanLanding = ref(true);
+const fScanGateways = ref(true);
+const fScanFtlPreference = ref<ScanFtlPreference>('LEAST_JUMPS');
 // 载重覆写：留空或 0 = 空载。填值 = 受控实验：固定蓝图/引擎/罐，只加质量
 // （游戏把载重计入飞船总质量），用来在**不改动账号里任何蓝图**的前提下扫质量。
 const fScanPayloadOverride = ref('');
@@ -423,8 +457,11 @@ async function startFScan() {
     const bpCap = blueprintStlCapacityOf(blueprintIdOfSelection());
     const overrideText = fScanStlFuelOverride.value.trim();
     const override = overrideText === '' ? undefined : Number(overrideText);
-    if (override !== undefined && (!Number.isFinite(override) || override <= 0)) {
-      fScanMessage.value = '罐覆写必须是正数；留空则用选中蓝图的真实罐容量。';
+    if (
+      override !== undefined &&
+      (!Number.isFinite(override) || override < 0 || override > bpCap)
+    ) {
+      fScanMessage.value = 'STL 出发余油必须在 0 与蓝图罐容量之间。';
       return;
     }
     const payloadText = fScanPayloadOverride.value.trim();
@@ -440,36 +477,82 @@ async function startFScan() {
       return;
     }
     const bpId = blueprintIdOfSelection();
-    const result = await scanTransitFuelCurve({
+    const perf = blueprintsStore.getByNaturalId(bpId)?.performance;
+    const ftlText = fScanFtlFuelOverride.value.trim();
+    const ftlTiers =
+      ftlText === ''
+        ? [undefined]
+        : [...new Set(ftlText.split(',').map(x => (x.trim() === '' ? NaN : Number(x.trim()))))];
+    const ftlCap = perf?.ftlFuelCapacity ?? 0;
+    if (ftlTiers.some(x => x !== undefined && (!Number.isFinite(x) || x < 0 || x > ftlCap))) {
+      fScanMessage.value = `每个 FTL 出发余油值必须在 0 与 ${ftlCap} 之间。`;
+      return;
+    }
+    const reactorText = fScanReactor.value.trim();
+    const reactorFloor = perf?.minReactorUsage ?? 0;
+    const reactorTiers =
+      reactorText === ''
+        ? [undefined]
+        : [...new Set(reactorText.split(',').map(x => (x.trim() === '' ? NaN : Number(x.trim()))))];
+    if (
+      reactorTiers.some(x => x !== undefined && (!Number.isFinite(x) || x < reactorFloor || x > 1))
+    ) {
+      fScanMessage.value = `每个反应堆档位必须在 ${reactorFloor} 与 1 之间。`;
+      return;
+    }
+    const condition = Number(fScanCondition.value);
+    if (
+      fScanCondition.value.trim() === '' ||
+      !Number.isFinite(condition) ||
+      condition < 0 ||
+      condition > 1
+    ) {
+      fScanMessage.value = '船况必须在 0 与 1 之间。';
+      return;
+    }
+    const scanOptions = {
       probe: from,
       target: to,
       blueprintId: bpId,
       fuelFactors: factors,
       stlFuel: override ?? bpCap,
       payload: payloadOverride,
-      onProgress: info => {
-        fScanMessage.value = info.error
-          ? `f=${factors[info.index - 1]} 失败：${info.error}`
-          : `已测 ${info.index}/${info.total}：f=${info.sample?.fuelUsageFactor} 时长 ${info.sample?.totalSeconds}s`;
-      },
+      condition,
+      landing: fScanLanding.value,
+      useGateways: fScanGateways.value,
+      ftlPreference: fScanFtlPreference.value,
       shouldCancel: () => fScanCancelled.value,
-    });
-    downloadFile(result, 'prun-transit-f-scan.json', true);
-    // 口径自检：请求的罐必须等于蓝图真实罐。不等则这批数据测的是"另一艘船"，
-    // 2026-10-13 就是这样作废了一批（传 8000，蓝图实际 1500）。此处显式报警。
-    const snap = result.blueprint;
-    // 覆写时请求罐本就该 ≠ 蓝图罐（那正是受控点），因此只在**未覆写**时把不相等当错误。
-    const mismatch =
-      override !== undefined
-        ? `（受控覆写：请求罐 ${result.stlFuel}，蓝图罐 ${snap.stlFuelCapacity ?? '?'}；整备 ${snap.operatingEmptyMass ?? '?'}t；载重 ${result.payload}t）`
-        : snap.stlFuelCapacity !== undefined && snap.stlFuelCapacity !== result.stlFuel
-          ? `⚠️ 口径错配：请求罐 ${result.stlFuel} ≠ 蓝图罐 ${snap.stlFuelCapacity}，本批不可用！`
-          : '';
-    fScanMessage.value =
-      `扫描完成：${result.samples.length} 档成功、${result.errors.length} 档失败，已下载 prun-transit-f-scan.json` +
-      `（船 ${result.blueprintId}、引擎 ${snap.stlEngine ?? '?'}、整备 ${snap.operatingEmptyMass ?? '?'}t、` +
-      `罐 ${result.stlFuel}）。请把文件发给我标定。` +
-      mismatch;
+    };
+    const flightInputs = await snapshotFlightInputs(probeAddr, targetAddr);
+    const variants: Awaited<ReturnType<typeof scanTransitFuelCurve>>[] = [];
+    const configurations = ftlTiers.flatMap(ftlFuel =>
+      reactorTiers.map(reactorUsageFactor => ({ ftlFuel, reactorUsageFactor })),
+    );
+    for (const { ftlFuel, reactorUsageFactor } of configurations) {
+      if (fScanCancelled.value) {
+        break;
+      }
+      const result = await scanTransitFuelCurve({
+        ...scanOptions,
+        ftlFuel,
+        reactorUsageFactor,
+        onProgress: ({ index, error }) => {
+          const tier = `STL ${factors[index - 1]} / FTL 余油 ${ftlFuel ?? ftlCap} / 反应堆 ${reactorUsageFactor ?? '蓝图默认'}`;
+          fScanMessage.value = error === undefined ? `已测 ${tier}` : `${tier}：${error}`;
+        },
+      });
+      variants.push(result);
+    }
+    const first = variants.at(0);
+    if (first === undefined) {
+      fScanMessage.value = '扫描已停止。';
+      return;
+    }
+    const exportData = variants.length === 1 ? first : { variants };
+    downloadFile({ ...exportData, flightInputs }, 'prun-transit-f-scan.json', true);
+    const successes = variants.reduce((sum, x) => sum + x.samples.length, 0);
+    const failures = variants.reduce((sum, x) => sum + x.errors.length, 0);
+    fScanMessage.value = `扫描${fScanCancelled.value ? '已停止' : '完成'}：${successes} 次成功，${failures} 次失败，已导出原始记录。`;
   } catch (e) {
     fScanMessage.value = '扫描失败：' + String(e);
   } finally {
@@ -480,699 +563,215 @@ async function startFScan() {
 function stopFScan() {
   fScanCancelled.value = true;
 }
-
-// ---- 燃料性价比计算器 ----
-const registration = ref('');
-const routeFrom = ref('');
-const routeTo = ref('');
-// 网关开关：玩家自选是否走网关跃迁（网关不耗 FTL 燃料，但可能收现金）。
-const useGateway = ref(false);
-const stlFuelPrice = ref<number | undefined>(undefined);
-const ftlFuelPrice = ref<number | undefined>(undefined);
-const timeValue = ref<number | undefined>(0);
-
-const dockedShips = computed(() =>
-  (shipsStore.all.value ?? []).filter(x => x.flightId === null && x.address !== null),
-);
-const ship = computed(() => shipsStore.getByRegistration(registration.value));
-// 蓝图性能（FTL 最大航速、STL 引擎、FTL 充能/燃料参数）——提取逻辑在 ftc-compute 共享模块。
-const blueprintInfo = computed(() => (ship.value ? blueprintInfoFor(ship.value) : undefined));
-
-// 从飞船燃料仓自动识别燃料材料 ticker，用于自动填价。
-function storageTicker(storeId?: string | null) {
-  if (!storeId) {
-    return undefined;
-  }
-  const store = storagesStore.getById(storeId);
-  const item = store?.items.find(x => x.quantity?.material?.ticker !== undefined);
-  return item?.quantity?.material.ticker;
-}
-const fuelTickers = computed(() => ({
-  stl: storageTicker(ship.value?.stlFuelStoreId),
-  ftl: storageTicker(ship.value?.ftlFuelStoreId),
-}));
-watchEffect(() => {
-  if (stlFuelPrice.value === undefined && fuelTickers.value.stl !== undefined) {
-    const price = getPrice(fuelTickers.value.stl);
-    if (price !== undefined && price > 0) {
-      stlFuelPrice.value = price;
-    }
-  }
-  if (ftlFuelPrice.value === undefined && fuelTickers.value.ftl !== undefined) {
-    const price = getPrice(fuelTickers.value.ftl);
-    if (price !== undefined && price > 0) {
-      ftlFuelPrice.value = price;
-    }
-  }
-});
-
-interface PlanResult {
-  label: string;
-  route: PlannedRoute;
-  metrics: NonNullable<FtcComputeOutput['metrics']>;
-  best: FuelOption;
-  // 邻档对比：最优燃料滑块前后各 5 档（同反应堆固定为最优值）的方案，展示边际代价。
-  nearby?: FuelOption[];
-  // 是否有自然跃迁（否 = 全程系内/纯网关飞行，反应堆滑块不影响结果，无需计算）。
-  reactorRelevant: boolean;
-  // 完整航线段（严格按游戏 SFC 表格）：优先服务器原生飞行计划，否则模型估算。
-  segments: RouteSegmentRow[];
-  segmentsNative: boolean;
-  // 飞船当前剩余 STL/FTL 燃料（油罐 store 实测），用于面板显示当前油量与缺口警告。
-  remaining?: NonNullable<FtcComputeOutput['remaining']>;
-  // 模型必需输入缺失（缺起终点轨道数据 / 罐容量）：结果退化，未应用到 SFC 滑块。
-  inputIncomplete?: string[];
-  // 服务器当前对该航线下发的原生 FlightPlan（与 SFC「蓝图试航模拟」一致）——面板用
-  // 它显示「实测总时长」与最优方案并行展示，不随 FTC 建议的 f 变化（与「最优」独立）。
-  nativePlan?: PrunApi.FlightPlan;
-}
-
-const result = ref<PlanResult | undefined>(undefined);
-const calcMessage = ref<string | undefined>(undefined);
-
-// 差额显示：与最优行无差异时用「—」，否则带符号（+ 更贵/更慢，- 更省/更快）。
-const DELTA_EPS_MS = 1000;
-function deltaDuration(ms: number): string {
-  if (Math.abs(ms) < DELTA_EPS_MS) {
-    return '—';
-  }
-  return `${ms > 0 ? '+' : '-'}${formatDuration(Math.abs(ms))}`;
-}
-function deltaCurrency(v: number): string {
-  if (Math.abs(v) < 0.5) {
-    return '—';
-  }
-  return `${v > 0 ? '+' : '-'}${formatCurrency(Math.abs(v))}`;
-}
-
-async function planAndCompute() {
-  calcMessage.value = undefined;
-  result.value = undefined;
-  const from = routeFrom.value.trim();
-  const to = routeTo.value.trim();
-  if (!from || !to) {
-    calcMessage.value = '请输入起点和终点';
-    return;
-  }
-  const s = ship.value;
-  if (!s) {
-    calcMessage.value = '请选择停靠中的飞船';
-    return;
-  }
-  // 计算编排（蓝图等待/星系浏览/滑块扫描）在 ftc-compute 共享模块，FTC 面板与 SFC 自动计算共用。
-  const out = await computeFtcPlan({
-    shipRegistration: registration.value,
-    from,
-    to,
-    useGateway: useGateway.value,
-    stlPrice: stlFuelPrice.value,
-    ftlPrice: ftlFuelPrice.value,
-    timeValue: timeValue.value,
-    onProgress: msg => {
-      calcMessage.value = msg;
-    },
-  });
-  if (!out.ok) {
-    calcMessage.value = out.message;
-    return;
-  }
-  const route = out.route!;
-  const metrics = out.metrics!;
-  const best = out.best!;
-  const reactorRelevant = out.reactorRelevant ?? false;
-  const perf = shipPerformanceFor(s);
-  // 完整航线段（严格按游戏 SFC 表格）：
-  // 优先复用服务器原生飞行计划（flightPlansStore 捕获的 SHIP_FLIGHT_MISSION，
-  // 与 SFC 表格逐段一致）；无原生计划时用模型估算分段。
-  // 原生计划查询统一在 computeFtcPlan 里完成（out.nativePlan），FTC.vue 只消费结果，
-  // 避免两处重复调用并确保「航线明细」与「实测总时长」来自同一份原生计划。
-  const nativePlan = out.nativePlan;
-  let segments: RouteSegmentRow[];
-  let segmentsNative: boolean;
-  if (nativePlan) {
-    segments = buildNativeSegmentRows(nativePlan);
-    segmentsNative = true;
-  } else {
-    segments = buildEstimatedSegmentRows(route, metrics, perf, best.fuel, best.reactor, {
-      landingRadius: out.landingRadius,
-      landingPressure: out.landingPressure,
-      departureRadius: out.departureRadius,
-      departurePressure: out.departurePressure,
-    });
-    segmentsNative = false;
-  }
-  result.value = {
-    label: route.label,
-    route,
-    metrics,
-    best,
-    nearby: out.nearby,
-    reactorRelevant,
-    segments,
-    segmentsNative,
-    remaining: out.remaining,
-    inputIncomplete: out.inputIncomplete,
-    nativePlan,
-  };
-  const radiusText =
-    out.landingRadius !== undefined ? `，目的地半径 ${fixed2v(out.landingRadius)}km` : '';
-  const fuelText =
-    best.fuelEstimated && (best.stlFuel > 0 || best.ftlFuel > 0)
-      ? `，STL ${Math.round(best.stlFuel)} + FTL ${Math.round(best.ftlFuel)} 燃料`
-      : '';
-  const reactorText = reactorRelevant ? ` / 反应堆 ${best.reactor}` : '';
-  // 网关费单列：总成本已含它（fuel-model 的 gatewayCost），不单列玩家看不出这笔钱花在哪。
-  // 金额与单价都现算（gwCount × GW_COST_PER_JUMP）——本文件不写 6,000 字面量，常数只有
-  // fuel-model 一份。紧贴「总成本」拼接（「含…」修饰的总成本），末尾的网关/自然后缀不动。
-  const gatewayFeeText =
-    metrics.gwCount > 0
-      ? `，含网关费 ${formatCurrency(metrics.gwCount * GW_COST_PER_JUMP)}` +
-        `（${formatCurrency(GW_COST_PER_JUMP)} × ${metrics.gwCount} 段）`
-      : '';
-  calcMessage.value =
-    `最优方案（平衡点）：燃料滑块 ${best.fuel}` +
-    reactorText +
-    (nativePlan
-      ? `，服务器实测 ${formatDuration(nativeSummary.value!.totalSeconds * 1000)}（模型估算 ${formatDuration(best.totalHours * 3600000)}）`
-      : `，预计 ${formatDuration(best.totalHours * 3600000)}`) +
-    fuelText +
-    `，总成本 ${formatCurrency(best.totalCost)}` +
-    gatewayFeeText +
-    radiusText +
-    (useGateway.value && metrics.gwCount > 0
-      ? '（网关航线：FTL 燃料为 0）'
-      : useGateway.value
-        ? '（未找到可用网关，已按自然航线计算）'
-        : '');
-}
-
-// 精确时长（中文单位，完整精度）：≥1 天显示 天/小时/分钟，<1 天显示 小时/分钟/秒。
-// 例：1天 7小时 26分钟、7小时 26分钟 35秒、26分钟 35秒、35秒。
-function formatPreciseDuration(ms: number) {
-  if (ms <= 0) {
-    return '--';
-  }
-  const totalSec = Math.floor(ms / 1000);
-  const days = Math.floor(totalSec / 86400);
-  const hours = Math.floor((totalSec % 86400) / 3600);
-  const minutes = Math.floor((totalSec % 3600) / 60);
-  const seconds = totalSec % 60;
-  if (days > 0) {
-    return `${days}天 ${hours}小时 ${minutes}分钟`;
-  }
-  if (hours > 0) {
-    return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
-  }
-  if (minutes > 0) {
-    return `${minutes}分钟 ${seconds}秒`;
-  }
-  return `${seconds}秒`;
-}
-
-// 总时长（最优方案表 / 计算提示）：精确到 天/时/分（≥1 天）或 时/分/秒（<1 天）。
-function formatDuration(ms: number) {
-  return formatPreciseDuration(ms);
-}
-function formatFuel(value: number) {
-  return fixed4(value);
-}
-function fixed2v(value: number) {
-  return fixed2(value);
-}
-
-// 分段耗时：与 SFC 表格一致，中文单位完整精度（如 "21分钟 1秒"、"2小时 14分钟 58秒"）。
-function formatSegmentDuration(ms: number) {
-  return formatPreciseDuration(ms);
-}
-// 分段损伤：SFC 表格显示百分比（如 "0.018%"）。
-function formatDamage(damage: number) {
-  if (damage <= 0) {
-    return '--';
-  }
-  return `${(damage * 100).toFixed(3)}%`;
-}
-// 分段燃料消耗：与 SFC 表格一致（如 "87 低光速 + 20 超光速"）。
-function formatSegmentFuel(stlFuel?: number, ftlFuel?: number) {
-  const parts: string[] = [];
-  if (stlFuel !== undefined && stlFuel > 0) {
-    parts.push(`${Math.round(stlFuel)} 低光速`);
-  }
-  if (ftlFuel !== undefined && ftlFuel > 0) {
-    parts.push(`${Math.round(ftlFuel)} 超光速`);
-  }
-  return parts.length > 0 ? parts.join(' + ') : '--';
-}
-
-// 平衡点说明（结果表提示）：设了时间价值按总成本，否则按 Pareto 拐点折衷。
-const balanceNote = computed(() => {
-  const tv = timeValue.value ?? 0;
-  return tv > 0 ? '按总成本（燃料费 + 时间价值）最优' : '快与省油的折衷（Pareto 拐点）';
-});
-
-// 服务器当前对该航线下发的原生计划「实测总时长」（秒）。
-// 有原生计划时，它是当前飞船/燃料/载重组合的权威时间；模型时间只用于燃料档位比较。
-const nativeSummary = computed(() => {
-  const plan = result.value?.nativePlan;
-  if (!plan) {
-    return undefined;
-  }
-  return summarizeNativeFlightPlan(plan);
-});
-
-const displayedBestDurationMs = computed(() => (result.value?.best.totalHours ?? 0) * 3600000);
-
-// 邻档对比的「最省」（按 totalCost 最小）与「最快」（按 totalHours 最小）：
-// out.best 已是「平衡点」，与这两类标记**独立**；同一行最多可同时满足两类（如极端支配点）。
-const nearbyCheapest = computed(() => {
-  const nearby = result.value?.nearby;
-  if (!nearby || nearby.length === 0) {
-    return undefined;
-  }
-  return nearby.reduce((a, b) => (a.totalCost <= b.totalCost ? a : b));
-});
-const nearbyFastest = computed(() => {
-  const nearby = result.value?.nearby;
-  if (!nearby || nearby.length === 0) {
-    return undefined;
-  }
-  return nearby.reduce((a, b) => (a.totalHours <= b.totalHours ? a : b));
-});
 </script>
 
 <template>
-  <LoadingSpinner v-if="!shipsStore.fetched" />
-  <div v-else :class="[$style.container, C.type.typeRegular, C.fonts.fontRegular]">
-    <SectionHeader>飞行燃料性价比计算器（FTC）</SectionHeader>
-
-    <div :class="$style.form">
-      <label :class="$style.field">
-        <span>飞船（自动读取性能：质量/加速度/船体条件）</span>
-        <select v-model="registration" :class="$style.select">
-          <option value="" disabled>选择停靠中的飞船</option>
-          <option v-for="s in dockedShips" :key="s.id" :value="s.registration">
-            {{ s.registration }}（{{ s.name }}）
-          </option>
-        </select>
-      </label>
-      <div v-if="blueprintInfo" :class="$style.hint">
-        蓝图 {{ ship?.blueprintNaturalId }} ｜ STL 引擎 {{ blueprintInfo.stlEngine ?? '未知' }} ｜
-        罐 {{ blueprintInfo.stlFuelCapacity ?? '--' }} ｜ G
-        {{ blueprintInfo.maxGFactor ?? '--' }} ｜ 加速 {{ ship?.acceleration ?? '--' }} m/s² ｜ 空重
-        {{ ship?.operatingEmptyMass ?? '--' }}t ｜ 流量 {{ ship?.stlFuelFlowRate ?? '--' }} u/s ｜
-        FTL {{ fixed2v(blueprintInfo.ftlMaxSpeed ?? 0) }} pc/h
-      </div>
-
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>起点（空间站/行星/星系）</span>
-          <TextInput v-model="routeFrom" placeholder="如：HRT 或 VH-331" />
-        </label>
-        <label :class="$style.field">
-          <span>终点</span>
-          <TextInput v-model="routeTo" placeholder="如：MOR 或 OT-580" />
-        </label>
-      </div>
-
-      <div :class="$style.hint">
-        无需设置滑块档位：自动扫描全范围燃料滑块（0.05–1），计算每种组合的时间与燃料消耗，
-        找出「尽量快同时耗油少」的平衡点。含自然跃迁时还会扫描反应堆使用量（滑块下限–1）。
-      </div>
-
-      <label :class="$style.field">
-        <span>
-          使用网关跃迁（玩家自选；网关不消耗 FTL 燃料、速度 3.0 pc/h，但可能收现金过路费）
-        </span>
-        <span>
-          <input v-model="useGateway" type="checkbox" />
-          启用网关（{{ routesStore.gatewayConnectionCount }} 条已记录连接）
-        </span>
-      </label>
-
-      <details :class="$style.costDetails">
-        <summary>成本参数（性价比评分 = 燃料费 + 时间价值）</summary>
-        <div :class="$style.fieldRow">
-          <label :class="$style.field">
-            <span>STL 燃料单价{{ fuelTickers.stl ? `（${fuelTickers.stl}）` : '' }}</span>
-            <NumberInput v-model="stlFuelPrice" optional />
-          </label>
-          <label :class="$style.field">
-            <span>FTL 燃料单价{{ fuelTickers.ftl ? `（${fuelTickers.ftl}）` : '' }}</span>
-            <NumberInput v-model="ftlFuelPrice" optional />
-          </label>
-        </div>
-        <div :class="$style.fieldRow">
-          <label :class="$style.field">
-            <span>时间价值（₳/小时）</span>
-            <NumberInput v-model="timeValue" optional />
-          </label>
-        </div>
-      </details>
-
-      <div :class="$style.actions">
-        <PrunButton primary :disabled="!ship" @click="planAndCompute">计算最优方案</PrunButton>
-        <PrunButton
-          neutral
-          :disabled="requestingStars"
-          data-tooltip="向游戏服务器请求原生星图（恒星位置与连接），只在点击时请求。用于补全路线规划所需的星系数据。"
-          @click="refreshStars">
-          {{ requestingStars ? '加载星图…' : '刷新原生星图' }}
-        </PrunButton>
-        <PrunButton
-          neutral
-          :disabled="prefetching"
-          data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进）。配合游戏轨道模型可离线预测任意时刻的天体位置。"
-          @click="prefetchOrbits">
-          {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
-        </PrunButton>
-        <PrunButton
-          neutral
-          :disabled="exporting"
-          data-tooltip="一次性拉取所有行星的完整参数（轨道根数/质量等），下载为 JSON；同时更新轨道缓存。"
-          @click="exportPlanets">
-          {{ exporting ? '导出中…' : '导出全部行星参数' }}
-        </PrunButton>
-        <PrunButton
-          neutral
-          data-tooltip="网关在打开星图（星系地图）后自动读取，名称配对/飞行计划自动记录连接。检查当前已加载状态。"
-          @click="checkGateways">
-          网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
-        </PrunButton>
-        <PrunButton
-          neutral
-          data-tooltip="导出当前已加载的网关数据（naturalId/名称/所属星系/行星/状态）为 JSON。"
-          @click="exportGateways">
-          导出网关
-        </PrunButton>
-        <PrunButton
-          neutral
-          data-tooltip="从已积累数据导出空间站轨道+归属星系（FIO 无空间站数据，需先在游戏里打开含空间站的星系详情/访问空间站积累）。导出后运行 build-station-data.mjs 精简，即可离线预测空间站位置。"
-          @click="exportStations">
-          导出空间站
-        </PrunButton>
-        <PrunButton
-          neutral
-          data-tooltip="导出已记录的原生 STL 离港/进近段距离（SFC/BTF 计划时自动记录）。运行 build-stl-data.mjs 精简后内置，FTC 即对所有已采集航线精确复现原生路程。"
-          @click="exportStlSegmentsData">
-          导出 STL 段数据
-        </PrunButton>
-      </div>
-      <div :class="$style.hint">{{ stlSpeedSourceNote }}</div>
-      <div v-if="fScanMessage" :class="$style.hint">
-        {{ fScanMessage }}
-      </div>
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>探针（系内转移段扫描的另一端；起点用此、终点用目标）</span>
-          <TextInput v-model="fScanProbe" placeholder="如：HRT" />
-        </label>
-        <label :class="$style.field">
-          <span>目标天体</span>
-          <TextInput v-model="fScanTarget" placeholder="如：VH-331g" />
-        </label>
-        <label :class="$style.field">
-          <span>f 档位（逗号分隔）</span>
-          <TextInput v-model="fScanFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
-        </label>
-        <label :class="$style.field">
-          <span>罐覆写（留空=蓝图真实罐；填值=受控实验：固定蓝图只改罐）</span>
-          <TextInput v-model="fScanStlFuelOverride" placeholder="留空，或如 3500" />
-        </label>
-        <label :class="$style.field">
-          <span>载重覆写（留空=0；填值=受控实验：固定蓝图只加质量）</span>
-          <TextInput v-model="fScanPayloadOverride" placeholder="留空，或如 3000" />
-        </label>
-        <div :class="$style.actions">
-          <PrunButton
-            primary
-            :disabled="fScanning"
-            data-tooltip="受控扫描：固定船/航线/罐，只变燃料滑块 f，逐档向服务器请求一次测试飞行计划并记录原生时长/距离/燃料。用于标定系内转移段的 f 曲线（该曲线此前只在 f=0.05 验证过）。只发计算请求，不提交飞行。"
-            @click="startFScan">
-            {{ fScanning ? '扫描中…' : '扫描 f 曲线' }}
-          </PrunButton>
-          <PrunButton v-if="fScanning" neutral @click="stopFScan">停止</PrunButton>
-        </div>
-      </div>
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>扫描蓝图（部件编辑在这份上；罐容量自动跟随它）</span>
-          <select v-model="scanBlueprintId" :class="$style.select">
-            <option value="">跟随选中飞船</option>
-            <option v-for="b in blueprintOptions" :key="b.naturalId" :value="b.naturalId">
-              {{ b.name !== '' ? b.name : b.naturalId }}（{{ b.naturalId }}）
-            </option>
-          </select>
-        </label>
-      </div>
-      <div v-if="fScanMessage" :class="$style.hint">{{ fScanMessage }}</div>
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>矩阵探针</span>
-          <TextInput v-model="matrixProbe" placeholder="如：VH-331g" />
-        </label>
-        <label :class="$style.field">
-          <span>矩阵目标</span>
-          <TextInput v-model="matrixTarget" placeholder="如：VH-331e" />
-        </label>
-        <label :class="$style.field">
-          <span>f 档位</span>
-          <TextInput v-model="matrixFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
-        </label>
+  <div :class="[$style.container, C.type.typeRegular, C.fonts.fontRegular]">
+    <FlightCalculator @blueprint="calculatorBlueprintId = $event" />
+    <details :class="$style.diagnostic">
+      <summary>数据工具与试飞采集</summary>
+      <div :class="$style.form">
         <div :class="$style.actions">
           <PrunButton
             neutral
-            data-tooltip="按公司现有蓝图生成变体行，罐容量自动取 blueprint.performance.stlFuelCapacity（避免传错罐）。"
-            @click="autoFillMatrixRows">
-            按蓝图自动填充
+            :disabled="requestingStars"
+            data-tooltip="向游戏服务器请求原生星图（恒星位置与连接），只在点击时请求。用于补全路线规划所需的星系数据。"
+            @click="refreshStars">
+            {{ requestingStars ? '加载星图…' : '刷新原生星图' }}
           </PrunButton>
           <PrunButton
-            primary
-            :disabled="matrixScanning"
-            data-tooltip="跨蓝图矩阵扫描：每个变体（=一套配件）各自跑完整 f 档位。请保证各变体只差一个部件，否则得到的是混合效应。"
-            @click="startMatrixScan">
-            {{ matrixScanning ? '矩阵扫描中…' : '矩阵扫描' }}
+            neutral
+            :disabled="prefetching"
+            data-tooltip="从 FIO 逐个请求所有行星的轨道根数（4155 个，后台低并发渐进）。配合游戏轨道模型可离线预测任意时刻的天体位置。"
+            @click="prefetchOrbits">
+            {{ prefetching ? '预取中…' : `预取全部轨道（${orbitStore.planetCount}/4155）` }}
           </PrunButton>
-          <PrunButton v-if="matrixScanning" neutral @click="stopMatrixScan">停止</PrunButton>
-        </div>
-      </div>
-      <div v-if="matrixRows.length > 0" :class="$style.hint">
-        变体行：
-        <span v-for="(r, i) in matrixRows" :key="i">
-          {{ r.variant }}（{{ r.blueprintId }}｜罐 {{ r.stlFuel }}）{{
-            i < matrixRows.length - 1 ? '、' : ''
-          }}
-        </span>
-      </div>
-      <div v-if="matrixMessage" :class="$style.hint">{{ matrixMessage }}</div>
-      <div v-if="starsMessage" :class="$style.hint">{{ starsMessage }}</div>
-      <div v-if="orbitMessage" :class="$style.hint">{{ orbitMessage }}</div>
-      <div :class="$style.fieldRow">
-        <label :class="$style.field">
-          <span>采集探针（全部行星的离港/进近都以它为目标/来源，建议用你自己的行星或站点）</span>
-          <TextInput v-model="collectProbe" placeholder="如：VH-192c" />
-        </label>
-        <div :class="$style.actions">
           <PrunButton
-            primary
-            :disabled="collecting"
-            data-tooltip="自动为内置全部行星（4155 个）逐个请求原生 STL 离港/进近距离（游戏服务器计算，无需打开 BTF）。并发 4、支持停止与断点续采；响应自动入库，完成后点「导出 STL 段数据」发给我内置。"
-            @click="startCollect">
-            {{
-              collecting
-                ? '采集中…'
-                : `采集全部星球 STL${collectProgressCount() > 0 ? `（已完成 ${collectProgressCount()}）` : ''}`
-            }}
+            neutral
+            :disabled="exporting"
+            data-tooltip="一次性拉取所有行星的完整参数（轨道根数/质量等），下载为 JSON；同时更新轨道缓存。"
+            @click="exportPlanets">
+            {{ exporting ? '导出中…' : '导出全部行星参数' }}
           </PrunButton>
-          <PrunButton v-if="collecting" neutral @click="stopCollect">停止</PrunButton>
-          <PrunButton :disabled="collecting" neutral @click="resetCollectProgress"
-            >清空断点</PrunButton
-          >
+          <PrunButton
+            neutral
+            data-tooltip="点这里向服务器请求一次网关快照（8 秒等待、60 秒内不重复请求），不需要打开星图；入库后公式模型即可用网关连接。面板其它路径只读已入库数据。"
+            @click="checkGateways">
+            网关{{ routesStore.gatewayCount > 0 ? `（${routesStore.gatewayCount}）` : '' }}
+          </PrunButton>
+          <PrunButton
+            neutral
+            data-tooltip="导出当前已加载的网关数据（naturalId/名称/所属星系/行星/状态）为 JSON。"
+            @click="exportGateways">
+            导出网关
+          </PrunButton>
+          <PrunButton
+            neutral
+            data-tooltip="从已积累数据导出空间站轨道+归属星系（FIO 无空间站数据，需先在游戏里打开含空间站的星系详情/访问空间站积累）。导出后运行 build-station-data.mjs 精简，即可离线预测空间站位置。"
+            @click="exportStations">
+            导出空间站
+          </PrunButton>
+          <PrunButton
+            neutral
+            data-tooltip="导出已记录的原生 STL 段距离，用于离线对照与旧模型数据维护。"
+            @click="exportStlSegmentsData">
+            导出 STL 段数据
+          </PrunButton>
         </div>
-      </div>
-      <div v-if="collecting || collectDone > 0" :class="$style.exportBar">
-        <ProgressBar :value="collectDone" :max="collectTotal || 1" />
-        <span :class="$style.progress">
-          {{ collectDone }}/{{ collectTotal }}（{{ collectCurrent }}）
-        </span>
-      </div>
-      <div v-if="collectMessage" :class="$style.hint">{{ collectMessage }}</div>
-      <div v-if="exporting" :class="$style.exportBar">
-        <ProgressBar :value="exportDone" :max="exportTotal || 1" />
-        <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
-      </div>
-      <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
-      <div v-if="exportLog.length > 0" :class="$style.exportLog">
-        <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
-      </div>
-      <div v-if="calcMessage" :class="$style.hint">{{ calcMessage }}</div>
-    </div>
 
-    <template v-if="result">
-      <SectionHeader>最优燃料方案（{{ result.label }}航线）</SectionHeader>
-      <div :class="$style.hint">
-        平衡点（{{ balanceNote }}）
-        <template v-if="!result.reactorRelevant"
-          >：全程系内飞行没有自然跃迁，反应堆不适用（--）。</template
-        >
-      </div>
-      <div v-if="result.remaining" :class="$style.hint">
-        当前油量：STL
-        {{ Math.round(result.remaining.stlRemaining) }}/{{ result.remaining.stlCap }}
-        ｜ FTL
-        {{ Math.round(result.remaining.ftlRemaining) }}/{{ result.remaining.ftlCap }}
-        <template v-if="result.best.stlShortage > 0 || result.best.ftlShortage > 0">
-          ｜ ⚠ 缺口 STL {{ Math.round(result.best.stlShortage) }} + FTL
-          {{ Math.round(result.best.ftlShortage) }}
-          <span :class="$style.warning">需先加注</span>
-        </template>
-        <template v-else-if="result.best.stlFuel > 0 || result.best.ftlFuel > 0">
-          ｜ ✓ 当前油量足够
-        </template>
-      </div>
-      <div v-if="result.inputIncomplete" :class="$style.hint">
-        ⚠ 输入不完整（缺 {{ result.inputIncomplete.join('、') }}）：结果为残缺输入下的退化值，
-        <span :class="$style.warning">未应用到 SFC 滑块</span>。几何只取服务器下发的原生 STL
-        段记录（浏览星系不再补几何），请按上面缺失项里的说明处理后重算。
-        <template v-if="(result.metrics?.transitKm ?? 0) > 0">
-          <br />
-          系内「转移」（TRANSIT）段的燃料与时长已按 BTF 实测标定：燃料只由 STL 罐与燃料滑块
-          决定（与距离、载重无关），滑块拉到 0.5 以上没有收益；补齐上面缺失的输入后，上表结果
-          即可用于决策。残余偏差：时长约一成以内（只在一个距离族上标定）、燃料更小；未实测引擎
-          （advanced/glass/hyperthrust）回退标准引擎参数，转移段路程随计划时刻漂移、不是航线
-          常数。口径细节与实测数据见
-          <span :class="$style.warning">docs/feature-patterns.md 的「FTC 几何」条目</span>。
-        </template>
-      </div>
-      <table :class="$style.table">
-        <thead>
-          <tr>
-            <th>燃料滑块</th>
-            <th>反应堆</th>
-            <th>{{ result.nativePlan ? '服务器时长' : '模型时长' }}</th>
-            <th>STL 燃料</th>
-            <th>FTL 燃料</th>
-            <th>燃料费</th>
-            <th>时间成本</th>
-            <th>总成本</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr :class="$style.best">
-            <td>{{ result.best.fuel }}</td>
-            <td>{{ result.reactorRelevant ? result.best.reactor : '--' }}</td>
-            <td>{{ formatDuration(displayedBestDurationMs) }}</td>
-            <td>{{
-              result.best.fuelEstimated ? formatFuel(result.best.stlFuel) : '需位置观测'
-            }}</td>
-            <td>{{ formatFuel(result.best.ftlFuel) }}</td>
-            <td>{{ formatCurrency(result.best.fuelCost) }}</td>
-            <td>{{ formatCurrency(result.best.timeCost) }}</td>
-            <td>{{ formatCurrency(result.best.totalCost) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <!-- 服务器当前对该航线下发的原生计划「实测总时长」（与「最优方案」并列、不替代）：
-           不随 FTC 建议的 f 变化（与最佳方案的 fuel/reactor 独立绑定）；仅在原生 STL 段记录
-           已存在（result.metrics.stlRecorded）时展示，避免误导「无原生计划还显示对比」。 -->
-      <div v-if="result.nativePlan && result.metrics?.stlRecorded" :class="$style.hint">
-        服务器当前计划实测：{{ formatDuration(nativeSummary!.totalSeconds * 1000) }}（{{
-          nativeSummary!.segmentCount
-        }}段原生，STL {{ formatDuration(nativeSummary!.stlSeconds * 1000) }}，FTL
-        {{ formatDuration(nativeSummary!.ftlSeconds * 1000) }}）
-      </div>
-      <details v-if="result.nearby && result.nearby.length > 1" :class="$style.costDetails" open>
-        <summary>邻档对比（燃料 ±5 档，反应堆固定 {{ result.best.reactor }}）</summary>
-        <table :class="$style.table">
-          <thead>
-            <tr>
-              <th>燃料滑块</th>
-              <th>总时长</th>
-              <th>Δ总时长</th>
-              <th>STL 燃料</th>
-              <th>FTL 燃料</th>
-              <th>总成本</th>
-              <th>Δ总成本</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="o in result.nearby"
-              :key="o.fuel"
-              :class="{
-                [$style.best]: o.fuel === result.best.fuel,
-                [$style.cheapest]: nearbyCheapest && o.fuel === nearbyCheapest.fuel,
-                [$style.fastest]: nearbyFastest && o.fuel === nearbyFastest.fuel,
-              }">
-              <td>{{ o.fuel }}</td>
-              <td>{{ formatDuration(o.totalHours * 3600000) }}</td>
-              <td>{{
-                deltaDuration(o.totalHours * 3600000 - result.best.totalHours * 3600000)
-              }}</td>
-              <td>{{ o.fuelEstimated ? formatFuel(o.stlFuel) : '需位置观测' }}</td>
-              <td>{{ formatFuel(o.ftlFuel) }}</td>
-              <td>{{ formatCurrency(o.totalCost) }}</td>
-              <td>{{ deltaCurrency(o.totalCost - result.best.totalCost) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </details>
-      <details :class="$style.costDetails">
-        <summary>航线明细</summary>
-        <div :class="$style.hint">
-          {{ result.route.systemIds.join(' → ') }}
+        <div v-if="fScanMessage" :class="$style.hint">
+          {{ fScanMessage }}
         </div>
-        <div :class="$style.hint">
-          跳数 {{ result.route.systemIds.length - 1 }} ｜ FTL
-          {{ fixed2v(result.route.totalPc) }} pc（自然 {{ fixed2v(result.metrics.natPc) }} + 网关
-          {{ fixed2v(result.metrics.gwPc) }}， 网关 {{ result.metrics.gwCount }} 段）
-          <template v-if="result.metrics.stlDistanceKm !== undefined">
-            ｜ STL 起降 ≈ {{ formatFuel(result.metrics.stlDistanceKm / 1e6) }}M km
-            <template
-              v-if="
-                result.metrics.departKm !== undefined && result.metrics.approachKm !== undefined
-              ">
-              （离港 {{ formatFuel(result.metrics.departKm / 1e6) }}M + 进近
-              {{ formatFuel(result.metrics.approachKm / 1e6) }}M）
-            </template>
-            <template v-if="result.metrics.stlRecorded">（飞行计划原生记录）</template>
-            <template v-else>（统计/轨道估算，采集中会逐步精确）</template>
-          </template>
+        <div :class="$style.scanFields">
+          <label :class="$style.field">
+            <span>出发天体</span>
+            <TextInput v-model="fScanProbe" placeholder="如：HRT" />
+          </label>
+          <label :class="$style.field">
+            <span>目标天体</span>
+            <TextInput v-model="fScanTarget" placeholder="如：VH-331g" />
+          </label>
+          <label :class="$style.field">
+            <span>STL 档位（逗号分隔）</span>
+            <TextInput v-model="fScanFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
+          </label>
+          <label :class="$style.field">
+            <span>反应堆档位（逗号分隔）</span>
+            <TextInput v-model="fScanReactor" placeholder="留空按蓝图" />
+          </label>
+          <label :class="$style.field">
+            <span>STL 出发余油（留空按满罐）</span>
+            <TextInput v-model="fScanStlFuelOverride" placeholder="留空，或如 3500" />
+          </label>
+          <label :class="$style.field">
+            <span>载重（留空按空载）</span>
+            <TextInput v-model="fScanPayloadOverride" placeholder="留空，或如 3000" />
+          </label>
+          <label :class="$style.field">
+            <span>FTL 出发余油（留空按满罐）</span>
+            <TextInput v-model="fScanFtlFuelOverride" placeholder="多组用逗号分隔，如 300,0" />
+          </label>
+          <label :class="$style.field">
+            <span>船况（0–1）</span>
+            <TextInput v-model="fScanCondition" />
+          </label>
+          <label :class="$style.field">
+            <span>跃迁偏好</span>
+            <select v-model="fScanFtlPreference" :class="$style.select">
+              <option value="LEAST_JUMPS">最少跳数</option>
+              <option value="SHORTEST_FTL">最短 FTL</option>
+            </select>
+          </label>
+          <div :class="[$style.actions, $style.scanActions]">
+            <label><input v-model="fScanLanding" type="checkbox" /> 着陆</label>
+            <label>
+              <input v-model="fScanGateways" type="checkbox" /> 使用网关（{{
+                routesStore.gatewayConnectionCount
+              }}
+              条连接）</label
+            >
+            <PrunButton
+              primary
+              :disabled="fScanning || matrixScanning"
+              data-tooltip="逐档请求一次 BTF 试飞计划，导出实际请求和服务器分段响应。"
+              @click="startFScan">
+              {{ fScanning ? '扫描中…' : '扫描试飞档位' }}
+            </PrunButton>
+            <PrunButton v-if="fScanning" neutral @click="stopFScan">停止</PrunButton>
+          </div>
         </div>
-      </details>
-      <SectionHeader>
-        航线分段（{{ result.segmentsNative ? '服务器原生飞行计划' : '模型估算' }}）
-      </SectionHeader>
-      <table :class="$style.planTable">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>类型</th>
-            <th>目的地</th>
-            <th>耗时</th>
-            <th>距离</th>
-            <th>损伤</th>
-            <th>消耗</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(s, i) in result.segments" :key="i">
-            <td>{{ i }}</td>
-            <td>{{ s.type }}</td>
-            <td>{{ s.destination }}</td>
-            <td>{{ formatSegmentDuration(s.durationMs) }}</td>
-            <td>
-              <template v-if="s.distanceKm !== undefined">
-                {{ formatFuel(s.distanceKm / 1e6) }}M km
-              </template>
-              <template v-else-if="s.distancePc !== undefined">
-                {{ fixed2v(s.distancePc) }} pc
-              </template>
-              <template v-else>--</template>
-            </td>
-            <td>{{ formatDamage(s.damage) }}</td>
-            <td>{{ formatSegmentFuel(s.stlFuel, s.ftlFuel) }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </template>
+        <div :class="$style.fieldRow">
+          <label :class="$style.field">
+            <span>扫描蓝图（部件编辑在这份上；罐容量自动跟随它）</span>
+            <select v-model="scanBlueprintId" :class="$style.select">
+              <option value="">跟随计算器蓝图</option>
+              <option v-for="b in blueprintOptions" :key="b.naturalId" :value="b.naturalId">
+                {{ b.name !== '' ? b.name : b.naturalId }}（{{ b.naturalId }}）
+              </option>
+            </select>
+          </label>
+        </div>
+        <div v-if="fScanMessage" :class="$style.hint">{{ fScanMessage }}</div>
+        <div :class="$style.fieldRow">
+          <label :class="$style.field">
+            <span>矩阵探针</span>
+            <TextInput v-model="matrixProbe" placeholder="如：VH-331g" />
+          </label>
+          <label :class="$style.field">
+            <span>矩阵目标</span>
+            <TextInput v-model="matrixTarget" placeholder="如：VH-331e" />
+          </label>
+          <label :class="$style.field">
+            <span>f 档位</span>
+            <TextInput v-model="matrixFactors" placeholder="0.05,0.1,0.2,0.3,0.4,0.5" />
+          </label>
+          <div :class="$style.actions">
+            <PrunButton
+              neutral
+              data-tooltip="按公司现有蓝图生成变体行，罐容量自动取 blueprint.performance.stlFuelCapacity（避免传错罐）。"
+              @click="autoFillMatrixRows">
+              按蓝图自动填充
+            </PrunButton>
+            <PrunButton
+              primary
+              :disabled="matrixScanning || fScanning"
+              data-tooltip="跨蓝图矩阵扫描：每个变体（=一套配件）各自跑完整 f 档位。请保证各变体只差一个部件，否则得到的是混合效应。"
+              @click="startMatrixScan">
+              {{ matrixScanning ? '矩阵扫描中…' : '矩阵扫描' }}
+            </PrunButton>
+            <PrunButton v-if="matrixScanning" neutral @click="stopMatrixScan">停止</PrunButton>
+          </div>
+        </div>
+        <div v-if="matrixRows.length > 0" :class="$style.hint">
+          变体行：
+          <span v-for="(r, i) in matrixRows" :key="i">
+            {{ r.variant }}（{{ r.blueprintId }}｜罐 {{ r.stlFuel }}）{{
+              i < matrixRows.length - 1 ? '、' : ''
+            }}
+          </span>
+        </div>
+        <div v-if="matrixMessage" :class="$style.hint">{{ matrixMessage }}</div>
+        <div v-if="starsMessage" :class="$style.hint">{{ starsMessage }}</div>
+        <div v-if="orbitMessage" :class="$style.hint">{{ orbitMessage }}</div>
+        <div :class="$style.fieldRow">
+          <label :class="$style.field">
+            <span>采集探针（全部行星的离港/进近都以它为目标/来源，建议用你自己的行星或站点）</span>
+            <TextInput v-model="collectProbe" placeholder="如：VH-192c" />
+          </label>
+          <div :class="$style.actions">
+            <PrunButton
+              primary
+              :disabled="collecting"
+              data-tooltip="自动为内置全部行星（4155 个）逐个请求原生 STL 离港/进近距离（游戏服务器计算，无需打开 BTF）。并发 4、支持停止与断点续采；响应自动入库，完成后点「导出 STL 段数据」发给我内置。"
+              @click="startCollect">
+              {{
+                collecting
+                  ? '采集中…'
+                  : `采集全部星球 STL${collectProgressCount() > 0 ? `（已完成 ${collectProgressCount()}）` : ''}`
+              }}
+            </PrunButton>
+            <PrunButton v-if="collecting" neutral @click="stopCollect">停止</PrunButton>
+            <PrunButton :disabled="collecting" neutral @click="resetCollectProgress"
+              >清空断点</PrunButton
+            >
+          </div>
+        </div>
+        <div v-if="collecting || collectDone > 0" :class="$style.exportBar">
+          <ProgressBar :value="collectDone" :max="collectTotal || 1" />
+          <span :class="$style.progress">
+            {{ collectDone }}/{{ collectTotal }}（{{ collectCurrent }}）
+          </span>
+        </div>
+        <div v-if="collectMessage" :class="$style.hint">{{ collectMessage }}</div>
+        <div v-if="exporting" :class="$style.exportBar">
+          <ProgressBar :value="exportDone" :max="exportTotal || 1" />
+          <span :class="$style.progress">{{ exportDone }}/{{ exportTotal }}</span>
+        </div>
+        <div v-if="gatewayMessage" :class="$style.hint">{{ gatewayMessage }}</div>
+        <div v-if="exportLog.length > 0" :class="$style.exportLog">
+          <div v-for="(line, i) in exportLog" :key="i">{{ line }}</div>
+        </div>
+      </div>
+    </details>
   </div>
 </template>

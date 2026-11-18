@@ -1,6 +1,6 @@
 // FTC 航线级参数键回归。
 // 契约：不同航线和网关模式互不可见；同航线重复写入短路。
-// 用法：node scripts/verify-ftc-route-key.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-route-key.mjs
 // 退出码：0 = 全部通过；1 = 存在失败。
 // 局限：几何 store 和 DOM 接线使用受控替身。
 

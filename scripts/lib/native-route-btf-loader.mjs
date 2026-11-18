@@ -1,3 +1,5 @@
+import { resolveTsRelative } from './resolve-ts-relative.mjs';
+
 // 测试用模块解析替身（Node module.register 钩子），服务 scripts/verify-native-route-btf.mjs。
 //
 // 只替换 native-route-btf.ts 的副作用依赖（socket 试飞 / 蓝图 / 地址解析 / FTC / 提示）；
@@ -21,6 +23,15 @@ const REAL = new Map([
 ]);
 
 export function resolve(specifier, context, nextResolve) {
+  if (
+    specifier === '@src/core/flight/fuel-options' ||
+    specifier === '@src/infrastructure/fio/planet-environment'
+  ) {
+    return {
+      url: new URL('../../src/' + specifier.slice(5) + '.ts', import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
   if (STUBBED.has(specifier)) {
     return { url: STUB, shortCircuit: true };
   }
@@ -38,6 +49,10 @@ export function resolve(specifier, context, nextResolve) {
   // 生产里由 Vite 补扩展名；Node ESM 必须显式拼 .ts。
   if (specifier === './native-route-plan' && !specifier.endsWith('.ts')) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
+  }
+  const relative = resolveTsRelative(specifier, context);
+  if (relative !== undefined) {
+    return { url: relative, shortCircuit: true };
   }
   return nextResolve(specifier, context);
 }

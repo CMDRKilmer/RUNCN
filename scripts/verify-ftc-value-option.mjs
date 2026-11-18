@@ -1,19 +1,25 @@
 // FTC「最优性价比」选点（fuel-model.pickBestValueOption）纯函数回归脚本 —— 带退出码。
 //
-// 锁定的行为契约：
-//   ① 同一反应堆序列内逐档比较「每 +1 燃料换回多少时间」，边际收益跌破首档一半即停；
-//   ② 多反应堆（FTC 全网格）时**先按反应堆分组**、组内选点，再按**实际时间与消耗**
-//      比较各序列候选（`findBalanceOption`：Pareto 折衷，燃料/时间无差异时退到最省油）——
-//      绝不返回「更慢又更费油」的劣解；自然跃迁航线上反应堆给的是常数时间，序列内
-//      「时间/燃料」比值会把它抵消掉，不能拿来跨反应堆比较；
-//   ③ 结果与输入顺序无关；
-//   ④ maxFuel 上限（离港饱和点）先过滤再选点；
-//   ⑤ 单序列（BTF 实测固定反应堆）结果与旧口径逐位一致。
+// 覆盖清单（8 条，每条 = 一个 check；直接驱动真实纯函数）：
+//   ① 单序列按边际收益停档 —— 同一反应堆序列内逐档比较「每 +1 燃料换回多少时间」，
+//      边际收益跌破首档一半即停；
+//   ② 跨反应堆不选「更慢又更费油」的劣解 —— 多反应堆（FTC 全网格）时先按反应堆分组、
+//      组内选点，再按**实际时间与消耗**比较各序列候选（`findBalanceOption`：Pareto 折衷，
+//      燃料/时间无差异时退到最省油）；
+//   ③ 输入顺序不影响结果；
+//   ③b 跨反应堆按实际油耗与时长折衷（与序列内「时间/燃料」比值无关）—— 自然跃迁航线上
+//      反应堆给的是常数时间，序列内比值会把它抵消掉，不能拿来跨反应堆比较；
+//   ④ maxFuel 先过滤（离港饱和点封顶）；
+//   ⑤ 单序列 5%–100% BTF 样本保持旧口径（BTF 实测固定反应堆）；
+//   ⑥ 燃料总量无差别的短途取最快；
+//   ⑦ 空输入返回 undefined。
 //
-// 用法：node scripts/verify-ftc-value-option.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-value-option.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：只到纯函数层；面板/向导接线与真实服务器数值不在本脚本范围内。
-import { pickBestValueOption } from '../src/features/XIT/FTC/fuel-model.ts';
+
+import './lib/register-flight-formula.mjs';
+const { pickBestValueOption } = await import('../src/features/XIT/FTC/fuel-model.ts');
 
 const summary = { pass: 0, fail: 0 };
 

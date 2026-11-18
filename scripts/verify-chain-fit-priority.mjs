@@ -5,7 +5,7 @@
 //   ② 优先装载（环线链上输送用）：按 dest 优先度（越小越优先）逐条装填，超载 item 部分装入；
 //     完全装不下的 item 跳过（不载人）。剩余舱容 0 时所有未装 item 一律跳过。
 //
-// 用法：node scripts/verify-chain-fit-priority.mjs
+// 用法：node --experimental-strip-types scripts/verify-chain-fit-priority.mjs
 // 退出码：0 = 全部通过；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 //
 // 模块直接 import 生产代码 src/features/XIT/FLEET/chain-fit.ts（无 Vue/DOM 依赖）——

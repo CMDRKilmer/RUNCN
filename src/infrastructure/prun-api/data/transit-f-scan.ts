@@ -1,9 +1,11 @@
-// 受控 BTF 扫描：系内转移段 f 曲线（2026-10-13）。
+// 受控 BTF 扫描：系内转移段 f 曲线。
 //
-// 目的：补齐 `STL_INTRA_TRANSIT_SPEED_KM_S` 缺失的地面真值。
-//   `fuel-model.ts` 的系内转移段速度 = 27,512 ,km/s × (质量幂律) × (引擎 f 曲线)，
-//   而 27,512 这个锚点来自 BTF 样本 `VH-331g → HRT`（599,220,390 km / 21,780 s），
-//   **该样本没有记录 f** —— 全模型的 f 依赖只有这一个点 + 一条假设的曲线形状。
+// 目的：补齐系内转移段速度里「档位 f」这一维的地面真值。
+//   旧口径（`fuel-model.ts` 的 `STL_INTRA_TRANSIT_SPEED_KM_S`，已停用）曾把速度写成
+//   27,512 km/s × 质量幂律 × 引擎 f 曲线，锚点来自 BTF 样本 `VH-331g → HRT`
+//   （599,220,390 km / 21,780 s），而**该样本没有记录 f** —— 那套模型的 f 依赖只有
+//   这一个点 + 一条假设的曲线形状。当前公式口径（`src/core/flight/stl.ts`）不再用这条
+//   速度曲线；保留本扫描是为了继续收 f 维度的原生时长/燃料真值。
 //   本扫描固定船/航线/罐，只变 f，逐点取服务器原生时长与燃料作真值。
 //
 // 与 `flight-test-collector` 共用同一条服务器通道（socket.io 直接发
@@ -13,7 +15,12 @@
 // ⚠️ 只读：只发「计算一次飞行计划」的请求，不提交飞行、不改游戏状态。
 // 会触发服务器计算，量级由调用方（面板按钮）控制。
 
-import { calculateTestFlight } from './flight-test-collector';
+import {
+  buildTestFlightPayload,
+  sendTestFlightPlan,
+  type TestFlightRequest,
+} from './flight-test-collector';
+import { gameClockOffsetMs } from './system-bodies';
 import { blueprintsStore } from './blueprints';
 import { shipsStore } from './ships';
 import { sendServerMessage } from '../socket-io-middleware';
@@ -98,6 +105,8 @@ export function summarizeStl(plan: PrunApi.FlightPlan, fuelUsageFactor: number):
 
 // ---- 扫描 ----
 
+export type ScanFtlPreference = 'LEAST_JUMPS' | 'SHORTEST_FTL';
+
 export interface TransitFScanOptions {
   // 探针（固定不动的另一端）naturalId，如 'HRT'。
   probe: string;
@@ -107,13 +116,17 @@ export interface TransitFScanOptions {
   blueprintId?: string;
   // f 档位列表。
   fuelFactors: number[];
-  // 段可用 STL 燃料（u）。★罐容量代理；系内转移段燃料口径 = 0.98×罐×min(f,0.5)。
+  // 出发时 STL 余量（u）；实际罐容量单独记录在蓝图快照中。
   stlFuel: number;
+  ftlFuel?: number;
+  landing?: boolean;
+  useGateways?: boolean;
+  ftlPreference?: ScanFtlPreference;
   // 载重（t）。缺省 0。
   payload?: number;
   // 船体状况。缺省 1。
   condition?: number;
-  // 反应堆使用量。缺省 0.6510416666666667。
+  // 反应堆使用量。缺省 125/192（≈0.651，与 buildTestFlightPayload 同一取值）。
   reactorUsageFactor?: number;
   // 变体标签：随结果回传，供矩阵扫描区分「这套配件测出来的是哪组数据」。
   // 例：'STL=SAVING,TANK=MED,REACTOR=STD'。同一次扫描内不变。
@@ -138,7 +151,7 @@ export interface BlueprintSnapshot {
   stlFuelTank?: string;
   // 蓝图整备质量（t）
   operatingEmptyMass?: number;
-  // 蓝图 STL 罐容量（u）。**应与本次请求的 stlFuel 相同**；不同即口径错配，该变体应作废。
+  // 蓝图 STL 罐容量（u）。
   stlFuelCapacity?: number;
   // 全部 selections 原样转储（type -> option），供事后追查任何部件。
   selections?: Record<string, string>;
@@ -173,11 +186,22 @@ export interface TransitFScanResult {
   condition: number;
   // 部件快照（见上）。采集时写入，供事后复核当次测得的是哪套部件。
   blueprint: BlueprintSnapshot;
+  blueprintConfig: Pick<PrunApi.Blueprint, 'id' | 'naturalId' | 'performance' | 'selections'>;
   // 变体标签（矩阵扫描用：同一次扫描内不变，但跨扫描用于区分是哪套配件）。
   // 由调用方传入并原样回传，便于离线把「哪套配件」与「哪组速度」对上。
   variant?: string;
   samples: TransitSample[];
   errors: { fuelUsageFactor: number; error: string }[];
+  observations: FlightObservation[];
+}
+
+interface FlightObservation {
+  requestedAt: number;
+  receivedAt: number;
+  gameTimeMs: number;
+  request: TestFlightRequest;
+  response: PrunApi.FlightPlan | null;
+  error?: string;
 }
 
 /** 确保蓝图已加载（与采集流程同一等待策略）。 */
@@ -206,6 +230,17 @@ export async function scanTransitFuelCurve(
   }
   const fromAddr = options.probe;
   const toAddr = options.target;
+  const reactorFloor = bp.performance.minReactorUsage ?? 0;
+  const reactorUsageFactor =
+    options.reactorUsageFactor ?? Math.min(1, Math.max(0.5, Math.ceil(reactorFloor * 100) / 100));
+  if (
+    !Number.isFinite(reactorUsageFactor) ||
+    reactorUsageFactor < reactorFloor ||
+    reactorUsageFactor > 1
+  ) {
+    throw new Error(`反应堆档位必须在蓝图下限 ${reactorFloor} 与 1 之间`);
+  }
+  const { id, naturalId, performance, selections } = bp;
   const result: TransitFScanResult = {
     probe: options.probe,
     target: options.target,
@@ -214,9 +249,11 @@ export async function scanTransitFuelCurve(
     payload: options.payload ?? 0,
     condition: options.condition ?? 1,
     blueprint: blueprintSnapshotOf(bp),
+    blueprintConfig: JSON.parse(JSON.stringify({ id, naturalId, performance, selections })),
     ...(options.variant !== undefined ? { variant: options.variant } : {}),
     samples: [],
     errors: [],
+    observations: [],
   };
   const total = options.fuelFactors.length;
   for (let i = 0; i < total; i++) {
@@ -224,27 +261,58 @@ export async function scanTransitFuelCurve(
       break;
     }
     const f = options.fuelFactors[i]!;
+    const request = buildTestFlightPayload(fromAddr, toAddr, bp.id, {
+      fuelUsageFactor: f,
+      stlFuel: options.stlFuel,
+      ftlFuel: options.ftlFuel ?? bp.performance.ftlFuelCapacity,
+      payload: result.payload,
+      condition: result.condition,
+      reactorUsageFactor,
+      landing: options.landing,
+      preferences: {
+        ftlPreference: options.ftlPreference ?? 'LEAST_JUMPS',
+        useGateways: options.useGateways ?? true,
+      },
+    });
+    const requestedAt = Date.now();
+    const gameTimeMs = requestedAt + gameClockOffsetMs.value;
+    let plan: PrunApi.FlightPlan | undefined;
+    let error: string | undefined;
     try {
-      const plan = await calculateTestFlight(fromAddr, toAddr, bp.id, 20000, {
-        fuelUsageFactor: f,
-        stlFuel: options.stlFuel,
-        payload: options.payload ?? 0,
-        condition: options.condition ?? 1,
-        reactorUsageFactor: options.reactorUsageFactor,
-        landing: true,
-      });
-      if (!plan) {
-        result.errors.push({ fuelUsageFactor: f, error: '超时/无响应' });
-        options.onProgress?.({ index: i + 1, total, error: '超时/无响应' });
-        continue;
+      plan = await sendTestFlightPlan(request, 20000);
+      if (plan === undefined) {
+        error = '超时/无响应';
+      } else if (plan.status !== 'OK') {
+        error = '服务器拒绝：' + plan.status;
+      } else if (
+        plan.segments.length === 0 ||
+        plan.segments.some(
+          x =>
+            !Number.isFinite(x.departure?.timestamp) ||
+            !Number.isFinite(x.arrival?.timestamp) ||
+            x.arrival.timestamp < x.departure.timestamp,
+        )
+      ) {
+        error = '服务器计划缺少有效的分段时间';
       }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+    result.observations.push({
+      requestedAt,
+      receivedAt: Date.now(),
+      gameTimeMs,
+      request,
+      response: plan ?? null,
+      error,
+    });
+    if (error !== undefined) {
+      result.errors.push({ fuelUsageFactor: f, error });
+      options.onProgress?.({ index: i + 1, total, error });
+    } else if (plan !== undefined) {
       const sample = summarizeStl(plan, f);
       result.samples.push(sample);
       options.onProgress?.({ index: i + 1, total, sample });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      result.errors.push({ fuelUsageFactor: f, error: msg });
-      options.onProgress?.({ index: i + 1, total, error: msg });
     }
     // 服务器限速礼貌间隔
     await sleep(300);
@@ -319,6 +387,12 @@ export interface TransitMatrixScanOptions {
   payload?: number;
   condition?: number;
   reactorUsageFactor?: number;
+  // 以下四项对矩阵内所有变体取同一值：矩阵扫的是「配件 × f 档」，其余飞行条件固定，
+  // 否则变体之间不可比。缺省值沿用 scanTransitFuelCurve 的默认。
+  ftlFuel?: number;
+  landing?: boolean;
+  useGateways?: boolean;
+  ftlPreference?: ScanFtlPreference;
   onVariantStart?: (info: { index: number; total: number; variant: string }) => void;
   onProgress?: (info: {
     variant: string;
@@ -366,6 +440,10 @@ export async function scanTransitMatrix(
       payload: options.payload,
       condition: options.condition,
       reactorUsageFactor: options.reactorUsageFactor,
+      ftlFuel: options.ftlFuel,
+      landing: options.landing,
+      useGateways: options.useGateways,
+      ftlPreference: options.ftlPreference,
       variant: entry.variant,
       onProgress: info => {
         options.onProgress?.({ variant: entry.variant, ...info });

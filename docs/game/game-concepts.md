@@ -52,26 +52,24 @@ Each planet has properties affecting base viability. Any extremes require specia
 - **Pressure**: SEA for low, HSE for high.
 - **Type**: Rocky or gas giant. Rocky require MCG, gas giants require AEF.
 
-FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`/`Radius`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。除建造材料外，行星环境还影响**飞船起降燃料**（FTC 已接入）：
-- **起飞 = 船体系数 × 0.455 × √(半径_km × 气压^(+0.2))**（行星出发特有）
-- **着陆 = 船体系数 × 0.47 × √(半径_km × 气压^(-0.2))**——3 船 13 实测点误差 ±2.6u
-- 机制：起/降段燃料 ∝ √(段距离)；起飞距离 = 0.62×半径×气压^(+0.2)、着陆距离 = 0.66×半径×气压^(-0.2)。厚大气 → 起飞更长（冲出大气）、着陆更短（大气制动），起飞+着陆 ≈ 恒定
-- 船体系数 = (STL 流量/0.015) × (G/8)^(1/6)（2026-08-27 OOG LCB 实测修正：着陆燃料由 STL 燃料流量主导——省油引擎 0.0075 u/s → 0.5×，Euu 着陆 16 vs WCB 30 精确吻合；纯 G 模型对省油船失效。流量缺失时回退旧 (G/8)^0.6）
-- **空间站无大气**：到空间站无着陆段、从空间站出发无起飞段（起/降段相互独立，FTC `fuel-model.ts` 用 R 缺失独立判定）。空间站↔空间站航线 = 离港+进近（0.49×罐×min(f, f_cap) + 0.49×罐×f）+ 进近差（f_cap ≈ 10.96×流量，省油引擎离港燃料随 f 饱和），不回退旧常数
-- 注意：BTF 起降段距离有 ~±10% 轨道相位波动 → 燃料模型有 ~±6% 固有噪声
+FIO `/planet/{id}` 提供数值环境参数（`Gravity`/`Temperature`/`Pressure`/`Radius`，重力=地表重力 地球 g，与 `MassEarth/Radius²` 吻合）。行星半径与气压通过**起降段距离**影响飞船燃料与时长（当前口径 `src/core/flight/stl.ts`，FTC 面板与 SFC／FLEET 公式共用同一套函数）：
+- **段时长**：`t = ceil(2 × √(500 × 段距离_km / a))` 秒，`a` 为 STL 加速度（见下节）。
+- **段燃料**：`ceil(t × STL 流量 × 0.225 / 0.03)`——由段时长 × 流量决定，与行星重力无直接关系。
+- **起飞距离** = 行星半径 × `0.15 + 0.45 × 气压^log10(2)`；**着陆距离** = 停泊高度 × `min(7, 1 + 3 × 气压^(-log10(2)))`——厚大气 → 起飞更长、着陆更短。
+- **停泊高度** = 行星半径 × `0.13–0.17`，由任务 UUID 的哈希决定；没有任务 UUID 时取中值 `0.15 × 半径`，界面持续标注为估算。
+- **空间站无大气**：到空间站无着陆段、从空间站出发无起飞段（起/降段相互独立）。空间站↔空间站航线只有 STL 转移段（见下节），不套用起降段。
 
-## STL 离港/进近段速度（2026-08-27 重大发现：油箱决定！）
+## STL 转移段：燃料与时长（`src/core/flight/stl.ts`）
 
-**离港/进近段速度不由巡航速度决定，而由"段中可用 STL 燃料量"决定**（BP-OHMI 多引擎×多油箱实测）：
+**转移段的燃料与时长由加速度、流量和本轮可用燃料解出，不再有「罐口径 × 速度表」**（旧 `fuel-model.ts` 的 Weibull 段速与 `0.49 × 罐 × min(f, f_cap)` 已停用）：
 
-$$v_{seg} = V_{SAT}^{G8} \times \left(\frac{G}{8}\right)^{0.3} \times \left(1 - e^{-(Q/Q_0)^k}\right)$$
-
-- **段燃料量**：$Q_{离港} = 0.49 \times 罐 \times f$；$Q_{进近} = 0.49 \times 罐 \times f + 8$（进近差）
-- **油箱大小是关键**：标准引擎 f=0.05 离港——小型 1500 罐 → 5.7k、中型 3500 → 12.3k、大型 8000 → 19.3k km/s；饱和段速度与油箱无关（各引擎 V_SAT 见 `fuel-model.ts` STL_SEGMENT_CURVES）
-- **G 力修正** (G/8)^0.3（HCB G15 1.218×、OOG G10 1.089× vs G8 实测）
-- ⚠️ 旧"段 = 巡航比例"模型只在大型油箱下偶然成立（罐大 Q 充足接近饱和）；小型油箱（新手船 STS 1500 罐段速度仅 5.7k）彻底推翻
-- ⚠️ **BTF 窗口缓存旧蓝图配置**：改油箱后必须关闭 BTF 重新打开才生效（否则离港燃料仍按旧罐计算），数据采集易踩坑
-- 5 引擎实测验证平均误差 1.1%（standard 3 油箱全档 + 大型油箱 5 引擎全档）
+- **加速度**：`a = min(加速上限, 蓝图加速度 × 整备质量 / 当前质量) × min(1, 船况 + 0.2)`，`当前质量 = 整备质量 + 载重 + 0.06 × 罐内 STL 油 + FTL 燃料重量`（`stlAcceleration`）。
+- **最小转移燃料**：`ceil(1.5 × 目标轨道速度 × 流量 / (0.03 × a))`（`stlMinimumTransferFuel`）；上限是饱和燃料 `ceil(流量 / 0.03 × √(距离 / a))`——再多加油只会变慢。
+- **时长**：`burn = min(0.03 × 燃料 / 流量, √(距离 / a))`，`t = 距离 / (a × burn) + burn`（`stlTransferDuration`）；距离随相位变化时用 `resolveStlTransferTime` 迭代 + 二分求出发时刻。
+- **档位 f 的作用**：`转移燃料 = floor(最小燃料 × (1 − f) + 可用燃料 × f)`，`可用燃料 = 出发余油 − 起飞 − 着陆`——同一 `f` 下余油越多，转移越快。
+- **自然跃迁**：速度 `0.0005 × (ftlMax / 0.0005)^((r − minReactor) / (1 − minReactor))` pc/s、燃料 `floor(0.003003 × 距离_pc × 功率 × r)`、充能 `(emitterChargeTime + maxOverchargeTime) × r` 秒（`ftl.ts`）。
+- **网关航线**：总燃料预算在首段／末段之间按 `stationGatewayFuelBudget` 分摊（`gateway.ts`）；网关与起点或终点同天体时该端不产生 STL 转移。
+- ⚠️ **BTF 窗口缓存旧蓝图配置**：改油箱后必须关闭 BTF 重新打开才生效，数据采集易踩坑。
 
 Additionally, planets have properties affecting production:
 - **Fertility**: Affects FRM/ORC efficiency. Range roughly -33% to +33%. Fully infertile planets cannot build farms.

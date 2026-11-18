@@ -1,17 +1,21 @@
 import { ref } from 'vue';
 import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
-import { getSystemLineFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import {
+  getSystemLineFromAddress,
+  isPlanetLine,
+} from '@src/infrastructure/prun-api/data/addresses';
 
 // 跃迁网络：内置恒星连接（离线）+ 在线网关（DATA_DATA["gateways"] + 飞行计划）。
 // 提供 BFS 最短跃迁路径（航线规划前置数据）与网关查询。
 //
 // 数据来源：
 // - 内置 star-connections.json：SYSTEM_STARS_DATA 的 connections（恒星天然跃迁航线）。
-// - 在线网关实体两条来源：
+// - 在线网关实体来源：
 //   1) DATA_DATA["gateways"]：打开星图（星系地图）后客户端一次性下发全部网关
 //      （naturalId、所属星系/行星、名称、状态），全量刷新。
 //   2) NOMENCLATURE_ADDRESSES_QUERY_DATA：地址查询响应中可能含 SATELLITE 行
 //      （网关实体），增量补充（网关是玩家动态建造/拆毁的，零散查询也能积累）。
+//   3) 成功的网关跃迁计划提供连接两端的网关与行星地址。
 // - 网关跃迁连接两条来源：
 //   1) 名称配对（主要，一次性）：网关名称格式 "本地端 -> 远程端"，成对网关的
 //      名称两端互为匹配（如 "Promitor -> Amethyst B" ⇄ "Amethyst B -> Promitor"），
@@ -27,6 +31,7 @@ export interface GatewayInfo {
   // 所在行星 naturalId（网关绕行星轨道运行）。
   planetId?: string;
   operational: boolean;
+  maxShipVolume?: number;
 }
 
 const routesVersion = ref(0);
@@ -36,6 +41,7 @@ const neighbors = new Map<string, Set<string>>();
 const bundledEdges = new Set<string>();
 // 星系 naturalId → 网关列表。
 const gateways = new Map<string, GatewayInfo[]>();
+const gatewayVolumeLimits = new Map<string, number>();
 let bundledLoaded = false;
 
 // 一条已观测的网关跃迁连接（网关两端星系），来自 JUMP_GATEWAY 段。
@@ -55,10 +61,32 @@ export interface GatewayConnection {
 // 已观测的网关连接，键为 "小星系|大星系"。
 const gatewayConnections = new Map<string, GatewayConnection>();
 
-function gatewayIdOf(address: PrunApi.Address | undefined): string | undefined {
-  const lines = address?.lines;
-  const last = lines?.[lines.length - 1];
-  return last !== undefined && last.type === 'SATELLITE' ? last.entity?.naturalId : undefined;
+function gatewayLineOf(address: PrunApi.Address | undefined) {
+  return address?.lines.find(line => line.type === 'SATELLITE');
+}
+
+function fillGatewayEndpoint(systemId: string, address: PrunApi.Address | undefined) {
+  const satellite = gatewayLineOf(address)?.entity;
+  const planetId = address?.lines.find(isPlanetLine)?.entity.naturalId;
+  if (!satellite?.naturalId || !planetId) {
+    return;
+  }
+
+  const key = systemId.toUpperCase();
+  const list = gateways.get(key) ?? [];
+  const existing = list.find(gate => gate.naturalId === satellite.naturalId);
+  if (existing) {
+    existing.planetId ??= planetId;
+    return;
+  }
+  list.push({
+    naturalId: satellite.naturalId,
+    name: satellite.name ?? satellite.naturalId,
+    systemId: key,
+    planetId,
+    operational: true,
+  });
+  gateways.set(key, list);
 }
 
 function recordGatewayConnection(
@@ -274,7 +302,10 @@ export const routesStore = {
     void routesVersion.value;
     const all: GatewayInfo[] = [];
     for (const list of gateways.values()) {
-      all.push(...list);
+      for (const gate of list) {
+        const maxShipVolume = gatewayVolumeLimits.get(gate.naturalId);
+        all.push(maxShipVolume === undefined ? gate : { ...gate, maxShipVolume });
+      }
     }
     return all;
   },
@@ -324,6 +355,7 @@ interface GatewayRaw {
     lines?: Array<{ type: string; entity?: { naturalId?: string } }>;
   };
   operationalState?: string;
+  maxShipVolume?: number;
 }
 
 onApiMessage({
@@ -331,16 +363,41 @@ onApiMessage({
     removeGatewayNeighbors();
     gatewayConnections.clear();
     gateways.clear();
+    gatewayVolumeLimits.clear();
     routesVersion.value++;
   },
   DATA_DATA(data: { path?: string[]; body?: unknown }) {
     const path = data.path;
-    if (!Array.isArray(path) || path[0] !== 'gateways' || !Array.isArray(data.body)) {
+    if (!Array.isArray(path) || path[0] !== 'gateways') {
+      return;
+    }
+    const recordVolumeLimit = ({ naturalId, maxShipVolume }: GatewayRaw) => {
+      if (
+        naturalId &&
+        typeof maxShipVolume === 'number' &&
+        Number.isFinite(maxShipVolume) &&
+        maxShipVolume > 0 &&
+        gatewayVolumeLimits.get(naturalId) !== maxShipVolume
+      ) {
+        gatewayVolumeLimits.set(naturalId, maxShipVolume);
+        return true;
+      }
+      return false;
+    };
+    if (!Array.isArray(data.body)) {
+      if (
+        data.body !== null &&
+        typeof data.body === 'object' &&
+        recordVolumeLimit(data.body as GatewayRaw)
+      ) {
+        routesVersion.value++;
+      }
       return;
     }
     removeGatewayNeighbors();
     gateways.clear();
     for (const g of data.body as GatewayRaw[]) {
+      recordVolumeLimit(g);
       const lines = g.address?.lines ?? [];
       const sysLine = lines.find(l => l.type === 'SYSTEM');
       const planetLine = lines.find(l => l.type === 'PLANET');
@@ -422,11 +479,15 @@ onApiMessage({
       if (!fromSys || !toSys) {
         continue;
       }
+      if (data.status === 'OK') {
+        fillGatewayEndpoint(fromSys, seg.origin);
+        fillGatewayEndpoint(toSys, seg.destination);
+      }
       recordGatewayConnection(
         fromSys,
         toSys,
-        gatewayIdOf(seg.origin),
-        gatewayIdOf(seg.destination),
+        gatewayLineOf(seg.origin)?.entity?.naturalId,
+        gatewayLineOf(seg.destination)?.entity?.naturalId,
         seg.ftlDistance ?? undefined,
       );
     }

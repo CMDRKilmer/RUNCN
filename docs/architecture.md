@@ -171,6 +171,8 @@ Two always-on automation policies — auto-refuel (`features/basic/auto-refuel.t
 
 Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known before a window opens — **do not use it for feature→window handoff**. Instead, `features/XIT/ACT/trigger-queue.ts` provides a module-level reactive queue: the engine pushes a `PendingTriggerRun` and calls `showBuffer('XIT ACT_<name>')`; `ExecuteActionPackage.vue` watches the queue for its package name and auto-starts (preview → execute). Queue entries expire after 60 s.
 
+`features/XIT/ACT/return-to-source.ts` is the second such handoff, used by the SHP/BRA 维修采购 flow. It is also a module-level queue, but indexed by package name and consumed by the user-initiated execution only: `setReturnCommand(packageName, command)` enqueues the source window at generation time, and `ExecuteActionPackage.vue` calls `takeReturnCommand(packageName)` from the 执行/自动 paths right before `runner.execute`. Trigger-driven runs never claim, and entries expire after 10 min.
+
 ### ACT action/step registration recap
 
 New action types must be added to the `ActionType` union in `src/store/user-data.types.d.ts` (plus any action-specific fields on `ActionData`). Steps register via `act.addActionStep` (execution logic), actions via `act.addAction` (Edit.vue must `defineExpose({ validate, save })`; `EditAction.vue` clears all keys of the action object before `save()` repopulates it). Import the action module in `ACT.ts`.
@@ -187,6 +189,42 @@ Two structural rules for generated packages:
 
 `ActionStepExecuteContext` has **no** `globalOptions` — generateSteps-time global flags (like `skipMissingMaterials`) must be baked into the step data at emit time (`CXPO_BUY`/`CXPO_SELL` carry a `skipMissing` field).
 
+
+## Flight prediction
+
+`src/features/XIT/FTC/FlightCalculator.vue` is the formula-based planning UI for blueprints and docked ships. Its click handler loads addresses and preflight data through `formula-inputs.ts`, then evaluates the local candidate grid with `formula-options.ts`. It does not publish SFC slider settings or request BTF flight calculations. The existing collection and export controls remain collapsed in `FTC.vue`.
+
+`src/infrastructure/fio/flight-formula.ts` combines the pure `core/flight` functions with `orbit-position.ts` ephemerides. It accepts snapshots rather than stores or server responses, selects the route, and returns ordered phases, time, both fuel totals, remaining fuel, feasibility and prediction notices. Gateway endpoint transfers currently require stations and same-planet gateway connections. Mixed routes support a standard STL engine with natural–gateway, gateway–natural, or natural–gateway–natural blocks. Gateway–natural station-to-planet flights have a formal blind group; the other two patterns passed the exploratory archive and display a notice that independent blind testing is outstanding.
+
+`src/core/flight/fuel-options.ts` holds the shared Pareto selection plus the value-optimal picker (`pickBestValueOption`; the legacy `src/features/XIT/FTC/fuel-model.ts` re-exports it from there for the FTC collection paths), used by the planning UI, SFC automation and FLEET. `src/infrastructure/fio/planet-environment.ts` provides bundled radius and pressure data without importing the legacy calculation module.
+
+`src/features/XIT/FTC/formula-plan.ts` is the background entry point for the same model: it reads the ship, blueprint, tank balances and preflight snapshots from stores, runs `calculateFormulaOptions`, and reports missing inputs instead of degrading. `formula-compute.ts` turns that into the SFC contract (route-keyed slider parameters plus the `lastFtcCompute` signal) and only publishes when the inputs are complete. `chain-flight-time.ts` (FLEET loop estimates) and `native-route-fuel.ts` (native RT waypoint tiers) call the same planner, so the panel, SFC automation and FLEET cannot diverge. Fuel prices come from FIO (`fuel-prices.ts`, four-exchange `PriceAverage` mean, no manual input) and the gateway network is loaded on demand by `gateway-loader.ts` (one `DATA_GET_DATA{path:['gateways']}` request — the same one the native star map sends — which the server answers with `DATA_DATA["gateways"]`). Only an explicit player click invokes it (the FTC panel's gateway and export-gateway buttons, both with `cooldownMs: 0`); no other code path requests data and no window is opened at any point — a socket that is not ready or a request without a reply only reports failure. `ship-fuel.ts` owns the tank readout. `ftc-compute.ts` and `fuel-model.ts` remain in the tree for the legacy FTC collection paths but are no longer used by SFC or FLEET.
+
+Without a mission UUID, the FTC planning UI labels landing predictions as estimates using the midpoint parking altitude. It never assigns a synthetic UUID to a future native mission. Missing geometry, invalid inputs and unsupported mixed paths produce an error. Candidate selection prefers flights that fit both starting tank balances; when none fit, the UI reports the fuel deficit. Prices are optional, and absent prices are never treated as free fuel. Gateway tolls are excluded from the displayed fuel-plus-time cost.
+
+`scripts/verify-ftc-formula.mjs` drives the actual FTC prediction and selection modules against eight recorded fixtures. `--archive` additionally replays the fourteen frozen blind groups (560 missions) and checks route choice, whole-flight results and every phase against the original tolerances. The archive replay separately checks 18 exploratory mixed flights without counting them toward formal blind acceptance. The Node loader only resolves source imports; it does not replace the formula implementation. `--archive` reads `.tmp/flight-formula-reports/formal-acceptance-audit.json`, `.tmp/flight-formula-freezes/` and `.tmp/flight-formula-data/`; `.tmp` is git-ignored (`.gitignore:24`), so a clean clone can only run the eight-fixture replay and must restore those directories before any archive replay.
+
+`scripts/verify-sfc-formula-plan.mjs` covers the SFC contract (route-keyed writes, no writes on incomplete input, `publish: false`), `scripts/verify-chain-flight-time.mjs` covers the FLEET loop estimates and `scripts/verify-native-route-settings.mjs` the native RT waypoint tiers. All three drive the production modules with only the store and planning-result dependencies replaced.
+
+`scripts/verify-real-flight.mjs` replays one real in-game flight (a ship and blueprint outside the collector archive) from `scripts/fixtures/real-flight-dwarf-pluto.json` using the production STL/FTL functions plus the bundled orbit, star-mass and planet-environment assets. It locks the acceleration law, both orbital fuel budgets, the mission-UUID parking altitude, the landing distance curve and the natural-jump fuel; the two transfer durations use the distances the server recorded, and the natural-jump duration is not predicted because the blueprint's FTL speed and emitter data were not logged. A second `SHIP_FLIGHT_MISSION` for the same mission id is replayed as the post-`CREATE_FLIGHT` recomputation that sees the already-debited departure fuel, so collectors keyed by mission id keep the first response — the plan that is actually flown.
+
+`src/core/flight/` contains the measured STL acceleration, transfer timing, surface timing and fuel calculations, the natural FTL speed, fuel, and charge relations, and the transfer ellipse between two supplied positions. The STL solver computes the arrival time from a callback that supplies distance at a given elapsed time. Offline verifiers use this solver with game ephemerides for transfers and approaches. Route selection and STL fuel allocation are separate from these calculations.
+
+`src/core/flight/itinerary.ts` advances a predicted flight state by its elapsed time and fuel use. The no-refuel predictor hands the resulting tank balances and time, including any scheduled wait, to the next leg. If a leg exceeds either tank balance, the result identifies that leg and its shortfall while preserving the completed predictions. The offline itinerary verifier supplies each leg's route and payload.
+
+`src/core/flight/gateway.ts` computes the station-to-station gateway fuel budget and fixed phase timing for a route with same-planet connections between gateways. Its callers supply jump durations, the minimum transfer fuel at each endpoint, and the two orbital transfer callbacks.
+
+`src/core/flight/route.ts` finds a route using the collected star graph and eligible directed gateway legs. Least-jumps mode compares total jumps, gateway jumps, then distance. Shortest-FTL mode compares total distance. The offline verifiers use this function before computing segment times and fuel.
+
+The FTC collector snapshots gateway endpoints, connections and ship-volume limits already received by `src/infrastructure/fio/routes.ts`. Successful earlier flight plans can supply missing endpoint addresses. The offline gateway and mixed-route verifiers apply the departure gateway's limit per direction before searching the graph.
+
+When planet details have been received, `src/infrastructure/fio/orbit.ts` supplies the native radius and pressure to the FTC flight collector. Its preflight snapshots identify these environment values with `env.source = 'native'`.
+
+The offline landing predictor derives the parking altitude from the mission UUID in the outgoing request. A prediction for a specific mission therefore requires the UUID that will be sent for that leg.
+
+The same-system predictor combines surface fuel, the minimum transfer budget and the transfer solver into a complete time and fuel estimate. The offline same-system and cross-system verifiers share the UUID-based landing calculation.
+
+The natural, gateway, and mixed-route verifiers share `scripts/lib/flight-path-pilot.mjs` for `LEAST_JUMPS` and `SHORTEST_FTL` routing. It selects legs from the preflight star and gateway data before comparing the route with the server response.
 
 ## FLEET module boundaries
 

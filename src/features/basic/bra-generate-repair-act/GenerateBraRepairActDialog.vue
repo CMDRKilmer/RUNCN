@@ -170,6 +170,8 @@ function onGenerateClick() {
     userData.actionPackages.push(pkg);
   }
 
+  // 关闭浮层，露出底下的 BRA；否则 ACT 跑完 showBuffer 聚焦 BRA 时仍被浮层盖住。
+  emit('close');
   showBuffer(`XIT ACT_${name}`);
 }
 
@@ -256,6 +258,8 @@ function generateFromPreset(siteId: string) {
     userData.actionPackages.push(pkg);
   }
 
+  // 同 REPD 入口：生成后关掉浮层，露出底下的 BRA。
+  emit('close');
   showBuffer(`XIT ACT_${name}`);
 }
 </script>

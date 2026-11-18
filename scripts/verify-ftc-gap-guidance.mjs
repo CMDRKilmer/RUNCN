@@ -1,6 +1,6 @@
 // FTC 输入缺失提示与原生 STL 几何来源回归。
 // 契约：天体键反查、TRANSIT 记录、系内/跨系路由和可操作提示保持当前语义。
-// 用法：node scripts/verify-ftc-gap-guidance.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-gap-guidance.mjs
 // 退出码：0 = 全部通过；1 = 存在失败。
 
 import { register } from 'node:module';

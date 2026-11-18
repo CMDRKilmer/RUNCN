@@ -53,7 +53,7 @@
 //   - 网关跃迁边不是手写的：由**真实** infrastructure/fio/routes.ts 观测本脚本派发的
 //     JUMP_GATEWAY 段得出（⑥⑦）—— 段地址形状本身因此也被测到。
 //
-// 用法：node scripts/verify-ftc-gateway-stl.mjs
+// 用法：node --experimental-strip-types scripts/verify-ftc-gateway-stl.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
 // 局限：SFC 磁贴的 DOM 接线（真正把值写进 rc-slider）在 Node 里不可加载 —— 本脚本断言到
 // `setFtcFuelSlider`（替身记录写入的航线键与值）为止；替换几何替身

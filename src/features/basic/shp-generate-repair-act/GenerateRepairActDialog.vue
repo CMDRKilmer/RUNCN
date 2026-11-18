@@ -10,8 +10,10 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { userData } from '@src/store/user-data';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { setReturnCommand } from '@src/features/XIT/ACT/return-to-source';
 
 const { registration } = defineProps<{ registration?: string }>();
+const emit = defineEmits<{ close: [] }>();
 
 const ship = computed(() => shipsStore.getByRegistration(registration));
 
@@ -90,6 +92,10 @@ function onGenerateClick() {
     userData.actionPackages.push(pkg);
   }
 
+  // 关闭浮层，露出底下的 SHP；否则 ACT 跑完 showBuffer 聚焦 SHP 时仍被浮层盖住。
+  emit('close');
+  // 登记来源飞船界面：ACT 自动跑完购物后据此跳回，方便直接点维修。
+  setReturnCommand(name, `SHP ${registration}`);
   showBuffer(`XIT ACT_${name.split(' ').join('_')}`);
 }
 </script>

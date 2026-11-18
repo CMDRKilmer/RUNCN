@@ -9,6 +9,7 @@ import {
   getSliderValue,
 } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
 import {
   getFtcFuelSlider,
@@ -17,7 +18,7 @@ import {
   ftcFuelSliders,
   ftcReactorUsages,
 } from '@src/features/XIT/FTC/ftc-fuel-settings';
-import { computeFtcPlan } from '@src/features/XIT/FTC/ftc-compute';
+import { computeFormulaFtcPlan } from '@src/features/XIT/FTC/formula-compute';
 import { orbitStore } from '@src/infrastructure/fio/orbit';
 import { stlSegmentsStore } from '@src/infrastructure/prun-api/data/system-bodies';
 import { RoutePushGate, incompleteLogLevel } from './sfc-route-push-gate';
@@ -297,6 +298,10 @@ function geometrySignature() {
     // 航线级表条数：几何**首选**来源就是它（见 system-bodies.routeRecords）；
     // 新航线写入不改变上面三张表的条数，漏掉这一项推送门会误判「几何没变」。
     stlSegmentsStore.routeCount,
+    // 已加载蓝图数：新公式的计算输入直接来自蓝图（加速度/FTL 航速/罐容量/发射器），
+    // 蓝图在首次打开 BLU 后才到达 —— 之前必然算不出来（inputIncomplete = 飞船蓝图）。
+    // 漏掉这一项，该航线会按「同签名已算过」被永久抑制，蓝图到了也不重算。
+    blueprintsStore.all.value?.length ?? 0,
   ].join('|');
 }
 
@@ -379,13 +384,11 @@ async function pushRouteToFtc(tile: PrunTile) {
   // 计算出栈（含抛异常）必须放行闸门，否则 pending 会永久卡住该航线。
   let settled = false;
   try {
-    const result = await computeFtcPlan({
+    const result = await computeFormulaFtcPlan({
       shipRegistration: ship,
       from,
       to,
       useGateway: viaGateway,
-      // SFC 自动联动不开星系窗口：环线自动执行时开窗会抢占缓冲槽位干扰 SFC 面板。
-      browse: false,
     });
     // 计算期间航线已再次变化：丢弃过期结果，避免旧航线参数覆盖新航线（重复响应）。
     if (lastPushedRoute.get(tile.anchor) !== key) {
@@ -396,29 +399,20 @@ async function pushRouteToFtc(tile: PrunTile) {
       console.warn(`[sfc-auto-fuel-settings] FTC 自动计算失败：${result.message}`);
       return;
     }
-    // 输入残缺（起终点轨道数据/罐容量缺失）：模型必然退化（同星系 stlFuel ≡ 0 → 燃料
-    // 无梯度），结果只是假值 —— 此时 computeFtcPlan 也未写入共享参数，这里再显式跳过
-    // 后续滑块刷新，宁可不动（沿用当前设置），也不要覆盖玩家/面板已经设好的参数。
-    // 已知局限：非公司蓝图 / ensureShipBlueprint 6s 超时的船（跨星系缺罐容量）同样
-    // 会落到这里 —— 联动静默不写滑块，而旧行为会写一个 cF×f×d 估值（精度口径问题，
-    // 拆独立项处理；当前取舍是「宁可不动，也不写不准的值」）。
+    // 输入残缺（缺轨道/环境/星图、航线不可达）：此时 computeFormulaFtcPlan 未写入共享参数，
+    // 这里再显式跳过后续滑块刷新，宁可不动（沿用当前设置），也不要覆盖玩家/面板设好的参数。
     if (result.inputIncomplete !== undefined) {
       // 只 debug；表格刷新过（T1，服务器计划已到）仍残缺才是真问题 → warn。
       // 写法用 `console[level]` 而不是两个 if 分支：级别由 incompleteLogLevel 单一处决定
       // （Node 回归脚本直接锁它：false → 'debug'、true → 'warn'）。
       // ⚠️ 语义不变：无论哪一级，都**不写滑块**、沿用当前设置（宁可不动，也不写假值）。
       console[incompleteLogLevel(planSeen.has(tile.anchor))](
-        `[sfc-auto-fuel-settings] 输入不完整（缺 ${result.inputIncomplete.join('、')}）：` +
-          '已跳过滑块写入，沿用当前设置（几何只取原生段记录，无估算回退）',
+        `[sfc-auto-fuel-settings] 输入不完整（${result.inputIncomplete.join('；')}）：` +
+          '已跳过滑块写入，沿用当前设置',
       );
-      // 未算出完整结果：不计入 settled，但**同签名也不再重复计算**（几何没变结果一样）。
+      // 未算出完整结果：不计入 settled，但**同签名也不再重复计算**（数据没变结果一样）。
       // 服务器计划到达（表格文本变化 → schedulePushRoute）后几何签名变化，门必放行；
       // 数据一直没到就一直在「不写滑块、等下一次信号」的状态 —— 没有放弃上限。
-      // ⚠️ 系内航线现在可以拿到**原生**几何（「转移」（TRANSIT）段的 stlDistance 已入库，
-      // 0.98×罐×min(f,0.5)、时长 = d/v_转移，见 fuel-model.ts 的「系内转移段标定」块）——
-      // 落到这里说明判缺的理由只剩「转移段记录未到」或「罐容量/余量缺失」，
-      // 等服务器下发该航线的记录即可。另一类结构性拿不到记录的是网关/星系 id 目的地 ——
-      // 缺失项文案里已给出可操作说明（见 fuel-model.missingModelInputs）。
       return;
     }
     // 已算出完整结果并写入参数：抑制同航线后续推送（防反馈循环）。
