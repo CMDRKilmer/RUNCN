@@ -1,7 +1,7 @@
-// 从 SHP「生成维修 ACT」登记的目标：购物跑完后把来源飞船界面开回来。
-// 登记与认领分开：生成时进队列，用户手动点「执行」时由那次执行自己认领并持有。
-// 这样两艘船各自生成维修 ACT、或者一次执行还没跑完又生成了新的，都不会互相覆盖；
-// 触发器静默跑同一个包时不会去认领，也就不会打开上一次放弃的飞船界面。
+// 从 SHP / BRA「生成维修 ACT」登记的目标：购物跑完后把来源飞船界面开回来。
+// 登记与认领分开：生成时按包名入队，用户主动发起的那次执行（「执行」或「自动」）
+// 才认领并持有；触发器静默执行不认领，不会取走上一次放弃的登记。
+// 按包名索引保证别的包的手动执行拿不走本包的目标；同一包连开两条时先进先出。
 const EXPIRE_MS = 10 * 60 * 1000;
 
 interface PendingReturn {
@@ -9,18 +9,25 @@ interface PendingReturn {
   createdAt: number;
 }
 
-const pendingReturns: PendingReturn[] = [];
+const pendingReturns = new Map<string, PendingReturn[]>();
 
-export function setReturnCommand(command: string) {
-  pendingReturns.push({ command, createdAt: Date.now() });
+export function setReturnCommand(packageName: string, command: string) {
+  const entries = pendingReturns.get(packageName) ?? [];
+  entries.push({ command, createdAt: Date.now() });
+  pendingReturns.set(packageName, entries);
 }
 
-/** 按登记顺序取一条；超过有效期的登记视为已放弃，直接丢弃。 */
-export function takeReturnCommand(): string | undefined {
+/** 按登记顺序取该包的一条；超过有效期的登记视为已放弃，直接丢弃。 */
+export function takeReturnCommand(packageName: string): string | undefined {
+  const entries = pendingReturns.get(packageName);
+  if (entries === undefined) {
+    return undefined;
+  }
   const now = Date.now();
   for (;;) {
-    const entry = pendingReturns.shift();
+    const entry = entries.shift();
     if (entry === undefined) {
+      pendingReturns.delete(packageName);
       return undefined;
     }
     if (now - entry.createdAt <= EXPIRE_MS) {

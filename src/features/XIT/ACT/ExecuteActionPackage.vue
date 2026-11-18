@@ -28,8 +28,9 @@ const autoAct = ref(false);
 const tile = useTile();
 let goingToSplit = ref(false);
 
-// 本次执行认领的返回目标。只由手动「执行」认领：触发器静默跑同一个包时不去碰队列，
-// 否则上一次生成后放弃的登记会被这次运行的结束回调取走，凭空打开别人的飞船界面。
+// 本次执行认领的返回目标。只由用户主动发起的执行（「执行」或「自动」）认领：
+// 触发器静默跑同一个包时不去碰队列，否则上一次生成后放弃的登记会被这次运行的结束
+// 回调取走，凭空打开别人的飞船界面。
 let returnCommand: string | undefined;
 
 const config = ref({
@@ -144,7 +145,7 @@ watch(
   has => {
     if (has) {
       consumeTriggerRun(pkg.global.name);
-      void onAutoClick();
+      void runAuto(false);
     }
   },
   { immediate: true },
@@ -167,12 +168,20 @@ async function onPreviewClick() {
   status.value = undefined;
 }
 
+// 每次开始执行都先清空上一次遗留的目标：生成步骤失败时 runner.execute 直接返回、
+// 不会触发 onEnd，残留值不能留给下一次运行。claim 只给用户主动发起的执行。
+function beginExecution(claim: boolean) {
+  returnCommand = undefined;
+  if (claim) {
+    returnCommand = takeReturnCommand(pkg.global.name);
+  }
+}
+
 function onExecuteClick() {
   logScrolling.value = true;
   clearLog();
   actReady.value = false;
-  // 手动执行才认领来源飞船：认领后由这次执行独占，后续再生成的维修 ACT 排到它后面。
-  returnCommand = takeReturnCommand();
+  beginExecution(true);
   runner.execute(pkg, config.value);
 }
 
@@ -195,14 +204,20 @@ function onToggleAutoMidRun() {
   }
 }
 
-// 触发式自动执行：点击后先预览（生成步骤+汇总），预览通过后自动执行
-async function onAutoClick() {
+// 触发式自动执行：点击后先预览（生成步骤+汇总），预览通过后自动执行。
+// 用户点「自动」同样认领来源飞船；触发器静默调用时不认领。
+function onAutoClick() {
+  void runAuto(true);
+}
+
+async function runAuto(claim: boolean) {
   if (isRunning.value) {
     return;
   }
   autoAct.value = true;
   logScrolling.value = false;
   clearLog();
+  returnCommand = undefined;
   isPreviewing.value = true;
   const ok = await runner.preview(pkg, config.value);
   isPreviewing.value = false;
@@ -215,6 +230,7 @@ async function onAutoClick() {
   }
   logScrolling.value = true;
   actReady.value = false;
+  beginExecution(claim);
   runner.execute(pkg, config.value);
 }
 
