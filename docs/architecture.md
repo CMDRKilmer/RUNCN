@@ -171,6 +171,8 @@ Two always-on automation policies — auto-refuel (`features/basic/auto-refuel.t
 
 Tile state (`user-data-tiles.ts`) is keyed by tile id, which cannot be known before a window opens — **do not use it for feature→window handoff**. Instead, `features/XIT/ACT/trigger-queue.ts` provides a module-level reactive queue: the engine pushes a `PendingTriggerRun` and calls `showBuffer('XIT ACT_<name>')`; `ExecuteActionPackage.vue` watches the queue for its package name and auto-starts (preview → execute). Queue entries expire after 60 s.
 
+`features/XIT/ACT/return-to-source.ts` is the second such handoff, used by the SHP/BRA 维修采购 flow. It is also a module-level queue, but indexed by package name and consumed by the user-initiated execution only: `setReturnCommand(packageName, command)` enqueues the source window at generation time, and `ExecuteActionPackage.vue` calls `takeReturnCommand(packageName)` from the 执行/自动 paths right before `runner.execute`. Trigger-driven runs never claim, and entries expire after 10 min.
+
 ### ACT action/step registration recap
 
 New action types must be added to the `ActionType` union in `src/store/user-data.types.d.ts` (plus any action-specific fields on `ActionData`). Steps register via `act.addActionStep` (execution logic), actions via `act.addAction` (Edit.vue must `defineExpose({ validate, save })`; `EditAction.vue` clears all keys of the action object before `save()` repopulates it). Import the action module in `ACT.ts`.

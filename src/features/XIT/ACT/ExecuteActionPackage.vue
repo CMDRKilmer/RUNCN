@@ -15,6 +15,8 @@ import {
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
 import { completeActionPackage } from '@src/features/XIT/FLEET/action-completion';
+import { takeReturnCommand } from '@src/features/XIT/ACT/return-to-source';
+import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
 const { pkg } = defineProps<{ pkg: UserData.ActionPackageData }>();
 
@@ -25,6 +27,11 @@ const autoAct = ref(false);
 
 const tile = useTile();
 let goingToSplit = ref(false);
+
+// 本次执行认领的返回目标。只由用户主动发起的执行（「执行」或「自动」）认领：
+// 触发器静默跑同一个包时不去碰队列，否则上一次生成后放弃的登记会被这次运行的结束
+// 回调取走，凭空打开别人的飞船界面。
+let returnCommand: string | undefined;
 
 const config = ref({
   globalOptions: { skipMissingMaterials: false },
@@ -107,8 +114,16 @@ const runner = new ActionRunner({
     autoAct.value = false;
     // 触发器引擎静默打开的 ACT 窗口据此自动关窗（成功/失败/取消均关闭）。
     getPackageFinished(pkg.global.name).value = true;
+    // 返回目标只属于认领它的那次执行：失败或取消后立刻丢弃，不让下一次运行捡到。
+    const target = returnCommand;
+    returnCommand = undefined;
     if (success) {
       completeActionPackage(pkg);
+      // 从 SHP 生成维修 ACT 的场景：购物跑完后把来源飞船界面开回来，
+      // 省去手动重开去点维修。showBuffer 对已开窗口只做聚焦，不会重复开。
+      if (target !== undefined) {
+        void showBuffer(target);
+      }
     }
   },
   onStatusChanged: (title, keepReady) => {
@@ -130,7 +145,7 @@ watch(
   has => {
     if (has) {
       consumeTriggerRun(pkg.global.name);
-      void onAutoClick();
+      void runAuto(false);
     }
   },
   { immediate: true },
@@ -153,10 +168,20 @@ async function onPreviewClick() {
   status.value = undefined;
 }
 
+// 每次开始执行都先清空上一次遗留的目标：生成步骤失败时 runner.execute 直接返回、
+// 不会触发 onEnd，残留值不能留给下一次运行。claim 只给用户主动发起的执行。
+function beginExecution(claim: boolean) {
+  returnCommand = undefined;
+  if (claim) {
+    returnCommand = takeReturnCommand(pkg.global.name);
+  }
+}
+
 function onExecuteClick() {
   logScrolling.value = true;
   clearLog();
   actReady.value = false;
+  beginExecution(true);
   runner.execute(pkg, config.value);
 }
 
@@ -179,14 +204,20 @@ function onToggleAutoMidRun() {
   }
 }
 
-// 触发式自动执行：点击后先预览（生成步骤+汇总），预览通过后自动执行
-async function onAutoClick() {
+// 触发式自动执行：点击后先预览（生成步骤+汇总），预览通过后自动执行。
+// 用户点「自动」同样认领来源飞船；触发器静默调用时不认领。
+function onAutoClick() {
+  void runAuto(true);
+}
+
+async function runAuto(claim: boolean) {
   if (isRunning.value) {
     return;
   }
   autoAct.value = true;
   logScrolling.value = false;
   clearLog();
+  returnCommand = undefined;
   isPreviewing.value = true;
   const ok = await runner.preview(pkg, config.value);
   isPreviewing.value = false;
@@ -199,6 +230,7 @@ async function onAutoClick() {
   }
   logScrolling.value = true;
   actReady.value = false;
+  beginExecution(claim);
   runner.execute(pkg, config.value);
 }
 
