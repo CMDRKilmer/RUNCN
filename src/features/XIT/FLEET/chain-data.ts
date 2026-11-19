@@ -278,8 +278,7 @@ export function collectChainPlanningSnapshot(
       Object.entries(current).map(([ticker, value]) => [ticker, { ...value }]),
     );
     const bill = {
-      ...(combinedBaseBill(base.naturalId, base.config, base.site, input.loop ? false : true) ??
-        {}),
+      ...(combinedBaseBill(base.naturalId, base.config, base.site, !input.loop) ?? {}),
     };
     const products = [...(getBaseProducts(base.siteId) ?? [])];
     const hours = input.arrivalHoursByNaturalId?.get(base.naturalId) ?? 0;
