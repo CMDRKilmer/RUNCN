@@ -238,6 +238,7 @@ function onTrialClick() {
             </InlineFlex>
           </th>
           <th>天数</th>
+          <th data-rp-burn-commands-col>命令</th>
         </tr>
       </thead>
       <tbody :class="$style.fakeRow">

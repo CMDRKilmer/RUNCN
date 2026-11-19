@@ -7,13 +7,18 @@
 // 一并停用。
 //
 // 时刻口径：每段出发时刻 = 起点时刻 + 前序各段飞行时长累计（供面板显示到达时刻与到港预测）。
-// 注意：这里只估算"飞行"时长，不包含各站的卸货/提取停留时间；模型按飞船**当前**油量与质量
-// 逐段独立计算（不递推后续航段的耗油，与切换前的口径一致）。
+// 注意：这里只估算"飞行"时长，不包含各站的卸货/提取停留时间。
+// 逐段状态按规格（26-11-14 重测）递推：每段用**该段离站载重**与**上一段到达后的剩余油量**
+// 计算，不再按「当前油量 + 当前质量」重复估算——新公式的转移速度取决于出发余油与总重，
+// 不递推会把装载后的后续航段算得偏快、把低油量船算得偏慢。
+// 出发油量默认取罐容量：环线在出发地补满（原生 RT 默认写补满步骤，ACT 路径由独立加油
+// 触发器处理），由 `refuelAtOrigin: false` 可改回「按当前余量出发」。
 //
 // 判缺：缺少轨道/环境/星图数据，或航线不可达时，该段 ok = false 并给出成因全文
 // （`formula-plan` 返回的 inputIncomplete），面板显示「--（成因）」，不会把缺数据写成 0 小时。
 import { gameNow } from '@src/infrastructure/fio/orbit';
 import { planFormulaFlight } from '@src/features/XIT/FTC/formula-plan';
+import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
 
 /** 环线的一个航段：从 `from` 到 `to` 的预计飞行。 */
 export interface ChainFlightLeg {
@@ -54,12 +59,34 @@ export interface ChainFlightTimeInput {
   startAtMs?: number;
   // Sample each possible segment endpoint for multi-ship allocation.
   includeEndpointHours?: boolean;
+  // 每段离站载重（t），与航段一一对应：`[起点→站0, 站0→站1, …, 末站→起点]`。
+  // 缺省项由模型按飞船当前质量反推（含船上现有货物）。
+  legPayloads?: readonly (number | undefined)[];
+  // 出发地补满油罐（缺省 true）：首段按罐容量出发，后续段按上一段剩余量递推。
+  refuelAtOrigin?: boolean;
   // 价格（可选；0 时平衡点不依赖价格）。
   stlPrice?: number;
   ftlPrice?: number;
   timeValue?: number;
   // 是否走网关航线（缺省 false：环线实际用自然航线飞行）。
   useGateway?: boolean;
+}
+
+interface LegFuel {
+  stl: number | undefined;
+  ftl: number | undefined;
+}
+
+// 出发油量：默认按补满后的罐容量，否则按当前余量。容量读不出（store 未加载）时保持
+// undefined，交给公式模型自己判缺，而不是假装有油。余量 0 是真空罐，必须原样保留。
+function departureFuel(ship: PrunApi.Ship, refuelAtOrigin: boolean): LegFuel {
+  const fuel = shipFuelRemainingFor(ship);
+  const pick = (cap: number, remaining: number) =>
+    cap > 0 ? (refuelAtOrigin ? cap : remaining) : undefined;
+  return {
+    stl: pick(fuel.stlCap, fuel.stlRemaining),
+    ftl: pick(fuel.ftlCap, fuel.ftlRemaining),
+  };
 }
 
 // 计算一条环线各段的预计飞行时间（按到访顺序逐段累计）。
@@ -86,7 +113,9 @@ export async function estimateChainFlightTimes(
     from: string,
     to: string,
     departAtMs: number,
-  ): Promise<ChainFlightLeg> {
+    legIndex: number,
+    fuel: LegFuel,
+  ): Promise<{ leg: ChainFlightLeg; remaining?: LegFuel }> {
     const leg: ChainFlightLeg = {
       from,
       to,
@@ -100,8 +129,9 @@ export async function estimateChainFlightTimes(
     // 起点与终点相同（如站点重复/归航即出发地）：无航程。
     if (from.toUpperCase() === to.toUpperCase()) {
       leg.ok = true;
-      return leg;
+      return { leg };
     }
+    const payload = input.legPayloads?.[legIndex];
     const plan = await planFormulaFlight({
       ship,
       from,
@@ -110,42 +140,65 @@ export async function estimateChainFlightTimes(
       atMs: departAtMs,
       prices,
       selection: 'balance',
+      ...(payload === undefined ? {} : { payload }),
+      ...(fuel.stl === undefined ? {} : { stlFuel: fuel.stl }),
+      ...(fuel.ftl === undefined ? {} : { ftlFuel: fuel.ftl }),
     });
     if (!plan.ok || plan.best === undefined) {
       const items = plan.inputIncomplete ?? [];
       leg.missingInputs = items.length > 0 ? items : undefined;
       leg.error = items.length > 0 ? '缺规划输入' : plan.message;
-      return leg;
+      return { leg };
     }
     const hours = plan.best.totalHours;
     if (!(Number.isFinite(hours) && hours > 0)) {
       leg.error = '飞行时长为 0（检查起终点与油量）';
-      return leg;
+      return { leg };
     }
     leg.ok = true;
     leg.hours = hours;
     leg.arriveAtMs = departAtMs + hours * 3600000;
-    return leg;
+    // 下一段按到达后的余量起飞（新公式的转移速度取决于出发余油）。
+    // 不足时保留 0（而不是回退成满罐）——后续段会如实判缺，不会伪造一箱不存在的油。
+    const remaining: LegFuel = {
+      stl: Number.isFinite(plan.best.stlRemaining) ? Math.max(0, plan.best.stlRemaining) : fuel.stl,
+      ftl: Number.isFinite(plan.best.ftlRemaining) ? Math.max(0, plan.best.ftlRemaining) : fuel.ftl,
+    };
+    return { leg, remaining };
   }
+
+  // 环线起点油量：默认补满，后续段按上一段剩余递推。
+  const initialFuel = departureFuel(ship, input.refuelAtOrigin ?? true);
 
   const legs: ChainFlightLeg[] = [];
   let departAtMs = startAtMs;
+  let fuel = initialFuel;
   for (let i = 0; i <= stops.length; i++) {
     const from = i === 0 ? origin : stops[i - 1]!.naturalId;
     const to = i === stops.length ? origin : stops[i]!.naturalId;
-    const leg = await estimateLeg(from, to, departAtMs);
-    legs.push(leg);
-    departAtMs = leg.arriveAtMs;
+    const result = await estimateLeg(from, to, departAtMs, i, fuel);
+    legs.push(result.leg);
+    departAtMs = result.leg.arriveAtMs;
+    if (result.remaining !== undefined) {
+      fuel = result.remaining;
+    }
   }
 
   let endpointHours: ChainFlightEstimate['endpointHours'];
   if (input.includeEndpointHours) {
     endpointHours = { outbound: [], inbound: [] };
     for (const [index, stop] of stops.entries()) {
-      const out = index === 0 ? legs[0]! : await estimateLeg(origin, stop.naturalId, startAtMs);
+      // 端点采样是假设性分段（从出发地直飞该站/从该站直飞出发地），都按起始油量与
+      // 该站对应航段的载重计算，不继承主环线前面的消耗。
+      const out =
+        index === 0
+          ? legs[0]!
+          : (await estimateLeg(origin, stop.naturalId, startAtMs, index + 1, initialFuel)).leg;
       // Sample the return at direct arrival; the final assigned route recomputes its actual ETA.
       const back =
-        stops.length === 1 ? legs[1]! : await estimateLeg(stop.naturalId, origin, out.arriveAtMs);
+        stops.length === 1
+          ? legs[1]!
+          : (await estimateLeg(stop.naturalId, origin, out.arriveAtMs, index + 1, initialFuel)).leg;
       endpointHours.outbound.push(out.ok ? out.hours : undefined);
       endpointHours.inbound.push(back.ok ? back.hours : undefined);
     }

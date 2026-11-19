@@ -121,6 +121,9 @@ export async function computeNativeRouteFuel(
       // 规划载重 + 未来出发油量 + 实际写入的固定档。
       payload: legLoadWeight(candidate.plan, index, legCount),
       stlFuel,
+      // FTL 余量同样按航段递推：只传 STL 会让模型每次回读油箱当前值，
+      // 与出发地补满/上一段消耗后的实际余量不符（FTL 质量还影响总重与加速度）。
+      ...(ftlFuel === undefined ? {} : { ftlFuel }),
       // 用**写入的那个档位**重算，避免重算结果与实际航线不一致。
       fuel: fuelPercent / 100,
       reactor: reactorPercent === undefined ? undefined : reactorPercent / 100,
@@ -159,6 +162,9 @@ export async function computeNativeRouteFuel(
       // 规划载重 + 未来出发油量。
       payload: legLoadWeight(candidate.plan, index, legCount),
       stlFuel,
+      // 与 STL 一样逐段递推 FTL 余量：不传会让模型每次回读当前油箱，
+      // 出发地补满或上一段消耗后的余量都对不上。
+      ...(ftlFuel === undefined ? {} : { ftlFuel }),
       selection: 'value',
     });
     if (result.ok && result.best !== undefined) {

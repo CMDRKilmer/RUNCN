@@ -40,7 +40,12 @@ export const blueprintInfoFor = () => ({
 
 // '@src/features/XIT/FTC/formula-plan'
 export const planFormulaFlight = async input => {
-  ftcCalls.push({ stlFuel: input.stlFuel, fuel: input.fuel, reactor: input.reactor });
+  ftcCalls.push({
+    stlFuel: input.stlFuel,
+    ftlFuel: input.ftlFuel,
+    fuel: input.fuel,
+    reactor: input.reactor,
+  });
   if (optionFixture === null) {
     return {
       ok: false,

@@ -13,6 +13,7 @@ import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { getWarehouseName } from '@src/features/XIT/CART/cart-utils';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 import {
   deductNeeds,
   getBaseStoreInventory,
@@ -44,8 +45,12 @@ const exchangeStationMap: Record<string, string> = {
   NC2: 'Hubur Station',
 };
 
-const exchanges = Object.keys(exchangeStationMap);
-const exchange = persistedRef('genact-bra-exchange', exchanges[0]);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
+const exchange = persistedRef('genact-bra-exchange', exchanges.value[0]);
+// 老版本可能持久化过 CI2 / NC2：隐藏后回退到第一个有效交易所。
+if (!exchanges.value.includes(exchange.value)) {
+  exchange.value = exchanges.value[0];
+}
 const useBaseInv = persistedRef('genact-bra-use-inv', true);
 const timeOffset = persistedRef<'now' | '24' | '48'>('genact-bra-time-offset', 'now');
 const openSfc = persistedRef('genact-bra-sfc', false);

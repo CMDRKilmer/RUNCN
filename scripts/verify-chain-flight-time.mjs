@@ -301,6 +301,59 @@ await check('时间价值：成本最优不会比平衡点更慢', async failure
   );
 });
 
+await check('出发地默认补满：空罐仍按罐容量算出时长', async failures => {
+  useFixture({ stlRemaining: 0 });
+  const est = await estimateChainFlightTimes({ ship, origin: 'A', stops });
+  const leg = est.legs[0];
+  expect(failures, 'ok', leg?.ok === true, `actual=${JSON.stringify(leg)}`);
+  expect(
+    failures,
+    '时长有限且为正',
+    Number.isFinite(leg.hours) && leg.hours > 0,
+    `hours=${leg.hours}`,
+  );
+});
+
+await check('refuelAtOrigin=false：少油按当前余量出发（更慢或判缺）', async failures => {
+  useFixture({ stlRemaining: 300 });
+  const full = await estimateChainFlightTimes({ ship, origin: 'A', stops });
+  const dry = await estimateChainFlightTimes({
+    ship,
+    origin: 'A',
+    stops,
+    refuelAtOrigin: false,
+  });
+  const leg = dry.legs[0];
+  expect(
+    failures,
+    '不补油不会比补满更快',
+    leg.ok === false || leg.hours > full.legs[0].hours,
+    `full=${full.legs[0].hours} dry=${leg.hours} ok=${leg.ok}`,
+  );
+});
+
+await check('逐段载重参与时长：重载航段不会更快', async failures => {
+  useFixture();
+  const empty = await estimateChainFlightTimes({
+    ship,
+    origin: 'A',
+    stops,
+    legPayloads: [0, 0],
+  });
+  const loaded = await estimateChainFlightTimes({
+    ship,
+    origin: 'A',
+    stops,
+    legPayloads: [500, 500],
+  });
+  expect(
+    failures,
+    '重载 ≥ 空载',
+    loaded.legs[0].hours >= empty.legs[0].hours - 1e-9,
+    `empty=${empty.legs[0].hours} loaded=${loaded.legs[0].hours}`,
+  );
+});
+
 console.log(
   summary.fail === 0
     ? `PASS ${summary.pass}/${summary.pass}`

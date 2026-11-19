@@ -28,6 +28,7 @@ import './chat-images';
 import './chat-translation/chat-translation';
 import './clickable-apex-logo';
 import './close-all-buffers/close-all-buffers';
+import './burn-command-column';
 import './cmds-clickable-commands';
 import './co-base-count';
 import './cogcu-generate-supply-act/cogcu-generate-supply-act';

@@ -85,6 +85,8 @@ function startedOrderSupplement(siteId: string): {
 // 生产线模型：capacity = 并行槽位数，每订单占一个槽位、产出 outputs[].amount；
 // 排队订单按序填满空闲槽位；循环（recurring）订单完成后副本在队尾重新入队
 // （循环添加）——生产线到港前持续排产，连续多批（含未开始与循环批次）都能计入。
+// 每个槽位按「释放时刻」参与事件排序，订单开始时刻 = max(槽位空闲, 订单就绪)：
+// 循环副本必须等上一批真正结束（不能抢用其它槽位提前释放的时间）。
 // 区间内完成比例 = (到港进度 − 当前进度)，进度 = (t − start) / (end − start) 钳制到 [0,1]；
 // 已完成订单（end ≤ now）的产出已计入当前库存，不重复计算。
 function projectedProductionByArrival(
@@ -123,85 +125,81 @@ function projectedProductionByArrival(
     duration: number;
     recurring: boolean;
     outputs: PrunApi.MaterialAmountValue[];
+    // 可开始时刻：排队订单 = 现在；循环订单的下一份 = 本次结束时刻。
+    // 只有槽位空闲且订单已就绪才能开产——否则多槽位线上不同时长的订单会让
+    // 循环副本抢在上一批结束前开工（到港产量被高估）。
+    readyAt: number;
+    seq: number;
   }
 
+  let seq = 0;
   for (const line of lines) {
     const capacity = line.capacity;
     if (capacity <= 0) {
       continue;
     }
-    // 槽位释放时刻（升序；空闲槽位数 = capacity − 长度）。
-    const slotFree: number[] = [];
-    // 等待队列（FIFO）：排队订单与循环订单完成后的副本。
-    const queue: PendingOrder[] = [];
-    // 未来时刻加入队列的循环副本：{ at, order }，按 at 升序。
-    const joinAt: { at: number; order: PendingOrder }[] = [];
-    const requeue = (order: PendingOrder, at: number) => {
-      joinAt.push({ at, order });
-      joinAt.sort((a, b) => a.at - b.at);
-    };
+    // 槽位可用时刻（升序；长度 = 运行中的订单数 + 当前空闲槽位）。
+    const slots: number[] = [];
+    // 待开产订单：未开始订单现在就绪，循环副本在上一批结束时就绪。
+    const pending: PendingOrder[] = [];
 
     for (const order of line.orders) {
-      if (order.duration?.millis == null || order.halted) {
+      if (order.duration?.millis == null || order.duration.millis <= 0 || order.halted) {
         continue;
       }
-      const pending: PendingOrder = {
+      const run: PendingOrder = {
         duration: order.duration.millis,
         recurring: order.recurring,
         outputs: order.outputs,
+        readyAt: now,
+        seq: seq++,
       };
       if (order.started) {
         // 已开始订单：占用槽位直到 completion（已完成的不占位）。
         const start = order.started.timestamp;
         const end = order.completion?.timestamp ?? start + order.duration.millis;
         if (end > now) {
-          slotFree.push(end);
+          slots.push(end);
         }
         countOrder(order.outputs, start, end);
         if (order.recurring) {
-          requeue(pending, end);
+          run.readyAt = end;
+          pending.push(run);
         }
       } else {
-        queue.push(pending);
+        pending.push(run);
       }
     }
+    // 空闲槽位立即可用。
+    while (slots.length < capacity) {
+      slots.push(now);
+    }
 
-    // 事件模拟：按时间推进。有空槽则在当前时刻启动队首订单；
-    // 无空槽则推进到最早槽位释放时刻；循环订单完成后副本在队尾重新排队。
-    let t = now;
-    while ((queue.length > 0 || joinAt.length > 0) && t < arrivalMs) {
-      // 已到时刻的循环副本并入队尾。
-      while (joinAt.length > 0 && joinAt[0].at <= t) {
-        queue.push(joinAt.shift()!.order);
-      }
-      if (queue.length === 0) {
-        // 队列空：跳到最早副本加入时刻（已由 while 条件保证 joinAt 非空）。
-        const next = joinAt[0].at;
-        if (next >= arrivalMs) {
-          break;
+    // 离散事件：每次取最早可用的槽位，与最早就绪的订单配对；开始时刻 =
+    // max(槽位空闲, 订单就绪)。时间只前进，循环副本绝不提前开工。
+    while (slots.length > 0 && pending.length > 0) {
+      slots.sort((a, b) => a - b);
+      pending.sort((a, b) => {
+        if (a.readyAt !== b.readyAt) {
+          return a.readyAt - b.readyAt;
         }
-        t = next;
-        continue;
+        return a.seq - b.seq;
+      });
+      const slot = slots.shift()!;
+      if (slot >= arrivalMs) {
+        break;
       }
-      if (slotFree.length < capacity) {
-        // 有空槽：当前时刻启动队首订单。
-        const pending = queue.shift()!;
-        const start = t;
-        const end = start + pending.duration;
-        countOrder(pending.outputs, start, end);
-        if (pending.recurring) {
-          requeue(pending, end);
-        }
-        slotFree.push(end);
-      } else {
-        // 无空槽：推进到最早槽位释放时刻。
-        const nextFree = Math.min(...slotFree);
-        if (nextFree >= arrivalMs) {
-          break;
-        }
-        slotFree.splice(slotFree.indexOf(nextFree), 1);
-        t = nextFree;
+      const next = pending.shift()!;
+      const start = Math.max(slot, next.readyAt);
+      if (start >= arrivalMs) {
+        break;
       }
+      const end = start + next.duration;
+      countOrder(next.outputs, start, end);
+      if (next.recurring) {
+        pending.push({ ...next, readyAt: end, seq: seq++ });
+      }
+      slots.push(end);
     }
   }
   return produced;
