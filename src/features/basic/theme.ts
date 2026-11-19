@@ -63,6 +63,13 @@ export interface Skin {
     line: string;
     lineSoft: string;
   };
+  // 游戏原生「呼吸灯」的三档配色：与 indicator / status 完全独立，每套主题各自
+  // 定义，让通知脉冲跟该主题的主色调一致，而不是借通用的成功/警告色。
+  pulse: {
+    success: string;
+    secondary: string;
+    danger: string;
+  };
   // <progress> 容量条：填充按 primary/secondary/warning 分色，轨道明显更浅并补
   // 一圈边框，避免「已用 / 剩余」被统一映射成同一个淡色后完全看不出比例。
   progress: {
@@ -168,6 +175,12 @@ const SKINS: Record<string, Skin> = {
       line: '#33566f',
       lineSoft: 'rgba(51, 86, 111, 0.6)',
     },
+    // 呼吸灯：低饱和石板蓝主色系三档，与浅色界面一致。
+    pulse: {
+      success: '#33566f',
+      secondary: '#5a7f98',
+      danger: '#9c3b3b',
+    },
     progress: {
       // 燃料条主/次色深度减半（R33）：原深石板蓝 / 赭棕 → 浅版，避免 FLT 燃料条
       // 在自定义浅色主题下过重；warning/success/danger 等语义色保持原对比度。
@@ -272,6 +285,12 @@ const SKINS: Record<string, Skin> = {
       glow: 'rgba(138, 90, 28, 0.4)',
       line: '#8a5a1c',
       lineSoft: 'rgba(138, 90, 28, 0.6)',
+    },
+    // 呼吸灯：赭金主色系三档，避免出现与米纸底不搭的绿/蓝。
+    pulse: {
+      success: '#8a5a1c',
+      secondary: '#a9782f',
+      danger: '#9b4741',
     },
     progress: {
       // 燃料条主/次色深度减半（R33）：原深赭金 / 青灰 → 浅版，避免 FLT 燃料条过重。
@@ -807,6 +826,32 @@ function addToBucket(bucket: Bucket, selector: string, decls: Map<string, string
 // 不再叠加左侧色条。daysSupplied（正常绿）继续走通用映射保持素淡。
 const STATUS_RE = /days(Warning|Missing)/;
 
+// 游戏原生「呼吸灯」：左侧竖排按钮 COM 右缘的新消息脉冲、COM 面板内频道左缘的
+// 未读竖条，共用 effects__shadowPulse{Success,Secondary,Failure}——有色小块 + 6px
+// 同色外发光 + 2s 无限 opacity 呼吸。它们承载通知语义，通用降饱和会把亮绿/亮蓝/
+// 亮红压成 ≈ 画布的淡色（浅色主题下几乎看不见）。这里改走每套主题自己的
+// skin.pulse 三档配色，与主题主色调一致；animation 保持原样不动。
+const PULSE_RE = /effects__shadowPulse(Success|Secondary|Failure)/;
+
+function pulseOverride(selector: string, skin: Skin): Map<string, string> | null {
+  const match = selector.match(PULSE_RE);
+  if (!match) {
+    return null;
+  }
+  const color =
+    match[1] === 'Success'
+      ? skin.pulse.success
+      : match[1] === 'Failure'
+        ? skin.pulse.danger
+        : skin.pulse.secondary;
+  return new Map<string, string>([
+    ['background-color', color],
+    // 原生是 6px 无扩散；浅底上把光晕略微加宽，呼吸时才看得出「发光」而不是
+    // 一条普通细线。颜色仍与色块同色，避免引入第二套色值。
+    ['box-shadow', `0 0 8px 1px ${color}`],
+  ]);
+}
+
 function statusOverride(selector: string, skin: Skin): Map<string, string> | null {
   const match = selector.match(STATUS_RE);
   if (!match) {
@@ -990,10 +1035,13 @@ function collect(
       if (prefix) {
         grouped.set(prefix, bucket);
       }
-      // 期限/告警语义色单独兜底，不能被通用降饱和映射吃掉。
-      const status = statusOverride(rule.selectorText, skin);
-      if (status) {
-        addToBucket(bucket, rule.selectorText, status);
+      // 呼吸灯优先：它既是语义通知，又完全靠 box-shadow 发光，被通用映射压淡后
+      // 等于没有提示。其次是期限/告警语义色，同样不能被降饱和吃掉。
+      const pulse = pulseOverride(rule.selectorText, skin);
+      const status = pulse === null ? statusOverride(rule.selectorText, skin) : null;
+      const override = pulse ?? status;
+      if (override !== null) {
+        addToBucket(bucket, rule.selectorText, override);
       } else {
         // 彩色块在浅色皮肤里会变成淡底，文字必须统一成深色才看得清。
         const coloredBg = hasSemanticBackground(rule.style);

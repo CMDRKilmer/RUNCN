@@ -1005,6 +1005,10 @@ html[data-rp-theme='ceramic-colorful'] {
   --rp-cc-status-info-bg: #e2eef5;
   --rp-cc-status-info-text: #1f4f6b;
   --rp-cc-status-info-border: #94b8ce;
+  /* 呼吸灯三档：与正文/状态色系分开，保证通知脉冲仍是本主题的主色调。 */
+  --rp-cc-pulse-success: #2f6b62;
+  --rp-cc-pulse-secondary: #7f5522;
+  --rp-cc-pulse-danger: #a4305c;
 
   /* 分类 1..8 / 图表同序号同色：浅底深字 + 中等饱和图形色 */
   --rp-cc-cat-1-bg: #e3eff5;
@@ -1163,6 +1167,10 @@ html[data-rp-theme='nebula'] {
   --rp-cc-status-info-bg: rgba(79, 195, 240, 0.14);
   --rp-cc-status-info-text: #7fd0f0;
   --rp-cc-status-info-border: #2a7a9e;
+  /* 呼吸灯三档：深空底上取青蓝/靛蓝/橙三色，与霓虹主色系一致。 */
+  --rp-cc-pulse-success: #35c4e8;
+  --rp-cc-pulse-secondary: #6f8bd6;
+  --rp-cc-pulse-danger: #ff7a45;
 
   /* 分类 1..8 / 图表同序号同色：暗彩底 + 亮彩字 + 彩描边 + 实色图形 */
   --rp-cc-cat-1-bg: rgba(53, 196, 232, 0.16);
