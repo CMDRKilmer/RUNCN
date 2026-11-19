@@ -1167,6 +1167,10 @@ html[data-rp-theme='claude'] {
   --rp-cc-status-info-bg: #e4ebf1;
   --rp-cc-status-info-text: #33566e;
   --rp-cc-status-info-border: #9fb6c6;
+  /* 呼吸灯三档：青绿 / 暖琥珀 / 砖红，与大地色系一致。 */
+  --rp-cc-pulse-success: #2f6b62;
+  --rp-cc-pulse-secondary: #8a5a1c;
+  --rp-cc-pulse-danger: #a83a32;
 
   /* 分类 1..8 / 图表同序号同色：浅底深字 + 低饱和大地色图形。
      序号按色相带排列（1 青 2 青绿 3 橄榄 4 琥珀/陶土 5 砖红 6 紫 7 蓝 8 玫红），
