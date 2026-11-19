@@ -178,6 +178,7 @@
 ## 待实采
 
 - `min=0` 的**实机执行**语义：不足时是否「不等待、只搬现有量」（LOAD/UNLOAD 协议均已确认可写且回显，2026-11-19）；减产轮链上提取/卸载不阻塞需实机验证。
+- 界面回退路径写 `min=0`：socket 侧已实采（LOAD/UNLOAD 对称回显），但编辑器「至少」输入框对 0 的反应未知——若被钳制或拒绝，`setLimit` 会在写入中途抛「Minimum 数量未写入。」并留下半成品航线。需实机确认 0 能写入并保存。
 - RTE 各状态的界面文案（中/英）。
 - LOAD 步骤 `retain` 字段语义（实采回显 46，RPrun 不写不读）。
 - 未知步骤类型（`UNLOAD_ALL`/`UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`）目前被 `toStep` 丢弃：手动增删 `UNLOAD_ALL`/`UNLOAD_FUEL` 不触发下游时长作废，是否纳入签名待扩展。
