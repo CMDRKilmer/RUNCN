@@ -482,6 +482,13 @@ function checkLoop() {
   repeats.value = tile === undefined ? undefined : nativeRouteRepeats(tile);
 }
 
+// 循环开关的提示只保留一条：这个按钮可以反复重试，同一条消息不该逐次堆叠。
+const LOOP_WARNING_PREFIX = '循环开关';
+function setLoopWarning(message: string | undefined) {
+  const others = fuelWarnings.value.filter(x => !x.startsWith(LOOP_WARNING_PREFIX));
+  fuelWarnings.value = message === undefined ? others : [...others, message];
+}
+
 // 循环模式：航点/步骤写完后打开游戏 Loop（SHIP_ROUTES_SET_REPEAT），用响应 repeats 校验。
 // 失败保留单趟航线并提示手动开启——开关与航点/步骤独立，socket 不可用时不阻断已写好的航线。
 async function enableLoop() {
@@ -494,19 +501,18 @@ async function enableLoop() {
     const route = await socketSetRouteRepeats(id, true);
     repeats.value = route.repeats === true;
     recordRoute(id, naturalId);
-    if (!repeats.value) {
-      fuelWarnings.value = [
-        ...fuelWarnings.value,
-        '循环开关未生效（服务端 repeats 仍为关），请在原生 RT 手动开启 Loop。',
-      ];
-    }
+    // 重试成功后清掉上一次的失败提示，避免「已开」和「未生效」同时挂在页面上。
+    setLoopWarning(
+      repeats.value
+        ? undefined
+        : '循环开关未生效（服务端 repeats 仍为关），请在原生 RT 手动开启 Loop。',
+    );
   } catch (err) {
     repeats.value = false;
-    fuelWarnings.value = [
-      ...fuelWarnings.value,
+    setLoopWarning(
       `循环开关打开失败：${err instanceof Error ? err.message : String(err)}。` +
         '已保留单趟航线，请在原生 RT 手动开启 Loop 后再分配。',
-    ];
+    );
   }
 }
 
