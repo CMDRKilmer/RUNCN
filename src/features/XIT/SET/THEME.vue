@@ -68,7 +68,7 @@ function reset() {
   display: grid;
   /* min 留 10px 余量：窗口宽高由游戏 inline style 精确控制，不同主题下
      内容区可能只差 1~2px；用 210px 时陶瓷白主题曾因 426px < 428px
-     从「两行两列」塌成「四行单列」。200px 保证四个主题都是 2×2。 */
+     从两列塌成单列。200px 保证主题卡片始终两列排布。 */
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 8px;
 }
