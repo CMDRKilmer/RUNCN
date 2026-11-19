@@ -174,9 +174,13 @@ const roundMaterials = computed(() => {
   }
   return mats;
 });
+// 物料没下发时算不出重量/体积，宁可只备 1 轮，也不按偏小的体积报出偏大的 N。
+const roundsUnweighable = computed(() =>
+  Object.keys(roundBill.value).some(ticker => roundMaterials.value[ticker] === undefined),
+);
 const nMax = computed(() => {
   const cap = shipChainCapacity(candidate.ship);
-  if (cap === undefined) {
+  if (cap === undefined || roundsUnweighable.value) {
     return 1;
   }
   return stockingRoundsMax(
@@ -184,33 +188,67 @@ const nMax = computed(() => {
     billWeightVolume(roundBill.value, roundMaterials.value),
   );
 });
-const stockingRounds = ref(1);
+// 输入框原样保留键入内容（清空时是 ''），只在计费/回显时钳到 1..Nmax：逐键回写会把
+// 「清空后输入 5」变成「15 → 钳成 Nmax」，用户输的 5 悄悄变成上限。
+const stockingRoundsInput = ref<number | string>(1);
+const stockingRounds = computed(() => {
+  const raw = Number(stockingRoundsInput.value);
+  return Number.isFinite(raw) ? Math.min(Math.max(1, Math.round(raw)), nMax.value) : 1;
+});
 watch(nMax, max => {
-  if (stockingRounds.value > max) {
-    stockingRounds.value = max;
+  const raw = Number(stockingRoundsInput.value);
+  if (Number.isFinite(raw) && raw > max) {
+    stockingRoundsInput.value = max;
   }
 });
-watch(stockingRounds, value => {
-  const base = Number.isFinite(value) ? value : 1;
-  const clamped = Math.min(Math.max(1, Math.round(base)), nMax.value);
-  if (clamped !== value) {
-    stockingRounds.value = clamped;
-  }
-});
+function normalizeStockingRounds() {
+  stockingRoundsInput.value = stockingRounds.value;
+}
 const exchangeCode = computed(() =>
   origin.value === '' ? undefined : exchangesStore.getByNaturalId(origin.value)?.code,
 );
-// SF/FF 在该交易所无订单簿时不下单，只提示缺口手动补给。
+// CXOB 只随 COMEX_BROKER_DATA 推送到达（要先开过该订单簿窗口）。没有订单簿 ≠ 不可买：
+// 先静默拉一次隐藏窗口读回来；仍读不到按「未知」处理（燃料照进备货包），
+// 只有确认订单簿存在且卖单为空才算不可买——否则默认路径会把每轮 SF/FF 都丢掉。
+const requestedOrderBooks = new Set<string>();
+function requestOrderBook(ticker: string, code: string) {
+  const key = `${ticker}.${code}`;
+  if (cxobStore.getByTicker(key) !== undefined || requestedOrderBooks.has(key)) {
+    return;
+  }
+  requestedOrderBooks.add(key);
+  void showBuffer(`CXOB ${key}`, {
+    autoClose: true,
+    closeWhen: computed(() => cxobStore.getByTicker(key) !== undefined),
+  });
+}
+watch(
+  [exchangeCode, roundBill],
+  ([code, bill]) => {
+    if (!loop || code === undefined) {
+      return;
+    }
+    for (const ticker of ['SF', 'FF']) {
+      if ((bill[ticker] ?? 0) > 0) {
+        requestOrderBook(ticker, code);
+      }
+    }
+  },
+  { immediate: true },
+);
+// 确认不可买的燃料：只提示缺口、不进备货包。
 const unbuyableFuel = computed(() => {
   const code = exchangeCode.value;
   if (code === undefined) {
     return [];
   }
-  return ['SF', 'FF'].filter(
-    ticker =>
-      (roundBill.value[ticker] ?? 0) > 0 &&
-      cxobStore.getByTicker(`${ticker}.${code}`) === undefined,
-  );
+  return ['SF', 'FF'].filter(ticker => {
+    if ((roundBill.value[ticker] ?? 0) <= 0) {
+      return false;
+    }
+    const book = cxobStore.getByTicker(`${ticker}.${code}`);
+    return book !== undefined && book.sellingOrders.length === 0;
+  });
 });
 const stockingBill = computed(() => {
   const bill: Record<string, number> = {};
@@ -495,11 +533,9 @@ async function enableLoop() {
     return;
   }
   const id = routeId.value;
-  const naturalId = routeNaturalId.value ?? id;
   try {
     const route = await socketSetRouteRepeats(id, true);
     repeats.value = route.repeats === true;
-    recordRoute(id, naturalId);
     // 重试成功后清掉上一次的失败提示，避免「已开」和「未生效」同时挂在页面上。
     setLoopWarning(
       repeats.value
@@ -649,10 +685,12 @@ async function advanceOnce(retrying: boolean) {
       routeId.value = result.routeId;
       routeNaturalId.value = result.naturalId;
       fuelWarnings.value = [...fuelWarnings.value, ...result.warnings];
-      recordRoute(result.routeId, result.naturalId);
+      // 先开 Loop、再落记录：记录里的 repeats 要反映服务端真实结果。顺序反过来时开关
+      // 失败会留下「loop: true + repeats 未定」的记录，卡片把没在循环的航线当循环航线。
       if (loop) {
         await enableLoop();
       }
+      recordRoute(result.routeId, result.naturalId);
       progress.value = { phase: 'done' };
     } catch (err) {
       if (controller.signal.aborted) {
@@ -702,6 +740,12 @@ async function advanceOnce(retrying: boolean) {
         ...fuelWarnings.value,
         `未能自动把航线改名为「${name}」，请在原生 RT 里手动改名。`,
       ];
+    }
+    if (loop) {
+      // 界面路径不碰 socket，Loop 只能玩家自己开：先按「未开」记录，
+      // 否则卡片会把没在循环的航线当循环航线展示（周期/备货照列，却发不出未执行告警）。
+      repeats.value = false;
+      setLoopWarning('循环开关未开启：界面路径不自动开启 Loop，请在原生 RT 手动开启后再分配飞船。');
     }
     recordRoute(routeId.value, routeId.value);
     progress.value = { phase: 'select' };
@@ -810,14 +854,15 @@ async function showRoute() {
       <label
         >备货轮数
         <input
-          v-model.number="stockingRounds"
+          v-model.number="stockingRoundsInput"
           :class="$style.fuelInput"
           type="number"
           min="1"
           :max="nMax"
           step="1"
           :disabled="busy"
-          aria-label="备货轮数" />
+          aria-label="备货轮数"
+          @change="normalizeStockingRounds" />
         / {{ nMax }} 轮（一船满载上限）</label
       >
       <div
