@@ -70,14 +70,16 @@ async function runFuel(waypoints) {
   await computeNativeRouteFuel(candidate, waypoints, new AbortController().signal, () => {});
   return {
     overrides: ftcCalls.map(x => x.stlFuel),
+    ftlOverrides: ftcCalls.map(x => x.ftlFuel),
     btf: btfCalls.map(x => ({ stlFuel: x.stlFuel, ftlFuel: x.ftlFuel })),
   };
 }
 
 await check('空罐已知：余量 0 原样透传给 FTC 与 BTF（不回退满罐）', async failures => {
   stubSetFuel({ stlRemaining: 0, ftlRemaining: 0, stlCap: 3000, ftlCap: 500 });
-  const { overrides, btf } = await runFuel(noRefuel);
+  const { overrides, ftlOverrides, btf } = await runFuel(noRefuel);
   expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [0], overrides);
+  expectEqual(failures, 'FTL 余量同样透传', [0], ftlOverrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 0, ftlFuel: 0 }], btf);
 });
 
@@ -90,15 +92,17 @@ await check('油罐读不出（容量也 0）：按未知处理（override = und
 
 await check('出发地补油：按罐容量起飞，与当前余量无关', async failures => {
   stubSetFuel({ stlRemaining: 0, ftlRemaining: 0, stlCap: 3000, ftlCap: 500 });
-  const { overrides, btf } = await runFuel(refuelAtOrigin);
+  const { overrides, ftlOverrides, btf } = await runFuel(refuelAtOrigin);
   expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [3000], overrides);
+  expectEqual(failures, '补满后 FTL 余量也按罐容量透传', [500], ftlOverrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 3000, ftlFuel: 500 }], btf);
 });
 
 await check('非零余量透传（控制组）', async failures => {
   stubSetFuel({ stlRemaining: 123, ftlRemaining: 45, stlCap: 3000, ftlCap: 500 });
-  const { overrides, btf } = await runFuel(noRefuel);
+  const { overrides, ftlOverrides, btf } = await runFuel(noRefuel);
   expectEqual(failures, '每段一次公式规划（stlFuel 透传）', [123], overrides);
+  expectEqual(failures, 'FTL 余量透传', [45], ftlOverrides);
   expectEqual(failures, 'BTF 出发油量', [{ stlFuel: 123, ftlFuel: 45 }], btf);
 });
 

@@ -12,6 +12,7 @@ import {
   type ChainShipTiming,
 } from './chain-allocation';
 import { estimateChainFlightTimes, type ChainFlightEstimate } from './chain-flight-time';
+import { legLoadWeight } from './native-route-plan';
 import type { ChainPlannerBase, ChainPlan } from './chain-types';
 import type { DispatchShip } from './utils';
 import { fitTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
@@ -582,6 +583,17 @@ export function useChainPlanning(input: {
   // eligibleShips / baseShipPlans 中，但飞行列仍需读取预估——按 shipId 收集
   // 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
   // 预估基于 baseShipPlans（不含到达时刻产出），避免最终适配结果反向触发估时。
+  // 执行中环线的逐段离站载重：起点装载 → 各站离站舱载 → 归航舱载。
+  // 旧记录没有计划快照（plan 为空），对应段留空由模型按当前质量反推。
+  function runLegPayloads(run: UserData.ChainRun): (number | undefined)[] {
+    const payloads: (number | undefined)[] = [run.plan?.originLoadOnDeparture.weight];
+    for (let i = 1; i < run.stops.length; i++) {
+      payloads.push(run.stops[i - 1]?.plan?.loadOnDeparture.weight);
+    }
+    payloads.push(run.plan?.loadOnReturn.weight);
+    return payloads;
+  }
+
   let flightTimeToken = 0;
   function registerFlightTimeWatch() {
     watch(
@@ -600,19 +612,27 @@ export function useChainPlanning(input: {
             ship: PrunApi.Ship;
             origin: string;
             stops: { naturalId: string; planetName: string }[];
+            legPayloads?: (number | undefined)[];
           }
         >();
         for (const sp of plans) {
           if (sp.plan.stops === undefined) {
             continue;
           }
+          const stops = sp.plan.stops.map(s => ({
+            naturalId: s.naturalId,
+            planetName: s.planetName,
+          }));
+          // 每段离站载重与航段一一对应（含归航段）：新公式的时长取决于出发质量，
+          // 不传载重会按规划时的空船质量算，装载后的航段被显著低估。
+          const legCount = stops.length + 1;
           entries.set(sp.ship.ship.id, {
             ship: sp.ship.ship,
             origin: sp.plan.originNaturalId,
-            stops: sp.plan.stops.map(s => ({
-              naturalId: s.naturalId,
-              planetName: s.planetName,
-            })),
+            stops,
+            legPayloads: Array.from({ length: legCount }, (_, index) =>
+              legLoadWeight(sp.plan, index + 1, legCount),
+            ),
           });
         }
         for (const run of runs) {
@@ -626,10 +646,15 @@ export function useChainPlanning(input: {
           if (run.run.stops === undefined) {
             continue;
           }
+          const stops = run.run.stops.map(s => ({
+            naturalId: s.naturalId,
+            planetName: s.planetName,
+          }));
           entries.set(run.shipId, {
             ship,
             origin: run.run.originNaturalId,
-            stops: run.run.stops.map(s => ({ naturalId: s.naturalId, planetName: s.planetName })),
+            stops,
+            legPayloads: runLegPayloads(run.run),
           });
         }
         if (entries.size === 0) {
