@@ -32,8 +32,6 @@ export function buildNativeWaypoints(plan: ChainPlan, loop = false) {
     throw new Error('环线缺少可执行站点、超出舱容或有未满足的产业链需求。');
   }
   const origin = plan.originNaturalId;
-  // 用户 2026-11-19 定：出发站只改卸货 min=0/max=Q（装载保留 min=max 缺料停跑背压）；
-  // 其余站点装/卸都 min=0/max=Q（机会式提取/卸载，上游减产不阻塞）。
   const waypoints: NativeWaypoint[] = [
     {
       location: origin,
@@ -50,10 +48,12 @@ export function buildNativeWaypoints(plan: ChainPlan, loop = false) {
     );
     let steps: NativeRouteStep[];
     if (loop) {
+      // 循环（用户 2026-11-19 定）：出发站只改卸货 min=0/max=Q（装载保留 min=max 缺料停跑
+      // 背压）；其余站点装/卸都 min=0/max=Q（机会式提取/卸载，上游减产不阻塞）。
       // 同 ticker 的采购卸货与链上卸货分开写步骤，合并后无法分别表达来源。
       steps = [
-        ...materialSteps('unload', stop.unloadCx),
-        ...materialSteps('unload', chainUnload),
+        ...materialSteps('unload', stop.unloadCx, 0),
+        ...materialSteps('unload', chainUnload, 0),
         ...materialSteps('load', load, 0),
       ];
     } else {
@@ -61,13 +61,13 @@ export function buildNativeWaypoints(plan: ChainPlan, loop = false) {
       for (const [ticker, amount] of Object.entries(chainUnload)) {
         unload[ticker] = (unload[ticker] ?? 0) + amount;
       }
-      steps = [...materialSteps('unload', unload), ...materialSteps('load', load, 0)];
+      steps = [...materialSteps('unload', unload), ...materialSteps('load', load)];
     }
     waypoints.push({ location: stop.naturalId, steps });
   }
   waypoints.push({
     location: origin,
-    steps: materialSteps('unload', plan.finalUnload),
+    steps: materialSteps('unload', plan.finalUnload, loop ? 0 : undefined),
   });
   for (const [index, waypoint] of waypoints.entries()) {
     const from = waypoints[index - 1]?.location;
@@ -122,8 +122,7 @@ function materialSteps(
   bill: Record<string, number>,
   minimum?: number,
 ): NativeRouteStep[] {
-  // 卸货缺省 min=0（机会式卸载不阻塞）；装载缺省 min=max（仅出发地装载保留背压）。
-  const min = minimum ?? (kind === 'unload' ? 0 : undefined);
+  // 缺省 min=max=计划量（单趟口径）；循环模式由调用方显式传 0 表示机会式装/卸。
   return Object.entries(bill).flatMap(([ticker, amount]) => {
     if (!Number.isSafeInteger(amount) || amount < 0) {
       throw new Error(`${ticker} 的货量无法写入原生 RT。`);
@@ -131,6 +130,6 @@ function materialSteps(
     if (amount === 0) {
       return [];
     }
-    return [{ kind, ticker, amount, ...(min === undefined ? {} : { minimum: min }) }];
+    return [{ kind, ticker, amount, ...(minimum === undefined ? {} : { minimum }) }];
   });
 }

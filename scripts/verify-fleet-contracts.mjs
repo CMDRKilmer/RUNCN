@@ -138,15 +138,15 @@ await check('native RT keeps warehouse departure and return as separate waypoint
   };
   assert.deepEqual(buildNativeWaypoints(plan), [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
     {
       location: 'B',
       steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
-        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+        { kind: 'unload', ticker: 'RAT', amount: 16 },
+        { kind: 'load', ticker: 'FE', amount: 3 },
       ],
     },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
   ]);
   assert.deepEqual(buildNativeWaypoints({ ...plan, finalUnload: {} }).at(-1), {
     location: 'CX',
@@ -1906,18 +1906,18 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
     },
     { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
   ]);
-  // 单趟：采购/链上卸货合并，口径相同。
+  // 单趟：采购/链上卸货合并，min=max=计划量（与循环前的口径一致）。
   assert.deepEqual(buildNativeWaypoints(plan), [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
     {
       location: 'B',
       steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
-        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+        { kind: 'unload', ticker: 'RAT', amount: 16 },
+        { kind: 'load', ticker: 'FE', amount: 3 },
       ],
     },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
   ]);
 });
 
