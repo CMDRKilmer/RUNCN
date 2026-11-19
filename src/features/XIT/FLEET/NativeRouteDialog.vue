@@ -78,7 +78,8 @@ const {
   loop?: boolean;
   // 生成时快照的飞行周期（小时），界面标「预计」。
   cycleHours?: number;
-  // 每轮 SF/FF 消耗；缺省时备货按罐容量保守估。
+  // 每轮 SF/FF 消耗。循环模式必有（ChainView 用 fuelPerRound 算，缺逐段油耗时它自己已回退罐容量）；
+  // 只有非循环暂存才没有，此时 roundBill 不含燃料、也不展示备货口径。
   loopFuel?: { stl: number; ftl: number };
 }>();
 const emit = defineEmits<{ close: []; started: [] }>();
@@ -161,6 +162,7 @@ const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ??
 // 每轮出发地账单 = 航点 0 装载（cxBill）+ 每轮 SF/FF；N 轮总量不超过一船满载。
 const origin = computed(() => waypoints.value[0]?.location.trim() ?? '');
 const cxBill = computed(() => billFromLoadSteps(waypoints.value[0]?.steps ?? []));
+// 每轮账单：循环模式带 fuelPerRound 的 SF/FF；非循环暂存没有燃料数据，按 0 算（此时不展示备货）。
 const roundBill = computed(() => buildRoundBill(cxBill.value, loopFuel ?? { stl: 0, ftl: 0 }));
 const roundMaterials = computed(() => {
   const mats: Record<string, { weight: number; volume: number }> = {};
@@ -234,9 +236,6 @@ const stockingWarnings = computed(() => {
     return [];
   }
   const warnings: string[] = [];
-  if (loopFuel === undefined) {
-    warnings.push('每轮燃料按罐容量上限保守估算（缺逐段油耗数据）。');
-  }
   if (sustain.value < 1) {
     warnings.push('出发地库存不足 1 轮，请先备货再分配飞船。');
   }

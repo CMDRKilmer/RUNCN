@@ -17,7 +17,8 @@ export interface StagedNativeRoute {
   loop?: boolean;
   // 生成时快照的飞行周期（小时），供向导按轮备货与界面标「预计」。
   cycleHours?: number;
-  // 每轮 SF/FF 消耗（收敛估时的逐段油耗之和）：向导按轮备货含燃料；缺省时按罐容量保守估。
+  // 每轮 SF/FF 消耗（收敛估时的逐段油耗之和）：向导按轮备货含燃料。`fuelPerRound` 缺逐段油耗时
+  // 已回退罐容量，所以 loop 为 true 时这个字段必定存在。
   loopFuel?: { stl: number; ftl: number };
 }
 
