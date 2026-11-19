@@ -651,9 +651,10 @@ enhancements, and `off` leaves the underlying table and window styles in effect.
 
 唯一事实源是 `src/features/basic/theme-registry.ts`。新增 token 模式主题只改两处：注册表加一行
 （id/label/desc/mode:'token'），以及在 `src/refined-prun.css` 加一个 `html[data-rp-theme='<id>']`
-精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token，外加首屏防闪的 `body` 底色规则。设置页卡片、
-首屏标记、图表取色、引擎映射全部自动派生，不改其它文件。颜色字面量只允许出现在该精确块内；
-组件规则一律 `var()`，复用 `buildComponentCss(<id>)` 与 `buildCeramicSkin()`。
+精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token（含 `--rp-cc-pulse-*` 三档呼吸灯色），外加
+首屏防闪的 `body` 底色规则。设置页卡片、首屏标记、图表取色、引擎映射全部自动派生，不改其它
+文件。颜色字面量只允许出现在该精确块内；组件规则一律 `var()`，复用 `buildComponentCss(<id>)` 与
+`buildCeramicSkin()`。
 
 特异性：斑马纹 `tbody tr:nth-child(even)` 是 (0,3,3)（`:nth-child` 按类级计）。要压过它的规则
 （如选中行）必须再叠一级 `[data-rp-theme]`，同 `!important` 下文档顺序救不了低特异性。
@@ -663,11 +664,8 @@ enhancements, and `off` leaves the underlying table and window styles in effect.
 文字级对比度，取同色相加深变体作文字/图表色（claude：强调 #d97757、链接文字 #a84c2c、图表 #cf6a45）。
 用一次性 node 脚本解析 CSS 块逐对计算，不入库。
 
-视觉验收：在 `.tmp/` 搭预览页——esbuild（pnpm 下无 `.bin/esbuild`，走
-`node_modules/.pnpm/esbuild@*/node_modules/esbuild` 的 JS API）bundle `theme-ceramic.ts` 取
-`buildComponentCss`，正则字面量提取各主题精确 token 块，mock 游戏类名后 http serve 用浏览器检查
-（`file://` 不加载 ESM；沙箱禁写系统 Temp）。应用内浏览器改不了 viewport，移动端媒体查询只能
-结构性验证；真实游戏内效果以用户实采验收为准。
+视觉验收：在 `.tmp/` 用 http serve 打开预览页检查各主题树（`file://` 不加载 ESM）；移动端媒体查询
+只能结构性验证，真实游戏内效果以用户实采验收为准。
 
 Each feature needing CSS gets a `.module.css` alongside the `.ts`. `applyCssRule` and `C` are auto-imported.
 
