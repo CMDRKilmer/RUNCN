@@ -19,7 +19,6 @@ import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { useChainPlanning } from './use-chain-planning';
 import { useChainLoopPlanning } from './use-chain-loop-planning';
-import { fuelPerRound } from './native-route-loop';
 import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import { sanitizeActName } from './chain-identity';
@@ -69,7 +68,7 @@ import {
 import {
   roundBill as buildRoundBill,
   sustainRounds,
-  fuelPerRound as computeFuelPerRound,
+  fuelPerRound,
   cycleDaysFromHours,
   supplyDaysPerRound,
 } from './native-route-loop';
@@ -356,7 +355,7 @@ function loopCardInfo(
   const fuelNow = ship === undefined ? undefined : shipFuelRemainingFor(ship);
   const fuel =
     record.fuelPerRound ??
-    computeFuelPerRound([], { stlCap: fuelNow?.stlCap ?? 0, ftlCap: fuelNow?.ftlCap ?? 0 });
+    fuelPerRound([], { stlCap: fuelNow?.stlCap ?? 0, ftlCap: fuelNow?.ftlCap ?? 0 });
   const bill = buildRoundBill(nativeRouteOriginBill(record), fuel);
   const sustain = sustainRounds(bill, readOriginStock(origin));
   const sustainText = sustain === Infinity ? '∞' : String(sustain);
