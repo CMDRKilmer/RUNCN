@@ -348,6 +348,29 @@ function loopCardInfo(
   status: RouteStatus | undefined,
 ) {
   const isLoop = record.loop === true || record.repeats === true;
+  const alerts: string[] = [];
+  if (ship !== undefined && ship.condition < 0.8) {
+    alerts.push(`船况 ${Math.round(ship.condition * 100)}%（低于 80%，建议维修后再跑）。`);
+  }
+  if (record.repeats === true && !running) {
+    alerts.push('循环已开但无船执行：可能 PRO 失效或已解除分配，请续费后重新分配。');
+  }
+  if (status === 'blocked') {
+    alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
+  } else if (status === 'waiting') {
+    alerts.push('等待中：上游产出或仓库空间不足。');
+  }
+  // 非循环卡片不展示周期/支撑轮数/补货，跳过仓库与账单读取。
+  if (!isLoop) {
+    return {
+      isLoop,
+      cycleText: '',
+      supplyText: '',
+      sustainText: '—',
+      alerts,
+      replenish: undefined,
+    };
+  }
   const cycleText =
     record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
   const supplyText =
@@ -360,20 +383,8 @@ function loopCardInfo(
   const bill = buildRoundBill(nativeRouteOriginBill(record), fuel);
   const sustain = sustainRounds(bill, readOriginStock(origin));
   const sustainText = sustain === Infinity ? '∞' : String(sustain);
-  const alerts: string[] = [];
-  if (ship !== undefined && ship.condition < 0.8) {
-    alerts.push(`船况 ${Math.round(ship.condition * 100)}%（低于 80%，建议维修后再跑）。`);
-  }
-  if (record.repeats === true && !running) {
-    alerts.push('循环已开但无船执行：可能 PRO 失效或已解除分配，请续费后重新分配。');
-  }
-  if (isLoop && sustain < 1) {
+  if (sustain < 1) {
     alerts.push('出发地库存不足 1 轮，请补货后再分配。');
-  }
-  if (status === 'blocked') {
-    alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
-  } else if (status === 'waiting') {
-    alerts.push('等待中：上游产出或仓库空间不足。');
   }
   return {
     isLoop,
@@ -381,7 +392,7 @@ function loopCardInfo(
     supplyText,
     sustainText,
     alerts,
-    replenish: isLoop ? cxShortfallPackage(origin, bill) : undefined,
+    replenish: cxShortfallPackage(origin, bill),
   };
 }
 
