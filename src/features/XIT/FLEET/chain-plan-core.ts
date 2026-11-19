@@ -40,6 +40,35 @@ export interface ChainPlanningSnapshot {
   loop?: boolean;
 }
 
+// 满载补给天数：船舱装满时的补给量能撑几天（重量/体积先到者决定）。
+// 只算选中基地的日耗（原料+劳动力消耗品），不含链上输送与返航货占用的舱容；
+// 任一消耗 ticker 缺重量/体积数据时返回 undefined，宁可不出数也不按偏小的需求报大天数。
+function supplyCapacityDays(planning: ChainPlanningSnapshot): number | undefined {
+  const { capacity, bases, materials } = planning;
+  let dailyWeight = 0;
+  let dailyVolume = 0;
+  for (const base of bases) {
+    for (const [ticker, mat] of Object.entries(base.burn)) {
+      const daily = mat.input + mat.workforce;
+      if (daily <= 0) {
+        continue;
+      }
+      const material = materials[ticker];
+      if (material === undefined) {
+        return undefined;
+      }
+      dailyWeight += material.weight * daily;
+      dailyVolume += material.volume * daily;
+    }
+  }
+  const limits = [
+    dailyWeight > 0 ? capacity.weight / dailyWeight : Infinity,
+    dailyVolume > 0 ? capacity.volume / dailyVolume : Infinity,
+  ];
+  const days = Math.min(...limits);
+  return Number.isFinite(days) ? days : undefined;
+}
+
 export function computeChainPlan(
   input: ChainPlanningSnapshot,
   formatAmount: (amount: number) => string,
@@ -141,6 +170,7 @@ export function computeChainPlan(
     loadOnReturn: { weight: 0, volume: 0 },
     overCapacity: false,
   };
+  plan.supplyCapacityDays = supplyCapacityDays(input);
 
   if (rawEdges.length === 0) {
     warnings.push('未检测到基地间的产业链关系，将执行纯补给环线（采购 → 卸货 → 提取 → 归航）。');

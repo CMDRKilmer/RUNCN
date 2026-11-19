@@ -259,6 +259,12 @@ const loopSupplyText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : `${cycleDaysFromHours(hours).toFixed(1)} 天`;
 });
+// 一船满载补给能撑几天（只算基地日耗）。周期短的单基地环线每轮只送一个周期的量，
+// 这个参考值会远大于每轮补给天数——避免把它当成「计算错了」。
+const loopCapacityText = computed(() => {
+  const days = loopPlan.value?.plan?.supplyCapacityDays;
+  return days === undefined ? '' : `${days.toFixed(1)} 天`;
+});
 const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
 // ── 执行 ─────────────────────────────────────────────────────
@@ -1439,7 +1445,9 @@ function flightTotalText(shipId: string): string {
         <template v-else-if="loopActive">
           循环模式 · 本轮周期 {{ loopCycleText }}（预计，随出发时刻漂移）<template
             v-if="loopSupplyText">
-            · 每轮补给 {{ loopSupplyText }} 库存</template
+            · 每轮补给 {{ loopSupplyText }} 库存<template v-if="loopCapacityText"
+              >（满载可至 {{ loopCapacityText }}）</template
+            ></template
           >
           <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
         </template>

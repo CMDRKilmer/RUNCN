@@ -1925,6 +1925,44 @@ await check('loop plan balances chain flow on steady gross need', () => {
   assert.equal(loop.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 10);
 });
 
+await check('plan reports hold-limited supply days for the selected bases', () => {
+  const mat = input => ({
+    input,
+    output: 0,
+    workforce: 0,
+    inventory: 0,
+    daysLeft: 5,
+  });
+  const base = (naturalId, burn) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 1,
+    cxBuy: true,
+    burn,
+    products: [],
+    bill: {},
+    projectedStock: {},
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity,
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { RAW: { weight: 2, volume: 1 } },
+    consumers: new Map(),
+    bases: [base('A', { RAW: mat(5) })],
+  };
+  // 日耗 5 → 重量 10 t/天、体积 5 m³/天：100 t 船舱先到，满载可补 10 天。
+  assert.equal(computeChainPlan(snapshot, String).supplyCapacityDays, 10);
+  // 消耗物资缺重量/体积：宁可不出数，也不按偏小的需求报出偏大的天数。
+  assert.equal(
+    computeChainPlan({ ...snapshot, materials: {} }, String).supplyCapacityDays,
+    undefined,
+  );
+});
+
 await check('waypoints: origin load min=max, all other steps min=0/max=Q', () => {
   const plan = {
     originNaturalId: 'CX',

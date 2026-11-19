@@ -47,6 +47,7 @@
 - `cycleHours = estimateChainFlightTimes({ ship, origin, stops, legPayloads, refuelAtOrigin: true }).totalHours`。`legPayloads` 取计划的 `legLoadWeight(plan, i, legCount)`（逐段离站载重）；首段按出发地补满油罐、后续段按上一段余油递推（与原生 RT 只在出发地补满一致，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
 - `est.ok === false`（任一段判缺）时不得进入循环模式：得不到可靠周期，列出缺数据段并退回单趟。
 - `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；规划界面天数输入只读，显示「本轮周期」。
+- **每轮补给天数 = 周期天数，另给「满载可至」参考**：稳态每轮只送一个周期的量，所以界面的「每轮补给 X 天库存」恒等于周期天数，与基地数量、船舱容量无关（周期短的单基地环线 X 很小）。为避免被当成算错，旁边给出 `ChainPlan.supplyCapacityDays`（一船满载补给能撑几天 = 舱容 ÷ 各基地日耗的重量/体积，只算补给、不含链上输送与返航货占舱；消耗物资缺重量/体积时不出数）。每轮装满这个天数会让基地逐轮囤积、仓储满后 UNLOAD 永久等待，故它只是参考上界。
 - **周期逐轮漂移**：估时按出发时刻的天体位置推算，循环每轮实际出发时刻不同，实际周期 ≠ 生成时 `cycleDays`。`cycleDays` 只是写步骤时的快照；不做后台重算（不轮询），运行中卡片的周期标「预计」。
 
 **迭代收敛**
@@ -152,6 +153,7 @@
 ## 数据与接口
 
 - `ChainFlightLeg` 增加 `stlUsed?/ftlUsed?`（每段油耗，供每轮 SF/FF 账单）。
+- `ChainPlan` 增加 `supplyCapacityDays?`（一船满载补给能撑几天；界面「满载可至」参考）。
 - `NativeRouteRecord` 增加 `loop?: boolean`、`cycleHours?: number`。
 - `RouteData` / `NativeRouteView` 增加 `repeats?: boolean`，以游戏定义覆盖本地快照。
 - `computeChainPlan` 增加稳态 need 口径开关（loop）；`buildNativeWaypoints` 写 min/max：出发站装载 `min=max`（背压），出发站卸货与其余站点装/卸 `min=0`。
@@ -181,7 +183,7 @@
 
 回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
 
-- `../../scripts/verify-fleet-contracts.mjs`：稳态每轮账单、**账单天数随周期**（`combinedBaseBill` 桩按传入 `config.days` 回值：loop + 2 天周期得 2、单趟仍是手填 10 天，CX 采购量 4 而非 20）、周期闭环迭代、备货轮数上限、支撑轮数、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
+- `../../scripts/verify-fleet-contracts.mjs`：稳态每轮账单、**账单天数随周期**（`combinedBaseBill` 桩按传入 `config.days` 回值：loop + 2 天周期得 2、单趟仍是手填 10 天，CX 采购量 4 而非 20）、**满载补给天数**（舱容 ÷ 日耗，重量先到；缺物料重量/体积时不出数）、周期闭环迭代、备货轮数上限、支撑轮数、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
 - `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
 - 循环模式不生成 ACT 的**守卫在 `ChainView.vue`**（按钮置灰 + `execute()` 早退）：脚本只核对两处共用 `actBlockedReason` 的同一文案、没有各自硬编码；置灰与拦截行为本身属浏览器验收。
 - 浏览器：循环模式下「执行环线」置灰、tooltip 指向「生成原生 RT」；点不可用按钮不产生 ACT 包/触发器。

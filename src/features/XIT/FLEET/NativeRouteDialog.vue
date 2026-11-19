@@ -268,6 +268,12 @@ const cycleText = computed(() =>
 const supplyText = computed(() =>
   cycleHours === undefined ? '' : `${cycleDaysFromHours(cycleHours).toFixed(1)} 天`,
 );
+// 一船满载补给能撑几天（只算基地日耗，不含链上输送与返航货占舱）：与每轮补给天数
+// 对照，说明短周期环线每轮只送一个周期的量。
+const capacityText = computed(() => {
+  const days = candidate.plan.supplyCapacityDays;
+  return days === undefined ? '' : `${days.toFixed(1)} 天`;
+});
 const sustainText = computed(() => (sustain.value === Infinity ? '∞' : String(sustain.value)));
 const stockingWarnings = computed(() => {
   if (!loop) {
@@ -849,7 +855,10 @@ async function showRoute() {
         >（预计，随出发时刻漂移）</div
       >
       <div
-        >每轮补给：<strong>{{ supplyText || '—' }}</strong> 库存（稳态下等于周期）</div
+        >每轮补给：<strong>{{ supplyText || '—' }}</strong> 库存（稳态下等于周期<template
+          v-if="capacityText"
+          >；满载可至 {{ capacityText }}</template
+        >）</div
       >
       <label
         >备货轮数

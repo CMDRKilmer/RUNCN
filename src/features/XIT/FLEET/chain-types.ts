@@ -89,6 +89,10 @@ export interface ChainPlan {
   // 归航前舱载（最后站离开后、卸最终产物前）。
   loadOnReturn: { weight: number; volume: number };
   overCapacity: boolean;
+  // 满载补给天数参考：船舱装满时的补给量能撑几天（只算基地日耗，不含链上输送与
+  // 返航货占舱）。循环模式给「每轮补给天数」作对照：稳态每轮只送一个周期的量，
+  // 周期短时这个参考值会明显更大。物料缺重量/体积时不提供。
+  supplyCapacityDays?: number;
   // 运回空间站产物的标注：ticker → 原因（无下游 / 循环下游需补给 / 循环下游已充足）。
   finalUnloadNotes?: Record<string, string>;
 }
