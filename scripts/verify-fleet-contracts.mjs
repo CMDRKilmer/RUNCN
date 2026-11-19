@@ -1826,16 +1826,35 @@ await check('loop supply days per round follow the bottleneck stop', () => {
   assert.equal(supplyDaysPerRound([{ days: 0 }, { days: -1 }]), undefined);
 });
 
-await check('loop eligibility requires one ship, bases, two destinations and a full estimate', () => {
-  assert.deepEqual(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: true }), {
-    ok: true,
-    reasons: [],
-  });
-  assert.equal(loopEligibility({ shipCount: 2, baseCount: 1, distinctDestinations: 2, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 0, distinctDestinations: 2, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 1, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false }).ok, false);
-});
+await check(
+  'loop eligibility requires one ship, bases, two destinations and a full estimate',
+  () => {
+    assert.deepEqual(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: true }),
+      {
+        ok: true,
+        reasons: [],
+      },
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 2, baseCount: 1, distinctDestinations: 2, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 0, distinctDestinations: 2, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 1, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false })
+        .ok,
+      false,
+    );
+  },
+);
 
 await check('loop plan balances chain flow on steady gross need', () => {
   // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环毛需求=ceil(10)=10。
@@ -1882,7 +1901,12 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
     cxBill: { RAT: 14 },
     finalUnload: { FE: 3 },
     stops: [
-      { naturalId: 'A', unloadCx: {}, unloadChain: new Map(), load: new Map([['RAT', { amount: 2 }]]) },
+      {
+        naturalId: 'A',
+        unloadCx: {},
+        unloadChain: new Map(),
+        load: new Map([['RAT', { amount: 2 }]]),
+      },
       {
         naturalId: 'B',
         unloadCx: { RAT: 14 },
@@ -1928,20 +1952,25 @@ const loopInput = bs => ({
   capacity: { weight: 100, volume: 100, freeWeight: 100, freeVolume: 100 },
   originStock: {},
 });
-const fakeEstimate = hoursOf => async ({ stops }) => {
-  const h = hoursOf();
-  const legs = [];
-  let t = 1_000_000;
-  const per = h / (stops.length + 1);
-  for (let i = 0; i <= stops.length; i++) {
-    legs.push({ ok: true, hours: per, departAtMs: t, arriveAtMs: t + per * 3600000 });
-    t += per * 3600000;
-  }
-  return { ok: true, shipRegistration: 'S', legs, totalHours: h };
-};
+const fakeEstimate =
+  hoursOf =>
+  async ({ stops }) => {
+    const h = hoursOf();
+    const legs = [];
+    let t = 1_000_000;
+    const per = h / (stops.length + 1);
+    for (let i = 0; i <= stops.length; i++) {
+      legs.push({ ok: true, hours: per, departAtMs: t, arriveAtMs: t + per * 3600000 });
+      t += per * 3600000;
+    }
+    return { ok: true, shipRegistration: 'S', legs, totalHours: h };
+  };
 
 await check('loop iteration converges and overrides cycle days', async () => {
-  const r = await computeLoopPlan(loopInput(bases()), fakeEstimate(() => 48));
+  const r = await computeLoopPlan(
+    loopInput(bases()),
+    fakeEstimate(() => 48),
+  );
   assert.equal(r.ok, true);
   assert.equal(r.converged, true);
   assert.equal(r.iterations, 2);
@@ -1976,7 +2005,10 @@ await check('loop blocks when flight estimate is incomplete', async () => {
 });
 
 await check('loop requires at least one base', async () => {
-  const r = await computeLoopPlan(loopInput([]), fakeEstimate(() => 48));
+  const r = await computeLoopPlan(
+    loopInput([]),
+    fakeEstimate(() => 48),
+  );
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some(x => x.includes('基地')));
 });
