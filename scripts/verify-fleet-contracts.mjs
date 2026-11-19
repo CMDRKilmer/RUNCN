@@ -434,6 +434,53 @@ await check('snapshot projection includes started production and arrival consump
   assert.equal(computeChainPlan(snapshot, String).finalUnload.RAW, 12);
   assert.equal(fixture.burns.A.burn.RAW.output, 2);
 });
+await check('snapshot projection schedules recurring copies after the batch ends', () => {
+  const bs = bases().slice(0, 1);
+  bs[0].config.days = 0;
+  fixture.bills.A = {};
+  fixture.products.A = ['RAT'];
+  fixture.burns.A = {
+    burn: { RAT: { input: 0, output: 1, workforce: 0, inventory: 0, daysLeft: Infinity } },
+  };
+  // 两槽位：非循环订单到 1,010,000 结束；循环订单到 1,020,000 结束。
+  // 到港时刻 = 1,030,000（now + 30 s）。循环副本只能从 1,020,000 开始，
+  // 若提前占用 1,010,000 释放的槽位，到港产量会从 30 高估成 40。
+  fixture.production.A = [
+    {
+      capacity: 2,
+      orders: [
+        {
+          started: { timestamp: 900_000 },
+          completion: { timestamp: 1_010_000 },
+          duration: { millis: 110_000 },
+          halted: false,
+          recurring: false,
+          inputs: [],
+          outputs: [{ material: { ticker: 'OTH' }, amount: 5 }],
+        },
+        {
+          started: { timestamp: 900_000 },
+          completion: { timestamp: 1_020_000 },
+          duration: { millis: 120_000 },
+          halted: false,
+          recurring: true,
+          inputs: [],
+          outputs: [{ material: { ticker: 'RAT' }, amount: 120 }],
+        },
+      ],
+    },
+  ];
+  const snapshot = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    // 30 s 后到港。
+    arrivalHoursByNaturalId: new Map([['A', 30_000 / 3_600_000]]),
+  });
+  // 当前批次：120 × 20 s / 120 s = 20；下一份：120 × 10 s / 120 s = 10。
+  assert.ok(Math.abs(snapshot.bases[0].projectedStock.RAT - 30) < 1e-9);
+});
+
 await check(
   'chain allocation prioritizes the most urgent downstream without mutating input',
   () => {
