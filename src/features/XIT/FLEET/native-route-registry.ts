@@ -29,6 +29,14 @@ export interface NativeRouteRecord {
   chainName: string;
   createdAt: number;
   waypoints: NativeRouteWaypointRecord[];
+  // 向导按循环模式生成（本地元数据）；服务端 Loop 开关以 repeats 为准。
+  loop?: boolean;
+  // 生成时快照的飞行周期（小时）：估时随出发时刻漂移，运行中只标「预计」。
+  cycleHours?: number;
+  // 游戏侧 Loop 开关，合并时以服务端 RouteData.repeats 覆盖本地快照。
+  repeats?: boolean;
+  // 每轮 SF/FF 消耗（生成时快照）：运行中卡片据此算出发地支撑轮数与补货缺口。
+  fuelPerRound?: { stl: number; ftl: number };
 }
 
 // 按**公司**分键：同一浏览器里换公司后，上一个公司的航线号属于另一个账号，

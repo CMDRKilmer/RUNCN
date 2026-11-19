@@ -37,6 +37,9 @@ export interface ChainFlightLeg {
   // 预计出发/到达时刻（毫秒，游戏世界时间）。
   departAtMs: number;
   arriveAtMs: number;
+  // 该段油耗（出发油量 − 到达余量），供循环每轮 SF/FF 账单；缺油量数据时 undefined。
+  stlUsed?: number;
+  ftlUsed?: number;
 }
 
 /** 一条环线（一艘船）的各段飞行时间预估。 */
@@ -129,6 +132,8 @@ export async function estimateChainFlightTimes(
     // 起点与终点相同（如站点重复/归航即出发地）：无航程。
     if (from.toUpperCase() === to.toUpperCase()) {
       leg.ok = true;
+      leg.stlUsed = 0;
+      leg.ftlUsed = 0;
       return { leg };
     }
     const payload = input.legPayloads?.[legIndex];
@@ -164,6 +169,13 @@ export async function estimateChainFlightTimes(
       stl: Number.isFinite(plan.best.stlRemaining) ? Math.max(0, plan.best.stlRemaining) : fuel.stl,
       ftl: Number.isFinite(plan.best.ftlRemaining) ? Math.max(0, plan.best.ftlRemaining) : fuel.ftl,
     };
+    // 逐段油耗 = 出发油量 − 到达余量；任一端不可读时留 undefined，由账单侧回退罐容量。
+    if (typeof fuel.stl === 'number' && Number.isFinite(plan.best.stlRemaining)) {
+      leg.stlUsed = Math.max(0, fuel.stl - Math.max(0, plan.best.stlRemaining));
+    }
+    if (typeof fuel.ftl === 'number' && Number.isFinite(plan.best.ftlRemaining)) {
+      leg.ftlUsed = Math.max(0, fuel.ftl - Math.max(0, plan.best.ftlRemaining));
+    }
     return { leg, remaining };
   }
 

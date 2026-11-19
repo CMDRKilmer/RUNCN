@@ -1,6 +1,6 @@
 # 原生 RT 循环执行（XIT FLEET）
 
-> 状态：方案（未实现）。
+> 状态：已实现（待浏览器验收）。纯数据/计算层（步骤 1–3、4 核心、6 数据、8 文档）、向导/规划 UI（步骤 4b、5）与运行中卡片循环状态/补货/预检（步骤 7）均已落地。UI 均需浏览器验收；RTE 阻塞/等待中文文案、min=0 运行语义待实采校准。
 
 给 XIT FLEET 生成的原生 RT 增加可选「循环执行」：写完航点与装卸步骤后打开游戏自带的 Loop，由游戏服务端反复执行同一闭环。循环不依赖浏览器内的 ACT 触发器，关掉页面仍继续跑。
 
@@ -42,27 +42,62 @@
 
 ### 周期与运量
 
-- `cycleHours = estimateChainFlightTimes(...).totalHours`（已包含归航段，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
-- `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；规划界面的天数输入只读，显示「本轮周期」。
-- 现有 `planChainRoute` 按 `days` 计算 `need`/`avail`；覆盖后每轮运量等于一轮消耗/产出。
-- 质量变化影响飞行速度：计划 → 质量 → 飞行估时 → 计划，迭代最多 3 次，变化 <5% 收敛；不收敛保留最后一次并给 warning。
-- 基地仓储上限仍会钳制天数；若 `supplies-cap` 把某基地压到小于周期，提示「该基地供不上这个周期」。
-- 慢基地会拖长整圈：`本轮装载量 / 基地日产量 > cycleDays` 时警告。
+**周期估算（生成时快照）**
+
+- `cycleHours = estimateChainFlightTimes({ ship, origin, stops, legPayloads, refuelAtOrigin: true }).totalHours`。`legPayloads` 取计划的 `legLoadWeight(plan, i, legCount)`（逐段离站载重）；首段按出发地补满油罐、后续段按上一段余油递推（与原生 RT 只在出发地补满一致，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
+- `est.ok === false`（任一段判缺）时不得进入循环模式：得不到可靠周期，列出缺数据段并退回单趟。
+- `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；规划界面天数输入只读，显示「本轮周期」。
+- **周期逐轮漂移**：估时按出发时刻的天体位置推算，循环每轮实际出发时刻不同，实际周期 ≠ 生成时 `cycleDays`。`cycleDays` 只是写步骤时的快照；不做后台重算（不轮询），运行中卡片的周期标「预计」。
+
+**迭代收敛**
+
+- 闭环：计划 → 逐段载重 → 估时（`totalHours` + 各站 `arriveAtMs`）→ 到港时刻排产库存（`projectedStock`，槽位事件）→ 计划。
+- 初值用当前手填天数跑一遍计划取载重；估时得 `cycleDays` 后覆盖天数重规划，并把各站 `arriveAtMs` 折算成 `arrivalHoursByNaturalId` 传入（取货按到港预计库存，`../../src/features/XIT/FLEET/chain-data.ts`）。
+- 最多 3 次，`|ΔcycleHours| / cycleHours < 5%` 收敛；不收敛保留最后一次并 warning。载重改时长、时长改到港排产，必须整条闭环迭代，不能只迭代 `totalHours`。
+
+**稳态运量（关键口径）**
+
+- 原生步骤是固定绝对量、每轮重复执行。输入配送量按**稳态流量** = `cycleDays × 日耗（原料+消耗品）`，**不减当前库存**——基地保留原有缓冲，每轮恰好补上一轮消耗。沿用 `need`（`ceil(days×日耗 − 库存)`，`chain-plan-core.ts`）会让固定步骤逐轮少送、基地饿死。
+- loop 模式给 `computeChainPlan` 单独的稳态 need 口径；`avail` 仍按到港预计库存 − 自用预留。当前库存只用于首轮可行性与仓储余量警告，不进入重复写入的绝对量。
+- 链上产物提取（基地 LOAD）= 平衡后的 flow，best-effort：减产轮少提、不阻塞。
+
+**步骤 min/max（出发站装载保留背压，其余机会式）**
+
+- 出发站（航点 0）**装载**（`cxBill` 采购/消耗品）：LOAD `min=max=Q`（缺料在出发地阻塞，船不发，「缺料停跑」背压保留）；出发站**卸货**（归航 `finalUnload`）`min=0, max=Q`。
+- 其余站点：装/卸都 `min=0, max=Q`——基地提取 LOAD、下游/链上 UNLOAD 均机会式，上游减产时船上货不足 Q 也不阻塞（用户 2026-11-19 定：出发站只改卸货，其他站点装货也 min=0）。
+- `min=0` **socket 可写已实采**（2026-11-19）：`EDIT_LOAD_STEP` 与 `EDIT_UNLOAD_STEP` 写 `minimum:{type:'ABSOLUTE',units:0}` 均被服务端接受并回显 `units:0`（**UNLOAD 对称性成立**；新建步骤默认 `min=1`，需显式改 0）。「不足不等待、只按现有量搬运」由手册规则推导（min=0 永不触发「不足最小值」），实机执行行为待确认。目标仓库无空间仍原地等待（仓储背压保留）。
+
+**仓储与慢基地**
+
+- 循环模式**不**按基地 cap 把 `cycleDays` 往下钳（钳了会与其他基地/周期失同步）。改为校验余量：基地当前库存 + 本轮配送量 > 仓储上限，或 cap < `cycleDays` 时，警告「该基地装不下/供不上这个周期」，由玩家缩短周期（减基地/换快船）或扩仓。
+- 慢基地：`本轮提取量 / 基地日产量 > cycleDays` 时警告（产出追不上周期）。
 - 周期只含飞行，不含装卸停留；界面按「飞行周期」展示，不用它冒充精确到港时刻。
 
 ### 备货
 
-- 每轮出发地清单 = `cxBill` + `SF`/`FF` 每轮消耗（优先用现有燃料模型；算不出时用油箱容量上限）。
-- 备货轮数 N：默认 1，范围 `1..Nmax`；`Nmax = max(1, floor(min(weightCap / cycleW, volumeCap / cycleV)))`，即最多备到装满船，不允许超过。
-- 采购包只含出发地 CX 可买的物料；基地端不采购，只显示本轮卸货/装载与当前库存的差额。
-- 船离港后出发地仓库空出，正好补下一轮；运行中的卡片也提供「补货」，按当前库存算缺口，不再只在未运行时显示。
-- 显示「出发地库存可支撑 N 轮」，按清单里最先耗尽的物料计算。
+**每轮出发地账单**
+
+- `roundBill = cxBill + 每轮 SF/FF 消耗`。`cxBill` = 航点 0 的 LOAD 步骤汇总（`nativeRouteOriginBill`，`../../src/features/XIT/FLEET/native-route-purchase.ts`）。
+- 每轮 SF/FF = 整圈消耗：v1 只在出发地补满（REFUEL `CAPACITY`），每轮补油量 = 罐容量 − 归航到港余量 = 逐段消耗之和。由收敛后的估时取逐段 `stlUsed/ftlUsed` 求和（需给 `ChainFlightLeg` 增加油耗字段）；算不出时回退罐容量上限（偏保守）。
+- 基地端不采购，只显示本轮卸货/装载与当前库存的差额。
+
+**备货轮数 N**
+
+- 默认 1，范围 `1..Nmax`；`Nmax = max(1, floor(min(weightCap / cycleW, volumeCap / cycleV)))`，`cycleW/cycleV` = `roundBill` 的重量/体积（含 SF/FF）。即备货总量不超过一船满载。
+- 采购包只含出发地 CX 可买的物料；SF/FF 若该交易所不可买，只提示缺口、不下单。
+- 复用 `billShortfall`，输入 `N × roundBill` 对 `originStock` 算缺口，生成 `CX Buy`（`useCXInv: false`，避免重复抵扣）。
+
+**支撑轮数与运行中补货**
+
+- 「出发地库存可支撑 N 轮」= `min over roundBill 物料 floor(stock / 每轮量)`（含 SF/FF），最先耗尽者决定。
+- 船离港后出发地仓库空出，正好补下一轮。运行中卡片也提供「补货」：按 `N × roundBill − 当前 originStock` 算缺口（不再只在未运行时显示）；出发地非交易所或已备齐时置灰。
 
 ### Loop 开关
 
 - `RouteData` 增加 `repeats?: boolean`（服务端响应已带该字段，当前类型未声明）。
-- 先实采开关报文：创建航线 → 手动切换 Loop → 对比 `SHIP_ROUTES_GET_ROUTES`。预计是 `SHIP_ROUTES_EDIT_ROUTE` 携带 `repeats`，未确认前不硬编码。
-- `socketSetRouteRepeats` 写入后必须用响应或重新 GET 校验 `repeats`；失败回退界面路径：打开 RT、点击 LOOP、读回状态。
+- **开关报文已实采**（`prun-client-log.json` / `prun-log.json`，2026-11-19）：`SHIP_ROUTES_SET_REPEAT`，payload `{ routeId, repeats: boolean, actionId }`；响应是单条 `SHIP_ROUTES_ROUTE`（完整航线，`repeats` 已翻转）。与现有变更类请求同口径，套用 `native-route-socket` 的 FIFO 串行 + 按 routeId 匹配单条响应。
+- `socketSetRouteRepeats(routeId, repeats)` 写入后直接用响应里的 `repeats` 校验（必要时重新 GET）；失败回退界面路径：打开 RT、点击 LOOP、读回状态。
+- Loop 开关与航点/步骤独立：实采时航线只有 3 航点、0 步骤即可切 `repeats:true`。写入顺序仍按「建航线 → 航点/档位/步骤 → 开 Loop → 读回」，但开关不必等步骤写完。
 - 关闭循环在下一轮结束生效；删除航线前必须先解除分配。
 - 循环开关与补货仍由向导/卡片点击触发。
 
@@ -74,54 +109,77 @@
 
 ### 监控与异常
 
-- `RouteExecutionRow` 扩展出状态（Step blocked / Blocked / Waiting）。中文/英文文案需从游戏 RTE 实采；读不到时保留「—」。
-- 只在面板打开、点「运行中」页签或向导写入后校准；不轮询。
-- 卡片显示：Loop 徽标、飞行周期、当前轮/总站数、阻塞状态、出发地可支撑轮数。
-- 告警：步骤阻塞、飞行阻塞、循环停止（船已解除分配且 Loop 仍为开）、船况 <80%、出发地库存 <1 轮、非计划货物占用舱容、基地仓储将满。
-- 飞行阻塞提示手动解除分配并重新分配；PRO 失效只能由玩家续费后重新分配。
+**状态来源**
+
+- `RouteExecutionRow` 增加 `status`（从行文本解析 Step blocked / Blocked / Waiting 等，`../../src/features/XIT/FLEET/native-route-rte.ts`）；中/英文文案需从 RTE 实采，读不到保留 `undefined` → 显示「—」。
+- `RouteData.repeats` 以服务端为准（见 Loop 开关）。
+- **轮次号不可读**：RTE 与 `RouteData` 都不暴露「第几轮」。卡片显示「当前站/总站数」（`routeStopStates`/`routeProgressText`），不伪造轮次计数；页面关闭期间的轮次无法累计。
+
+**校准触发**：面板打开停在「运行中」、点页签、向导写入后各校准一次；不轮询（沿用 `collectNativeRoutes` 现有触发口径）。
+
+**卡片显示**：Loop 徽标、飞行周期（标「预计」）、当前站/总站数、阻塞状态、出发地可支撑轮数。
+
+**告警（含数据源）**
+
+- 步骤阻塞 / 飞行阻塞：RTE 行 `status`。飞行阻塞提示手动解除分配再重新分配。
+- 循环停止：`ship.assignedRoute` 已无该航线但 `repeats` 仍为开。PRO 失效只能由玩家续费后重新分配。
+- 船况 <80%：`ship.condition`。
+- 出发地库存 <1 轮：支撑轮数 <1。
+- 非计划货物占用舱容：`cargoStore` 与计划载重的差额。
+- 基地仓储将满：`daysUntilFull` 偏小，或库存 + 本轮配送 > cap。
 
 ### 分配前预检
 
+- 恰好 1 艘船、至少 1 个基地、至少 2 个不同目的地。
 - 船在出发地，或剩余燃料足够飞到出发地。
 - 货舱为空，或剩余舱容足够装下本轮计划；非计划货物必须列出。
 - 出发地库存 ≥1 轮（含 SF/FF）。
-- 至少 2 个不同目的地。
-- Loop 已确认打开。
+- 各基地仓储余量够本轮配送（不足则警告，运行中可能阻塞）。
+- Loop 已确认打开（`repeats` 读回）。
 - 无同船旧环线 ACT/触发器。
 - 玩家有 PRO（无法可靠读取时只提示）。
 
 ## 数据与接口
 
+- `ChainFlightLeg` 增加 `stlUsed?/ftlUsed?`（每段油耗，供每轮 SF/FF 账单）。
 - `NativeRouteRecord` 增加 `loop?: boolean`、`cycleHours?: number`。
 - `RouteData` / `NativeRouteView` 增加 `repeats?: boolean`，以游戏定义覆盖本地快照。
-- 新纯函数建议放 `native-route-loop.ts`：周期换算、每轮账单、备货轮数上限、可支撑轮数。
+- `computeChainPlan` 增加稳态 need 口径开关（loop）；`buildNativeWaypoints` 写 min/max：出发站装载 `min=max`（背压），出发站卸货与其余站点装/卸 `min=0`。
+- 新纯函数建议放 `native-route-loop.ts`：周期换算、稳态每轮账单、每轮 SF/FF 消耗、备货轮数上限、可支撑轮数、资格校验。
 - 复用 `native-route-purchase.ts` 的缺口算法，输入改为 N 轮账单。
 
 ## 实现步骤
 
-1. 实采 Loop 开关报文，更新 `native-route-socket.ts`；补 `RouteData.repeats`。
-2. 新增 `native-route-loop.ts`（周期、每轮账单、N 轮备货、资格校验）。
-3. `use-chain-planning.ts` 支持 `cycleDays` 覆盖与迭代；`ChainView.vue` 暴露循环模式。
-4. `NativeRouteDialog.vue` 增加循环选项、写后开 Loop、N 轮备货与警告。
-5. `native-route-registry.ts` / `native-route-game.ts` 记录并合并循环状态。
-6. `ChainView.vue` 运行中卡片显示循环状态、补货与预检。
-7. 更新 `../feature-patterns.md` 的 Chain Planner 一节和 `../architecture.md`（模块边界）。
+1. `native-route-socket.ts` 补 `RouteData.repeats` 与 `socketSetRouteRepeats`（`SHIP_ROUTES_SET_REPEAT`）；装卸步骤支持 `min=0`（报文均已实采，实机执行语义待验证）。
+2. `ChainFlightLeg` 补逐段油耗；新增 `native-route-loop.ts`（周期、稳态每轮账单、SF/FF 消耗、N 轮备货、资格校验）。
+3. `computeChainPlan` 加稳态 need 口径；`buildNativeWaypoints` 按装载端写 min/max。
+4. `use-chain-planning.ts` 支持 `cycleDays` 覆盖与整闭环迭代；`ChainView.vue` 暴露循环模式。
+5. `NativeRouteDialog.vue` 增加循环选项、写后开 Loop、N 轮备货与警告。
+6. `native-route-registry.ts` / `native-route-game.ts` 记录并合并循环状态；`native-route-rte.ts` 解析阻塞状态。
+7. `ChainView.vue` 运行中卡片显示循环状态、补货与预检。
+8. 更新 `../feature-patterns.md` 的 Chain Planner 一节和 `../architecture.md`（模块边界）。
 
 ## 不采用
 
 - **直接给现有单趟计划打开 Loop**：运量按目标天数计算，与飞行周期不一致；也没有按轮备货。
+- **按 need（减库存）写循环绝对量**：固定步骤重复执行会逐轮少送、基地饿死；循环必须按稳态流量写。
+- **按基地 cap 钳短循环周期**：各基地共用一个周期，单独钳短会失同步；改为余量警告。
 - **Loop + ACT 触发器并存**：原生步骤已经装卸，触发器会重复搬运。
 - **多船共用一条循环航线**：每艘船都按同一组绝对量装卸，实际流量按船数倍增，计划失效。
 
 ## 验证
 
-- 回归脚本（`../../scripts/verify-fleet-contracts.mjs`）：每轮账单、周期迭代、备货轮数上限、循环资格、循环模式不生成 ACT、`repeats` 合并。
-- 实机：2 基地 1 船跑满两轮；抽掉一种输入验证步骤阻塞后恢复；航行中补货；关闭 Loop 在下一轮生效。
+- 回归脚本（`../../scripts/verify-fleet-contracts.mjs`）：稳态每轮账单、周期闭环迭代、每轮 SF/FF 消耗、备货轮数上限、支撑轮数、循环资格、循环模式不生成 ACT、min/max 按装载端、`repeats` 合并。
+- 实机：2 基地 1 船跑满两轮；基地有初始缓冲时多轮不饿死、不溢仓；上游减产轮链上提取/卸载不阻塞；抽掉一种出发地输入验证在出发地阻塞、补货后恢复；航行中补货；关闭 Loop 在下一轮生效。
 - 浏览器关闭后循环仍继续；关闭期间不产生扩展请求。
 - 打开/点页签才发 `SHIP_ROUTES_GET_ROUTES` / RTE 读取，符合 ToS 例外清单。
 
 ## 待实采
 
-- Loop 开关的 messageType 与 payload（是否可在 `CREATE_ROUTE` 时直接带 `repeats`）。
+- `min=0` 的**实机执行**语义：不足时是否「不等待、只搬现有量」（LOAD/UNLOAD 协议均已确认可写且回显，2026-11-19）；减产轮链上提取/卸载不阻塞需实机验证。
 - RTE 各状态的界面文案（中/英）。
-- Wait 步骤的 socket 协议（后续把周期拉长到目标天数时使用）。
+- LOAD 步骤 `retain` 字段语义（实采回显 46，RPrun 不写不读）。
+- 未知步骤类型（`UNLOAD_ALL`/`UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`）目前被 `toStep` 丢弃：手动增删 `UNLOAD_ALL`/`UNLOAD_FUEL` 不触发下游时长作废，是否纳入签名待扩展。
+- （可选）`CREATE_ROUTE` 是否能直接带 `repeats`：已有独立 `SET_REPEAT`，非必需。
+
+> 已实采（2026-11-19，prun-client-log / prun-log）：WAIT 协议 `EDIT_WAIT_STEP {amount, unit:'MINUTES'}`、REFUEL `source:'LOCAL_STORE'`+CAPACITY、UNLOAD_FUEL 协议、LOAD/UNLOAD `min=0` 对称回显。详见 feature-patterns socket 表。

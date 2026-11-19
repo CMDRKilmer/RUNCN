@@ -14,6 +14,7 @@ const { fixture, userData, sitesStore, shipsStore, flightsStore, transport, wind
 const { collectChainPlanningSnapshot } = await import('../src/features/XIT/FLEET/chain-data.ts');
 const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-core.ts');
 const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-planning.ts');
+const { computeLoopPlan } = await import('../src/features/XIT/FLEET/use-chain-loop-planning.ts');
 const { fillInventoryDays } = await import('../src/features/XIT/FLEET/supplies-cap.ts');
 const { executeChainPlans, clearShipChainPlan } =
   await import('../src/features/XIT/FLEET/chain-commands.ts');
@@ -36,14 +37,26 @@ globalThis.localStorage = {
 };
 const {
   collectNativeRoutes,
+  matchRunningRoutes,
   mergeRouteRecord,
   recordsToRemoveAfterDelete,
   routeProgressText,
   routeStopStates,
   withoutRouteDefinition,
 } = await import('../src/features/XIT/FLEET/native-route-game.ts');
+const { parseRouteStatus } = await import('../src/features/XIT/FLEET/native-route-rte.ts');
 const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage } =
   await import('../src/features/XIT/FLEET/native-route-purchase.ts');
+const {
+  cycleDaysFromHours,
+  fuelPerRound,
+  roundBill,
+  billWeightVolume,
+  stockingRoundsMax,
+  sustainRounds,
+  supplyDaysPerRound,
+  loopEligibility,
+} = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -125,15 +138,15 @@ await check('native RT keeps warehouse departure and return as separate waypoint
   };
   assert.deepEqual(buildNativeWaypoints(plan), [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
     {
       location: 'B',
       steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16 },
-        { kind: 'load', ticker: 'FE', amount: 3 },
+        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
+        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
       ],
     },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
   ]);
   assert.deepEqual(buildNativeWaypoints({ ...plan, finalUnload: {} }).at(-1), {
     location: 'CX',
@@ -1756,6 +1769,309 @@ await check('fill inventory: fitted days clamp to each base cap', () => {
   assert.equal(fillInventoryDays(undefined, 25, 10), 25);
   assert.equal(fillInventoryDays(undefined, Infinity, 10), 10);
   assert.equal(fillInventoryDays(undefined, 0, 10), 0);
+});
+
+// ---- 原生 RT 循环：周期、每轮账单、备货/支撑轮数、资格、min/max ----
+await check('loop cycle converts flight hours to days', () => {
+  assert.equal(cycleDaysFromHours(48), 2);
+  assert.equal(cycleDaysFromHours(36), 1.5);
+});
+
+await check('loop fuel per round sums leg usage and falls back to tank caps', () => {
+  const legs = [
+    { stlUsed: 10, ftlUsed: 1 },
+    { stlUsed: 20, ftlUsed: 2 },
+    { stlUsed: 5, ftlUsed: 0 },
+  ];
+  assert.deepEqual(fuelPerRound(legs, { stlCap: 1500, ftlCap: 300 }), { stl: 35, ftl: 3 });
+  // 某油罐缺一段油耗 → 该罐回退上限，另一罐仍按实耗。
+  assert.deepEqual(
+    fuelPerRound([{ stlUsed: 10 }, { stlUsed: 20, ftlUsed: 2 }], { stlCap: 1500, ftlCap: 300 }),
+    { stl: 30, ftl: 300 },
+  );
+  assert.deepEqual(fuelPerRound([], { stlCap: 1500, ftlCap: 300 }), { stl: 1500, ftl: 300 });
+});
+
+await check('loop round bill adds SF/FF to the origin load', () => {
+  assert.deepEqual(roundBill({ RAT: 100 }, { stl: 35, ftl: 3 }), { RAT: 100, SF: 35, FF: 3 });
+  // cxBill 已含燃料时叠加；零燃料不写键。
+  assert.deepEqual(roundBill({ SF: 10 }, { stl: 5, ftl: 0 }), { SF: 15 });
+  assert.deepEqual(roundBill({ RAT: 100 }, { stl: 0, ftl: 0 }), { RAT: 100 });
+});
+
+await check('loop stocking cap limits rounds to one full ship load', () => {
+  const materials = { RAT: { weight: 1, volume: 2 }, SF: { weight: 0.5, volume: 0.5 } };
+  const bill = roundBill({ RAT: 10 }, { stl: 4, ftl: 0 });
+  const cycle = billWeightVolume(bill, materials);
+  assert.deepEqual(cycle, { weight: 12, volume: 22 });
+  // min(100/12, 100/22) = 4.54 → 4 轮。
+  assert.equal(stockingRoundsMax({ weight: 100, volume: 100 }, cycle), 4);
+  // 单轮就超舱 → 至少备 1 轮。
+  assert.equal(stockingRoundsMax({ weight: 5, volume: 5 }, cycle), 1);
+  assert.equal(stockingRoundsMax({ weight: 100, volume: 100 }, { weight: 0, volume: 0 }), 1);
+});
+
+await check('loop sustain rounds follow the first material to run out', () => {
+  assert.equal(sustainRounds({ RAT: 10, SF: 5 }, { RAT: 25, SF: 100 }), 2);
+  assert.equal(sustainRounds({ RAT: 10 }, { RAT: 0 }), 0);
+  assert.equal(sustainRounds({ RAT: 10 }, {}), 0);
+  assert.equal(sustainRounds({}, { RAT: 10 }), Infinity);
+});
+
+await check('loop supply days per round follow the bottleneck stop', () => {
+  // 每站送达 = 计划天数 × 日耗 → 覆盖天数 = 计划天数；取最小（瓶颈站）。
+  assert.equal(supplyDaysPerRound([{ days: 4 }, { days: 2.5 }, { days: 4 }]), 2.5);
+  assert.equal(supplyDaysPerRound([{ days: 3 }]), 3);
+  assert.equal(supplyDaysPerRound([]), undefined);
+  assert.equal(supplyDaysPerRound([{ days: 0 }, { days: -1 }]), undefined);
+});
+
+await check('loop eligibility requires one ship, bases, two destinations and a full estimate', () => {
+  assert.deepEqual(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: true }), {
+    ok: true,
+    reasons: [],
+  });
+  assert.equal(loopEligibility({ shipCount: 2, baseCount: 1, distinctDestinations: 2, estimateOk: true }).ok, false);
+  assert.equal(loopEligibility({ shipCount: 1, baseCount: 0, distinctDestinations: 2, estimateOk: true }).ok, false);
+  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 1, estimateOk: true }).ok, false);
+  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false }).ok, false);
+});
+
+await check('loop plan balances chain flow on steady gross need', () => {
+  // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环毛需求=ceil(10)=10。
+  const mat = (input, output, inventory, daysLeft) => ({
+    input,
+    output,
+    workforce: 0,
+    inventory,
+    daysLeft,
+  });
+  const base = (naturalId, burn, products, bill, projectedStock) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 10,
+    cxBuy: true,
+    burn,
+    products,
+    bill,
+    projectedStock,
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity,
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0, B: 1 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['B']]]),
+    bases: [
+      base('A', { RAW: mat(0, 10, 100, Infinity) }, ['RAW'], {}, { RAW: 100 }),
+      base('B', { RAW: mat(1, 0, 5, 5) }, [], { RAW: 10 }, { RAW: 5 }),
+    ],
+  };
+  const single = computeChainPlan(snapshot, String);
+  const loop = computeChainPlan({ ...snapshot, loop: true }, String);
+  assert.equal(single.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 5);
+  assert.equal(loop.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 10);
+});
+
+await check('waypoints: origin load min=max, all other steps min=0/max=Q', () => {
+  const plan = {
+    originNaturalId: 'CX',
+    cxBill: { RAT: 14 },
+    finalUnload: { FE: 3 },
+    stops: [
+      { naturalId: 'A', unloadCx: {}, unloadChain: new Map(), load: new Map([['RAT', { amount: 2 }]]) },
+      {
+        naturalId: 'B',
+        unloadCx: { RAT: 14 },
+        unloadChain: new Map([['RAT', { amount: 2 }]]),
+        load: new Map([['FE', { amount: 3 }]]),
+      },
+    ],
+  };
+  // 用户 2026-11-19 定：出发站只改卸货 min=0（装载 min=max 背压保留）；其余站点装/卸 min=0。
+  // 循环：同 ticker 的采购卸货与链上卸货分成两个步骤。
+  assert.deepEqual(buildNativeWaypoints(plan, true), [
+    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    {
+      location: 'B',
+      steps: [
+        { kind: 'unload', ticker: 'RAT', amount: 14, minimum: 0 },
+        { kind: 'unload', ticker: 'RAT', amount: 2, minimum: 0 },
+        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+      ],
+    },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+  ]);
+  // 单趟：采购/链上卸货合并，口径相同。
+  assert.deepEqual(buildNativeWaypoints(plan), [
+    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    {
+      location: 'B',
+      steps: [
+        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
+        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+      ],
+    },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+  ]);
+});
+
+const loopInput = bs => ({
+  ship: { id: 'S', registration: 'S' },
+  origin: 'CX',
+  bases: bs,
+  capacity: { weight: 100, volume: 100, freeWeight: 100, freeVolume: 100 },
+  originStock: {},
+});
+const fakeEstimate = hoursOf => async ({ stops }) => {
+  const h = hoursOf();
+  const legs = [];
+  let t = 1_000_000;
+  const per = h / (stops.length + 1);
+  for (let i = 0; i <= stops.length; i++) {
+    legs.push({ ok: true, hours: per, departAtMs: t, arriveAtMs: t + per * 3600000 });
+    t += per * 3600000;
+  }
+  return { ok: true, shipRegistration: 'S', legs, totalHours: h };
+};
+
+await check('loop iteration converges and overrides cycle days', async () => {
+  const r = await computeLoopPlan(loopInput(bases()), fakeEstimate(() => 48));
+  assert.equal(r.ok, true);
+  assert.equal(r.converged, true);
+  assert.equal(r.iterations, 2);
+  assert.equal(r.cycleHours, 48);
+  // 手填 10 天被飞行周期 48h=2 天覆盖（不写回 config）。
+  assert.ok(r.plan.stops.every(s => s.days === 2));
+});
+
+await check('loop iteration keeps last estimate when not converged', async () => {
+  const seq = [48, 100, 200];
+  let call = 0;
+  const r = await computeLoopPlan(
+    loopInput(bases()),
+    fakeEstimate(() => seq[Math.min(call++, seq.length - 1)]),
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.converged, false);
+  assert.equal(r.iterations, 3);
+  assert.equal(r.cycleHours, 200);
+  assert.ok(r.warnings.some(w => w.includes('未收敛')));
+});
+
+await check('loop blocks when flight estimate is incomplete', async () => {
+  const r = await computeLoopPlan(loopInput(bases()), async () => ({
+    ok: false,
+    shipRegistration: 'S',
+    legs: [],
+    totalHours: 0,
+  }));
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.some(x => x.includes('估时')));
+});
+
+await check('loop requires at least one base', async () => {
+  const r = await computeLoopPlan(loopInput([]), fakeEstimate(() => 48));
+  assert.equal(r.ok, false);
+  assert.ok(r.reasons.some(x => x.includes('基地')));
+});
+
+await check('native RT merge: server repeats overrides local loop snapshot', () => {
+  const server = { ...nativeRouteServer(stops(25, 50)), repeats: true };
+  const local = {
+    ...nativeRouteLocal(stops(25, 50), [undefined, 10]),
+    loop: true,
+    cycleHours: 48,
+    repeats: false,
+  };
+  const merged = mergeRouteRecord(server, 'S', local);
+  // Loop 开关以服务端为准（本地 false 被覆盖）；循环标记与周期沿用本地元数据。
+  assert.equal(merged.repeats, true);
+  assert.equal(merged.loop, true);
+  assert.equal(merged.cycleHours, 48);
+  // 服务端关闭循环同样覆盖本地开启。
+  assert.equal(mergeRouteRecord({ ...server, repeats: false }, 'S', local).repeats, false);
+  // 无本地记录（游戏 UI 手建）：只有服务端 repeats，无循环元数据。
+  const fresh = mergeRouteRecord(server, 'S', undefined);
+  assert.equal(fresh.repeats, true);
+  assert.equal(fresh.loop, undefined);
+  assert.equal(fresh.cycleHours, undefined);
+});
+
+await check('native RT merge: loop min=0 step is preserved', () => {
+  const waypoint = steps => ({
+    id: 'w0',
+    destination: 'S|PLA|STA,B0',
+    landing: true,
+    fuelUsageFactor: 0.25,
+    reactorUsageFactor: 0.5,
+    preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+    steps,
+  });
+  const server = {
+    id: 'route-1',
+    naturalId: 'RT-A-1',
+    name: 'RT-A-1',
+    repeats: true,
+    waypoints: [
+      waypoint([
+        {
+          type: 'LOAD',
+          material: { id: 'm', ticker: 'RAT' },
+          minimum: { type: 'ABSOLUTE', units: 0 },
+          maximum: { type: 'ABSOLUTE', units: 50 },
+        },
+        {
+          type: 'UNLOAD',
+          material: { id: 'm', ticker: 'RAT' },
+          minimum: { type: 'ABSOLUTE', units: 50 },
+          maximum: { type: 'ABSOLUTE', units: 50 },
+        },
+      ]),
+    ],
+  };
+  const stepsOut = mergeRouteRecord(server, undefined, undefined).waypoints[0].steps;
+  // min=0/max=Q 记下 minimum；min=max 缺省不写（单趟口径不变）。
+  assert.deepEqual(stepsOut, [
+    { kind: 'load', ticker: 'RAT', amount: 50, capacity: undefined, minimum: 0 },
+    { kind: 'unload', ticker: 'RAT', amount: 50, capacity: undefined },
+  ]);
+});
+
+await check('RTE status parses blocked/waiting candidates, undefined otherwise', () => {
+  // 文案待实采校准：先识别手册候选英文关键词，读不到保留 undefined。
+  assert.equal(parseRouteStatus('RT-A-1 S1 Step blocked'), 'blocked');
+  assert.equal(parseRouteStatus('RT-A-1 S1 Blocked'), 'blocked');
+  assert.equal(parseRouteStatus('RT-A-1 S1 Waiting'), 'waiting');
+  assert.equal(parseRouteStatus('RT-A-1 S1'), undefined);
+});
+
+await check('RTE status flows into running route entries', () => {
+  const routes = [nativeRouteServer(stops(25, 50))];
+  const rows = [
+    { text: 'RT-A-1 S1 Blocked', naturalId: 'RT-A-1', shipId: 'S1', status: 'blocked' },
+    { text: 'RT-A-1 S2 Waiting', naturalId: 'RT-A-1', shipId: 'S2', status: 'waiting' },
+  ];
+  const running = matchRunningRoutes(routes, rows);
+  assert.equal(running.entries.length, 2);
+  assert.equal(running.entries.find(x => x.shipId === 'S1').status, 'blocked');
+  assert.equal(running.entries.find(x => x.shipId === 'S2').status, 'waiting');
+});
+
+await check('native RT merge preserves per-round fuel snapshot', () => {
+  const server = { ...nativeRouteServer(stops(25, 50)), repeats: true };
+  const local = {
+    ...nativeRouteLocal(stops(25, 50), [undefined, 10]),
+    loop: true,
+    fuelPerRound: { stl: 120, ftl: 30 },
+  };
+  assert.deepEqual(mergeRouteRecord(server, 'S', local).fuelPerRound, { stl: 120, ftl: 30 });
+  assert.equal(mergeRouteRecord(server, 'S', undefined).fuelPerRound, undefined);
 });
 
 console.log(`PASS ${passes}/${passes}`);

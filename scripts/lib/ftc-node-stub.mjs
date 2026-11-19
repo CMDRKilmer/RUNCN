@@ -126,6 +126,12 @@ export const storagesStore = {
   getByAddressableId: () => undefined,
 };
 
+// '@src/infrastructure/prun-api/data/materials'
+// 燃料单重（t/u）：ship-fuel 用 weightCapacity(吨)/单重 换回罐容量 u。
+export const materialsStore = {
+  getByTicker: ticker => ({ SF: { weight: 0.06 }, FF: { weight: 0.05 } })[ticker],
+};
+
 // '@src/infrastructure/prun-ui/buffers'
 export const showBuffer = async () => {};
 

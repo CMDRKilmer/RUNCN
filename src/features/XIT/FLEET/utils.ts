@@ -274,6 +274,8 @@ export function combinedBaseBill(
   naturalId: string,
   config: DispatchBaseConfig,
   site: PrunApi.Site,
+  // 循环模式传 false：账单按毛需求（不减库存），固定步骤每轮重复才不逐轮少送。
+  useBaseInv = true,
 ): Record<string, number> | undefined {
   if (!config.resupply && !config.repair) {
     return undefined;
@@ -283,7 +285,7 @@ export function combinedBaseBill(
   if (config.resupply) {
     resupply = computeResupplyBill(
       {
-        useBaseInv: true,
+        useBaseInv,
         consumablesOnly: config.consumablesOnly,
         includeConsumables: config.includeConsumables,
       },

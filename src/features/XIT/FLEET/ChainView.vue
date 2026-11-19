@@ -18,6 +18,9 @@ import RadioItem from '@src/components/forms/RadioItem.vue';
 import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { useChainPlanning } from './use-chain-planning';
+import { useChainLoopPlanning } from './use-chain-loop-planning';
+import { fuelPerRound } from './native-route-loop';
+import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import { sanitizeActName } from './chain-identity';
 import type { ShipChainPlan } from './chain-allocation';
@@ -57,7 +60,19 @@ import {
 } from './native-route-game';
 import { stagedNativeRoute } from './native-route-staged';
 import { stagedDispatch } from './staged';
-import { nativeRoutePurchasePackage } from './native-route-purchase';
+import {
+  nativeRoutePurchasePackage,
+  nativeRouteOriginBill,
+  cxShortfallPackage,
+  readOriginStock,
+} from './native-route-purchase';
+import {
+  roundBill as buildRoundBill,
+  sustainRounds,
+  fuelPerRound as computeFuelPerRound,
+  cycleDaysFromHours,
+  supplyDaysPerRound,
+} from './native-route-loop';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -89,6 +104,8 @@ const chainAutoLaunch = useTileState<boolean>('chainAutoLaunch', true);
 const chainAutoTrigger = useTileState<boolean>('chainAutoTrigger', false);
 // 自动恢复：页面加载后自动检测并执行环线断线阶段的下一步（网页关闭期间错过到港触发器）。
 const chainAutoRecover = useTileState<boolean>('chainAutoRecover', true);
+// 循环模式（原生 RT Loop，v1 仅单船）：开启后按飞行周期重算运量，生成时打开游戏 Loop。
+const chainLoopMode = useTileState<boolean>('chainLoopMode', false);
 
 // 换分组时重置基地勾选（新分组默认全选）。
 watch(chainGroup, () => {
@@ -210,6 +227,35 @@ const {
   runs: () => activeRuns.value,
 });
 
+// ── 循环模式（单船闭环迭代）─────────────────────────────────────
+// v1 仅单船：恰好选中 1 艘船时才驱动循环规划；多船/未选船时循环不生效，规划表走原口径。
+const loopShip = computed(() =>
+  selectedShips.value.length === 1 ? selectedShips.value[0] : undefined,
+);
+const { result: loopPlan, computing: loopComputing } = useChainLoopPlanning({
+  ship: () => loopShip.value,
+  bases: () => selectedBases.value,
+  enabled: () => chainLoopMode.value && loopShip.value !== undefined,
+});
+// 循环计划可用：开关开 + 单船 + 迭代成功且有计划。规划表与生成向导据此切到循环口径。
+const loopActive = computed(
+  () =>
+    chainLoopMode.value &&
+    loopShip.value !== undefined &&
+    loopPlan.value?.ok === true &&
+    loopPlan.value.plan !== undefined,
+);
+const loopCycleText = computed(() => {
+  const hours = loopPlan.value?.cycleHours;
+  return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
+});
+// 一轮送达量可补给的库存天数（瓶颈站）；稳态下等于周期天数。
+const loopSupplyText = computed(() => {
+  const days = supplyDaysPerRound(loopPlan.value?.plan?.stops ?? []);
+  return days === undefined ? '' : `${days.toFixed(1)} 天`;
+});
+const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
+
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
   if (chainGroup.value === undefined) {
@@ -236,7 +282,15 @@ function openNativeRoutePlan() {
     return;
   }
   try {
-    const waypoints = buildNativeWaypoints(candidate.plan);
+    const loop = loopActive.value;
+    const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
+    const waypoints = buildNativeWaypoints(plan, loop);
+    // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
+    const fuelNow = shipFuelRemainingFor(candidate.ship.ship);
+    const loopFuel = fuelPerRound(loopPlan.value?.estimate?.legs ?? [], {
+      stlCap: fuelNow.stlCap,
+      ftlCap: fuelNow.ftlCap,
+    });
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {
@@ -245,6 +299,7 @@ function openNativeRoutePlan() {
       waypoints,
       chainName: chainGroup.value ?? '',
       autoStart: true,
+      ...(loop ? { loop: true, cycleHours: loopPlan.value?.cycleHours, loopFuel } : {}),
     };
     void showBuffer('XIT RTWIZ');
   } catch (err) {
@@ -265,8 +320,69 @@ interface NativeRouteView {
   capacity: { weight: number; volume: number };
   // 有船按游戏里的分配在跑（`ship.assignedRoute` / RTE 命中）。
   running: boolean;
+  // 游戏侧 Loop 开关（服务端 repeats 为准）：运行中卡片标「循环」。
+  repeats: boolean;
+  // 循环航线（本地标记或服务端 repeats 开）：显示周期/支撑轮数，运行中也可补货。
+  isLoop: boolean;
+  // 生成时快照的飞行周期文本（预计）；非循环或无快照为空。
+  cycleText: string;
+  // 一轮送达量可补给的库存天数文本；非循环或无快照为空。
+  supplyText: string;
+  // 出发地库存可支撑轮数文本（∞ = 无消耗）。
+  sustainText: string;
+  // RTE 阻塞/等待状态（待实采校准）：blocked / waiting / undefined。
+  status: string | undefined;
+  // 卡片告警（船况、循环停止、库存不足、阻塞）。
+  alerts: string[];
+  // 循环补货包：按 1 轮 roundBill 扣出发地库存的缺口（运行中也可用）。
+  replenish: UserData.ActionPackageData | undefined;
   // 未运行时的备货采购包：出发地装载清单扣掉仓库现有库存。
   purchase: UserData.ActionPackageData | undefined;
+}
+
+// 循环卡片的运行态信息：周期、支撑轮数、补货缺口与告警。燃料缺快照时按罐容量保守估。
+function loopCardInfo(
+  record: NativeRouteRecord,
+  ship: PrunApi.Ship | undefined,
+  running: boolean,
+  status: string | undefined,
+) {
+  const isLoop = record.loop === true || record.repeats === true;
+  const cycleText =
+    record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
+  const supplyText =
+    record.cycleHours === undefined ? '' : `${cycleDaysFromHours(record.cycleHours).toFixed(1)} 天`;
+  const origin = record.waypoints[0]?.location.trim() ?? '';
+  const fuelNow = ship === undefined ? undefined : shipFuelRemainingFor(ship);
+  const fuel =
+    record.fuelPerRound ??
+    computeFuelPerRound([], { stlCap: fuelNow?.stlCap ?? 0, ftlCap: fuelNow?.ftlCap ?? 0 });
+  const bill = buildRoundBill(nativeRouteOriginBill(record), fuel);
+  const sustain = sustainRounds(bill, readOriginStock(origin));
+  const sustainText = sustain === Infinity ? '∞' : String(sustain);
+  const alerts: string[] = [];
+  if (ship !== undefined && ship.condition < 0.8) {
+    alerts.push(`船况 ${Math.round(ship.condition * 100)}%（低于 80%，建议维修后再跑）。`);
+  }
+  if (record.repeats === true && !running) {
+    alerts.push('循环已开但无船执行：可能 PRO 失效或已解除分配，请续费后重新分配。');
+  }
+  if (isLoop && sustain < 1) {
+    alerts.push('出发地库存不足 1 轮，请补货后再分配。');
+  }
+  if (status === 'blocked') {
+    alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
+  } else if (status === 'waiting') {
+    alerts.push('等待中：上游产出或仓库空间不足。');
+  }
+  return {
+    isLoop,
+    cycleText,
+    supplyText,
+    sustainText,
+    alerts,
+    replenish: isLoop ? cxShortfallPackage(origin, bill) : undefined,
+  };
 }
 
 // 同一条航线可能同时被两艘船执行：key 必须带上船，否则 Vue 会报重复 key。
@@ -287,6 +403,9 @@ const nativeRoutes = computed<NativeRouteView[]>(() =>
       loads: nativeRouteLoads(row.record),
       capacity: nativeRouteCapacity(ship),
       running: row.running,
+      repeats: row.record.repeats === true,
+      status: row.status,
+      ...loopCardInfo(row.record, ship, row.running, row.status),
       purchase: row.running ? undefined : nativeRoutePurchasePackage(row.record),
     };
   }),
@@ -298,6 +417,15 @@ function openRoutePurchase(entry: NativeRouteView) {
     return;
   }
   stagedDispatch.value = { pkg: entry.purchase };
+  void showBuffer('XIT FLEETACT');
+}
+
+// 循环航线补货：船离港后出发地仓库空出，按 1 轮缺口补下一轮（运行中也可用）。
+function openRouteReplenish(entry: NativeRouteView) {
+  if (entry.replenish === undefined) {
+    return;
+  }
+  stagedDispatch.value = { pkg: entry.replenish };
   void showBuffer('XIT FLEETACT');
 }
 
@@ -740,6 +868,13 @@ type ChainTableRow = {
 // 有环线运行中仍可规划其他环线。
 const planTables = computed<ChainTableRow[]>(() => {
   const runningIds = new Set(activeRuns.value.map(e => e.shipId));
+  // 循环模式：用闭环迭代的计划替换该船的单趟计划（运量按本轮周期、min/max 按装载端）。
+  if (loopActive.value && loopShip.value !== undefined && loopPlan.value?.plan) {
+    const ship = loopShip.value;
+    return runningIds.has(ship.ship.id)
+      ? []
+      : [{ shipId: ship.ship.id, ship, plan: loopPlan.value.plan, progress: undefined }];
+  }
   return shipPlans.value
     .filter(sp => !runningIds.has(sp.ship.ship.id))
     .map(sp => ({ shipId: sp.ship.ship.id, ship: sp.ship, plan: sp.plan, progress: undefined }));
@@ -1159,6 +1294,7 @@ function flightTotalText(shipId: string): string {
       <RadioItem v-model="chainAutoLaunch" horizontal>自动发船</RadioItem>
       <RadioItem v-model="chainAutoTrigger" horizontal>自动执行</RadioItem>
       <RadioItem v-model="chainAutoRecover" horizontal>自动恢复</RadioItem>
+      <RadioItem v-model="chainLoopMode" horizontal>循环模式</RadioItem>
       <div :class="$style.separator" />
       <PrunButton dark @click="onStatusCheckClick">状态检查</PrunButton>
       <div :class="$style.separator" />
@@ -1174,7 +1310,12 @@ function flightTotalText(shipId: string): string {
       <div :class="$style.spacer" />
       <PrunButton
         dark
-        :disabled="selectedShips.length !== 1 || shipPlans.length !== 1 || loading"
+        :disabled="
+          selectedShips.length !== 1 ||
+          shipPlans.length !== 1 ||
+          loading ||
+          (chainLoopMode && !loopActive)
+        "
         @click="openNativeRoutePlan">
         生成原生 RT
       </PrunButton>
@@ -1253,6 +1394,22 @@ function flightTotalText(shipId: string): string {
         </div>
       </div>
 
+      <div
+        v-if="chainTab === 'plan' && chainLoopMode"
+        :class="loopActive ? $style.allocOk : $style.notice">
+        <template v-if="loopShip === undefined">循环模式仅支持单船：请只分配一艘船。</template>
+        <template v-else-if="loopComputing">循环周期估算中…</template>
+        <template v-else-if="loopPlan && !loopPlan.ok"
+          >循环模式不可用：{{ loopPlan.reasons.join('；') }}</template
+        >
+        <template v-else-if="loopActive">
+          循环模式 · 本轮周期 {{ loopCycleText }}（预计，随出发时刻漂移）<template
+            v-if="loopSupplyText">
+            · 每轮补给 {{ loopSupplyText }} 库存</template
+          >
+          <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
+        </template>
+      </div>
       <div
         v-if="chainTab === 'plan' && allocBanner"
         :class="allocBanner.kind === 'ok' ? $style.allocOk : $style.notice">
@@ -1577,7 +1734,14 @@ function flightTotalText(shipId: string): string {
                 >（{{ entry.record.name || entry.record.naturalId }} ·
                 {{ routeProgressText(entry.record, entry.ship) }}）</span
               >
+              <span v-if="entry.repeats" :class="$style.running">（循环）</span>
+              <span v-if="entry.status === 'blocked'" :class="$style.routeBlocked">阻塞</span>
+              <span v-else-if="entry.status === 'waiting'" :class="$style.routeWaiting">等待</span>
             </span>
+            <div v-if="entry.isLoop" :class="$style.loopInfo">
+              周期 {{ entry.cycleText || '—' }}（预计） · 每轮补给
+              {{ entry.supplyText || '—' }} 库存 · 出发地可支撑 {{ entry.sustainText }} 轮
+            </div>
             <div :class="$style.route">
               <span :class="$style.routeLabel">航线：</span>
               <template v-for="(stop, index) in entry.record.waypoints" :key="index">
@@ -1593,9 +1757,24 @@ function flightTotalText(shipId: string): string {
                 >
               </template>
             </div>
+            <ul v-if="entry.alerts.length > 0" :class="$style.routeAlerts" role="status">
+              <li v-for="alert in entry.alerts" :key="alert">{{ alert }}</li>
+            </ul>
             <div :class="$style.shipActions">
               <PrunButton
-                v-if="!entry.running"
+                v-if="entry.isLoop"
+                dark
+                :disabled="!entry.replenish"
+                :data-tooltip="
+                  entry.replenish
+                    ? '按 1 轮出发地账单扣掉仓库库存生成 CX 采购包（含每轮 SF/FF）'
+                    : '出发地已备齐（或不在交易所），无需补货'
+                "
+                @click="openRouteReplenish(entry)"
+                >补货（1 轮）</PrunButton
+              >
+              <PrunButton
+                v-else-if="!entry.running"
                 dark
                 :disabled="!entry.purchase"
                 :data-tooltip="
@@ -2061,6 +2240,32 @@ function flightTotalText(shipId: string): string {
   color: #f0ad4e;
   font-size: 11px;
   margin-left: 0.5rem;
+}
+
+.loopInfo {
+  color: #8a9aa8;
+  font-size: 11px;
+  margin: 2px 0;
+}
+
+.routeBlocked {
+  color: #d9534f;
+  font-size: 11px;
+  margin-left: 0.5rem;
+}
+
+.routeWaiting {
+  color: #f0ad4e;
+  font-size: 11px;
+  margin-left: 0.5rem;
+}
+
+.routeAlerts {
+  margin: 4px 0;
+  padding-left: 20px;
+  color: #f0ad4e;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 .marker {

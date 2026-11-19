@@ -33,7 +33,7 @@ export function billShortfall(
 
 // 出发地仓库库存：航线在空间站装载，买在同一个交易所的货就落进这个仓库。
 // 库存没加载时按 0 处理——清单本身就是要备齐的东西。
-function originStock(origin: string) {
+export function readOriginStock(origin: string) {
   const station = stationsStore.getByNaturalId(origin);
   const store = station === undefined ? undefined : storagesStore.getById(station.warehouseId);
   const stock: Record<string, number> = {};
@@ -46,26 +46,33 @@ function originStock(origin: string) {
   return stock;
 }
 
+// 出发地缺口采购包：清单扣掉仓库库存后只含 CX Buy（useCXInv:false 避免重复抵扣）。
+// 出发地不是交易所、或已经备齐时不生成。单趟备货与循环 N 轮备货共用。
+export function cxShortfallPackage(
+  origin: string,
+  bill: Readonly<Record<string, number>>,
+): UserData.ActionPackageData | undefined {
+  const exchange = origin === '' ? undefined : exchangesStore.getByNaturalId(origin)?.code;
+  if (exchange === undefined) {
+    return undefined;
+  }
+  const materials = billShortfall(bill, readOriginStock(origin));
+  if (Object.keys(materials).length === 0) {
+    return undefined;
+  }
+  const name = `购买 ${exchange}`;
+  return {
+    global: { name },
+    groups: [{ type: 'Manual', name, materials }],
+    actions: [{ type: 'CX Buy', name, group: name, exchange, useCXInv: false }],
+  };
+}
+
 // 未运行的航线备货：只含出发地缺口的 CX 采购包（暂存到 XIT FLEETACT 执行）。
 // 出发地不是交易所、或已经备齐时不生成。
 export function nativeRoutePurchasePackage(
   record: NativeRouteRecord,
 ): UserData.ActionPackageData | undefined {
   const origin = record.waypoints[0]?.location.trim() ?? '';
-  const exchange = origin === '' ? undefined : exchangesStore.getByNaturalId(origin)?.code;
-  if (exchange === undefined) {
-    return undefined;
-  }
-  const materials = billShortfall(nativeRouteOriginBill(record), originStock(origin));
-  if (Object.keys(materials).length === 0) {
-    return undefined;
-  }
-  const name = `购买 ${exchange}`;
-  const pkg: UserData.ActionPackageData = {
-    global: { name },
-    groups: [{ type: 'Manual', name, materials }],
-    // 缺口已按当前库存算过，执行时不再从 CX 仓库抵扣，避免重复扣减。
-    actions: [{ type: 'CX Buy', name, group: name, exchange, useCXInv: false }],
-  };
-  return pkg;
+  return cxShortfallPackage(origin, nativeRouteOriginBill(record));
 }

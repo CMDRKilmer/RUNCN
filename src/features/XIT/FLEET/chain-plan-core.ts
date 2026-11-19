@@ -35,6 +35,9 @@ export interface ChainPlanningSnapshot {
   originStock: Record<string, number>;
   purchaseStock: Record<string, number>;
   groupProducedTickers?: Set<string>;
+  // 循环模式：need 按稳态毛需求（天数×日耗，不减库存）。调用方须同时传入毛账单
+  // （bill 不减库存），固定步骤每轮重复执行才不会逐轮少送；avail 口径不变。
+  loop?: boolean;
 }
 
 export function computeChainPlan(
@@ -206,16 +209,15 @@ export function computeChainPlan(
     targetDays.set(base.naturalId, base.days);
   }
   // need: 下游 ticker 需求 = 目标天数 × 日耗（原料+消耗品）− 库存。
+  // 循环模式按稳态毛需求（不减库存）：固定步骤每轮重复，减库存会逐轮少送、基地饿死。
   const need = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
     // ticker 不在该基地 burn 中（极少见，例如生产订单刚启动 burn 尚未刷新）→ 按 0 计。
     if (mat === undefined) {
       return 0;
     }
-    return Math.max(
-      0,
-      Math.ceil(targetDays.get(id)! * (mat.input + mat.workforce) - mat.inventory),
-    );
+    const gross = targetDays.get(id)! * (mat.input + mat.workforce);
+    return Math.max(0, Math.ceil(input.loop ? gross : gross - mat.inventory));
   };
   // avail: 上游可提取 = 到达时预计库存 − 自用预留（目标天数 × 自身日耗）。
   const avail = (id: string, ticker: string) => {
