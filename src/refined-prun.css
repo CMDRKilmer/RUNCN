@@ -1356,3 +1356,13 @@ html[data-rp-theme='nebula'] body {
   background-color: var(--rp-cc-canvas);
   color: var(--rp-cc-text-primary);
 }
+
+/* BURN 星球行右侧的「命令」列：默认显示；由 basic/burn-command-column 功能
+   在 <html> 上加 data-rp-burn-commands 控制，开关在 XIT SET → 功能。 */
+[data-rp-burn-commands-col] {
+  display: none;
+}
+
+html[data-rp-burn-commands] [data-rp-burn-commands-col] {
+  display: table-cell;
+}
