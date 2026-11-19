@@ -19,12 +19,11 @@ import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { useChainPlanning } from './use-chain-planning';
 import { useChainLoopPlanning } from './use-chain-loop-planning';
-import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import { sanitizeActName } from './chain-identity';
 import type { ShipChainPlan } from './chain-allocation';
 import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
-import type { ChainFlightLeg } from './chain-flight-time';
+import { chainShipFuelCaps, type ChainFlightLeg } from './chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { matWeightVolume } from './chain-data';
 import { getBaseGroups } from '@src/core/base-groups';
@@ -280,11 +279,10 @@ function openNativeRoutePlan() {
     const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
     const waypoints = buildNativeWaypoints(plan, loop);
     // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
-    const fuelNow = shipFuelRemainingFor(candidate.ship.ship);
-    const loopFuel = fuelPerRound(loopPlan.value?.estimate?.legs ?? [], {
-      stlCap: fuelNow.stlCap,
-      ftlCap: fuelNow.ftlCap,
-    });
+    const loopFuel = fuelPerRound(
+      loopPlan.value?.estimate?.legs ?? [],
+      chainShipFuelCaps(candidate.ship.ship),
+    );
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {

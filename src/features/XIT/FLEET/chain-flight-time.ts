@@ -92,6 +92,13 @@ function departureFuel(ship: PrunApi.Ship, refuelAtOrigin: boolean): LegFuel {
   };
 }
 
+// 船当前油罐容量（units）。FLEET 取油罐口径的唯一出口：本模块已经把 XIT FTC 的燃料模型借过来
+// （planFormulaFlight / shipFuelRemainingFor），面板及其子组件不必再直接引用另一个 feature。
+export function chainShipFuelCaps(ship: PrunApi.Ship): { stlCap: number; ftlCap: number } {
+  const fuel = shipFuelRemainingFor(ship);
+  return { stlCap: fuel.stlCap, ftlCap: fuel.ftlCap };
+}
+
 // 计算一条环线各段的预计飞行时间（按到访顺序逐段累计）。
 export async function estimateChainFlightTimes(
   input: ChainFlightTimeInput,
