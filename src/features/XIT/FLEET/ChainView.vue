@@ -65,7 +65,12 @@ import {
   cxShortfallPackage,
   readOriginStock,
 } from './native-route-purchase';
-import { loopSustain, fuelPerRound, cycleDaysFromHours } from './native-route-loop';
+import {
+  loopSustain,
+  fuelPerRound,
+  cycleDaysFromHours,
+  actBlockedReason,
+} from './native-route-loop';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -252,8 +257,9 @@ const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
   // 循环模式下规划表是稳态口径，ACT 包只能按单趟量下发，等于把每轮运量少写一个数量级。
-  if (loopActive.value) {
-    return '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
+  const blocked = actBlockedReason(loopActive.value);
+  if (blocked !== undefined) {
+    return blocked;
   }
   if (chainGroup.value === undefined) {
     return '请先选择产业链分组';
@@ -722,8 +728,9 @@ function execute() {
   }
   // 循环模式：规划表是闭环稳态计划，而 shipPlans 仍是单趟口径——生成 ACT 包会把每轮运量
   // 按单趟写一遍。循环走「生成原生 RT」+ 游戏 Loop，这里直接拒绝。
-  if (loopActive.value) {
-    executeNotice.value = '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
+  const blocked = actBlockedReason(loopActive.value);
+  if (blocked !== undefined) {
+    executeNotice.value = blocked;
     return;
   }
   // 时间均衡分段计算中：此时 shipPlans 还是舱容贪心（未充分利用多船）。
