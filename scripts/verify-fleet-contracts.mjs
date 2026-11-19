@@ -54,7 +54,7 @@ const {
   billWeightVolume,
   stockingRoundsMax,
   sustainRounds,
-  supplyDaysPerRound,
+  loopSustain,
   loopEligibility,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 let passes = 0;
@@ -1818,12 +1818,16 @@ await check('loop sustain rounds follow the first material to run out', () => {
   assert.equal(sustainRounds({}, { RAT: 10 }), Infinity);
 });
 
-await check('loop supply days per round follow the bottleneck stop', () => {
-  // 每站送达 = 计划天数 × 日耗 → 覆盖天数 = 计划天数；取最小（瓶颈站）。
-  assert.equal(supplyDaysPerRound([{ days: 4 }, { days: 2.5 }, { days: 4 }]), 2.5);
-  assert.equal(supplyDaysPerRound([{ days: 3 }]), 3);
-  assert.equal(supplyDaysPerRound([]), undefined);
-  assert.equal(supplyDaysPerRound([{ days: 0 }, { days: -1 }]), undefined);
+await check('loop sustain leaves fuel out and reports unknown without a per-round snapshot', () => {
+  // 游戏里手建的循环航线没有每轮燃料快照：不能拿罐容量当整圈油耗，支撑轮数留空。
+  assert.deepEqual(loopSustain({ RAT: 10 }, undefined, { RAT: 100 }), {
+    bill: { RAT: 10 },
+    sustain: undefined,
+  });
+  assert.deepEqual(loopSustain({ RAT: 10 }, { stl: 5, ftl: 0 }, { RAT: 100, SF: 100 }), {
+    bill: { RAT: 10, SF: 5 },
+    sustain: 10,
+  });
 });
 
 await check(

@@ -66,13 +66,7 @@ import {
   cxShortfallPackage,
   readOriginStock,
 } from './native-route-purchase';
-import {
-  roundBill as buildRoundBill,
-  sustainRounds,
-  fuelPerRound,
-  cycleDaysFromHours,
-  supplyDaysPerRound,
-} from './native-route-loop';
+import { loopSustain, fuelPerRound, cycleDaysFromHours } from './native-route-loop';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -249,10 +243,10 @@ const loopCycleText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
 });
-// 一轮送达量可补给的库存天数（瓶颈站）；稳态下等于周期天数。
+// 一轮送达量可补给的库存天数：稳态一轮刚好补满一个周期的消耗，故等于周期天数。
 const loopSupplyText = computed(() => {
-  const days = supplyDaysPerRound(loopPlan.value?.plan?.stops ?? []);
-  return days === undefined ? '' : `${days.toFixed(1)} 天`;
+  const hours = loopPlan.value?.cycleHours;
+  return hours === undefined ? '' : `${cycleDaysFromHours(hours).toFixed(1)} 天`;
 });
 const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
@@ -340,7 +334,8 @@ interface NativeRouteView {
   purchase: UserData.ActionPackageData | undefined;
 }
 
-// 循环卡片的运行态信息：周期、支撑轮数、补货缺口与告警。燃料缺快照时按罐容量保守估。
+// 循环卡片的运行态信息：周期、支撑轮数、补货缺口与告警。燃料只认记录里的每轮快照，
+// 没有快照（游戏手建的循环航线）就不给支撑轮数，见 loopSustain。
 function loopCardInfo(
   record: NativeRouteRecord,
   ship: PrunApi.Ship | undefined,
@@ -376,14 +371,15 @@ function loopCardInfo(
   const supplyText =
     record.cycleHours === undefined ? '' : `${cycleDaysFromHours(record.cycleHours).toFixed(1)} 天`;
   const origin = record.waypoints[0]?.location.trim() ?? '';
-  const fuelNow = ship === undefined ? undefined : shipFuelRemainingFor(ship);
-  const fuel =
-    record.fuelPerRound ??
-    fuelPerRound([], { stlCap: fuelNow?.stlCap ?? 0, ftlCap: fuelNow?.ftlCap ?? 0 });
-  const bill = buildRoundBill(nativeRouteOriginBill(record), fuel);
-  const sustain = sustainRounds(bill, readOriginStock(origin));
-  const sustainText = sustain === Infinity ? '∞' : String(sustain);
-  if (sustain < 1) {
+  // 燃料只认生成时快照（见 loopSustain）：游戏里手建的循环航线没快照时不给支撑轮数，
+  // 补货包也只按物料算，避免拿罐容量当整圈油耗去误报「不足 1 轮」。
+  const { bill, sustain } = loopSustain(
+    nativeRouteOriginBill(record),
+    record.fuelPerRound,
+    readOriginStock(origin),
+  );
+  const sustainText = sustain === undefined ? '—' : sustain === Infinity ? '∞' : String(sustain);
+  if (sustain !== undefined && sustain < 1) {
     alerts.push('出发地库存不足 1 轮，请补货后再分配。');
   }
   return {

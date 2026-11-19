@@ -17,18 +17,6 @@ export function cycleDaysFromHours(cycleHours: number): number {
   return cycleHours / 24;
 }
 
-// 一轮送达量可补给的库存天数：每站送达 = 该站计划天数 × 日耗，故覆盖天数 = 计划天数；
-// 取瓶颈站（最小值）。循环稳态下各站 = cycleDays，即一轮刚好补满一个周期的消耗。
-export function supplyDaysPerRound(stops: readonly { days: number }[]): number | undefined {
-  let min: number | undefined;
-  for (const stop of stops) {
-    if (Number.isFinite(stop.days) && stop.days > 0) {
-      min = min === undefined ? stop.days : Math.min(min, stop.days);
-    }
-  }
-  return min;
-}
-
 // 每轮燃料 = 逐段油耗之和（v1 只在出发地补满，整圈消耗即每轮补油量）。
 // 某油罐任一段缺油耗时回退罐容量上限（偏保守），不伪造精确值。
 export function fuelPerRound(
@@ -109,6 +97,21 @@ export function sustainRounds(
     rounds = Math.min(rounds, Math.floor((stock[ticker] ?? 0) / amount));
   }
   return rounds;
+}
+
+// 每轮出发地账单 + 可支撑轮数。燃料只认生成时的每轮快照：游戏里手建的循环航线没有快照，
+// 按罐容量估会把整圈当成耗满一罐（支撑轮数偏少、误报「不足 1 轮」），故不猜——账单只含物料，
+// 支撑轮数返回 undefined（未知，卡片显示「—」）。
+export function loopSustain(
+  cxBill: Readonly<Record<string, number>>,
+  fuel: LoopFuel | undefined,
+  stock: Readonly<Record<string, number>>,
+): { bill: Record<string, number>; sustain: number | undefined } {
+  if (fuel === undefined) {
+    return { bill: { ...cxBill }, sustain: undefined };
+  }
+  const bill = roundBill(cxBill, fuel);
+  return { bill, sustain: sustainRounds(bill, stock) };
 }
 
 export interface LoopEligibility {
