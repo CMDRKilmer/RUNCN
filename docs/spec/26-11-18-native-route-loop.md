@@ -170,7 +170,12 @@
 
 ## 验证
 
-- 回归脚本（`../../scripts/verify-fleet-contracts.mjs`）：稳态每轮账单、周期闭环迭代、每轮 SF/FF 消耗、备货轮数上限、支撑轮数、循环资格、循环模式不生成 ACT、min/max 按装载端、`repeats` 合并。
+回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
+
+- `../../scripts/verify-fleet-contracts.mjs`：稳态每轮账单、周期闭环迭代、备货轮数上限、支撑轮数、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）。
+- `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
+- 循环模式不生成 ACT 的**守卫在 `ChainView.vue`**（按钮置灰 + `execute()` 早退）：脚本只核对两处共用 `actBlockedReason` 的同一文案、没有各自硬编码；置灰与拦截行为本身属浏览器验收。
+- 浏览器：循环模式下「执行环线」置灰、tooltip 指向「生成原生 RT」；点不可用按钮不产生 ACT 包/触发器。
 - 实机：2 基地 1 船跑满两轮；基地有初始缓冲时多轮不饿死、不溢仓；上游减产轮链上提取/卸载不阻塞；抽掉一种出发地输入验证在出发地阻塞、补货后恢复；航行中补货；关闭 Loop 在下一轮生效。
 - 浏览器关闭后循环仍继续；关闭期间不产生扩展请求。
 - 打开/点页签才发 `SHIP_ROUTES_GET_ROUTES` / RTE 读取，符合 ToS 例外清单。

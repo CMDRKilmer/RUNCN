@@ -6,6 +6,7 @@
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
@@ -56,6 +57,7 @@ const {
   sustainRounds,
   loopSustain,
   loopEligibility,
+  actBlockedReason,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 let passes = 0;
 async function check(name, fn) {
@@ -1790,6 +1792,21 @@ await check('loop fuel per round sums leg usage and falls back to tank caps', ()
     { stl: 30, ftl: 300 },
   );
   assert.deepEqual(fuelPerRound([], { stlCap: 1500, ftlCap: 300 }), { stl: 1500, ftl: 300 });
+});
+
+await check('loop mode blocks ACT execution with one shared reason', () => {
+  assert.equal(actBlockedReason(false), undefined);
+  const blocked = actBlockedReason(true);
+  assert.equal(typeof blocked, 'string');
+  assert.match(blocked, /生成原生 RT/);
+  // 守卫的最终落点是 ChainView 的置灰与 execute() 拦截（渲染层，脚本驱动不到）：这里只核对
+  // 两处共用同一文案、没有各自硬编码，实际置灰/拦截行为由浏览器验收。
+  const view = readFileSync(
+    new URL('../src/features/XIT/FLEET/ChainView.vue', import.meta.url),
+    'utf8',
+  );
+  assert.equal(view.split('actBlockedReason(').length - 1, 2);
+  assert.equal(view.includes('循环模式不生成 ACT'), false);
 });
 
 await check('loop round bill adds SF/FF to the origin load', () => {
