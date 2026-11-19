@@ -658,7 +658,8 @@ enhancements, and `off` leaves the underlying table and window styles in effect.
 特异性：斑马纹 `tbody tr:nth-child(even)` 是 (0,3,3)（`:nth-child` 按类级计）。要压过它的规则
 （如选中行）必须再叠一级 `[data-rp-theme]`，同 `!important` 下文档顺序救不了低特异性。
 
-色板验收：文字对 `surface` 与 `canvas` 两种底都要 ≥4.5:1，图形/焦点环 ≥3:1。品牌强调色常达不到
+色板验收：文字对 `surface` 与 `canvas` 两种底都要 ≥4.5:1；图表实色、焦点环与控件边界 ≥3:1。
+装饰线 `--rp-cc-accent-line`（窗口描边、指示条、光晕）不参与对比度验收。品牌强调色常达不到
 文字级对比度，取同色相加深变体作文字/图表色（claude：强调 #d97757、链接文字 #a84c2c、图表 #cf6a45）。
 用一次性 node 脚本解析 CSS 块逐对计算，不入库。
 
