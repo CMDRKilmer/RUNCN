@@ -529,7 +529,7 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] .rp-tooltip-icon {
 html[data-rp-theme][data-rp-theme][data-rp-theme]
   :is(.rp-command-XIT, [class*='rp-command-FIN'], [class*='rp-command-CORPFIN'])
   :is(input, textarea)::placeholder {
-  color: var(--rp-skin-muted, currentColor) !important;
+  color: color-mix(in srgb, var(--rp-skin-muted, currentColor) 45%, transparent) !important;
   opacity: 1 !important;
 }
 
