@@ -277,8 +277,16 @@ export function collectChainPlanningSnapshot(
     const burn = Object.fromEntries(
       Object.entries(current).map(([ticker, value]) => [ticker, { ...value }]),
     );
+    // 循环模式的固定步骤每轮重复同一绝对量：账单必须按本轮周期算。用 base.config.days
+    // 会让每轮送「手填天数」的量（周期更短时超舱、更长时基地饿死），与下面的 days 口径不一致。
+    const billDays = input.loop ? (input.cycleDays ?? base.config.days) : base.config.days;
     const bill = {
-      ...(combinedBaseBill(base.naturalId, base.config, base.site, !input.loop) ?? {}),
+      ...(combinedBaseBill(
+        base.naturalId,
+        { ...base.config, days: billDays },
+        base.site,
+        !input.loop,
+      ) ?? {}),
     };
     const products = [...(getBaseProducts(base.siteId) ?? [])];
     const hours = input.arrivalHoursByNaturalId?.get(base.naturalId) ?? 0;

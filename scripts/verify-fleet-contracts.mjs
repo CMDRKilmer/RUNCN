@@ -2135,4 +2135,31 @@ await check('native RT merge preserves per-round fuel snapshot', () => {
   assert.equal(mergeRouteRecord(server, 'S', undefined).fuelPerRound, undefined);
 });
 
+await check('loop bills each base by the cycle, not the hand-entered days', () => {
+  const bs = bases();
+  for (const base of bs) {
+    fixture.bills[base.siteId] = config => ({ RAT: config.days });
+  }
+  const single = collectChainPlanningSnapshot({ originNaturalId: 'CX', capacity, bases: bs });
+  assert.equal(single.bases[0].bill.RAT, 10);
+  assert.equal(single.bases[0].days, 10);
+  const looped = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    loop: true,
+    cycleDays: 2,
+  });
+  assert.deepEqual(
+    looped.bases.map(base => [base.bill.RAT, base.days]),
+    [
+      [2, 2],
+      [2, 2],
+    ],
+  );
+  // 每轮 CX 采购量必须落在周期口径上：2 天 × 2 个基地 = 4，而不是 10 天 × 2 = 20。
+  assert.equal(computeChainPlan(looped, String).cxBill.RAT, 4);
+});
+
+
 console.log(`PASS ${passes}/${passes}`);
