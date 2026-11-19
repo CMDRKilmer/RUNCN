@@ -304,6 +304,8 @@ gh api graphql -f query='query { repository(owner:"CMDRKilmer", name:"RUNCN") { 
 
 Reply to a thread with `gh api repos/.../pulls/N/comments -F in_reply_to=<databaseId> -f body=...` — `-F` is required (`-f` sends a string and the API 422s). Resolve with the `resolveReviewThread(threadId:)` mutation. Fix commits should follow the existing `fix(<scope>): 处理 PR #N 第 X 轮 review 发现` style and be pushed to the PR branch.
 
+Reviews evaluate the **merge result**, not the branch tip, so a PR that is behind `origin/main` can carry findings about code that only exists on `main`. Merge `origin/main` into the PR branch (this repo merges, it does not rebase) before resolving findings, and re-check token/API parity afterwards.
+
 ### Git Identity in the Sandbox
 
 The sandbox has no git identity configured. Never run `git config`; pass identity per command instead: `git -c user.name="CMDRkilmer" -c user.email="kilsama@outlook.com" commit ...`.
