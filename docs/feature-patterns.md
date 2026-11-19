@@ -647,26 +647,6 @@ use `--rp-font-enlargement` (0 for 标准, 1 for 放大). Extra table separators
 outlines use `data-rp-borders` on `html`. An absent attribute follows the theme, `on` forces the
 enhancements, and `off` leaves the underlying table and window styles in effect.
 
-### 界面主题（token 模式）
-
-唯一事实源是 `src/features/basic/theme-registry.ts`。新增 token 模式主题只改两处：注册表加一行
-（id/label/desc/mode:'token'），以及在 `src/refined-prun.css` 加一个 `html[data-rp-theme='<id>']`
-精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token（含 `--rp-cc-pulse-*` 三档呼吸灯色），外加
-首屏防闪的 `body` 底色规则。设置页卡片、首屏标记、图表取色、引擎映射全部自动派生，不改其它
-文件。颜色字面量只允许出现在该精确块内；组件规则一律 `var()`，复用 `buildComponentCss(<id>)` 与
-`buildCeramicSkin()`。
-
-特异性：斑马纹 `tbody tr:nth-child(even)` 是 (0,3,3)（`:nth-child` 按类级计）。要压过它的规则
-（如选中行）必须再叠一级 `[data-rp-theme]`，同 `!important` 下文档顺序救不了低特异性。
-
-色板验收：文字对 `surface` 与 `canvas` 两种底都要 ≥4.5:1；图表实色、焦点环与控件边界 ≥3:1。
-装饰线 `--rp-cc-accent-line`（窗口描边、指示条、光晕）不参与对比度验收。品牌强调色常达不到
-文字级对比度，取同色相加深变体作文字/图表色（claude：强调 #d97757、链接文字 #a84c2c、图表 #cf6a45）。
-用一次性 node 脚本解析 CSS 块逐对计算，不入库。
-
-视觉验收：在 `.tmp/` 用 http serve 打开预览页检查各主题树（`file://` 不加载 ESM）；移动端媒体查询
-只能结构性验证，真实游戏内效果以用户实采验收为准。
-
 Each feature needing CSS gets a `.module.css` alongside the `.ts`. `applyCssRule` and `C` are auto-imported.
 
 ```ts
@@ -680,6 +660,26 @@ function init() {
 ```
 
 `applyCssRule` must be called during feature `init()`.
+
+### 界面主题（token 模式）
+
+唯一事实源是 `src/features/basic/theme-registry.ts`。新增 token 模式主题只改两处：注册表加一行
+（id/label/desc/mode:'token'），以及在 `src/refined-prun.css` 加一个 `html[data-rp-theme='<id>']`
+精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token（含 `--rp-cc-pulse-*` 三档呼吸灯色），外加
+首屏防闪的 `body` 底色规则。设置页卡片、首屏标记、图表取色、引擎映射全部自动派生，不改其它
+文件。颜色字面量只允许出现在该精确块内；组件规则一律 `var()`，复用 `buildComponentCss(<id>)` 与
+`buildCeramicSkin()`。
+
+特异性：斑马纹 `tbody tr:nth-child(even)` 是 (0,3,3)（`:nth-child` 按类级计）。要压过它的规则
+（如选中行）必须再叠一级 `[data-rp-theme]`，同 `!important` 下文档顺序救不了低特异性。
+
+色板验收：文字对 `surface` 与 `canvas` 两种底都要 ≥4.5:1（禁用态按 WCAG 1.4.3 豁免）；图表实色、
+焦点环、控件边界与指示线 ≥3:1。指示线 `--rp-cc-accent-line` 除窗口描边、指示条、光晕外，还驱动
+选中态边框（`theme.ts` 的 `INDICATOR_LINE_RE`：选中格、模板选中、`:focus`、滑杆点），不能按纯装饰
+处理。品牌强调色本身常达不到这些阈值，取同色相加深变体（claude：品牌陶土 #d97757 只作色相基准，
+链接文字 #a84c2c、图表与指示线 #cf6a45）。
+
+视觉验收：移动端媒体查询只能结构性验证，真实游戏内效果以用户实采验收为准。
 
 Game filter containers (`.ComExOrdersPanel.filter`, `.ContractsListTable.filter`, `.LocalMarket.filter`) stack their children vertically. A toolbar built from one must also carry the shared `filterToolbarStyle.toolbar` (`@src/components/filter-toolbar.module.css`), which turns it back into a wrapping row:
 
