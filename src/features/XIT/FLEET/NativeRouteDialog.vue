@@ -48,7 +48,7 @@ import {
   sustainRounds,
   cycleDaysFromHours,
 } from './native-route-loop';
-import { cxShortfallPackage, readOriginStock } from './native-route-purchase';
+import { billFromLoadSteps, cxShortfallPackage, readOriginStock } from './native-route-purchase';
 import { shipChainCapacity } from './chain-allocation';
 import { formatFlightDuration } from './chain-format';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
@@ -160,16 +160,7 @@ const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ??
 // ── 循环备货（N 轮）─────────────────────────────────────────────
 // 每轮出发地账单 = 航点 0 装载（cxBill）+ 每轮 SF/FF；N 轮总量不超过一船满载。
 const origin = computed(() => waypoints.value[0]?.location.trim() ?? '');
-const cxBill = computed(() => {
-  const bill: Record<string, number> = {};
-  for (const step of waypoints.value[0]?.steps ?? []) {
-    if (step.kind !== 'load' || step.capacity) {
-      continue;
-    }
-    bill[step.ticker] = (bill[step.ticker] ?? 0) + step.amount;
-  }
-  return bill;
-});
+const cxBill = computed(() => billFromLoadSteps(waypoints.value[0]?.steps ?? []));
 const roundBill = computed(() => buildRoundBill(cxBill.value, loopFuel ?? { stl: 0, ftl: 0 }));
 const roundMaterials = computed(() => {
   const mats: Record<string, { weight: number; volume: number }> = {};

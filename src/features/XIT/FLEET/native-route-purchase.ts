@@ -1,19 +1,25 @@
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import type { NativeRouteStep } from './native-route-plan';
 import type { NativeRouteRecord } from './native-route-registry';
 
-// 出发地（航点 0）起飞前必须备好的物料：航线的「装载」步骤。
+// 出发地起飞前必须备好的物料：一组「装载」步骤的汇总。
 // 「按容量装载」没有确定数量，无法下单，跳过。
-export function nativeRouteOriginBill(record: NativeRouteRecord) {
+export function billFromLoadSteps(steps: readonly NativeRouteStep[]) {
   const bill: Record<string, number> = {};
-  for (const step of record.waypoints[0]?.steps ?? []) {
+  for (const step of steps) {
     if (step.kind !== 'load' || step.capacity) {
       continue;
     }
     bill[step.ticker] = (bill[step.ticker] ?? 0) + step.amount;
   }
   return bill;
+}
+
+// 出发地（航点 0）起飞前必须备好的物料：航线的「装载」步骤。
+export function nativeRouteOriginBill(record: NativeRouteRecord) {
+  return billFromLoadSteps(record.waypoints[0]?.steps ?? []);
 }
 
 // 还差多少才够出航：清单扣掉出发地仓库现有库存。
