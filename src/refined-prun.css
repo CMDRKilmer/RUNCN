@@ -1061,9 +1061,10 @@ html[data-rp-theme='ceramic-colorful'] body {
 }
 
 /* ── Claude 暖陶（claude）：token 模式，仿 Claude 暖米白 + 陶土橘配色 ────
-   画布暖米白 → 卡片象牙白 → 表头深米色；陶土橘 #d97757 是唯一主强调色
-   （窗口描边 / 选中光晕 / 装饰线），正文级陶土文字加深到 #a84c2c 保证
-   WCAG 4.5:1。八类功能彩色按色相带收敛为低饱和大地色系，同类同色。
+   画布暖米白 → 卡片象牙白 → 表头深米色；陶土橘 #d97757 是主强调色的色相
+   基准，落到窗口描边 / 选中光晕 / 装饰线时加深到 #cf6a45（选中态边框也要
+   够 3:1），正文级陶土文字再加深到 #a84c2c 保证 WCAG 4.5:1。八类功能彩色
+   按色相带收敛为低饱和大地色系，同类同色。
    所有颜色字面量只在此精确块内（R01）。变量名与 ceramic 完全一致，
    由 buildComponentCss('claude') 与 buildCeramicSkin() 复用。 */
 html[data-rp-theme='claude'] {
@@ -1215,7 +1216,9 @@ html[data-rp-theme='claude'] {
   --rp-cc-chart-grid: #ddd9cc;
   --rp-cc-chart-axis: #6e6a61;
   --rp-cc-chart-label: #4a4741;
-  --rp-cc-accent-line: #d97757;
+  /* 指示线同时是选中态边框（theme.ts 的 INDICATOR_LINE_RE），要 ≥3:1；
+     品牌陶土 #d97757 只有 2.96:1，取 cat-4 图表色。 */
+  --rp-cc-accent-line: #cf6a45;
 }
 
 /* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
