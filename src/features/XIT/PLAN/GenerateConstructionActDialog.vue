@@ -10,6 +10,7 @@ import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { fioBuildingsStore, loadFioBuildings } from '@src/features/XIT/PLAN/fio-buildings';
 import type { PlannedBuilding } from '@src/features/XIT/PLAN/tile-state';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const { plan } = defineProps<{ plan: UserData.BasePlan }>();
 
@@ -28,9 +29,12 @@ const exchangeStationMap: Record<string, string> = {
   CI2: 'Arclight Station',
   NC2: 'Hubur Station',
 };
-const exchanges = Object.keys(exchangeStationMap);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
 
-const exchange = ref(plan.exchange && exchanges.includes(plan.exchange) ? plan.exchange : 'IC1');
+// IC1 永不被过滤，因此这里的结果一定在列表内。
+const initialExchange =
+  plan.exchange && exchanges.value.includes(plan.exchange) ? plan.exchange : 'IC1';
+const exchange = ref(initialExchange);
 const useCXInv = ref(true);
 
 const planetEnv = ref<PlanetEnv | undefined>();

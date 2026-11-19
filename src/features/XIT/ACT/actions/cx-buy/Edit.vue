@@ -8,6 +8,7 @@ import { showTileOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import EditPriceLimits from '@src/features/XIT/ACT/actions/cx-buy/EditPriceLimits.vue';
 import PriceInfo from '@src/features/XIT/ACT/actions/cx-buy/PriceInfo.vue';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const { action, pkg } = defineProps<{
   action: UserData.ActionData;
@@ -17,8 +18,15 @@ const { action, pkg } = defineProps<{
 const materialGroups = computed(() => pkg.groups.map(x => x.name!).filter(x => x));
 const materialGroup = ref(action.group ?? materialGroups.value[0]);
 
-const exchanges = ['AI1', 'CI1', 'IC1', 'NC1', 'CI2', 'NC2'];
-const exchange = ref(action.exchange ?? exchanges[0]);
+const exchanges = computed(() =>
+  withOptionalRareExchanges(['AI1', 'CI1', 'IC1', 'NC1', 'CI2', 'NC2']),
+);
+// 老动作可能存过 CI2 / NC2：hidden 后回退到第一个有效交易所，避免下拉显示与实际值脱节。
+const exchange = ref(
+  action.exchange && exchanges.value.includes(action.exchange)
+    ? action.exchange
+    : exchanges.value[0],
+);
 
 const priceLimits = reactive<{ value: [string, number][] }>({ value: getPriceLimits() });
 
