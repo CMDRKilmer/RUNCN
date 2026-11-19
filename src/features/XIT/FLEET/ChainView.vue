@@ -230,7 +230,11 @@ const {
 const loopShip = computed(() =>
   selectedShips.value.length === 1 ? selectedShips.value[0] : undefined,
 );
-const { result: loopPlan, computing: loopComputing } = useChainLoopPlanning({
+const {
+  result: loopPlan,
+  computing: loopComputing,
+  error: loopError,
+} = useChainLoopPlanning({
   ship: () => loopShip.value,
   bases: () => selectedBases.value,
   enabled: () => chainLoopMode.value && loopShip.value !== undefined,
@@ -360,10 +364,13 @@ function loopCardInfo(
   if (record.repeats === true && !running) {
     alerts.push('循环已开但无船执行：可能 PRO 失效或已解除分配，请续费后重新分配。');
   }
-  if (status === 'blocked') {
-    alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
-  } else if (status === 'waiting') {
-    alerts.push('等待中：上游产出或仓库空间不足。');
+  // 状态文案是从手册候选词推的（未实采）：只对循环航线报，别外溢到单趟卡片。
+  if (isLoop) {
+    if (status === 'blocked') {
+      alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
+    } else if (status === 'waiting') {
+      alerts.push('等待中：上游产出或仓库空间不足。');
+    }
   }
   // 非循环卡片不展示周期/支撑轮数/补货，跳过仓库与账单读取。
   if (!isLoop) {
@@ -1436,6 +1443,9 @@ function flightTotalText(shipId: string): string {
           >
           <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
         </template>
+        <template v-else
+          >循环周期未估算：{{ loopError ?? '请在计划里分配 1 艘船并勾选至少 1 个基地。' }}</template
+        >
       </div>
       <div
         v-if="chainTab === 'plan' && allocBanner"
