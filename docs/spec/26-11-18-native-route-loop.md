@@ -59,6 +59,7 @@
 
 - 原生步骤是固定绝对量、每轮重复执行。输入配送量按**稳态流量** = `cycleDays × 日耗（原料+消耗品）`，**不减当前库存**——基地保留原有缓冲，每轮恰好补上一轮消耗。沿用 `need`（`ceil(days×日耗 − 库存)`，`chain-plan-core.ts`）会让固定步骤逐轮少送、基地饿死。
 - loop 模式给 `computeChainPlan` 单独的稳态 need 口径；`avail` 仍按到港预计库存 − 自用预留。当前库存只用于首轮可行性与仓储余量警告，不进入重复写入的绝对量。
+- **账单天数与 need 同口径**：`collectChainPlanningSnapshot` 在 loop 模式先把 `base.config.days` 覆盖成 `cycleDays` 再交给 `combinedBaseBill`（`chain-data.ts` 的 `billDays`）。只把快照里的 `days` 字段改成周期、账单仍按手填天数算，是错的：手填 10 天、周期 2 天时每轮送 5 倍量，直接超舱抛「环线缺少可执行站点、超出舱容或有未满足的产业链需求。」或顶满基地；反过来手填 2 天、周期 10 天则基地饿死。
 - 链上产物提取（基地 LOAD）= 平衡后的 flow，best-effort：减产轮少提、不阻塞。
 
 **步骤 min/max（出发站装载保留背压，其余机会式）**
@@ -80,10 +81,14 @@
 - `roundBill = cxBill + 每轮 SF/FF 消耗`。`cxBill` = 航点 0 的 LOAD 步骤汇总（`nativeRouteOriginBill`，`../../src/features/XIT/FLEET/native-route-purchase.ts`）。
 - 每轮 SF/FF = 整圈消耗：v1 只在出发地补满（REFUEL `CAPACITY`），每轮补油量 = 罐容量 − 归航到港余量 = 逐段消耗之和。由收敛后的估时取逐段 `stlUsed/ftlUsed` 求和（需给 `ChainFlightLeg` 增加油耗字段）；算不出时回退罐容量上限（偏保守）。
 - 基地端不采购，只显示本轮卸货/装载与当前库存的差额。
+- 罐容量是「吨 → u」换算：`weightCapacity` 单位是吨，要除以燃料单重（SF 0.06 / FF 0.05 t/u）换回 u 并向下取整（`210 / 0.06 = 3499.999…` 的小数尾巴会顺着备货账一路进 CX 采购包）。把吨直接当 u 会把 3500 u 的罐读成 210 u，逐段余油假判缺——单趟估时与 FTC 判缺同样按 u 吃这个值。
+- 「该交易所不可买」必须区分「确认无卖单」与「订单簿没下发」：`cxobStore` 只由 `COMEX_BROKER_DATA` 推送填充，而该推送要先打开过对应 CXOB 窗口。所以循环模式下对话框按账单静默打开隐藏窗口（`CXOB SF.AI1`，`autoClose` + `closeWhen` 读到即关）把数据拉回来；仍读不到按未知处理——燃料照进备货包、不报警；只有订单簿存在且 `sellingOrders` 为空才算不可买（排除并提示手动补给）。
 
 **备货轮数 N**
 
 - 默认 1，范围 `1..Nmax`；`Nmax = max(1, floor(min(weightCap / cycleW, volumeCap / cycleV)))`，`cycleW/cycleV` = `roundBill` 的重量/体积（含 SF/FF）。即备货总量不超过一船满载。
+- 输入框原样保留键入内容（允许清空），只在 `change` 与计算时钳到 `1..Nmax`。逐键回写会把「清空后输入 5」变成「15 → 钳成上限」，用户输的 5 悄悄变成 Nmax。
+- 物料重量/体积没下发（`materialsStore` 缺 ticker）时算不出 `cycleW/cycleV`，`Nmax` 直接取 1：宁可少备一轮，也不按偏小的体积报出偏大的轮数、装不下。
 - 采购包只含出发地 CX 可买的物料；SF/FF 若该交易所不可买，只提示缺口、不下单。
 - 复用 `billShortfall`，输入 `N × roundBill` 对 `originStock` 算缺口，生成 `CX Buy`（`useCXInv: false`，避免重复抵扣）。
 
@@ -105,6 +110,7 @@
 ### 执行与 ACT 关系
 
 - 循环模式不调用 `buildChainActionPackages`，不创建 `FLIGHT_ENDED` 触发器。
+- 守卫绑的是「循环已生效」（`loopActive`），不是「勾了循环模式」：估时失败/资格不足时按上面「退回单趟」处理，此时「生成原生 RT」是禁用的，若 ACT 一起禁掉玩家就没有任何可执行路径。两个出口（按钮置灰、`execute()` 早退）共用 `actBlockedReason`，不各写一份文案。
 - 生成前检查该船是否仍有旧环线 ACT/触发器；有则要求先清理，避免同一次到港执行两遍装卸。
 - 原 ACT 路径保留给单趟、需要 CX 买卖或需要每轮重新规划的场景。
 
@@ -119,6 +125,9 @@
 **校准触发**：面板打开停在「运行中」、点页签、向导写入后各校准一次；不轮询（沿用 `collectNativeRoutes` 现有触发口径）。
 
 **卡片显示**：Loop 徽标、飞行周期（标「预计」）、当前站/总站数、阻塞状态、出发地可支撑轮数。
+
+- 循环模式开着但周期没算出来（没选船/0 个基地/缺载重数据/估时抛错）时，横幅给出具体原因，不留空色条；同时「生成原生 RT」置灰。
+- 阻塞/等待告警只挂在循环航线上：关键字是从手册候选词推的，未实采前不外溢到单趟卡片。
 
 **告警（含数据源）**
 
@@ -172,7 +181,7 @@
 
 回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
 
-- `../../scripts/verify-fleet-contracts.mjs`：稳态每轮账单、周期闭环迭代、备货轮数上限、支撑轮数、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）。
+- `../../scripts/verify-fleet-contracts.mjs`：稳态每轮账单、**账单天数随周期**（`combinedBaseBill` 桩按传入 `config.days` 回值：loop + 2 天周期得 2、单趟仍是手填 10 天，CX 采购量 4 而非 20）、周期闭环迭代、备货轮数上限、支撑轮数、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
 - `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
 - 循环模式不生成 ACT 的**守卫在 `ChainView.vue`**（按钮置灰 + `execute()` 早退）：脚本只核对两处共用 `actBlockedReason` 的同一文案、没有各自硬编码；置灰与拦截行为本身属浏览器验收。
 - 浏览器：循环模式下「执行环线」置灰、tooltip 指向「生成原生 RT」；点不可用按钮不产生 ACT 包/触发器。
@@ -185,6 +194,7 @@
 - `min=0` 的**实机执行**语义：不足时是否「不等待、只搬现有量」（LOAD/UNLOAD 协议均已确认可写且回显，2026-11-19）；减产轮链上提取/卸载不阻塞需实机验证。
 - 界面回退路径写 `min=0`：socket 侧已实采（LOAD/UNLOAD 对称回显），但编辑器「至少」输入框对 0 的反应未知——若被钳制或拒绝，`setLimit` 会在写入中途抛「Minimum 数量未写入。」并留下半成品航线。需实机确认 0 能写入并保存。
 - RTE 各状态的界面文案（中/英）。
+- 对话框隐藏 CXOB 窗口能否在真实会话里及时回推 `COMEX_BROKER_DATA`（脚本以桩替代）。读不到按「未知即可买」处理，代价是订单簿确实为空时会多下一单燃料。
 - LOAD 步骤 `retain` 字段语义（实采回显 46，RPrun 不写不读）。
 - 未知步骤类型（`UNLOAD_ALL`/`UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`）目前被 `toStep` 丢弃：手动增删 `UNLOAD_ALL`/`UNLOAD_FUEL` 不触发下游时长作废，是否纳入签名待扩展。
 - （可选）`CREATE_ROUTE` 是否能直接带 `repeats`：已有独立 `SET_REPEAT`，非必需。
