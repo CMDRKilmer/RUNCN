@@ -11,6 +11,7 @@ import { userData } from '@src/store/user-data';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { setReturnCommand } from '@src/features/XIT/ACT/return-to-source';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const { registration } = defineProps<{ registration?: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -26,8 +27,12 @@ const exchangeStationMap: Record<string, string> = {
   NC2: 'Hubur Station',
 };
 
-const exchanges = Object.keys(exchangeStationMap);
-const exchange = persistedRef('genact-ship-exchange', exchanges[0]);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
+const exchange = persistedRef('genact-ship-exchange', exchanges.value[0]);
+// 老版本可能持久化过 CI2 / NC2：隐藏后回退到第一个有效交易所。
+if (!exchanges.value.includes(exchange.value)) {
+  exchange.value = exchanges.value[0];
+}
 const useShipInv = persistedRef('genact-ship-use-inv', true);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);

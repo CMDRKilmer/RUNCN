@@ -36,6 +36,7 @@ import Active from '@src/components/forms/Active.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import SavePlanOverlay from '@src/features/XIT/PLAN/SavePlanOverlay.vue';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 // 从 XIT 参数中读取初始星球。
 const parameters = useXitParameters();
@@ -117,8 +118,10 @@ loadWorkforceNeeds();
 
 const planetEnv = ref<PlanetEnvironment>();
 
-// 交易所选项列表。
-const exchangeOptions = ['IC1', 'AI1', 'NC1', 'CI1', 'NC2', 'CI2'];
+// 交易所选项列表（默认隐藏冷门交易所 CI2 / NC2，见 XIT SET）。
+const exchangeOptions = computed(() =>
+  withOptionalRareExchanges(['IC1', 'AI1', 'NC1', 'CI1', 'NC2', 'CI2']),
+);
 
 // 可供选择的所有建筑列表（按 Ticker 排序）。
 const allBuildings = computed<FioBuilding[]>(() => {

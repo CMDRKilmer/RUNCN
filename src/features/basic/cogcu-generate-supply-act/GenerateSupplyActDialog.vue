@@ -12,6 +12,7 @@ import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { fixed0 } from '@src/utils/format';
 import { persistedRef } from '@src/utils/persisted-ref';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const { planet } = defineProps<{ planet?: string }>();
 
@@ -24,8 +25,12 @@ const exchangeStationMap: Record<string, string> = {
   NC2: 'Hubur Station',
 };
 
-const exchanges = Object.keys(exchangeStationMap);
-const exchange = persistedRef('genact-cogc-exchange', exchanges[0]);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
+const exchange = persistedRef('genact-cogc-exchange', exchanges.value[0]);
+// 老版本可能持久化过 CI2 / NC2：隐藏后回退到第一个有效交易所。
+if (!exchanges.value.includes(exchange.value)) {
+  exchange.value = exchanges.value[0];
+}
 const multiplier = persistedRef('genact-cogc-multiplier', 1);
 const openSfc = persistedRef('genact-cogc-sfc', false);
 

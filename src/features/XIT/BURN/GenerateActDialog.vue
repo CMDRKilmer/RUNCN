@@ -25,6 +25,7 @@ import { fixed2 } from '@src/utils/format';
 import { persistedRef } from '@src/utils/persisted-ref';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { serializeStorage } from '@src/features/XIT/ACT/actions/utils';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const parameters = useXitParameters();
 const planetName = computed(() => parameters.join(' '));
@@ -54,7 +55,8 @@ const includeConsumables = persistedRef('genact-burn-consumables', true);
 const includeInputs = persistedRef('genact-burn-inputs', true);
 const useBaseInv = persistedRef('genact-burn-base-inv', true);
 
-// Exchange code to station name mapping.
+// Exchange code to station name mapping. CI2（Arclight）与 NC2（Hubur）属于冷门站点，
+// 默认不在列表里显示；需要时在 XIT SET → 游戏设置 → 交易所 打开开关。
 const exchangeStationMap: Record<string, string> = {
   AI1: 'Antares Station',
   CI1: 'Benten Station',
@@ -64,8 +66,12 @@ const exchangeStationMap: Record<string, string> = {
   NC2: 'Hubur Station',
 };
 
-const exchanges = Object.keys(exchangeStationMap);
-const exchange = persistedRef('genact-burn-exchange', exchanges[0]);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
+const exchange = persistedRef('genact-burn-exchange', exchanges.value[0]);
+// 老版本可能持久化过 CI2 / NC2：隐藏后回退到第一个有效交易所。
+if (!exchanges.value.includes(exchange.value)) {
+  exchange.value = exchanges.value[0];
+}
 
 // Auto-derive warehouse name from selected exchange.
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);

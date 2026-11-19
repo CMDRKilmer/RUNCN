@@ -8,6 +8,7 @@ import { calculateHQUpgradeMaterials } from '@src/core/hq';
 import { userData } from '@src/store/user-data';
 import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const { from, to } = defineProps<{ from: number; to: number }>();
 
@@ -20,8 +21,8 @@ const exchangeStationMap: Record<string, string> = {
   NC2: 'Hubur Station',
 };
 
-const exchanges = Object.keys(exchangeStationMap);
-const exchange = ref(exchanges[0]);
+const exchanges = computed(() => withOptionalRareExchanges(Object.keys(exchangeStationMap)));
+const exchange = ref(exchanges.value[0]);
 
 const warehouseName = computed(() => `${exchangeStationMap[exchange.value]} Warehouse`);
 const packageName = 'ZONGBUSHENJI';

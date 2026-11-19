@@ -67,6 +67,7 @@ import { optimizeIndustryQueue } from './industry-optimizer';
 import { getIndustryQueues, runIndustryQueue } from './industry-queue';
 import { estimateIndustryStorage, getIndustryWarehouses } from './industry-storage';
 import $style from './IND.module.css';
+import { withOptionalRareExchanges } from '@src/core/exchange-options';
 
 const exchange = ref('IC1');
 const selectedTickers = ref<string[]>([]);
@@ -125,7 +126,9 @@ const balances = computed(() =>
     })),
   ),
 );
-const options = ['IC1', 'AI1', 'NC1', 'CI1', 'NC2', 'CI2'];
+const options = computed(() =>
+  withOptionalRareExchanges(['IC1', 'AI1', 'NC1', 'CI1', 'NC2', 'CI2']),
+);
 const standalonePriceModes = [
   { value: 'VWAP7D', label: '7 天', tooltip: '按 7 日加权均价估值，缺价物料用 30 日均价' },
   { value: 'VWAP30D', label: '30 天', tooltip: '按 30 日加权均价估值' },

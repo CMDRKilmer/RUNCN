@@ -24,6 +24,9 @@ export const initialUserData = deepFreeze({
       method: 'DEFAULT' as UserData.PricingMethod,
       materialPriceTooltips: false,
     },
+    // 生成操作包 / 定价等交易所列表里是否显示冷门交易所 CI2（Arclight）与 NC2（Hubur）。
+    // 默认隐藏；老数据没有该字段时按 false 处理（见 core/exchange-options.ts）。
+    showRareExchanges: false,
     burn: {
       red: 3,
       yellow: 7,

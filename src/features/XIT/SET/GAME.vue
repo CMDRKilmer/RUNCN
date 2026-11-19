@@ -4,6 +4,7 @@ import SectionHeader from '@src/components/SectionHeader.vue';
 import Tooltip from '@src/components/Tooltip.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
 import Active from '@src/components/forms/Active.vue';
+import RadioItem from '@src/components/forms/RadioItem.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
@@ -56,6 +57,12 @@ const timeFormat = computed({
     return format;
   },
   set: value => (userData.settings.time = value),
+});
+
+// 老数据没有该字段：按 false 处理，开关默认关闭（隐藏 CI2 / NC2）。
+const showRareExchanges = computed({
+  get: () => userData.settings.showRareExchanges ?? false,
+  set: value => (userData.settings.showRareExchanges = value),
 });
 
 const exchangeChartTypes: { label: string; value: UserData.ExchangeChartType }[] = [
@@ -186,6 +193,14 @@ function openDesktopNotifications() {
     </Active>
     <Active label="默认 CX 图表类型">
       <SelectInput v-model="userData.settings.defaultChartType" :options="exchangeChartTypes" />
+    </Active>
+  </form>
+  <SectionHeader>交易所</SectionHeader>
+  <form>
+    <Active
+      label="冷门交易所"
+      tooltip="在生成操作包、维修单、PLAN / IND 定价等交易所列表里显示 CI2（Arclight）与 NC2（Hubur）。默认隐藏。">
+      <RadioItem v-model="showRareExchanges">显示 CI2 / NC2</RadioItem>
     </Active>
   </form>
   <SectionHeader>
