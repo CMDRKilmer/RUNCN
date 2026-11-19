@@ -243,6 +243,9 @@ const loopActive = computed(
     loopPlan.value?.ok === true &&
     loopPlan.value.plan !== undefined,
 );
+// 「执行环线」的唯一拦截口径：tooltip、execute() 早退与按钮置灰都读它，避免守卫条件
+// 只加在一处（比如以后再加「多船」「缺估时」），出现「提示拦住、按钮还能点」。
+const actBlocked = computed(() => actBlockedReason(loopActive.value));
 const loopCycleText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
@@ -257,9 +260,8 @@ const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
   // 循环模式下规划表是稳态口径，ACT 包只能按单趟量下发，等于把每轮运量少写一个数量级。
-  const blocked = actBlockedReason(loopActive.value);
-  if (blocked !== undefined) {
-    return blocked;
+  if (actBlocked.value !== undefined) {
+    return actBlocked.value;
   }
   if (chainGroup.value === undefined) {
     return '请先选择产业链分组';
@@ -728,9 +730,8 @@ function execute() {
   }
   // 循环模式：规划表是闭环稳态计划，而 shipPlans 仍是单趟口径——生成 ACT 包会把每轮运量
   // 按单趟写一遍。循环走「生成原生 RT」+ 游戏 Loop，这里直接拒绝。
-  const blocked = actBlockedReason(loopActive.value);
-  if (blocked !== undefined) {
-    executeNotice.value = blocked;
+  if (actBlocked.value !== undefined) {
+    executeNotice.value = actBlocked.value;
     return;
   }
   // 时间均衡分段计算中：此时 shipPlans 还是舱容贪心（未充分利用多船）。
@@ -1342,11 +1343,11 @@ function flightTotalText(shipId: string): string {
         生成原生 RT
       </PrunButton>
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
-        <PrunButton primary :disabled="!hasStops || loopActive" @click="execute"
+        <PrunButton primary :disabled="!hasStops || actBlocked !== undefined" @click="execute"
           >执行环线</PrunButton
         >
       </Tooltip>
-      <PrunButton v-else primary :disabled="!hasStops || loopActive" @click="execute"
+      <PrunButton v-else primary :disabled="!hasStops || actBlocked !== undefined" @click="execute"
         >执行环线</PrunButton
       >
     </div>

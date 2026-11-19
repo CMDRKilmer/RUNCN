@@ -1800,13 +1800,21 @@ await check('loop mode blocks ACT execution with one shared reason', () => {
   assert.equal(typeof blocked, 'string');
   assert.match(blocked, /生成原生 RT/);
   // 守卫的最终落点是 ChainView 的置灰与 execute() 拦截（渲染层，脚本驱动不到）：这里只核对
-  // 两处共用同一文案、没有各自硬编码，实际置灰/拦截行为由浏览器验收。
+  // 它确实是唯一来源——一个 computed 派生、置灰不读裸 loopActive、没有第二份硬编码文案。
   const view = readFileSync(
     new URL('../src/features/XIT/FLEET/ChainView.vue', import.meta.url),
     'utf8',
   );
-  assert.equal(view.split('actBlockedReason(').length - 1, 2);
+  assert.equal(view.split('actBlockedReason(').length - 1, 1);
   assert.equal(view.includes('循环模式不生成 ACT'), false);
+  const hasStopGuards = [...view.matchAll(/:disabled="([^"]*)"/g)]
+    .map(match => match[1])
+    .filter(expr => expr.includes('hasStops'));
+  assert.equal(hasStopGuards.length, 2);
+  for (const expr of hasStopGuards) {
+    assert.match(expr, /actBlocked !== undefined/);
+  }
+  assert.equal(view.includes('|| loopActive'), false);
 });
 
 await check('loop round bill adds SF/FF to the origin load', () => {
