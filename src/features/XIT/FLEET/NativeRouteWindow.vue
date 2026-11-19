@@ -21,6 +21,9 @@ function onStarted() {
     :initial-waypoints="stagedNativeRoute.waypoints"
     :chain-name="stagedNativeRoute.chainName"
     :auto-start="stagedNativeRoute.autoStart === true"
+    :loop="stagedNativeRoute.loop === true"
+    :cycle-hours="stagedNativeRoute.cycleHours"
+    :loop-fuel="stagedNativeRoute.loopFuel"
     @started="onStarted"
     @close="stagedNativeRoute = undefined" />
 </template>

@@ -12,6 +12,22 @@ export interface RouteExecutionRow {
   // 游戏内航线号（RT-XXXX-NNNN）。
   naturalId?: string;
   shipId?: string;
+  // 阻塞/等待状态（行文本解析）；文案待 RTE 实采校准，读不到保留 undefined → 界面「—」。
+  status?: RouteStatus;
+}
+
+export type RouteStatus = 'blocked' | 'waiting';
+
+// 状态文案待 RTE 实采校准（中/英）：先按手册候选关键词识别英文阻塞/等待，
+// 读不到（含尚未采集的中文文案）保留 undefined，不伪造状态。
+export function parseRouteStatus(text: string): RouteStatus | undefined {
+  if (/\b(?:step\s+)?blocked\b/i.test(text)) {
+    return 'blocked';
+  }
+  if (/\bwaiting\b/i.test(text)) {
+    return 'waiting';
+  }
+  return undefined;
 }
 
 // 读取所有正在执行航线的船。返回 undefined = 窗口没读到（调用方回退本地记录）；
@@ -90,7 +106,7 @@ function readRows(frame: Element): RouteExecutionRow[] {
     if (naturalId === undefined && shipId === undefined) {
       continue;
     }
-    rows.push({ text, naturalId, shipId });
+    rows.push({ text, naturalId, shipId, status: parseRouteStatus(text) });
   }
   return rows;
 }

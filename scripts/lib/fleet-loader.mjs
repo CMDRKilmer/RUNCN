@@ -27,6 +27,7 @@ const adapters = new Set([
   '@src/store/user-data',
   '@src/store/create-id',
   '@src/utils/format',
+  '@src/utils/sleep',
   '@src/infrastructure/org-api/chain-sync',
   '@src/infrastructure/org-api/client',
   '@src/infrastructure/org-api/session',
@@ -35,7 +36,11 @@ const adapters = new Set([
   '@src/utils/on-node-disconnected',
 ]);
 export function resolve(specifier, context, nextResolve) {
-  if (specifier === './chain-flight-time' && context.parentURL.endsWith('use-chain-planning.ts')) {
+  if (
+    specifier === './chain-flight-time' &&
+    (context.parentURL.endsWith('use-chain-planning.ts') ||
+      context.parentURL.endsWith('use-chain-loop-planning.ts'))
+  ) {
     return { url: stub, shortCircuit: true };
   }
   if (specifier === '@src/utils/watch') {

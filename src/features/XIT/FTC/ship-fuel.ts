@@ -2,6 +2,7 @@
 //
 // 单列成模块是为了让公式模型（formula-plan / chain-flight-time）不必 import 旧的
 // ftc-compute 编排模块；ftc-compute 仍按原路径 re-export，旧调用方无需改动。
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 
 export interface ShipFuelRemaining {
@@ -9,6 +10,17 @@ export interface ShipFuelRemaining {
   ftlRemaining: number;
   stlCap: number;
   ftlCap: number;
+}
+
+// 罐容量必须以燃料单位（u）返回：公式模型与环线逐段递推都按 u 计。
+// weightCapacity 是吨，直接当 u 会把 3500u 罐读成 210u，后续航段余油假判缺；
+// 除以燃料单重（SF 0.06 / FF 0.05 t/u）换回 u。store 未下发时保持 0，不得误报有罐。
+function tankCapUnits(store: PrunApi.Store | undefined, ticker: string) {
+  if (store === undefined) {
+    return 0;
+  }
+  const unitWeight = materialsStore.getByTicker(ticker)?.weight ?? 0;
+  return unitWeight > 0 ? store.weightCapacity / unitWeight : 0;
 }
 
 export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
@@ -27,7 +39,7 @@ export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
   return {
     stlRemaining: sumQty(stlStore),
     ftlRemaining: sumQty(ftlStore),
-    stlCap: stlStore?.weightCapacity ?? 0,
-    ftlCap: ftlStore?.weightCapacity ?? 0,
+    stlCap: tankCapUnits(stlStore, 'SF'),
+    ftlCap: tankCapUnits(ftlStore, 'FF'),
   };
 }

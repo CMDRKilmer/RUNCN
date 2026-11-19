@@ -633,14 +633,16 @@ await checkAsync('门控：publish = false → 输入完整也不写滑块、不
 // ShipPerformance.stlRemaining（转移段燃料/速度的乘性基准 0.49×余量×f）与缺口判断。
 // 黄金样本 = 用户实测那组数（3,238 / 3,500 与 1,974 / 2,000），字面量写死，禁止从实现反推。
 // 替身侧：storagesStore.getById 见 scripts/lib/ftc-node-stub.mjs（stubSetStores 注入）。
+// weightCapacity 是**吨**（实测 STL 罐 210t / FTL 罐 100t）；容量 u 由单重换算
+// （210/0.06=3500、100/0.05=2000）。旧实现把吨直接当 u → stlCap=210，本组用例可区分。
 const fuelStore = (id, type, weightCapacity, amount) => ({
   id,
   type,
   weightCapacity,
   items: [{ type: 'INVENTORY', quantity: { amount } }],
 });
-const STL_3238 = fuelStore('stl-1', 'STL_FUEL_STORE', 3500, 3238);
-const FTL_1974 = fuelStore('ftl-1', 'FTL_FUEL_STORE', 2000, 1974);
+const STL_3238 = fuelStore('stl-1', 'STL_FUEL_STORE', 210, 3238);
+const FTL_1974 = fuelStore('ftl-1', 'FTL_FUEL_STORE', 100, 1974);
 
 check('油罐查表：stlFuelStoreId/ftlFuelStoreId 有值、idStlFuelStore 为空 → 读到实测余量', f => {
   stub.stubSetStores([STL_3238, FTL_1974]);

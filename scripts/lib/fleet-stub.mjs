@@ -60,6 +60,7 @@ export const showBuffer = async (command, options) => {
   windows.push({ command, options });
 };
 export const onApiMessage = () => {};
+export const sleep = () => Promise.resolve();
 export const estimation = { calls: [], pending: null, result: null };
 export async function estimateChainFlightTimes(input) {
   estimation.calls.push(input);

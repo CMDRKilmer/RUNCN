@@ -39,6 +39,8 @@ export interface RouteData {
   id: string;
   naturalId: string;
   name?: string | null;
+  // 循环开关，服务端响应已带该字段（实采 2026-11-19）。
+  repeats?: boolean;
   waypoints: RouteWaypointData[];
 }
 
@@ -231,6 +233,8 @@ export async function socketEditStep(
   type: 'LOAD' | 'UNLOAD',
   materialId: string,
   units: number,
+  // 缺省 min=max（出发地装载保留缺料停跑背压）；其余装/卸由调用方传 0（机会式不阻塞）。
+  minimum = units,
 ) {
   return await sendRouteAction(
     `SHIP_ROUTES_EDIT_${type}_STEP`,
@@ -239,7 +243,7 @@ export async function socketEditStep(
       waypointId,
       stepId,
       material: materialId,
-      minimum: { type: 'ABSOLUTE', units },
+      minimum: { type: 'ABSOLUTE', units: minimum },
       maximum: { type: 'ABSOLUTE', units },
       retain: 0,
     },
@@ -249,6 +253,16 @@ export async function socketEditStep(
 
 export async function socketRenameRoute(routeId: string, name: string) {
   return await sendRouteAction('SHIP_ROUTES_RENAME_ROUTE', { routeId, name }, routeId);
+}
+
+// 循环开关（实采 2026-11-19）：SHIP_ROUTES_SET_REPEAT 回单条 SHIP_ROUTES_ROUTE，repeats 已翻转。
+// 与航点/步骤独立，套用 FIFO 串行 + 按 routeId 匹配；写入后直接用响应里的 repeats 校验。
+export async function socketSetRouteRepeats(routeId: string, repeats: boolean) {
+  const route = await sendRouteAction('SHIP_ROUTES_SET_REPEAT', { routeId, repeats }, routeId);
+  if (route.repeats !== repeats) {
+    throw new Error(`循环开关未生效（服务端 repeats=${String(route.repeats)}）。`);
+  }
+  return route;
 }
 
 // 补油步骤：source 固定本地仓库，上下限都用 CAPACITY（= 补满），与游戏 UI 的最终状态一致。
@@ -372,7 +386,15 @@ async function writeRoute(
         throw new Error(`未找到材料 ${step.ticker}。`);
       }
       const stepType = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
-      route = await socketEditStep(route.id, added.id, stepId, stepType, material.id, step.amount);
+      route = await socketEditStep(
+        route.id,
+        added.id,
+        stepId,
+        stepType,
+        material.id,
+        step.amount,
+        step.minimum,
+      );
     }
   }
   const name = input.name.trim();

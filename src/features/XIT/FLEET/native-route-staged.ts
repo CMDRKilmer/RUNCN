@@ -13,6 +13,13 @@ export interface StagedNativeRoute {
   chainName: string;
   // 首次打开向导时自动跑完燃料计算与写入；向导发 started 后由窗口清掉。
   autoStart?: boolean;
+  // 循环模式：航点按装载端写 min/max，写完后由向导打开游戏 Loop（步骤 5）。
+  loop?: boolean;
+  // 生成时快照的飞行周期（小时），供向导按轮备货与界面标「预计」。
+  cycleHours?: number;
+  // 每轮 SF/FF 消耗（收敛估时的逐段油耗之和）：向导按轮备货含燃料。`fuelPerRound` 缺逐段油耗时
+  // 已回退罐容量，所以 loop 为 true 时这个字段必定存在。
+  loopFuel?: { stl: number; ftl: number };
 }
 
 export const stagedNativeRoute = ref<StagedNativeRoute | undefined>(undefined);

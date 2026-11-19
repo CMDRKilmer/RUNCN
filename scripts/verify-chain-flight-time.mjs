@@ -9,7 +9,9 @@
 //   ④ 模型拒绝（缺蓝图）时同样标缺，而不是 0 小时；
 //   ⑤ 起终点相同 → ok 且 0 小时，不依赖任何输入；
 //   ⑥ includeEndpointHours 的出发/归航采样；
-//   ⑦ 设了时间价值后不会比不设时更慢（成本最优趋快）。
+//   ⑦ 设了时间价值后不会比不设时更慢（成本最优趋快）；
+//   ⑧ 逐段 SF/FF 实耗 = 出发油量 − 到达余量（真实模型给出余量，不是占位 0），并与
+//      fuelPerRound 的每轮燃料对账。
 //
 // 注意：「缺飞船蓝图」用例会真实等待蓝图 6 s（与生产口径一致，替身 sleep 立即返回但
 // 截止时间仍按墙钟走），整套约 6 s 属预期。
@@ -21,7 +23,9 @@ import { register } from 'node:module';
 register('./lib/chain-flight-time-loader.mjs', import.meta.url);
 
 const stub = await import('./lib/chain-flight-time-stub.mjs');
-const { estimateChainFlightTimes } = await import('../src/features/XIT/FLEET/chain-flight-time.ts');
+const { estimateChainFlightTimes, chainShipFuelCaps } =
+  await import('../src/features/XIT/FLEET/chain-flight-time.ts');
+const { fuelPerRound } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 
 const summary = { pass: 0, fail: 0 };
 
@@ -171,6 +175,65 @@ await check('单段：时长来自公式模型，到达时刻 = 出发 + 时长'
     '输入按起点→站点调用',
     stub.state.loads[0]?.from === 'A',
     `actual=${stub.state.loads[0]?.from}`,
+  );
+});
+
+await check('逐段 SF 实耗 = 出发油量 − 到达余量，与每轮燃料对账', async failures => {
+  useFixture({ stlRemaining: 3000 });
+  const est = await estimateChainFlightTimes({
+    ship,
+    origin: 'A',
+    stops: [
+      { naturalId: 'B', planetName: 'B' },
+      { naturalId: 'A', planetName: 'A' },
+    ],
+  });
+  const legs = est.legs;
+  const used = legs.map(x => x.stlUsed);
+  expect(
+    failures,
+    '三段都 ok',
+    legs.every(x => x.ok),
+    `actual=${JSON.stringify(legs.map(x => x.ok))}`,
+  );
+  expect(
+    failures,
+    '每段都写数值实耗',
+    used.every(v => Number.isFinite(v)),
+    `actual=${JSON.stringify(used)}`,
+  );
+  expect(
+    failures,
+    '去程与归程都耗油',
+    used[0] > 0 && used[1] > 0,
+    `actual=${JSON.stringify(used)}`,
+  );
+  expect(
+    failures,
+    '实耗取自余量差值（小于满罐 3000，不是拿满罐顶替）',
+    used[0] < 3000,
+    `actual=${used[0]}`,
+  );
+  expect(
+    failures,
+    '起终点相同的段实耗为 0',
+    legs[est.legs.length - 1].stlUsed === 0,
+    `actual=${legs[est.legs.length - 1].stlUsed}`,
+  );
+  const stlSum = used.reduce((total, v) => total + v, 0);
+  const perRound = fuelPerRound(legs, chainShipFuelCaps(ship));
+  expect(
+    failures,
+    '每轮 SF = 各段实耗之和',
+    perRound.stl === stlSum && stlSum > 0,
+    `expected=${stlSum} actual=${perRound.stl}`,
+  );
+  // 系内单段时间飞行不耗 FTL：模型给出 0 余量差，每轮 FF 就该是 0，不能落到「缺段回退罐容量」。
+  expect(
+    failures,
+    '系内不耗 FF（每轮 FF = 0，未回退罐容量）',
+    perRound.ftl === 0,
+    `actual=${perRound.ftl}`,
   );
 });
 

@@ -14,11 +14,13 @@ import {
   type RouteTank,
 } from './native-route-plan';
 import type { RouteData, RouteStepData, RouteWaypointData } from './native-route-socket';
-import type { RouteExecutionRow } from './native-route-rte';
+import type { RouteExecutionRow, RouteStatus } from './native-route-rte';
 
 export interface RunningNativeRoute {
   route: RouteData;
   shipId?: string;
+  // RTE 行解析出的阻塞/等待状态（文案待实采校准，读不到为 undefined）。
+  status?: RouteStatus;
 }
 
 export interface RunningRoutes {
@@ -48,20 +50,20 @@ export function matchRunningRoutes(routes: RouteData[], rows: RouteExecutionRow[
         unresolved++;
         continue;
       }
-      push(inferred, row.shipId);
+      push(inferred, row.shipId, row.status);
       continue;
     }
-    push(route, row.shipId);
+    push(route, row.shipId, row.status);
   }
   return { entries, unresolved };
 
-  function push(route: RouteData, shipId: string | undefined) {
+  function push(route: RouteData, shipId: string | undefined, status?: RouteStatus) {
     const key = `${route.id}|${shipId ?? ''}`;
     if (seen.has(key)) {
       return;
     }
     seen.add(key);
-    entries.push({ route, shipId });
+    entries.push({ route, shipId, status });
   }
 }
 
@@ -263,6 +265,7 @@ export function gameRouteRecord(route: RouteData, shipId: string | undefined): N
     chainName: '',
     createdAt: 0,
     waypoints: routeWaypoints(route).map(toWaypoint),
+    repeats: route.repeats,
   };
 }
 
@@ -307,6 +310,11 @@ export function mergeRouteRecord(
     chainName: local.chainName,
     createdAt: local.createdAt,
     waypoints,
+    // Loop 开关以服务端为准；循环标记与生成时周期是本地元数据，沿用快照。
+    repeats: server.repeats,
+    loop: local.loop,
+    cycleHours: local.cycleHours,
+    fuelPerRound: local.fuelPerRound,
   };
 }
 
@@ -441,7 +449,12 @@ export function collectNativeRoutes(
   running: RunningRoutes | undefined,
   definitions: readonly RouteData[] = [],
 ) {
-  const rows: { record: NativeRouteRecord; shipId: string; running: boolean }[] = [];
+  const rows: {
+    record: NativeRouteRecord;
+    shipId: string;
+    running: boolean;
+    status?: RouteStatus;
+  }[] = [];
   // 同一条航线可能同时被两艘船执行：执行行按「航线 + 船」去重，两艘船各占一张卡；
   // 而定义行/本地行按航线去重，避免给执行中的航线再补一张「未分配」的重复卡。
   const executing = new Set<string>();
@@ -461,7 +474,7 @@ export function collectNativeRoutes(
     }
     return ships;
   };
-  const pushExecuting = (record: NativeRouteRecord, shipId: string) => {
+  const pushExecuting = (record: NativeRouteRecord, shipId: string, status?: RouteStatus) => {
     const identity = routeIdentity(record.routeId, record.naturalId);
     const key = `${identity}|${shipId}`;
     if (executingRows.has(key)) {
@@ -469,7 +482,7 @@ export function collectNativeRoutes(
     }
     executingRows.add(key);
     executing.add(identity);
-    rows.push({ record, shipId, running: true });
+    rows.push({ record, shipId, running: true, status });
   };
   for (const entry of running?.entries ?? []) {
     const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
@@ -481,6 +494,7 @@ export function collectNativeRoutes(
       pushExecuting(
         mergeRouteRecord(entry.route, shipId === '' ? undefined : shipId, local),
         shipId,
+        entry.status,
       );
     }
   }
@@ -756,10 +770,18 @@ function toStep(step: RouteStepData): NativeRouteStep | undefined {
   // CAPACITY（装载=装满 / 卸船=全部）没有绝对数量，标记出来避免按 0 吨计算。
   const capacity = step.maximum?.type === 'CAPACITY' || step.minimum?.type === 'CAPACITY';
   const amount = capacity ? 0 : (step.maximum?.units ?? step.minimum?.units ?? 0);
+  // 循环步骤 min=0/max=Q：最小量与最大量不同时记下来（min=max 缺省不写，单趟口径不变）。
+  const minUnits = step.minimum?.units;
+  const maxUnits = step.maximum?.units;
+  const minimum =
+    !capacity && typeof minUnits === 'number' && minUnits !== (maxUnits ?? minUnits)
+      ? minUnits
+      : undefined;
   return {
     kind: step.type === 'LOAD' ? 'load' : 'unload',
     ticker,
     amount,
     capacity: capacity || undefined,
+    ...(minimum === undefined ? {} : { minimum }),
   };
 }
