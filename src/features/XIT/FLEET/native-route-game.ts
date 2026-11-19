@@ -14,13 +14,13 @@ import {
   type RouteTank,
 } from './native-route-plan';
 import type { RouteData, RouteStepData, RouteWaypointData } from './native-route-socket';
-import type { RouteExecutionRow } from './native-route-rte';
+import type { RouteExecutionRow, RouteStatus } from './native-route-rte';
 
 export interface RunningNativeRoute {
   route: RouteData;
   shipId?: string;
   // RTE 行解析出的阻塞/等待状态（文案待实采校准，读不到为 undefined）。
-  status?: string;
+  status?: RouteStatus;
 }
 
 export interface RunningRoutes {
@@ -57,7 +57,7 @@ export function matchRunningRoutes(routes: RouteData[], rows: RouteExecutionRow[
   }
   return { entries, unresolved };
 
-  function push(route: RouteData, shipId: string | undefined, status?: string) {
+  function push(route: RouteData, shipId: string | undefined, status?: RouteStatus) {
     const key = `${route.id}|${shipId ?? ''}`;
     if (seen.has(key)) {
       return;
@@ -449,8 +449,12 @@ export function collectNativeRoutes(
   running: RunningRoutes | undefined,
   definitions: readonly RouteData[] = [],
 ) {
-  const rows: { record: NativeRouteRecord; shipId: string; running: boolean; status?: string }[] =
-    [];
+  const rows: {
+    record: NativeRouteRecord;
+    shipId: string;
+    running: boolean;
+    status?: RouteStatus;
+  }[] = [];
   // 同一条航线可能同时被两艘船执行：执行行按「航线 + 船」去重，两艘船各占一张卡；
   // 而定义行/本地行按航线去重，避免给执行中的航线再补一张「未分配」的重复卡。
   const executing = new Set<string>();
@@ -470,7 +474,7 @@ export function collectNativeRoutes(
     }
     return ships;
   };
-  const pushExecuting = (record: NativeRouteRecord, shipId: string, status?: string) => {
+  const pushExecuting = (record: NativeRouteRecord, shipId: string, status?: RouteStatus) => {
     const identity = routeIdentity(record.routeId, record.naturalId);
     const key = `${identity}|${shipId}`;
     if (executingRows.has(key)) {

@@ -48,6 +48,7 @@ import {
   type RouteData,
 } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
+import type { RouteStatus } from './native-route-rte';
 import {
   collectNativeRoutes,
   matchRunningRoutes,
@@ -330,7 +331,7 @@ interface NativeRouteView {
   // 出发地库存可支撑轮数文本（∞ = 无消耗）。
   sustainText: string;
   // RTE 阻塞/等待状态（待实采校准）：blocked / waiting / undefined。
-  status: string | undefined;
+  status: RouteStatus | undefined;
   // 卡片告警（船况、循环停止、库存不足、阻塞）。
   alerts: string[];
   // 循环补货包：按 1 轮 roundBill 扣出发地库存的缺口（运行中也可用）。
@@ -344,7 +345,7 @@ function loopCardInfo(
   record: NativeRouteRecord,
   ship: PrunApi.Ship | undefined,
   running: boolean,
-  status: string | undefined,
+  status: RouteStatus | undefined,
 ) {
   const isLoop = record.loop === true || record.repeats === true;
   const cycleText =
