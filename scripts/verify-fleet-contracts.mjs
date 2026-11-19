@@ -59,6 +59,7 @@ const {
   loopEligibility,
   actBlockedReason,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
+const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -2161,5 +2162,22 @@ await check('loop bills each base by the cycle, not the hand-entered days', () =
   assert.equal(computeChainPlan(looped, String).cxBill.RAT, 4);
 });
 
-
+await check('fuel tank capacity converts tonnes to units and floors the fraction', () => {
+  fixture.materials.SF = { weight: 0.06, volume: 10 };
+  fixture.materials.FF = { weight: 0.05, volume: 10 };
+  fixture.stores.sf = {
+    id: 'sf',
+    weightCapacity: 210,
+    items: [{ type: 'INVENTORY', quantity: { amount: 100 } }],
+  };
+  fixture.stores.ff = { id: 'ff', weightCapacity: 500, items: [] };
+  const fuel = shipFuelRemainingFor({ stlFuelStoreId: 'sf', ftlFuelStoreId: 'ff' });
+  // 210 t / 0.06 t/u = 3499.9999999999995 → 整数罐容量 3500 u（带小数尾巴会流进备货账）。
+  assert.equal(fuel.stlCap, 3500);
+  assert.equal(fuel.stlRemaining, 100);
+  assert.equal(fuel.ftlCap, 10000);
+  assert.equal(fuel.ftlRemaining, 0);
+  assert.equal(shipFuelRemainingFor({}).stlCap, 0);
+  assert.equal(shipFuelRemainingFor({}).ftlCap, 0);
+});
 console.log(`PASS ${passes}/${passes}`);

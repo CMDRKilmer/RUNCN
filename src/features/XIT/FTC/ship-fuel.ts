@@ -20,7 +20,9 @@ function tankCapUnits(store: PrunApi.Store | undefined, ticker: string) {
     return 0;
   }
   const unitWeight = materialsStore.getByTicker(ticker)?.weight ?? 0;
-  return unitWeight > 0 ? store.weightCapacity / unitWeight : 0;
+  // 向下取整：除法会给出 3499.9999999999995 这类浮点尾巴，燃料数量是整数，
+  // 带小数的罐容量会顺着备货账单一路上到 CX 采购包。
+  return unitWeight > 0 ? Math.floor(store.weightCapacity / unitWeight) : 0;
 }
 
 export function shipFuelRemainingFor(s: PrunApi.Ship): ShipFuelRemaining {
