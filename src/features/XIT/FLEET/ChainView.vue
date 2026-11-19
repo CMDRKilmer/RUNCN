@@ -251,6 +251,10 @@ const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
+  // 循环模式下规划表是稳态口径，ACT 包只能按单趟量下发，等于把每轮运量少写一个数量级。
+  if (loopActive.value) {
+    return '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
+  }
   if (chainGroup.value === undefined) {
     return '请先选择产业链分组';
   }
@@ -714,6 +718,12 @@ function onClearShipPlanClick(
 function execute() {
   const allPlans = shipPlans.value;
   if (allPlans.length === 0) {
+    return;
+  }
+  // 循环模式：规划表是闭环稳态计划，而 shipPlans 仍是单趟口径——生成 ACT 包会把每轮运量
+  // 按单趟写一遍。循环走「生成原生 RT」+ 游戏 Loop，这里直接拒绝。
+  if (loopActive.value) {
+    executeNotice.value = '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
     return;
   }
   // 时间均衡分段计算中：此时 shipPlans 还是舱容贪心（未充分利用多船）。
@@ -1325,9 +1335,13 @@ function flightTotalText(shipId: string): string {
         生成原生 RT
       </PrunButton>
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
-        <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
+        <PrunButton primary :disabled="!hasStops || loopActive" @click="execute"
+          >执行环线</PrunButton
+        >
       </Tooltip>
-      <PrunButton v-else primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
+      <PrunButton v-else primary :disabled="!hasStops || loopActive" @click="execute"
+        >执行环线</PrunButton
+      >
     </div>
 
     <!-- 分组内基地勾选 -->
