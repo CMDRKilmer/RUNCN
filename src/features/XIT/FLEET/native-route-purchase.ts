@@ -90,16 +90,25 @@ export function nativeRoutePurchasePackage(
 }
 
 // 循环航线一次运输实际可用天数（满载加权分摊展示口径）：船总舱容 ÷ Σ各基地净日耗 bundle。
-// 实际每轮送达按周期稳态净缺口，不装满；首末航点是出发地（装载/归航卸货），不算基地；
-// BURN 未加载返回 undefined（显示 —）。
+// 实际每轮送达按周期稳态净缺口，不装满；同一基地只算一次，不是基地的航点（出发/归航
+// 空间站）不计；BURN 或物料维度未加载返回 undefined（显示 —）。
 export function nativeRouteUsableDays(
   waypoints: readonly { location: string }[],
   capacity: { weight: number; volume: number },
 ): number | undefined {
   const bundles: { weight: number; volume: number }[] = [];
-  for (const waypoint of waypoints.slice(1, -1)) {
-    const site = sitesStore.getByPlanetNaturalIdOrName(waypoint.location.trim());
-    const burn = site === undefined ? undefined : effectiveBurn(site.siteId);
+  const seen = new Set<string>();
+  for (const waypoint of waypoints) {
+    const location = waypoint.location.trim();
+    if (seen.has(location)) {
+      continue;
+    }
+    seen.add(location);
+    const site = sitesStore.getByPlanetNaturalIdOrName(location);
+    if (site === undefined) {
+      continue;
+    }
+    const burn = effectiveBurn(site.siteId);
     if (burn === undefined) {
       return undefined;
     }

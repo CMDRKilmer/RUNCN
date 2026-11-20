@@ -2240,6 +2240,14 @@ await check('loop usable days read ship capacity and base BURN, not UNLOAD steps
   const waypoints = [{ location: 'CX' }, { location: 'A' }, { location: 'CX' }];
   // 单基地独享 100t/100m³：净日耗 4t/2m³ → min(25, 50) = 25 天（与 UNLOAD 步骤量无关）。
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), 25);
+  // 游戏里手建的 Loop 首站就是基地：按基地去重、跳过非基地航点，不再机械跳过首末站。
+  sitesStore.all.value.push({ siteId: 'B', address: { id: 'B' } });
+  fixture.burns.B = {
+    burn: { RAT: { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 } },
+  };
+  const baseLoop = [{ location: 'A' }, { location: 'B' }, { location: 'A' }];
+  // A 净 2/日 × (2t,1m³) + B 净 1/日 × (2t,1m³) → 100 ÷ 6 = 16.67 天（重量先到）。
+  assert.equal(nativeRouteUsableDays(baseLoop, { weight: 100, volume: 100 }), 100 / 6);
   // BURN 未加载 → 不伪造（物料维度缺失的守卫在 netDailyBundle/规划侧断言）。
   delete fixture.burns.A;
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
