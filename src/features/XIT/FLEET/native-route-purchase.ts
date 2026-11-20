@@ -1,6 +1,10 @@
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
-import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
+import { effectiveBurn } from './chain-data';
+import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
 import type { NativeRouteStep } from './native-route-plan';
 import type { NativeRouteRecord } from './native-route-registry';
 
@@ -38,10 +42,12 @@ export function billShortfall(
 }
 
 // 出发地仓库库存：航线在空间站装载，买在同一个交易所的货就落进这个仓库。
+// station.warehouseId 是站级静态地址，不是玩家 store id：玩家仓库按地址实体自然 id
+// 从 warehousesStore 取再读 storeId（键型混用恒查不到，同 FTC ship-fuel 的坑）。
 // 库存没加载时按 0 处理——清单本身就是要备齐的东西。
 export function readOriginStock(origin: string) {
-  const station = stationsStore.getByNaturalId(origin);
-  const store = station === undefined ? undefined : storagesStore.getById(station.warehouseId);
+  const warehouse = warehousesStore.getByEntityNaturalId(origin);
+  const store = warehouse === undefined ? undefined : storagesStore.getById(warehouse.storeId);
   const stock: Record<string, number> = {};
   for (const item of store?.items ?? []) {
     if (item.quantity) {
@@ -81,4 +87,39 @@ export function nativeRoutePurchasePackage(
 ): UserData.ActionPackageData | undefined {
   const origin = record.waypoints[0]?.location.trim() ?? '';
   return cxShortfallPackage(origin, nativeRouteOriginBill(record));
+}
+
+// 循环航线一次运输实际可用天数（满载加权分摊展示口径）：船总舱容 ÷ Σ各基地净日耗 bundle。
+// 实际每轮送达按周期稳态净缺口，不装满；同一基地只算一次，不是基地的航点（出发/归航
+// 空间站）不计；BURN 或物料维度未加载返回 undefined（显示 —）。
+export function nativeRouteUsableDays(
+  waypoints: readonly { location: string }[],
+  capacity: { weight: number; volume: number },
+): number | undefined {
+  const bundles: { weight: number; volume: number }[] = [];
+  const seen = new Set<string>();
+  for (const waypoint of waypoints) {
+    const location = waypoint.location.trim();
+    if (seen.has(location)) {
+      continue;
+    }
+    seen.add(location);
+    const site = sitesStore.getByPlanetNaturalIdOrName(location);
+    if (site === undefined) {
+      continue;
+    }
+    const burn = effectiveBurn(site.siteId);
+    if (burn === undefined) {
+      return undefined;
+    }
+    const bundle = netDailyBundle(burn, ticker => {
+      const mat = materialsStore.getByTicker(ticker);
+      return mat === undefined ? undefined : { weight: mat.weight, volume: mat.volume };
+    });
+    if (bundle === undefined) {
+      return undefined;
+    }
+    bundles.push(bundle);
+  }
+  return fullLoadUsableDays(capacity, bundles);
 }

@@ -82,6 +82,7 @@ Each planet has a limited number of plots. To build a base, a planet must have a
 A base is the primary operational unit on a planet.
 
 - Bases can be built on any planet.
+- A company owns at most one base per planet (confirmed by the maintainer 2026-11-20): a route waypoint's planet natural id therefore identifies its base uniquely.
 - Bases use up a base permit, and can be expanded to three permits.
 - A single-permit base has 500 building area. Each other permit adds 250.
 - Additional permits can be reclaimed at any time.

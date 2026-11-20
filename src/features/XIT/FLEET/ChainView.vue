@@ -62,15 +62,11 @@ import { stagedDispatch } from './staged';
 import {
   nativeRoutePurchasePackage,
   nativeRouteOriginBill,
+  nativeRouteUsableDays,
   cxShortfallPackage,
   readOriginStock,
 } from './native-route-purchase';
-import {
-  loopSustain,
-  fuelPerRound,
-  cycleDaysFromHours,
-  actBlockedReason,
-} from './native-route-loop';
+import { loopSustain, fuelPerRound, actBlockedReason } from './native-route-loop';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -254,15 +250,9 @@ const loopCycleText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
 });
-// 一轮送达量可补给的库存天数：稳态一轮刚好补满一个周期的消耗，故等于周期天数。
+// 一次运输实际可用天数（满载加权分摊展示口径：总舱容 ÷ Σ净日耗；实际送达按周期稳态）。
 const loopSupplyText = computed(() => {
-  const hours = loopPlan.value?.cycleHours;
-  return hours === undefined ? '' : `${cycleDaysFromHours(hours).toFixed(1)} 天`;
-});
-// 一船满载补给能撑几天（只算基地日耗）。周期短的单基地环线每轮只送一个周期的量，
-// 这个参考值会远大于每轮补给天数——避免把它当成「计算错了」。
-const loopCapacityText = computed(() => {
-  const days = loopPlan.value?.plan?.supplyCapacityDays;
+  const days = loopPlan.value?.plan?.fullLoadUsableDays;
   return days === undefined ? '' : `${days.toFixed(1)} 天`;
 });
 const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
@@ -340,7 +330,7 @@ interface NativeRouteView {
   isLoop: boolean;
   // 生成时快照的飞行周期文本（预计）；非循环或无快照为空。
   cycleText: string;
-  // 一轮送达量可补给的库存天数文本；非循环或无快照为空。
+  // 一次运输实际可用天数文本（满载加权分摊：总舱容 ÷ ΣBURN 净日耗）；非循环或无数据为空。
   supplyText: string;
   // 出发地库存可支撑轮数文本（∞ = 无消耗）。
   sustainText: string;
@@ -391,8 +381,11 @@ function loopCardInfo(
   }
   const cycleText =
     record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
-  const supplyText =
-    record.cycleHours === undefined ? '' : `${cycleDaysFromHours(record.cycleHours).toFixed(1)} 天`;
+  // 一次运输实际可用（满载加权分摊展示口径）：船总舱容 ÷ Σ航点基地净日耗；BURN 未加载显示 —。
+  const cargoCapacity = nativeRouteCapacity(ship);
+  const supplyDays =
+    cargoCapacity.weight > 0 ? nativeRouteUsableDays(record.waypoints, cargoCapacity) : undefined;
+  const supplyText = supplyDays === undefined ? '' : `${supplyDays.toFixed(1)} 天`;
   const origin = record.waypoints[0]?.location.trim() ?? '';
   // 燃料只认生成时快照（见 loopSustain）：游戏里手建的循环航线没快照时不给支撑轮数，
   // 补货包也只按物料算，避免拿罐容量当整圈油耗去误报「不足 1 轮」。
@@ -1445,9 +1438,7 @@ function flightTotalText(shipId: string): string {
         <template v-else-if="loopActive">
           循环模式 · 本轮周期 {{ loopCycleText }}（预计，随出发时刻漂移）<template
             v-if="loopSupplyText">
-            · 每轮补给 {{ loopSupplyText }} 库存<template v-if="loopCapacityText"
-              >（满载可至 {{ loopCapacityText }}）</template
-            ></template
+            · 一次运输实际可用 {{ loopSupplyText }}</template
           >
           <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
         </template>
@@ -1784,8 +1775,8 @@ function flightTotalText(shipId: string): string {
               <span v-else-if="entry.status === 'waiting'" :class="$style.routeWaiting">等待</span>
             </span>
             <div v-if="entry.isLoop" :class="$style.loopInfo">
-              周期 {{ entry.cycleText || '—' }}（预计） · 每轮补给
-              {{ entry.supplyText || '—' }} 库存 · 出发地可支撑 {{ entry.sustainText }} 轮
+              周期 {{ entry.cycleText || '—' }}（预计） · 一次运输实际可用
+              {{ entry.supplyText || '—' }} · 出发地可支撑 {{ entry.sustainText }} 轮
             </div>
             <div :class="$style.route">
               <span :class="$style.routeLabel">航线：</span>

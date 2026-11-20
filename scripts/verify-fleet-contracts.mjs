@@ -46,7 +46,7 @@ const {
   withoutRouteDefinition,
 } = await import('../src/features/XIT/FLEET/native-route-game.ts');
 const { parseRouteStatus } = await import('../src/features/XIT/FLEET/native-route-rte.ts');
-const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage } =
+const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage, nativeRouteUsableDays } =
   await import('../src/features/XIT/FLEET/native-route-purchase.ts');
 const {
   cycleDaysFromHours,
@@ -55,6 +55,8 @@ const {
   billWeightVolume,
   stockingRoundsMax,
   sustainRounds,
+  fullLoadUsableDays,
+  netDailyBundle,
   loopSustain,
   loopEligibility,
   actBlockedReason,
@@ -77,6 +79,7 @@ async function check(name, fn) {
     materials: {},
     stations: {},
     exchanges: {},
+    warehouses: {},
   });
   Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
@@ -1726,8 +1729,14 @@ await check('native RT purchase: the bill is reduced by the origin stock', async
 });
 
 await check('native RT purchase: an unplanned route gets a CX Buy package', async () => {
-  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'station-wh' };
   fixture.exchanges.HRT = { code: 'IC1' };
+  fixture.warehouses.HRT = { warehouseId: 'player-wh', storeId: 'wh' };
+  // 站级 warehouseId 不是玩家 store id：诱饵库存若被读到说明键型又混了。
+  fixture.stores['station-wh'] = {
+    id: 'station-wh',
+    items: [{ quantity: { material: { ticker: 'RAT' }, amount: 1000 } }],
+  };
   fixture.stores.wh = {
     id: 'wh',
     items: [{ quantity: { material: { ticker: 'RAT' }, amount: 30 } }],
@@ -1752,7 +1761,8 @@ await check('native RT purchase: no package outside a CX or with full stock', as
   const record = purchaseRecord([{ kind: 'load', ticker: 'RAT', amount: 100 }]);
   assert.equal(nativeRoutePurchasePackage(record), undefined);
   fixture.exchanges.HRT = { code: 'IC1' };
-  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'station-wh' };
+  fixture.warehouses.HRT = { warehouseId: 'player-wh', storeId: 'wh' };
   fixture.stores.wh = {
     id: 'wh',
     items: [{ quantity: { material: { ticker: 'RAT' }, amount: 100 } }],
@@ -1844,6 +1854,56 @@ await check('loop sustain rounds follow the first material to run out', () => {
   assert.equal(sustainRounds({}, { RAT: 10 }), Infinity);
 });
 
+await check('loop full-load usable days weight capacity by net daily need', () => {
+  // 总舱容 100t/100m³：单基地净日耗 2t/2m³ → 50 天；两基地相同净日耗 → 25 天。
+  const bundle = { weight: 2, volume: 2 };
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [bundle]), 50);
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [bundle, bundle]), 25);
+  // 加权分摊：净日耗 1:3 的两基地按份额分舱 → 各 25 天（均分口径只有 16.7）。
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [
+      { weight: 1, volume: 1 },
+      { weight: 3, volume: 3 },
+    ]),
+    25,
+  );
+  // 重量/体积取较小：体积瓶颈 100/4 = 25 天。
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 2, volume: 4 }]), 25);
+  // 自给基地不占分摊：剩一个净消耗基地独享全舱 → 50 天；无基地/全自给 → undefined。
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }, bundle]),
+    50,
+  );
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, []), undefined);
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }]),
+    undefined,
+  );
+});
+
+await check('loop net daily bundle sums net need with material weight/volume', () => {
+  const burn = {
+    RAT: { input: 2, workforce: 0.5, output: 0 },
+    COF: { input: 1, workforce: 0, output: 1 },
+    PG: { input: 3, workforce: 0, output: 1 },
+  };
+  const bundle = netDailyBundle(burn, t =>
+    t === 'RAT' ? { weight: 2, volume: 1 } : { weight: 1, volume: 3 },
+  );
+  // RAT 净 2.5 → 5t/2.5m³；PG 净 2 → 2t/6m³；COF 自给不计。
+  assert.deepEqual(bundle, { weight: 7, volume: 8.5 });
+  // 缺重量/体积 → 不出数（宁可显示 —，也不按 0 重量报出偏大的天数）。
+  assert.equal(
+    netDailyBundle({ RAT: { input: 2, workforce: 0, output: 0 } }, () => undefined),
+    undefined,
+  );
+  // 自给材料缺维度不算缺数据（它不占分摊）。
+  assert.deepEqual(
+    netDailyBundle({ RAT: { input: 1, workforce: 0, output: 1 } }, () => undefined),
+    { weight: 0, volume: 0 },
+  );
+});
+
 await check('loop sustain leaves fuel out and reports unknown without a per-round snapshot', () => {
   // 游戏里手建的循环航线没有每轮燃料快照：不能拿罐容量当整圈油耗，支撑轮数留空。
   assert.deepEqual(loopSustain({ RAT: 10 }, undefined, { RAT: 100 }), {
@@ -1886,8 +1946,8 @@ await check(
   },
 );
 
-await check('loop plan balances chain flow on steady gross need', () => {
-  // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环毛需求=ceil(10)=10。
+await check('loop plan balances chain flow on steady net need', () => {
+  // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环稳态净缺口=ceil(10)=10。
   const mat = (input, output, inventory, daysLeft) => ({
     input,
     output,
@@ -1923,44 +1983,274 @@ await check('loop plan balances chain flow on steady gross need', () => {
   const loop = computeChainPlan({ ...snapshot, loop: true }, String);
   assert.equal(single.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 5);
   assert.equal(loop.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 10);
+  // 提取口径：循环 = 周期×日产（10×10=100）扣已送下游 10 → 运回 90；
+  // 单趟 = 到港预计库存装尽（100）扣已送 5 → 运回 95。
+  assert.equal(loop.stops.find(x => x.naturalId === 'A').returnLoad.RAW, 90);
+  assert.equal(single.stops.find(x => x.naturalId === 'A').returnLoad.RAW, 95);
+  // 一次运输实际可用 = 满载加权分摊展示口径：100t/100m³ 仅 B 有净消耗（1t/1m³）独享全舱 → 100 天；单趟不算。
+  assert.equal(loop.fullLoadUsableDays, 100);
+  assert.equal(single.fullLoadUsableDays, undefined);
 });
 
-await check('plan reports hold-limited supply days for the selected bases', () => {
-  const mat = input => ({
+await check('loop snapshot bills follow cycle × BURN net need, not config days', () => {
+  const bs = bases();
+  // config.days=10、fixture 账单 RAT:10 都不参与循环口径；人口消耗计入、库存不减。
+  fixture.burns.A = {
+    burn: { RAT: { input: 1, output: 0, workforce: 0.5, inventory: 99, daysLeft: 0 } },
+  };
+  const loop = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    loop: true,
+    cycleDays: 1.5,
+  });
+  // ceil(1.5 × 1.5) = 3；B 日耗 1 → ceil(1.5) = 2。
+  assert.deepEqual(
+    loop.bases.map(b => b.bill),
+    [{ RAT: 3 }, { RAT: 2 }],
+  );
+  assert.deepEqual(
+    loop.bases.map(b => b.days),
+    [1.5, 1.5],
+  );
+  // 循环不用到港预计库存（提取按 BURN 日产）。
+  assert.deepEqual(
+    loop.bases.map(b => b.projectedStock),
+    [{}, {}],
+  );
+  const single = collectChainPlanningSnapshot({ originNaturalId: 'CX', capacity, bases: bs });
+  assert.deepEqual(
+    single.bases.map(b => b.bill),
+    [{ RAT: 10 }, { RAT: 10 }],
+  );
+});
+
+await check('loop self-produced material delivers net shortfall and extracts net surplus', () => {
+  // C 产 RAW 10/日；A 产 RAW 10/日且自耗 12/日（净消耗）；B 耗 2/日。10 天周期。
+  // A 净缺口 20 由 C 送达；A 自产 100 全留作一轮生产所需，提取 0。
+  const mat = (input, output, daysLeft) => ({
     input,
-    output: 0,
+    output,
     workforce: 0,
     inventory: 0,
-    daysLeft: 5,
+    daysLeft,
   });
-  const base = (naturalId, burn) => ({
+  const base = (naturalId, burn, products) => ({
     naturalId,
     planetName: naturalId,
-    days: 1,
+    days: 10,
     cxBuy: true,
     burn,
-    products: [],
+    products,
     bill: {},
     projectedStock: {},
     daysUntilFull: Infinity,
   });
   const snapshot = {
     originNaturalId: 'CX',
-    capacity,
+    // 舱容放大：本例只验证提取口径，不让返航裁剪干扰断言。
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { C: 0, A: 1, B: 2 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['A', 'B']]]),
+    bases: [
+      base('C', { RAW: mat(0, 10, Infinity) }, ['RAW']),
+      base('A', { RAW: mat(12, 10, 1) }, ['RAW']),
+      base('B', { RAW: mat(2, 0, 5) }, []),
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  const a = plan.stops.find(x => x.naturalId === 'A');
+  // A 日耗 12、日产 10 → 稳态净缺口 20 由 C 送达；自产部分基地自留一轮生产所需。
+  assert.equal(a.unloadChain.get('RAW').amount, 20);
+  // A 提取 = 日产 100 − 未被送达覆盖的自用 (120−20) = 0，不运回。
+  assert.equal(a.returnLoad.RAW, undefined);
+  // 满载加权分摊：500t/500m³ ÷ (A 2 + B 2) = 125 天（C 自产不占分摊）。
+  assert.equal(plan.fullLoadUsableDays, 500 / 2 / 2);
+  // C 日产 100 送下游 40，余量 60 运回。
+  assert.equal(plan.stops.find(x => x.naturalId === 'C').returnLoad.RAW, 60);
+});
+
+await check('loop self-sufficient base keeps one round need and extracts net surplus', () => {
+  // 单基地自给（日产 10 ≥ 日耗 1）：不安排送达，提取净余量 90，覆盖不计自给材料。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
     originStock: {},
     purchaseStock: {},
     planetRanks: { A: 0 },
-    materials: { RAW: { weight: 2, volume: 1 } },
+    materials: { RAW: { weight: 1, volume: 1 } },
     consumers: new Map(),
-    bases: [base('A', { RAW: mat(5) })],
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { RAW: { input: 1, output: 10, workforce: 0, inventory: 50, daysLeft: Infinity } },
+        products: ['RAW'],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
   };
-  // 日耗 5 → 重量 10 t/天、体积 5 m³/天：100 t 船舱先到，满载可补 10 天。
-  assert.equal(computeChainPlan(snapshot, String).supplyCapacityDays, 10);
-  // 消耗物资缺重量/体积：宁可不出数，也不按偏小的需求报出偏大的天数。
-  assert.equal(
-    computeChainPlan({ ...snapshot, materials: {} }, String).supplyCapacityDays,
-    undefined,
+  const plan = computeChainPlan(snapshot, String);
+  assert.deepEqual(plan.stops[0].unloadCx, {});
+  assert.equal(plan.stops[0].unloadChain.size, 0);
+  assert.equal(plan.stops[0].returnLoad.RAW, 90);
+  // 全自给基地无净消耗 → 满载分摊无瓶颈可言。
+  assert.equal(plan.fullLoadUsableDays, undefined);
+});
+
+await check('loop self-sufficient base gets no delivery bill at fractional cycle', () => {
+  const site = { siteId: 'A', address: { id: 'A' } };
+  sitesStore.all.value.push(site);
+  const billOf = (input, output, cycleDays) => {
+    fixture.burns.A = {
+      burn: { RAT: { input, output, workforce: 0, inventory: 0, daysLeft: 0 } },
+    };
+    const snapshot = collectChainPlanningSnapshot({
+      originNaturalId: 'CX',
+      capacity,
+      bases: [
+        { siteId: 'A', naturalId: 'A', planetName: 'A', site, config: { days: 10, cxBuy: true } },
+      ],
+      loop: true,
+      cycleDays,
+    });
+    return snapshot.bases[0].bill;
+  };
+  // 完全自给（日产 = 日耗）与净产（日产 > 日耗）在非整数周期下都不得虚报缺口：
+  // 逐项取整 ceil(日耗) − floor(日产) 会在这里给出 { RAT: 1 }。
+  assert.deepEqual(billOf(2, 2, 2.4), {});
+  assert.deepEqual(billOf(1, 1.1, 1.5), {});
+  // 净消耗仍按净缺口向上取整。
+  assert.deepEqual(billOf(2, 1, 1.5), { RAT: 2 });
+});
+
+await check('loop usable days stay blank when a net-consumer material has no dimensions', () => {
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: {},
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { RAW: { input: 2, output: 0, workforce: 0, inventory: 0, daysLeft: Infinity } },
+        products: [],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  // 物料维度没下发：宁可显示 —，也不按 0 重量报出偏大的天数。
+  assert.equal(computeChainPlan(snapshot, String).fullLoadUsableDays, undefined);
+  const weighed = computeChainPlan(
+    { ...snapshot, materials: { RAW: { weight: 2, volume: 1 } } },
+    String,
   );
+  // 净日耗 2 × 2t = 4t/日 → 500t ÷ 4 = 125 天（体积 250 天，重量先到）。
+  assert.equal(weighed.fullLoadUsableDays, 125);
+});
+
+await check('loop net producer at fractional cycle neither blocks nor under-extracts', () => {
+  // 自产 3/日、自耗 2/日、周期 1.5 天：净余 1.5/轮，不得生成送达缺口（否则整条环线被阻塞）。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 1.5,
+        cxBuy: true,
+        burn: { RAW: { input: 2, output: 3, workforce: 0, inventory: 0, daysLeft: Infinity } },
+        products: ['RAW'],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.equal(plan.hasUnmetChainDemand, undefined);
+  assert.deepEqual(plan.stops[0].unloadCx, {});
+  assert.equal(plan.stops[0].returnLoad.RAW, 1);
+});
+
+await check('loop net-consumer self-produced material picks up shortfall from origin stock', () => {
+  // 自产但净消耗（日产 1 < 日耗 12）：净缺口 110 走出发地取货，提取扣送达后为 0。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: { COF: 200 },
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { COF: { weight: 1, volume: 1 } },
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { COF: { input: 0, output: 1, workforce: 12, inventory: 0, daysLeft: Infinity } },
+        products: ['COF'],
+        bill: { COF: 110 },
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.equal(plan.stops[0].unloadCx.COF, 110);
+  assert.equal(plan.stops[0].returnLoad.COF, undefined);
+  assert.equal(plan.fullLoadUsableDays, 500 / 11);
+  assert.deepEqual(plan.purchaseBill, {});
+});
+
+await check('loop usable days read ship capacity and base BURN, not UNLOAD steps', () => {
+  sitesStore.all.value = [{ siteId: 'A', address: { id: 'A' } }];
+  fixture.burns.A = {
+    burn: { RAT: { input: 2, output: 0, workforce: 0, inventory: 0, daysLeft: 0 } },
+  };
+  fixture.materials.RAT = { weight: 2, volume: 1 };
+  const waypoints = [{ location: 'CX' }, { location: 'A' }, { location: 'CX' }];
+  // 单基地独享 100t/100m³：净日耗 4t/2m³ → min(25, 50) = 25 天（与 UNLOAD 步骤量无关）。
+  assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), 25);
+  // 游戏里手建的 Loop 首站就是基地：按基地去重、跳过非基地航点，不再机械跳过首末站。
+  sitesStore.all.value.push({ siteId: 'B', address: { id: 'B' } });
+  fixture.burns.B = {
+    burn: { RAT: { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 } },
+  };
+  const baseLoop = [{ location: 'A' }, { location: 'B' }, { location: 'A' }];
+  // A 净 2/日 × (2t,1m³) + B 净 1/日 × (2t,1m³) → 100 ÷ 6 = 16.67 天（重量先到）。
+  assert.equal(nativeRouteUsableDays(baseLoop, { weight: 100, volume: 100 }), 100 / 6);
+  // BURN 未加载 → 不伪造（物料维度缺失的守卫在 netDailyBundle/规划侧断言）。
+  delete fixture.burns.A;
+  assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
 });
 
 await check('waypoints: origin load min=max, all other steps min=0/max=Q', () => {
@@ -2045,6 +2335,23 @@ await check('loop iteration converges and overrides cycle days', async () => {
   assert.equal(r.cycleHours, 48);
   // 手填 10 天被飞行周期 48h=2 天覆盖（不写回 config）。
   assert.ok(r.plan.stops.every(s => s.days === 2));
+});
+
+await check('loop delivery stays steady while usable days show full load', async () => {
+  const r = await computeLoopPlan(
+    loopInput(bases()),
+    fakeEstimate(() => 48),
+  );
+  assert.equal(r.ok, true);
+  // 装载/补货按稳态：周期 2 天 × 日耗 1 × 2 基地 = 4（不是满载 100）。
+  assert.deepEqual(r.plan.cxBill, { RAT: 4 });
+  assert.ok(r.plan.stops.every(s => s.unloadCx.RAT === 2));
+  // 满载加权只作显示：100 ÷ (1+1) = 50 天。
+  assert.equal(r.plan.fullLoadUsableDays, 50);
+  // 出发地装载 min=max 精确量（缺料停跑背压）。
+  assert.deepEqual(buildNativeWaypoints(r.plan, true)[0].steps, [
+    { kind: 'load', ticker: 'RAT', amount: 4 },
+  ]);
 });
 
 await check('loop iteration keeps last estimate when not converged', async () => {
