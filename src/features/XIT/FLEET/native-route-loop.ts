@@ -36,11 +36,12 @@ export function cycleDelivery(rate: BurnRate, days: number): number {
 }
 
 // 基地净日耗 bundle：逐材料 max(0, 日耗 − 自产日产) × 单件重量/体积 求和。
-// 自给材料（日产 ≥ 日耗）不消耗外部送达，不计入。
+// 自给材料（日产 ≥ 日耗）不消耗外部送达，不计入。任一净消耗材料缺重量/体积时返回
+// undefined——宁可不出数，也不按偏小的需求报出偏大的可用天数。
 export function netDailyBundle(
   burn: Readonly<Record<string, BurnRate>>,
-  materialOf: (ticker: string) => { weight: number; volume: number },
-): { weight: number; volume: number } {
+  materialOf: (ticker: string) => { weight: number; volume: number } | undefined,
+): { weight: number; volume: number } | undefined {
   let weight = 0;
   let volume = 0;
   for (const [ticker, mat] of Object.entries(burn)) {
@@ -49,6 +50,9 @@ export function netDailyBundle(
       continue;
     }
     const m = materialOf(ticker);
+    if (m === undefined) {
+      return undefined;
+    }
     weight += net * m.weight;
     volume += net * m.volume;
   }

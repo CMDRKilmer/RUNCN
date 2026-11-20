@@ -1892,6 +1892,16 @@ await check('loop net daily bundle sums net need with material weight/volume', (
   );
   // RAT 净 2.5 → 5t/2.5m³；PG 净 2 → 2t/6m³；COF 自给不计。
   assert.deepEqual(bundle, { weight: 7, volume: 8.5 });
+  // 缺重量/体积 → 不出数（宁可显示 —，也不按 0 重量报出偏大的天数）。
+  assert.equal(
+    netDailyBundle({ RAT: { input: 2, workforce: 0, output: 0 } }, () => undefined),
+    undefined,
+  );
+  // 自给材料缺维度不算缺数据（它不占分摊）。
+  assert.deepEqual(
+    netDailyBundle({ RAT: { input: 1, workforce: 0, output: 1 } }, () => undefined),
+    { weight: 0, volume: 0 },
+  );
 });
 
 await check('loop sustain leaves fuel out and reports unknown without a per-round snapshot', () => {
@@ -2124,6 +2134,40 @@ await check('loop self-sufficient base gets no delivery bill at fractional cycle
   assert.deepEqual(billOf(2, 1, 1.5), { RAT: 2 });
 });
 
+await check('loop usable days stay blank when a net-consumer material has no dimensions', () => {
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: {},
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { RAW: { input: 2, output: 0, workforce: 0, inventory: 0, daysLeft: Infinity } },
+        products: [],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  // 物料维度没下发：宁可显示 —，也不按 0 重量报出偏大的天数。
+  assert.equal(computeChainPlan(snapshot, String).fullLoadUsableDays, undefined);
+  const weighed = computeChainPlan(
+    { ...snapshot, materials: { RAW: { weight: 2, volume: 1 } } },
+    String,
+  );
+  // 净日耗 2 × 2t = 4t/日 → 500t ÷ 4 = 125 天（体积 250 天，重量先到）。
+  assert.equal(weighed.fullLoadUsableDays, 125);
+});
+
 await check('loop net producer at fractional cycle neither blocks nor under-extracts', () => {
   // 自产 3/日、自耗 2/日、周期 1.5 天：净余 1.5/轮，不得生成送达缺口（否则整条环线被阻塞）。
   const snapshot = {
@@ -2196,7 +2240,7 @@ await check('loop usable days read ship capacity and base BURN, not UNLOAD steps
   const waypoints = [{ location: 'CX' }, { location: 'A' }, { location: 'CX' }];
   // 单基地独享 100t/100m³：净日耗 4t/2m³ → min(25, 50) = 25 天（与 UNLOAD 步骤量无关）。
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), 25);
-  // BURN 未加载 → 不伪造。
+  // BURN 未加载 → 不伪造（物料维度缺失的守卫在 netDailyBundle/规划侧断言）。
   delete fixture.burns.A;
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
 });

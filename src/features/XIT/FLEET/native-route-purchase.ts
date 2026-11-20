@@ -103,12 +103,14 @@ export function nativeRouteUsableDays(
     if (burn === undefined) {
       return undefined;
     }
-    bundles.push(
-      netDailyBundle(burn, ticker => {
-        const mat = materialsStore.getByTicker(ticker);
-        return { weight: mat?.weight ?? 0, volume: mat?.volume ?? 0 };
-      }),
-    );
+    const bundle = netDailyBundle(burn, ticker => {
+      const mat = materialsStore.getByTicker(ticker);
+      return mat === undefined ? undefined : { weight: mat.weight, volume: mat.volume };
+    });
+    if (bundle === undefined) {
+      return undefined;
+    }
+    bundles.push(bundle);
   }
   return fullLoadUsableDays(capacity, bundles);
 }

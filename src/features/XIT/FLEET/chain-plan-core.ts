@@ -65,13 +65,29 @@ export function computeChainPlan(
     volume: (input.materials[ticker]?.volume ?? 0) * amount,
   });
   // 循环满载可用天数（总舱容 ÷ Σ净日耗 bundle，加权分摊）：仅「一次运输实际可用」
-  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。
-  const fullLoadDays = input.loop
-    ? fullLoadUsableDays(
+  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。任一净消耗材料缺重量/体积、
+  // 或任一基地缺 BURN 时不出数（显示 —），不按偏小的需求报大天数。
+  let fullLoadDays: number | undefined;
+  if (input.loop) {
+    const bundles: { weight: number; volume: number }[] = [];
+    let complete = true;
+    for (const base of bases) {
+      const bundle = netDailyBundle(base.burn, t =>
+        input.materials[t] === undefined ? undefined : matWeightVolume(t, 1),
+      );
+      if (bundle === undefined) {
+        complete = false;
+        break;
+      }
+      bundles.push(bundle);
+    }
+    if (complete) {
+      fullLoadDays = fullLoadUsableDays(
         { weight: capacity.weight, volume: capacity.volume },
-        bases.map(base => netDailyBundle(base.burn, t => matWeightVolume(t, 1))),
-      )
-    : undefined;
+        bundles,
+      );
+    }
+  }
   // 预读白名单：BSN 中配置的 ticker 是「可提取产物白名单」，
   // 只有白名单上的 ticker 才能被提取（送下游或运回出发地）。
   // producer 推断仅考虑白名单 ticker（不白名单 = 中间产物，不参与搬运）。
