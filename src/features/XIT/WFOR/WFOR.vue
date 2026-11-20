@@ -3,6 +3,9 @@ import { computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
+import { useTitleBarToggle } from '@src/features/XIT/title-bar-toggle';
+import { useTileState } from '@src/store/user-data-tiles';
+
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { workforcesStore } from '@src/infrastructure/prun-api/data/workforces';
 import {
@@ -81,6 +84,24 @@ const rows = computed<WorkforceRow[] | undefined>(() => {
   return result.sort((a, b) => a.satisfaction - b.satisfaction);
 });
 
+// 「只看异常」：劳动力有缺口，或存在任何未满足需求（含未标 ★ 的非必需短供）的基地。
+// 只影响显示，不改变行内数据口径。状态随磁贴持久化（默认关 = 显示全部）。
+const onlyIssues = useTileState('onlyIssues', false);
+
+useTitleBarToggle({
+  ui: 'wfor-only-issues',
+  label: '只看异常',
+  active: onlyIssues,
+});
+
+const visibleRows = computed(() => {
+  const all = rows.value ?? [];
+  if (!onlyIssues.value) {
+    return all;
+  }
+  return all.filter(row => row.shortage > 0 || row.unmetNeeds.length > 0);
+});
+
 function satisfactionClass(value: number) {
   if (value < 0.8) {
     return C.ColoredValue.negative;
@@ -116,10 +137,12 @@ function unmetText(needs: { ticker: string; satisfaction: number; essential: boo
       </tr>
     </thead>
     <tbody>
-      <tr v-if="rows.length === 0">
-        <td colspan="6" style="text-align: center; opacity: 0.5; padding: 12px">暂无劳动力数据</td>
+      <tr v-if="visibleRows.length === 0">
+        <td colspan="6" style="text-align: center; opacity: 0.5; padding: 12px">
+          {{ onlyIssues ? '没有缺口或未满足需求的基地' : '暂无劳动力数据' }}
+        </td>
       </tr>
-      <tr v-for="row in rows" :key="`${row.naturalId}:${row.level}`">
+      <tr v-for="row in visibleRows" :key="`${row.naturalId}:${row.level}`">
         <td>
           <PrunLink inline :command="`BS ${row.naturalId}`">
             {{ row.planetName }}

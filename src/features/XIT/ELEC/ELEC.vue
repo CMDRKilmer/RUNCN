@@ -13,6 +13,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { timestampEachSecond } from '@src/utils/dayjs';
 import dayjs from 'dayjs';
 import { useTileState } from '@src/features/XIT/ELEC/tile-state';
+import { useTitleBarToggle } from '@src/features/XIT/title-bar-toggle';
 import RadioItem from '@src/components/forms/RadioItem.vue';
 import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 
@@ -32,6 +33,13 @@ const voteCommand = { GOV: 'ADM', COGC: 'COGCPEX' } as const;
 
 const gov = useTileState('gov');
 const cogc = useTileState('cogc');
+const votable = useTileState('votable');
+
+useTitleBarToggle({
+  ui: 'elec-votable-only',
+  label: '只看可投票',
+  active: votable,
+});
 
 const rows = computed<ElectionRow[] | undefined>(() => {
   const sites = sitesStore.all.value;
@@ -85,7 +93,13 @@ const sorted = computed(() => {
     return undefined;
   }
 
-  return filtered.value.slice().sort(compareRows);
+  // 「只看可投票」：只保留投票期已开始的行，也就是表格里显示「投票」按钮的那些。
+  // 未到投票期（显示倒计时）与没有任何选举信息（显示 `--`）的行都隐藏。
+  const visible = votable.value
+    ? filtered.value.filter(x => x.electionStart !== undefined && isPastOrNow(x.electionStart))
+    : filtered.value;
+
+  return visible.slice().sort(compareRows);
 });
 
 function govWindow(started?: number, elected?: number, reminder?: number): ElectionWindow {
@@ -232,6 +246,11 @@ function getPlanetNaturalIdFromAlert(alert: PrunApi.Alert) {
         </tr>
       </thead>
       <tbody>
+        <tr v-if="(sorted?.length ?? 0) === 0">
+          <td colspan="4" style="text-align: center; opacity: 0.5; padding: 12px">
+            {{ votable ? '当前没有可以投票的选举' : '暂无选举数据' }}
+          </td>
+        </tr>
         <tr v-for="row in sorted" :key="`${row.planetNaturalId}:${row.type}`">
           <td>
             <PrunLink inline :command="`PLI ${row.planetNaturalId}`">

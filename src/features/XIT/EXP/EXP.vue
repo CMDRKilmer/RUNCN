@@ -3,6 +3,9 @@ import { computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import BaseAlias from '@src/components/BaseAlias.vue';
+import { useTitleBarToggle } from '@src/features/XIT/title-bar-toggle';
+import { useTileState } from '@src/store/user-data-tiles';
+
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { expertsStore } from '@src/infrastructure/prun-api/data/experts';
 import { productionStore } from '@src/infrastructure/prun-api/data/production';
@@ -106,6 +109,24 @@ const rows = computed<ExpertRow[] | undefined>(() => {
 
   return result.filter(x => x.etaText !== '--').sort((a, b) => a.sortKey - b.sortKey);
 });
+
+// 「只看未满」：隐藏已达上限（total >= limit，表格里显示 Maxed）的专家，只留仍在培养的。
+// 上限取自游戏给的 entry.limit，不写死 5。状态随磁贴持久化（默认关 = 显示全部）。
+const onlyUnfinished = useTileState('onlyUnfinished', false);
+
+useTitleBarToggle({
+  ui: 'exp-only-unfinished',
+  label: '只看未满',
+  active: onlyUnfinished,
+});
+
+const visibleRows = computed(() => {
+  const all = rows.value ?? [];
+  if (!onlyUnfinished.value) {
+    return all;
+  }
+  return all.filter(row => !row.maxed);
+});
 </script>
 
 <template>
@@ -122,10 +143,12 @@ const rows = computed<ExpertRow[] | undefined>(() => {
       </tr>
     </thead>
     <tbody>
-      <tr v-if="rows.length === 0">
-        <td colspan="6" style="text-align: center; opacity: 0.5; padding: 12px">暂无专家数据</td>
+      <tr v-if="visibleRows.length === 0">
+        <td colspan="6" style="text-align: center; opacity: 0.5; padding: 12px">
+          {{ onlyUnfinished ? '所有专家都已达上限' : '暂无专家数据' }}
+        </td>
       </tr>
-      <tr v-for="row in rows" :key="`${row.naturalId}:${row.category}`">
+      <tr v-for="row in visibleRows" :key="`${row.naturalId}:${row.category}`">
         <td>
           <PrunLink inline :command="`EXP ${row.naturalId}`">
             {{ row.planetName }}
