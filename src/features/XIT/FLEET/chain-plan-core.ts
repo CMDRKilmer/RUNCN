@@ -65,8 +65,8 @@ export function computeChainPlan(
     volume: (input.materials[ticker]?.volume ?? 0) * amount,
   });
   // 循环满载可用天数（总舱容 ÷ Σ净日耗 bundle，加权分摊）：仅「一次运输实际可用」
-  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。任一净消耗材料缺重量/体积、
-  // 或任一基地缺 BURN 时不出数（显示 —），不按偏小的需求报大天数。
+  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。任一净消耗材料缺重量/体积时
+  // 不出数（显示 —），不按偏小的需求报大天数。
   let fullLoadDays: number | undefined;
   if (input.loop) {
     const bundles: { weight: number; volume: number }[] = [];
