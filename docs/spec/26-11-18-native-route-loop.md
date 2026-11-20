@@ -46,7 +46,7 @@
 
 - `cycleHours = estimateChainFlightTimes({ ship, origin, stops, legPayloads, refuelAtOrigin: true }).totalHours`。`legPayloads` 取计划的 `legLoadWeight(plan, i, legCount)`（逐段离站载重）；首段按出发地补满油罐、后续段按上一段余油递推（与原生 RT 只在出发地补满一致，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
 - `est.ok === false`（任一段判缺）时不得进入循环模式：得不到可靠周期，列出缺数据段并退回单趟。
-- `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；规划界面天数输入只读，显示「本轮周期」。
+- `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；循环账单与提取都不读 `config.days`，FLEET 配置表的天数输入仍可编辑但对循环无效（只有单趟环线用它）。
 - **周期逐轮漂移**：估时按出发时刻的天体位置推算，循环每轮实际出发时刻不同，实际周期 ≠ 生成时 `cycleDays`。`cycleDays` 只是写步骤时的快照；不做后台重算（不轮询），运行中卡片的周期标「预计」。
 
 **迭代收敛**
