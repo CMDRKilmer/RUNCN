@@ -17,6 +17,7 @@ export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: 
 export const sitesStore = {
   all: ref([]),
   getByPlanetNaturalId: id => sitesStore.all.value.find(x => x.siteId === id),
+  getByPlanetNaturalIdOrName: id => sitesStore.all.value.find(x => x.siteId === id),
 };
 export const shipsStore = { all: ref([]), fetched: ref(true), getById: id => fixture.ships[id] };
 export const flightsStore = { all: ref([]), getById: () => undefined };

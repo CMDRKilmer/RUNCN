@@ -1,6 +1,6 @@
 // 原生 RT 循环执行的单船规划（XIT FLEET）。与多船时间均衡的 use-chain-planning 分离：
 // 循环恰好 1 艘船、不分段、不生成 ACT。核心是整闭环不动点迭代——
-// 计划 → 逐段载重 → 估时（totalHours + arriveAtMs）→ 到港排产库存 → 计划。
+// 计划 → 逐段载重 → 估时（totalHours）→ 周期天数 → 计划。
 // 周期只是生成时快照（估时随出发时刻漂移），运行中不做后台重算（不轮询）。
 import { ref, watch, onScopeDispose } from 'vue';
 import { planChainRoute } from './chain-planner';
@@ -63,7 +63,6 @@ export async function computeLoopPlan(
     loop: true,
   };
   let cycleDays: number | undefined;
-  let arrivalHours: Map<string, number> | undefined;
   let prevCycleHours: number | undefined;
   let plan: ChainPlan | undefined;
   let est: ChainFlightEstimate | undefined;
@@ -72,7 +71,7 @@ export async function computeLoopPlan(
   let converged = false;
   for (let i = 0; i < MAX_ITERATIONS; i++) {
     iterations++;
-    plan = planChainRoute({ ...routeBase, cycleDays, arrivalHoursByNaturalId: arrivalHours });
+    plan = planChainRoute({ ...routeBase, cycleDays });
     if (!plan) {
       return { ok: false, reasons: ['无法生成环线计划。'], iterations, converged: false, warnings };
     }
@@ -101,17 +100,6 @@ export async function computeLoopPlan(
       };
     }
     cycleHours = est.totalHours;
-    const startAtMs = est.legs[0]?.departAtMs ?? 0;
-    arrivalHours = new Map();
-    for (let k = 0; k < stops.length; k++) {
-      const leg = est.legs[k];
-      if (leg?.ok) {
-        const hours = (leg.arriveAtMs - startAtMs) / 3600000;
-        if (hours > 0) {
-          arrivalHours.set(stops[k]!.naturalId, hours);
-        }
-      }
-    }
     if (
       prevCycleHours !== undefined &&
       cycleHours > 0 &&

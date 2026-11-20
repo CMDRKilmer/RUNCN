@@ -1,4 +1,5 @@
 import type { BurnValues, MaterialBurn } from '@src/core/burn';
+import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
 import {
   pushItemsPrioritised as pushItemsPrioritisedPure,
   pushItemsProportional as pushItemsProportionalPure,
@@ -35,8 +36,9 @@ export interface ChainPlanningSnapshot {
   originStock: Record<string, number>;
   purchaseStock: Record<string, number>;
   groupProducedTickers?: Set<string>;
-  // 循环模式：need 按稳态毛需求（天数×日耗，不减库存）。调用方须同时传入毛账单
-  // （bill 不减库存），固定步骤每轮重复执行才不会逐轮少送；avail 口径不变。
+  // 循环模式：need/账单按稳态净缺口（天数×日耗 − 天数×日产，不减库存），
+  // 自产材料基地自留一轮生产所需；avail/提取按 天数×BURN 日产扣自用预留，
+  // 不用到港预计库存。固定步骤每轮重复执行，减库存或装尽库存都会让基地逐轮饿死/库存漂移。
   loop?: boolean;
 }
 
@@ -57,6 +59,14 @@ export function computeChainPlan(
     weight: (input.materials[ticker]?.weight ?? 0) * amount,
     volume: (input.materials[ticker]?.volume ?? 0) * amount,
   });
+  // 循环满载可用天数（总舱容 ÷ Σ净日耗 bundle，加权分摊）：仅「一次运输实际可用」
+  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。
+  const fullLoadDays = input.loop
+    ? fullLoadUsableDays(
+        { weight: capacity.weight, volume: capacity.volume },
+        bases.map(base => netDailyBundle(base.burn, t => matWeightVolume(t, 1))),
+      )
+    : undefined;
   // 预读白名单：BSN 中配置的 ticker 是「可提取产物白名单」，
   // 只有白名单上的 ticker 才能被提取（送下游或运回出发地）。
   // producer 推断仅考虑白名单 ticker（不白名单 = 中间产物，不参与搬运）。
@@ -209,7 +219,7 @@ export function computeChainPlan(
     targetDays.set(base.naturalId, base.days);
   }
   // need: 下游 ticker 需求 = 目标天数 × 日耗（原料+消耗品）− 库存。
-  // 循环模式按稳态毛需求（不减库存）：固定步骤每轮重复，减库存会逐轮少送、基地饿死。
+  // 循环模式按稳态净缺口（不减库存、自产抵扣）：固定步骤每轮重复，减库存会逐轮少送、基地饿死。
   const need = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
     // ticker 不在该基地 burn 中（极少见，例如生产订单刚启动 burn 尚未刷新）→ 按 0 计。
@@ -217,13 +227,31 @@ export function computeChainPlan(
       return 0;
     }
     const gross = targetDays.get(id)! * (mat.input + mat.workforce);
-    return Math.max(0, Math.ceil(input.loop ? gross : gross - mat.inventory));
+    if (input.loop) {
+      // 自产材料只补净缺口（日耗 − 日产），基地自留一轮生产所需量。
+      return Math.max(0, Math.ceil(gross) - Math.floor(targetDays.get(id)! * mat.output));
+    }
+    return Math.max(0, Math.ceil(gross - mat.inventory));
   };
   // avail: 上游可提取 = 到达时预计库存 − 自用预留（目标天数 × 自身日耗）。
+  // 循环模式 = 周期 × BURN 日产 − 自用预留：流量分配阶段 incoming 未知，先按
+  // 全额自用保守扣减；实际提取（余量运回/最终产物）在 incoming 确定后只扣未被
+  // 送达覆盖的部分（loopExtractable）。
+  const loopOutputOf = (id: string, ticker: string) => {
+    const mat = burns.get(id)![ticker];
+    return mat === undefined ? 0 : Math.floor(targetDays.get(id)! * mat.output);
+  };
+  const loopSelfNeedOf = (id: string, ticker: string) => {
+    const mat = burns.get(id)![ticker];
+    return mat === undefined ? 0 : Math.ceil(targetDays.get(id)! * (mat.input + mat.workforce));
+  };
   const avail = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
     if (mat === undefined) {
       return 0;
+    }
+    if (input.loop) {
+      return Math.max(0, loopOutputOf(id, ticker) - loopSelfNeedOf(id, ticker));
     }
     return Math.max(
       0,
@@ -443,6 +471,15 @@ export function computeChainPlan(
     }
   }
 
+  // 循环实际可提取量：周期 × BURN 日产，只扣未被本轮送达覆盖的自用部分。
+  // 送达含链上输送与 CX/出发地取货：自产自耗同 ticker 的基地若按全额自用扣减，
+  // 送达量会逐轮累积在基地。
+  const loopExtractable = (id: string, ticker: string) => {
+    const delivered = (incoming.get(id)?.get(ticker) ?? 0) + (cxResupply.get(id)?.[ticker] ?? 0);
+    const reserve = Math.max(0, loopSelfNeedOf(id, ticker) - delivered);
+    return Math.max(0, loopOutputOf(id, ticker) - reserve);
+  };
+
   if (producedGap.size > 0) {
     plan.hasUnmetChainDemand = true;
   }
@@ -634,7 +671,6 @@ export function computeChainPlan(
         }
       }
     }
-
     // 第一遍只模拟送往下游的必需货物，返航货物在第二遍分配。
     const chainPickup: CargoItem[] = [];
     for (const flow of flows) {
@@ -644,20 +680,23 @@ export function computeChainPlan(
     }
     const finalPickup: Pick<CargoItem, 'ticker' | 'amount'>[] = [];
     for (const ticker of finalTickers.get(id) ?? []) {
-      // 最终产物装尽到港时预计库存（含飞行期间新增产出）：不扣自用预留
-      // （自用是该基地 burn 的事）。链上 flows 仍按 avail（扣自用）避免抽空基地断粮。
-      const mat = burns.get(id)![ticker];
-      const amount = Math.max(0, Math.floor(projectedInventory(mat, ticker, id)));
+      // 单趟：最终产物装尽到港时预计库存（含飞行期间新增产出），不扣自用预留。
+      // 循环：只提取 周期 × BURN 日产（扣未覆盖自用），不动基地现有库存，
+      // 固定步骤每轮重复才保持稳态。
+      const amount = input.loop
+        ? loopExtractable(id, ticker)
+        : Math.max(0, Math.floor(projectedInventory(burns.get(id)![ticker], ticker, id)));
       if (amount > 0) {
         finalPickup.push({ ticker, amount });
       }
     }
-    // 有前向下游边的产物：已按需补给下游（flows），剩余 avail 运回空间站。
+    // 有前向下游边的产物：已按需补给下游（flows），剩余可提取量运回空间站。
     // 遍历「所有下游边」而非仅正向 flows——下游已充足（need=0）时流量为 0，
     // 但产物仍有可提取余量，应运回空间站；否则会卡在基地既不送下游也不运回。
     for (const ticker of [...new Set(edges.filter(f => f.from === id).map(f => f.ticker))]) {
       const sent = delivered.get(id)?.get(ticker) ?? 0;
-      const surplus = Math.max(0, avail(id, ticker) - sent);
+      const extractable = input.loop ? loopExtractable(id, ticker) : avail(id, ticker);
+      const surplus = Math.max(0, extractable - sent);
       if (surplus > 0) {
         finalPickup.push({ ticker, amount: surplus });
       }
@@ -842,6 +881,10 @@ export function computeChainPlan(
   });
   if (filteredStops.length > 0) {
     plan.filteredStops = filteredStops;
+  }
+  if (input.loop) {
+    // 满载分摊按全部基地的净日耗加权（自给基地 bundle 为 0、不占分摊）。
+    plan.fullLoadUsableDays = fullLoadDays;
   }
   return plan;
 }

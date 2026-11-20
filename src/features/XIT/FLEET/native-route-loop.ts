@@ -17,16 +17,47 @@ export function cycleDaysFromHours(cycleHours: number): number {
   return cycleHours / 24;
 }
 
-// 一轮送达量可补给的库存天数：每站送达 = 该站计划天数 × 日耗，故覆盖天数 = 计划天数；
-// 取瓶颈站（最小值）。循环稳态下各站 = cycleDays，即一轮刚好补满一个周期的消耗。
-export function supplyDaysPerRound(stops: readonly { days: number }[]): number | undefined {
-  let min: number | undefined;
-  for (const stop of stops) {
-    if (Number.isFinite(stop.days) && stop.days > 0) {
-      min = min === undefined ? stop.days : Math.min(min, stop.days);
+// 基地净日耗 bundle：逐材料 max(0, 日耗 − 自产日产) × 单件重量/体积 求和。
+// 自给材料（日产 ≥ 日耗）不消耗外部送达，不计入。
+export function netDailyBundle(
+  burn: Readonly<Record<string, { input: number; workforce: number; output: number }>>,
+  materialOf: (ticker: string) => { weight: number; volume: number },
+): { weight: number; volume: number } {
+  let weight = 0;
+  let volume = 0;
+  for (const [ticker, mat] of Object.entries(burn)) {
+    const net = mat.input + mat.workforce - mat.output;
+    if (net <= 0) {
+      continue;
     }
+    const m = materialOf(ticker);
+    weight += net * m.weight;
+    volume += net * m.volume;
   }
-  return min;
+  return { weight, volume };
+}
+
+// 满载可用天数（按净日耗加权分摊）：各基地份额 ∝ 净日耗 bundle，等价于
+// 总舱容 ÷ Σ净日耗 bundle（重量/体积取较小），各基地可用天数拉平。
+// 仅「一次运输实际可用」展示口径——实际每轮送达按 周期 × 日耗 稳态，不装满。
+// 自给基地净日耗为 0、不占分摊；无净消耗基地 → undefined。
+export function fullLoadUsableDays(
+  capacity: { weight: number; volume: number },
+  bundles: readonly { weight: number; volume: number }[],
+): number | undefined {
+  let weight = 0;
+  let volume = 0;
+  for (const bundle of bundles) {
+    weight += bundle.weight;
+    volume += bundle.volume;
+  }
+  if (weight <= 0 && volume <= 0) {
+    return undefined;
+  }
+  return Math.min(
+    weight > 0 ? capacity.weight / weight : Infinity,
+    volume > 0 ? capacity.volume / volume : Infinity,
+  );
 }
 
 // 每轮燃料 = 逐段油耗之和（v1 只在出发地补满，整圈消耗即每轮补油量）。

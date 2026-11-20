@@ -1,6 +1,10 @@
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { effectiveBurn } from './chain-data';
+import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
 import type { NativeRouteRecord } from './native-route-registry';
 
 // 出发地（航点 0）起飞前必须备好的物料：航线的「装载」步骤。
@@ -75,4 +79,28 @@ export function nativeRoutePurchasePackage(
 ): UserData.ActionPackageData | undefined {
   const origin = record.waypoints[0]?.location.trim() ?? '';
   return cxShortfallPackage(origin, nativeRouteOriginBill(record));
+}
+
+// 循环航线一次运输实际可用天数（满载加权分摊展示口径）：船总舱容 ÷ Σ各基地净日耗 bundle。
+// 实际每轮送达按周期稳态净缺口，不装满；首末航点是出发地（装载/归航卸货），不算基地；
+// BURN 未加载返回 undefined（显示 —）。
+export function nativeRouteUsableDays(
+  waypoints: readonly { location: string }[],
+  capacity: { weight: number; volume: number },
+): number | undefined {
+  const bundles: { weight: number; volume: number }[] = [];
+  for (const waypoint of waypoints.slice(1, -1)) {
+    const site = sitesStore.getByPlanetNaturalIdOrName(waypoint.location.trim());
+    const burn = site === undefined ? undefined : effectiveBurn(site.siteId);
+    if (burn === undefined) {
+      return undefined;
+    }
+    bundles.push(
+      netDailyBundle(burn, ticker => {
+        const mat = materialsStore.getByTicker(ticker);
+        return { weight: mat?.weight ?? 0, volume: mat?.volume ?? 0 };
+      }),
+    );
+  }
+  return fullLoadUsableDays(capacity, bundles);
 }

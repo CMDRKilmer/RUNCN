@@ -45,7 +45,7 @@ const {
   withoutRouteDefinition,
 } = await import('../src/features/XIT/FLEET/native-route-game.ts');
 const { parseRouteStatus } = await import('../src/features/XIT/FLEET/native-route-rte.ts');
-const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage } =
+const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage, nativeRouteUsableDays } =
   await import('../src/features/XIT/FLEET/native-route-purchase.ts');
 const {
   cycleDaysFromHours,
@@ -54,7 +54,8 @@ const {
   billWeightVolume,
   stockingRoundsMax,
   sustainRounds,
-  supplyDaysPerRound,
+  fullLoadUsableDays,
+  netDailyBundle,
   loopEligibility,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 let passes = 0;
@@ -1818,12 +1819,41 @@ await check('loop sustain rounds follow the first material to run out', () => {
   assert.equal(sustainRounds({}, { RAT: 10 }), Infinity);
 });
 
-await check('loop supply days per round follow the bottleneck stop', () => {
-  // 每站送达 = 计划天数 × 日耗 → 覆盖天数 = 计划天数；取最小（瓶颈站）。
-  assert.equal(supplyDaysPerRound([{ days: 4 }, { days: 2.5 }, { days: 4 }]), 2.5);
-  assert.equal(supplyDaysPerRound([{ days: 3 }]), 3);
-  assert.equal(supplyDaysPerRound([]), undefined);
-  assert.equal(supplyDaysPerRound([{ days: 0 }, { days: -1 }]), undefined);
+await check('loop full-load usable days weight capacity by net daily need', () => {
+  // 总舱容 100t/100m³：单基地净日耗 2t/2m³ → 50 天；两基地相同净日耗 → 25 天。
+  const bundle = { weight: 2, volume: 2 };
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [bundle]), 50);
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [bundle, bundle]), 25);
+  // 加权分摊：净日耗 1:3 的两基地按份额分舱 → 各 25 天（均分口径只有 16.7）。
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [
+      { weight: 1, volume: 1 },
+      { weight: 3, volume: 3 },
+    ]),
+    25,
+  );
+  // 重量/体积取较小：体积瓶颈 100/4 = 25 天。
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 2, volume: 4 }]), 25);
+  // 自给基地不占分摊：剩一个净消耗基地独享全舱 → 50 天；无基地/全自给 → undefined。
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }, bundle]),
+    50,
+  );
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, []), undefined);
+  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }]), undefined);
+});
+
+await check('loop net daily bundle sums net need with material weight/volume', () => {
+  const burn = {
+    RAT: { input: 2, workforce: 0.5, output: 0 },
+    COF: { input: 1, workforce: 0, output: 1 },
+    PG: { input: 3, workforce: 0, output: 1 },
+  };
+  const bundle = netDailyBundle(burn, t =>
+    t === 'RAT' ? { weight: 2, volume: 1 } : { weight: 1, volume: 3 },
+  );
+  // RAT 净 2.5 → 5t/2.5m³；PG 净 2 → 2t/6m³；COF 自给不计。
+  assert.deepEqual(bundle, { weight: 7, volume: 8.5 });
 });
 
 await check('loop eligibility requires one ship, bases, two destinations and a full estimate', () => {
@@ -1837,8 +1867,8 @@ await check('loop eligibility requires one ship, bases, two destinations and a f
   assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false }).ok, false);
 });
 
-await check('loop plan balances chain flow on steady gross need', () => {
-  // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环毛需求=ceil(10)=10。
+await check('loop plan balances chain flow on steady net need', () => {
+  // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环稳态净缺口=ceil(10)=10。
   const mat = (input, output, inventory, daysLeft) => ({
     input,
     output,
@@ -1874,6 +1904,163 @@ await check('loop plan balances chain flow on steady gross need', () => {
   const loop = computeChainPlan({ ...snapshot, loop: true }, String);
   assert.equal(single.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 5);
   assert.equal(loop.stops.find(x => x.naturalId === 'B').unloadChain.get('RAW').amount, 10);
+  // 提取口径：循环 = 周期×日产（10×10=100）扣已送下游 10 → 运回 90；
+  // 单趟 = 到港预计库存装尽（100）扣已送 5 → 运回 95。
+  assert.equal(loop.stops.find(x => x.naturalId === 'A').returnLoad.RAW, 90);
+  assert.equal(single.stops.find(x => x.naturalId === 'A').returnLoad.RAW, 95);
+  // 一次运输实际可用 = 满载加权分摊展示口径：100t/100m³ 仅 B 有净消耗（1t/1m³）独享全舱 → 100 天；单趟不算。
+  assert.equal(loop.fullLoadUsableDays, 100);
+  assert.equal(single.fullLoadUsableDays, undefined);
+});
+
+await check('loop snapshot bills follow cycle × BURN net need, not config days', () => {
+  const bs = bases();
+  // config.days=10、fixture 账单 RAT:10 都不参与循环口径；人口消耗计入、库存不减。
+  fixture.burns.A = {
+    burn: { RAT: { input: 1, output: 0, workforce: 0.5, inventory: 99, daysLeft: 0 } },
+  };
+  const loop = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    loop: true,
+    cycleDays: 1.5,
+  });
+  // ceil(1.5 × 1.5) = 3；B 日耗 1 → ceil(1.5) = 2。
+  assert.deepEqual(loop.bases.map(b => b.bill), [{ RAT: 3 }, { RAT: 2 }]);
+  assert.deepEqual(loop.bases.map(b => b.days), [1.5, 1.5]);
+  // 循环不用到港预计库存（提取按 BURN 日产）。
+  assert.deepEqual(loop.bases.map(b => b.projectedStock), [{}, {}]);
+  const single = collectChainPlanningSnapshot({ originNaturalId: 'CX', capacity, bases: bs });
+  assert.deepEqual(single.bases.map(b => b.bill), [{ RAT: 10 }, { RAT: 10 }]);
+});
+
+await check('loop self-produced material delivers net shortfall and extracts net surplus', () => {
+  // C 产 RAW 10/日；A 产 RAW 10/日且自耗 12/日（净消耗）；B 耗 2/日。10 天周期。
+  // A 净缺口 20 由 C 送达；A 自产 100 全留作一轮生产所需，提取 0。
+  const mat = (input, output, daysLeft) => ({
+    input,
+    output,
+    workforce: 0,
+    inventory: 0,
+    daysLeft,
+  });
+  const base = (naturalId, burn, products) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 10,
+    cxBuy: true,
+    burn,
+    products,
+    bill: {},
+    projectedStock: {},
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    // 舱容放大：本例只验证提取口径，不让返航裁剪干扰断言。
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { C: 0, A: 1, B: 2 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['A', 'B']]]),
+    bases: [
+      base('C', { RAW: mat(0, 10, Infinity) }, ['RAW']),
+      base('A', { RAW: mat(12, 10, 1) }, ['RAW']),
+      base('B', { RAW: mat(2, 0, 5) }, []),
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  const a = plan.stops.find(x => x.naturalId === 'A');
+  // A 日耗 12、日产 10 → 稳态净缺口 20 由 C 送达；自产部分基地自留一轮生产所需。
+  assert.equal(a.unloadChain.get('RAW').amount, 20);
+  // A 提取 = 日产 100 − 未被送达覆盖的自用 (120−20) = 0，不运回。
+  assert.equal(a.returnLoad.RAW, undefined);
+  // 满载加权分摊：500t/500m³ ÷ (A 2 + B 2) = 125 天（C 自产不占分摊）。
+  assert.equal(plan.fullLoadUsableDays, 500 / 2 / 2);
+  // C 日产 100 送下游 40，余量 60 运回。
+  assert.equal(plan.stops.find(x => x.naturalId === 'C').returnLoad.RAW, 60);
+});
+
+await check('loop self-sufficient base keeps one round need and extracts net surplus', () => {
+  // 单基地自给（日产 10 ≥ 日耗 1）：不安排送达，提取净余量 90，覆盖不计自给材料。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { RAW: { input: 1, output: 10, workforce: 0, inventory: 50, daysLeft: Infinity } },
+        products: ['RAW'],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.deepEqual(plan.stops[0].unloadCx, {});
+  assert.equal(plan.stops[0].unloadChain.size, 0);
+  assert.equal(plan.stops[0].returnLoad.RAW, 90);
+  // 全自给基地无净消耗 → 满载分摊无瓶颈可言。
+  assert.equal(plan.fullLoadUsableDays, undefined);
+});
+
+await check('loop net-consumer self-produced material picks up shortfall from origin stock', () => {
+  // 自产但净消耗（日产 1 < 日耗 12）：净缺口 110 走出发地取货，提取扣送达后为 0。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: { COF: 200 },
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { COF: { weight: 1, volume: 1 } },
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 10,
+        cxBuy: true,
+        burn: { COF: { input: 0, output: 1, workforce: 12, inventory: 0, daysLeft: Infinity } },
+        products: ['COF'],
+        bill: { COF: 110 },
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.equal(plan.stops[0].unloadCx.COF, 110);
+  assert.equal(plan.stops[0].returnLoad.COF, undefined);
+  assert.equal(plan.fullLoadUsableDays, 500 / 11);
+  assert.deepEqual(plan.purchaseBill, {});
+});
+
+await check('loop usable days read ship capacity and base BURN, not UNLOAD steps', () => {
+  sitesStore.all.value = [{ siteId: 'A', address: { id: 'A' } }];
+  fixture.burns.A = {
+    burn: { RAT: { input: 2, output: 0, workforce: 0, inventory: 0, daysLeft: 0 } },
+  };
+  fixture.materials.RAT = { weight: 2, volume: 1 };
+  const waypoints = [{ location: 'CX' }, { location: 'A' }, { location: 'CX' }];
+  // 单基地独享 100t/100m³：净日耗 4t/2m³ → min(25, 50) = 25 天（与 UNLOAD 步骤量无关）。
+  assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), 25);
+  // BURN 未加载 → 不伪造。
+  delete fixture.burns.A;
+  assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
 });
 
 await check('waypoints: origin load min=max, all other steps min=0/max=Q', () => {
@@ -1948,6 +2135,20 @@ await check('loop iteration converges and overrides cycle days', async () => {
   assert.equal(r.cycleHours, 48);
   // 手填 10 天被飞行周期 48h=2 天覆盖（不写回 config）。
   assert.ok(r.plan.stops.every(s => s.days === 2));
+});
+
+await check('loop delivery stays steady while usable days show full load', async () => {
+  const r = await computeLoopPlan(loopInput(bases()), fakeEstimate(() => 48));
+  assert.equal(r.ok, true);
+  // 装载/补货按稳态：周期 2 天 × 日耗 1 × 2 基地 = 4（不是满载 100）。
+  assert.deepEqual(r.plan.cxBill, { RAT: 4 });
+  assert.ok(r.plan.stops.every(s => s.unloadCx.RAT === 2));
+  // 满载加权只作显示：100 ÷ (1+1) = 50 天。
+  assert.equal(r.plan.fullLoadUsableDays, 50);
+  // 出发地装载 min=max 精确量（缺料停跑背压）。
+  assert.deepEqual(buildNativeWaypoints(r.plan, true)[0].steps, [
+    { kind: 'load', ticker: 'RAT', amount: 4 },
+  ]);
 });
 
 await check('loop iteration keeps last estimate when not converged', async () => {

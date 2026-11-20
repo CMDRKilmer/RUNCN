@@ -46,9 +46,12 @@ import {
   roundBill as buildRoundBill,
   stockingRoundsMax,
   sustainRounds,
-  cycleDaysFromHours,
 } from './native-route-loop';
-import { cxShortfallPackage, readOriginStock } from './native-route-purchase';
+import {
+  cxShortfallPackage,
+  nativeRouteUsableDays,
+  readOriginStock,
+} from './native-route-purchase';
 import { shipChainCapacity } from './chain-allocation';
 import { formatFlightDuration } from './chain-format';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
@@ -234,9 +237,12 @@ const sustain = computed(() => sustainRounds(roundBill.value, readOriginStock(or
 const cycleText = computed(() =>
   cycleHours === undefined ? '' : formatFlightDuration(cycleHours * 3600000),
 );
-const supplyText = computed(() =>
-  cycleHours === undefined ? '' : `${cycleDaysFromHours(cycleHours).toFixed(1)} 天`,
-);
+// 一次运输实际可用 = 满载加权分摊：船总舱容 ÷ ΣBURN 净日耗（自给材料不计）。
+const supplyText = computed(() => {
+  const cap = shipChainCapacity(candidate.ship);
+  const days = cap === undefined ? undefined : nativeRouteUsableDays(waypoints.value, cap);
+  return days === undefined ? '' : `${days.toFixed(1)} 天`;
+});
 const sustainText = computed(() => (sustain.value === Infinity ? '∞' : String(sustain.value)));
 const stockingWarnings = computed(() => {
   if (!loop) {
@@ -809,7 +815,7 @@ async function showRoute() {
         >（预计，随出发时刻漂移）</div
       >
       <div
-        >每轮补给：<strong>{{ supplyText || '—' }}</strong> 库存（稳态下等于周期）</div
+        >一次运输实际可用：<strong>{{ supplyText || '—' }}</strong></div
       >
       <label
         >备货轮数

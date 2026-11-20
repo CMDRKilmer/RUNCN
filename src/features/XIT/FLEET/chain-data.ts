@@ -32,8 +32,10 @@ export type ChainRouteInput = {
   // 各站预计到达时刻（相对规划时刻的小时数）：飞行期间基地继续生产/消耗，
   // 取货量按到达时预计库存计算，否则到港时取货包装不完飞行期间的新增产出。
   arrivalHoursByNaturalId?: Map<string, number>;
-  // 循环模式：账单按毛需求（不减库存），need 同口径；天数覆盖为飞行周期 cycleDays，
-  // 不按基地仓储 cap 钳短（钳短会与其他基地/周期失同步，改为余量警告）。
+  // 循环模式：运送量严格按 cycleDays × BURN 日输入/日输出（送达补净缺口、
+  // 提取运净余量，不减库存），天数覆盖为飞行周期 cycleDays，不走补给配置
+  // （config.days / supplies-cap / 消耗品过滤 / 维修材料都不适用），
+  // 也不按基地仓储 cap 钳短（改为余量警告）。
   loop?: boolean;
   cycleDays?: number;
 };
@@ -263,6 +265,19 @@ export function effectiveBurn(siteId: string): BurnValues | undefined {
   return merged;
 }
 
+// 循环账单：周期 × BURN 日耗（原料 + 人口消耗品）扣自产后的净缺口，逐 ticker 取整。
+function loopBurnBill(burn: BurnValues, days: number): Record<string, number> {
+  const bill: Record<string, number> = {};
+  for (const [ticker, mat] of Object.entries(burn)) {
+    const daily = mat.input + mat.workforce;
+    const net = Math.ceil(days * daily) - Math.floor(days * mat.output);
+    if (daily > 0 && net > 0) {
+      bill[ticker] = net;
+    }
+  }
+  return bill;
+}
+
 export function collectChainPlanningSnapshot(
   input: ChainRouteInput,
 ): ChainPlanningSnapshot | undefined {
@@ -277,20 +292,25 @@ export function collectChainPlanningSnapshot(
     const burn = Object.fromEntries(
       Object.entries(current).map(([ticker, value]) => [ticker, { ...value }]),
     );
-    const bill = {
-      ...(combinedBaseBill(base.naturalId, base.config, base.site, input.loop ? false : true) ??
-        {}),
-    };
+    const days = input.loop
+      ? (input.cycleDays ?? base.config.days)
+      : clampTargetDaysUtil(base.config.days, getSuppliesCap(base.site));
+    const bill = input.loop
+      ? loopBurnBill(burn, days)
+      : { ...(combinedBaseBill(base.naturalId, base.config, base.site) ?? {}) };
     const products = [...(getBaseProducts(base.siteId) ?? [])];
     const hours = input.arrivalHoursByNaturalId?.get(base.naturalId) ?? 0;
     const projectedStock: Record<string, number> = {};
     for (const [ticker, mat] of Object.entries(burn)) {
-      projectedStock[ticker] =
-        hours <= 0
-          ? mat.inventory
-          : mat.inventory +
-            projectedProductionByArrival(base.siteId, ticker, now, now + hours * 3600000) -
-            ((mat.input + mat.workforce) * hours) / 24;
+      // 循环提取按 cycleDays × BURN 日产，不用到港预计库存（现有库存 + 排产预测）。
+      if (!input.loop) {
+        projectedStock[ticker] =
+          hours <= 0
+            ? mat.inventory
+            : mat.inventory +
+              projectedProductionByArrival(base.siteId, ticker, now, now + hours * 3600000) -
+              ((mat.input + mat.workforce) * hours) / 24;
+      }
       tickers.add(ticker);
     }
     for (const ticker of [...Object.keys(bill), ...products]) {
@@ -300,9 +320,7 @@ export function collectChainPlanningSnapshot(
     bases.push({
       naturalId: base.naturalId,
       planetName: base.planetName,
-      days: input.loop
-        ? (input.cycleDays ?? base.config.days)
-        : clampTargetDaysUtil(base.config.days, getSuppliesCap(base.site)),
+      days,
       cxBuy: base.config.cxBuy,
       burn,
       bill,
