@@ -2098,6 +2098,63 @@ await check('loop self-sufficient base keeps one round need and extracts net sur
   assert.equal(plan.fullLoadUsableDays, undefined);
 });
 
+await check('loop self-sufficient base gets no delivery bill at fractional cycle', () => {
+  const site = { siteId: 'A', address: { id: 'A' } };
+  sitesStore.all.value.push(site);
+  const billOf = (input, output, cycleDays) => {
+    fixture.burns.A = {
+      burn: { RAT: { input, output, workforce: 0, inventory: 0, daysLeft: 0 } },
+    };
+    const snapshot = collectChainPlanningSnapshot({
+      originNaturalId: 'CX',
+      capacity,
+      bases: [
+        { siteId: 'A', naturalId: 'A', planetName: 'A', site, config: { days: 10, cxBuy: true } },
+      ],
+      loop: true,
+      cycleDays,
+    });
+    return snapshot.bases[0].bill;
+  };
+  // 完全自给（日产 = 日耗）与净产（日产 > 日耗）在非整数周期下都不得虚报缺口：
+  // 逐项取整 ceil(日耗) − floor(日产) 会在这里给出 { RAT: 1 }。
+  assert.deepEqual(billOf(2, 2, 2.4), {});
+  assert.deepEqual(billOf(1, 1.1, 1.5), {});
+  // 净消耗仍按净缺口向上取整。
+  assert.deepEqual(billOf(2, 1, 1.5), { RAT: 2 });
+});
+
+await check('loop net producer at fractional cycle neither blocks nor under-extracts', () => {
+  // 自产 3/日、自耗 2/日、周期 1.5 天：净余 1.5/轮，不得生成送达缺口（否则整条环线被阻塞）。
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
+    originStock: {},
+    purchaseStock: {},
+    planetRanks: { A: 0 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map(),
+    bases: [
+      {
+        naturalId: 'A',
+        planetName: 'A',
+        days: 1.5,
+        cxBuy: true,
+        burn: { RAW: { input: 2, output: 3, workforce: 0, inventory: 0, daysLeft: Infinity } },
+        products: ['RAW'],
+        bill: {},
+        projectedStock: {},
+        daysUntilFull: Infinity,
+      },
+    ],
+    loop: true,
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.equal(plan.hasUnmetChainDemand, undefined);
+  assert.deepEqual(plan.stops[0].unloadCx, {});
+  assert.equal(plan.stops[0].returnLoad.RAW, 1);
+});
+
 await check('loop net-consumer self-produced material picks up shortfall from origin stock', () => {
   // 自产但净消耗（日产 1 < 日耗 12）：净缺口 110 走出发地取货，提取扣送达后为 0。
   const snapshot = {

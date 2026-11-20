@@ -1,5 +1,10 @@
 import type { BurnValues, MaterialBurn } from '@src/core/burn';
-import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
+import {
+  cycleDelivery,
+  cycleNetAmount,
+  fullLoadUsableDays,
+  netDailyBundle,
+} from './native-route-loop';
 import {
   pushItemsPrioritised as pushItemsPrioritisedPure,
   pushItemsProportional as pushItemsProportionalPure,
@@ -36,8 +41,8 @@ export interface ChainPlanningSnapshot {
   originStock: Record<string, number>;
   purchaseStock: Record<string, number>;
   groupProducedTickers?: Set<string>;
-  // 循环模式：need/账单按稳态净缺口（天数×日耗 − 天数×日产，不减库存），
-  // 自产材料基地自留一轮生产所需；avail/提取按 天数×BURN 日产扣自用预留，
+  // 循环模式：need/账单按周期净缺口（天数 × (日耗 − 日产)，不减库存），
+  // 自产材料基地自留一轮生产所需；avail/提取按周期净余量补偿回本轮送达，
   // 不用到港预计库存。固定步骤每轮重复执行，减库存或装尽库存都会让基地逐轮饿死/库存漂移。
   loop?: boolean;
 }
@@ -226,32 +231,24 @@ export function computeChainPlan(
     if (mat === undefined) {
       return 0;
     }
-    const gross = targetDays.get(id)! * (mat.input + mat.workforce);
     if (input.loop) {
-      // 自产材料只补净缺口（日耗 − 日产），基地自留一轮生产所需量。
-      return Math.max(0, Math.ceil(gross) - Math.floor(targetDays.get(id)! * mat.output));
+      // 自产材料只补净缺口（日耗 − 日产），自给/净产不送。
+      return cycleDelivery(mat, targetDays.get(id)!);
     }
+    const gross = targetDays.get(id)! * (mat.input + mat.workforce);
     return Math.max(0, Math.ceil(gross - mat.inventory));
   };
   // avail: 上游可提取 = 到达时预计库存 − 自用预留（目标天数 × 自身日耗）。
-  // 循环模式 = 周期 × BURN 日产 − 自用预留：流量分配阶段 incoming 未知，先按
-  // 全额自用保守扣减；实际提取（余量运回/最终产物）在 incoming 确定后只扣未被
-  // 送达覆盖的部分（loopExtractable）。
-  const loopOutputOf = (id: string, ticker: string) => {
-    const mat = burns.get(id)![ticker];
-    return mat === undefined ? 0 : Math.floor(targetDays.get(id)! * mat.output);
-  };
-  const loopSelfNeedOf = (id: string, ticker: string) => {
-    const mat = burns.get(id)![ticker];
-    return mat === undefined ? 0 : Math.ceil(targetDays.get(id)! * (mat.input + mat.workforce));
-  };
+  // 循环模式 = 周期净余量（日产 − 日耗）：流量分配阶段 incoming 未知，先按全额自用
+  // 保守扣减；实际提取（余量运回/最终产物）在 incoming 确定后只扣未被送达覆盖的部分
+  // （loopExtractable）。
   const avail = (id: string, ticker: string) => {
     const mat = burns.get(id)![ticker];
     if (mat === undefined) {
       return 0;
     }
     if (input.loop) {
-      return Math.max(0, loopOutputOf(id, ticker) - loopSelfNeedOf(id, ticker));
+      return Math.max(0, Math.floor(-cycleNetAmount(mat, targetDays.get(id)!)));
     }
     return Math.max(
       0,
@@ -471,13 +468,15 @@ export function computeChainPlan(
     }
   }
 
-  // 循环实际可提取量：周期 × BURN 日产，只扣未被本轮送达覆盖的自用部分。
-  // 送达含链上输送与 CX/出发地取货：自产自耗同 ticker 的基地若按全额自用扣减，
-  // 送达量会逐轮累积在基地。
+  // 循环实际可提取量：周期净余量（日产 − 日耗）加上本轮送达的自产自耗部分
+  // （送达顶掉了基地自留量，不加上就会逐轮累积在基地）。
   const loopExtractable = (id: string, ticker: string) => {
+    const mat = burns.get(id)![ticker];
+    if (mat === undefined) {
+      return 0;
+    }
     const delivered = (incoming.get(id)?.get(ticker) ?? 0) + (cxResupply.get(id)?.[ticker] ?? 0);
-    const reserve = Math.max(0, loopSelfNeedOf(id, ticker) - delivered);
-    return Math.max(0, loopOutputOf(id, ticker) - reserve);
+    return Math.max(0, Math.floor(-cycleNetAmount(mat, targetDays.get(id)!) + delivered));
   };
 
   if (producedGap.size > 0) {

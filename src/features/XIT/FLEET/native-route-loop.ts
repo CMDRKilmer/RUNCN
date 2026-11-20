@@ -17,16 +17,34 @@ export function cycleDaysFromHours(cycleHours: number): number {
   return cycleHours / 24;
 }
 
+export interface BurnRate {
+  input: number;
+  workforce: number;
+  output: number;
+}
+
+// 单基地单 ticker 的周期净额：正 = 净缺口，负 = 净余量。用连续净额而不是逐项取整
+// （ceil(日耗) − floor(日产)）——后者在「日产 ≥ 日耗」时也会虚报 1 单位缺口。
+export function cycleNetAmount(rate: BurnRate, days: number): number {
+  return days * (rate.input + rate.workforce - rate.output);
+}
+
+// 每轮送达量：净缺口向上取整，自给/净产不送。账单与链上 need 共用这一处，避免分叉。
+export function cycleDelivery(rate: BurnRate, days: number): number {
+  const net = cycleNetAmount(rate, days);
+  return net > 0 ? Math.ceil(net) : 0;
+}
+
 // 基地净日耗 bundle：逐材料 max(0, 日耗 − 自产日产) × 单件重量/体积 求和。
 // 自给材料（日产 ≥ 日耗）不消耗外部送达，不计入。
 export function netDailyBundle(
-  burn: Readonly<Record<string, { input: number; workforce: number; output: number }>>,
+  burn: Readonly<Record<string, BurnRate>>,
   materialOf: (ticker: string) => { weight: number; volume: number },
 ): { weight: number; volume: number } {
   let weight = 0;
   let volume = 0;
   for (const [ticker, mat] of Object.entries(burn)) {
-    const net = mat.input + mat.workforce - mat.output;
+    const net = cycleNetAmount(mat, 1);
     if (net <= 0) {
       continue;
     }

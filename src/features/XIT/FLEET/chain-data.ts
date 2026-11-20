@@ -15,6 +15,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { combinedBaseBill } from '@src/features/XIT/FLEET/utils';
+import { cycleDelivery } from './native-route-loop';
 import type { ChainPlannerBase, ChainCapacity } from './chain-types';
 import type { ChainPlanningSnapshot, ChainPlanningBase } from './chain-plan-core';
 
@@ -265,14 +266,13 @@ export function effectiveBurn(siteId: string): BurnValues | undefined {
   return merged;
 }
 
-// 循环账单：周期 × BURN 日耗（原料 + 人口消耗品）扣自产后的净缺口，逐 ticker 取整。
+// 循环账单：周期净缺口（周期 × BURN 日耗扣自产），自给/净产不送。
 function loopBurnBill(burn: BurnValues, days: number): Record<string, number> {
   const bill: Record<string, number> = {};
   for (const [ticker, mat] of Object.entries(burn)) {
-    const daily = mat.input + mat.workforce;
-    const net = Math.ceil(days * daily) - Math.floor(days * mat.output);
-    if (daily > 0 && net > 0) {
-      bill[ticker] = net;
+    const amount = cycleDelivery(mat, days);
+    if (amount > 0) {
+      bill[ticker] = amount;
     }
   }
   return bill;
