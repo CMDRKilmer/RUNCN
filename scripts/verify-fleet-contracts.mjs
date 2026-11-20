@@ -1875,7 +1875,10 @@ await check('loop full-load usable days weight capacity by net daily need', () =
     50,
   );
   assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, []), undefined);
-  assert.equal(fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }]), undefined);
+  assert.equal(
+    fullLoadUsableDays({ weight: 100, volume: 100 }, [{ weight: 0, volume: 0 }]),
+    undefined,
+  );
 });
 
 await check('loop net daily bundle sums net need with material weight/volume', () => {
@@ -1993,12 +1996,24 @@ await check('loop snapshot bills follow cycle × BURN net need, not config days'
     cycleDays: 1.5,
   });
   // ceil(1.5 × 1.5) = 3；B 日耗 1 → ceil(1.5) = 2。
-  assert.deepEqual(loop.bases.map(b => b.bill), [{ RAT: 3 }, { RAT: 2 }]);
-  assert.deepEqual(loop.bases.map(b => b.days), [1.5, 1.5]);
+  assert.deepEqual(
+    loop.bases.map(b => b.bill),
+    [{ RAT: 3 }, { RAT: 2 }],
+  );
+  assert.deepEqual(
+    loop.bases.map(b => b.days),
+    [1.5, 1.5],
+  );
   // 循环不用到港预计库存（提取按 BURN 日产）。
-  assert.deepEqual(loop.bases.map(b => b.projectedStock), [{}, {}]);
+  assert.deepEqual(
+    loop.bases.map(b => b.projectedStock),
+    [{}, {}],
+  );
   const single = collectChainPlanningSnapshot({ originNaturalId: 'CX', capacity, bases: bs });
-  assert.deepEqual(single.bases.map(b => b.bill), [{ RAT: 10 }, { RAT: 10 }]);
+  assert.deepEqual(
+    single.bases.map(b => b.bill),
+    [{ RAT: 10 }, { RAT: 10 }],
+  );
 });
 
 await check('loop self-produced material delivers net shortfall and extracts net surplus', () => {
@@ -2214,7 +2229,10 @@ await check('loop iteration converges and overrides cycle days', async () => {
 });
 
 await check('loop delivery stays steady while usable days show full load', async () => {
-  const r = await computeLoopPlan(loopInput(bases()), fakeEstimate(() => 48));
+  const r = await computeLoopPlan(
+    loopInput(bases()),
+    fakeEstimate(() => 48),
+  );
   assert.equal(r.ok, true);
   // 装载/补货按稳态：周期 2 天 × 日耗 1 × 2 基地 = 4（不是满载 100）。
   assert.deepEqual(r.plan.cxBill, { RAT: 4 });
