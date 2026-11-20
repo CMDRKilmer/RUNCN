@@ -1244,11 +1244,11 @@ html[data-rp-theme='nebula'] {
   --rp-cc-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.62);
 
   /* 文字 */
-  --rp-cc-text-primary: #dce8f5;
-  --rp-cc-text-secondary: #9fb2c8;
+  --rp-cc-text-primary: #bbc5d0;
+  --rp-cc-text-secondary: #8797aa;
   --rp-cc-text-muted: #6b7f96;
   --rp-cc-text-inverse: #0d1626;
-  --rp-cc-text-link: #4fc3f0;
+  --rp-cc-text-link: #43a6cc;
   --rp-cc-text-disabled: #45566a;
   /* 「临近阈值」告警字色（R45）：船名等元素在本主题实际渲染成金色（#f5d27a），
      状态 warning 的琥珀与它几乎同色，故改用更红更亮的橙。 */
@@ -1266,12 +1266,12 @@ html[data-rp-theme='nebula'] {
 
   /* 按钮：按类型统一，跨页面同色 */
   --rp-cc-btn-primary-bg: #1d6fb0;
-  --rp-cc-btn-primary-text: #eafaff;
+  --rp-cc-btn-primary-text: #c7d5d9;
   --rp-cc-btn-primary-border: #35c4e8;
   --rp-cc-btn-primary-hover: #2690d8;
   --rp-cc-btn-primary-active: #155a92;
   --rp-cc-btn-secondary-bg: #12233d;
-  --rp-cc-btn-secondary-text: #9fd0f0;
+  --rp-cc-btn-secondary-text: #87b1cc;
   --rp-cc-btn-secondary-border: #2a4a66;
   --rp-cc-btn-secondary-hover: #19314f;
   --rp-cc-btn-secondary-active: #0e1c30;
@@ -1286,7 +1286,7 @@ html[data-rp-theme='nebula'] {
   --rp-cc-btn-ghost-hover: rgba(53, 196, 232, 0.12);
   --rp-cc-btn-ghost-active: rgba(53, 196, 232, 0.2);
   --rp-cc-btn-link-bg: transparent;
-  --rp-cc-btn-link-text: #4fc3f0;
+  --rp-cc-btn-link-text: #43a6cc;
   --rp-cc-btn-link-border: transparent;
   --rp-cc-btn-link-hover: rgba(79, 195, 240, 0.12);
   --rp-cc-btn-link-active: rgba(79, 195, 240, 0.2);
@@ -1297,7 +1297,7 @@ html[data-rp-theme='nebula'] {
   /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
   --rp-cc-control-bg: #0e1a2e;
   --rp-cc-control-alt-bg: #11213a;
-  --rp-cc-control-text: #cfe0f0;
+  --rp-cc-control-text: #b0becc;
   --rp-cc-control-placeholder: #6b7f96;
   --rp-cc-control-border: #2a4a66;
   --rp-cc-control-border-strong: #3a6a92;
@@ -1308,18 +1308,18 @@ html[data-rp-theme='nebula'] {
   --rp-cc-control-disabled-bg: #0a1322;
   --rp-cc-control-disabled-text: #45566a;
   --rp-cc-tooltip-bg: #0d1626;
-  --rp-cc-tooltip-text: #dce8f5;
+  --rp-cc-tooltip-text: #bbc5d0;
   --rp-cc-tooltip-border: #2a4a66;
 
   /* 表格 */
   --rp-cc-table-head-bg: #11213a;
-  --rp-cc-table-head-text: #bcd2ea;
+  --rp-cc-table-head-text: #a0b3c7;
   --rp-cc-table-row: #0d1626;
   --rp-cc-table-row-alt: #0f1a2e;
   --rp-cc-table-row-hover: #14304d;
   --rp-cc-table-row-selected: #1d4a6e;
   --rp-cc-table-border: #1e3048;
-  --rp-cc-table-text: #cfe0f0;
+  --rp-cc-table-text: #b0becc;
 
   /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
   --rp-cc-status-success-bg: rgba(78, 217, 138, 0.14);
@@ -1555,11 +1555,11 @@ html[data-rp-theme='starforge'] {
   --rp-cc-shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.6);
 
   /* 文字：正文冷白、次级冷蓝灰、辅助色在 #253a48 上仍 ≥4.5:1 */
-  --rp-cc-text-primary: #d7e1e8;
-  --rp-cc-text-secondary: #a8bed0;
+  --rp-cc-text-primary: #b7bfc5;
+  --rp-cc-text-secondary: #8fa2b1;
   --rp-cc-text-muted: #8fa5b5;
   --rp-cc-text-inverse: #0b121b;
-  --rp-cc-text-link: #8fc9de;
+  --rp-cc-text-link: #7aabbd;
   --rp-cc-text-disabled: #7a8d9d;
   /* 阈值告警与浅蓝链接拉开冷暖，不与橙金主强调色撞色。 */
   --rp-cc-warn-accent: #ff8a4c;
@@ -1580,13 +1580,13 @@ html[data-rp-theme='starforge'] {
   --rp-cc-ring-halo: rgba(244, 172, 105, 0.28);
 
   /* 按钮：主按钮橙金实心深字，其余深底细线；跨页面同色 */
-  --rp-cc-btn-primary-bg: #f4ac69;
+  --rp-cc-btn-primary-bg: #cf9259;
   --rp-cc-btn-primary-text: #241a10;
   --rp-cc-btn-primary-border: #d9904d;
   --rp-cc-btn-primary-hover: #ffbd7d;
   --rp-cc-btn-primary-active: #d9904d;
   --rp-cc-btn-secondary-bg: #1a2936;
-  --rp-cc-btn-secondary-text: #d7e1e8;
+  --rp-cc-btn-secondary-text: #b7bfc5;
   --rp-cc-btn-secondary-border: #3d5263;
   --rp-cc-btn-secondary-hover: #253a48;
   --rp-cc-btn-secondary-active: #141f2b;
@@ -1596,12 +1596,12 @@ html[data-rp-theme='starforge'] {
   --rp-cc-btn-danger-hover: #8f3f28;
   --rp-cc-btn-danger-active: #7a3521;
   --rp-cc-btn-ghost-bg: transparent;
-  --rp-cc-btn-ghost-text: #f4ac69;
+  --rp-cc-btn-ghost-text: #cf9259;
   --rp-cc-btn-ghost-border: transparent;
   --rp-cc-btn-ghost-hover: rgba(244, 172, 105, 0.12);
   --rp-cc-btn-ghost-active: rgba(244, 172, 105, 0.2);
   --rp-cc-btn-link-bg: transparent;
-  --rp-cc-btn-link-text: #8fc9de;
+  --rp-cc-btn-link-text: #7aabbd;
   --rp-cc-btn-link-border: transparent;
   --rp-cc-btn-link-hover: rgba(143, 201, 222, 0.12);
   --rp-cc-btn-link-active: rgba(143, 201, 222, 0.2);
@@ -1612,7 +1612,7 @@ html[data-rp-theme='starforge'] {
   /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
   --rp-cc-control-bg: #101923;
   --rp-cc-control-alt-bg: #1a2936;
-  --rp-cc-control-text: #d7e1e8;
+  --rp-cc-control-text: #b7bfc5;
   --rp-cc-control-placeholder: #8fa5b5;
   --rp-cc-control-border: #314452;
   --rp-cc-control-border-strong: #3d5263;
@@ -1623,18 +1623,18 @@ html[data-rp-theme='starforge'] {
   --rp-cc-control-disabled-bg: #0d1823;
   --rp-cc-control-disabled-text: #7a8d9d;
   --rp-cc-tooltip-bg: #0d1823;
-  --rp-cc-tooltip-text: #d7e1e8;
+  --rp-cc-tooltip-text: #b7bfc5;
   --rp-cc-tooltip-border: #3d5263;
 
   /* 表格：米金表头文字、深底行、橙金选中淡底 */
   --rp-cc-table-head-bg: #16242f;
-  --rp-cc-table-head-text: #c6bba3;
+  --rp-cc-table-head-text: #a89f8b;
   --rp-cc-table-row: #0b121b;
   --rp-cc-table-row-alt: #101923;
   --rp-cc-table-row-hover: #1a2936;
   --rp-cc-table-row-selected: rgba(244, 172, 105, 0.2);
   --rp-cc-table-border: #23313e;
-  --rp-cc-table-text: #d7e1e8;
+  --rp-cc-table-text: #b7bfc5;
 
   /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
   --rp-cc-status-success-bg: rgba(121, 215, 198, 0.13);
