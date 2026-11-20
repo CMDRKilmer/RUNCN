@@ -131,6 +131,7 @@ A production line is a set of identical buildings (e.g., 3 FRM = 1 production li
 - Players queue orders in production lines via PRODCO command.
 - Specify: primary output commodity, order size, input materials.
 - Order size scales production time and material consumption proportionally.
+- Outputs are credited only when the whole order completes — an unfinished batch adds nothing to inventory (2026-11-20 confirmed). Projections must therefore count completed batches only.
 - Maximum queue: 5 pending orders; active orders = building count in line.
 - Efficiency multipliers applied based: building condition, worker availability, worker satisfaction, experts, CoGC programs, soil fertility.
 - Production halts if: no workers, no consumables, no inputs, insufficient production fees, insufficient funds, not enough space for output.
