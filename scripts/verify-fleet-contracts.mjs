@@ -6,6 +6,7 @@
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
@@ -56,8 +57,11 @@ const {
   sustainRounds,
   fullLoadUsableDays,
   netDailyBundle,
+  loopSustain,
   loopEligibility,
+  actBlockedReason,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
+const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -140,15 +144,15 @@ await check('native RT keeps warehouse departure and return as separate waypoint
   };
   assert.deepEqual(buildNativeWaypoints(plan), [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
     {
       location: 'B',
       steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
-        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+        { kind: 'unload', ticker: 'RAT', amount: 16 },
+        { kind: 'load', ticker: 'FE', amount: 3 },
       ],
     },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
   ]);
   assert.deepEqual(buildNativeWaypoints({ ...plan, finalUnload: {} }).at(-1), {
     location: 'CX',
@@ -1801,6 +1805,29 @@ await check('loop fuel per round sums leg usage and falls back to tank caps', ()
   assert.deepEqual(fuelPerRound([], { stlCap: 1500, ftlCap: 300 }), { stl: 1500, ftl: 300 });
 });
 
+await check('loop mode blocks ACT execution with one shared reason', () => {
+  assert.equal(actBlockedReason(false), undefined);
+  const blocked = actBlockedReason(true);
+  assert.equal(typeof blocked, 'string');
+  assert.match(blocked, /生成原生 RT/);
+  // 守卫的最终落点是 ChainView 的置灰与 execute() 拦截（渲染层，脚本驱动不到）：这里只核对
+  // 它确实是唯一来源——一个 computed 派生、置灰不读裸 loopActive、没有第二份硬编码文案。
+  const view = readFileSync(
+    new URL('../src/features/XIT/FLEET/ChainView.vue', import.meta.url),
+    'utf8',
+  );
+  assert.equal(view.split('actBlockedReason(').length - 1, 1);
+  assert.equal(view.includes('循环模式不生成 ACT'), false);
+  const hasStopGuards = [...view.matchAll(/:disabled="([^"]*)"/g)]
+    .map(match => match[1])
+    .filter(expr => expr.includes('hasStops'));
+  assert.equal(hasStopGuards.length, 2);
+  for (const expr of hasStopGuards) {
+    assert.match(expr, /actBlocked !== undefined/);
+  }
+  assert.equal(view.includes('|| loopActive'), false);
+});
+
 await check('loop round bill adds SF/FF to the origin load', () => {
   assert.deepEqual(roundBill({ RAT: 100 }, { stl: 35, ftl: 3 }), { RAT: 100, SF: 35, FF: 3 });
   // cxBill 已含燃料时叠加；零燃料不写键。
@@ -1864,16 +1891,47 @@ await check('loop net daily bundle sums net need with material weight/volume', (
   assert.deepEqual(bundle, { weight: 7, volume: 8.5 });
 });
 
-await check('loop eligibility requires one ship, bases, two destinations and a full estimate', () => {
-  assert.deepEqual(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: true }), {
-    ok: true,
-    reasons: [],
+await check('loop sustain leaves fuel out and reports unknown without a per-round snapshot', () => {
+  // 游戏里手建的循环航线没有每轮燃料快照：不能拿罐容量当整圈油耗，支撑轮数留空。
+  assert.deepEqual(loopSustain({ RAT: 10 }, undefined, { RAT: 100 }), {
+    bill: { RAT: 10 },
+    sustain: undefined,
   });
-  assert.equal(loopEligibility({ shipCount: 2, baseCount: 1, distinctDestinations: 2, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 0, distinctDestinations: 2, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 1, estimateOk: true }).ok, false);
-  assert.equal(loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false }).ok, false);
+  assert.deepEqual(loopSustain({ RAT: 10 }, { stl: 5, ftl: 0 }, { RAT: 100, SF: 100 }), {
+    bill: { RAT: 10, SF: 5 },
+    sustain: 10,
+  });
 });
+
+await check(
+  'loop eligibility requires one ship, bases, two destinations and a full estimate',
+  () => {
+    assert.deepEqual(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: true }),
+      {
+        ok: true,
+        reasons: [],
+      },
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 2, baseCount: 1, distinctDestinations: 2, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 0, distinctDestinations: 2, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 1, estimateOk: true }).ok,
+      false,
+    );
+    assert.equal(
+      loopEligibility({ shipCount: 1, baseCount: 1, distinctDestinations: 2, estimateOk: false })
+        .ok,
+      false,
+    );
+  },
+);
 
 await check('loop plan balances chain flow on steady net need', () => {
   // B 日耗 RAW 1、库存 5、目标 10 天：单趟 need=ceil(10−5)=5，循环稳态净缺口=ceil(10)=10。
@@ -2077,7 +2135,12 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
     cxBill: { RAT: 14 },
     finalUnload: { FE: 3 },
     stops: [
-      { naturalId: 'A', unloadCx: {}, unloadChain: new Map(), load: new Map([['RAT', { amount: 2 }]]) },
+      {
+        naturalId: 'A',
+        unloadCx: {},
+        unloadChain: new Map(),
+        load: new Map([['RAT', { amount: 2 }]]),
+      },
       {
         naturalId: 'B',
         unloadCx: { RAT: 14 },
@@ -2101,18 +2164,18 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
     },
     { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
   ]);
-  // 单趟：采购/链上卸货合并，口径相同。
+  // 单趟：采购/链上卸货合并，min=max=计划量（与循环前的口径一致）。
   assert.deepEqual(buildNativeWaypoints(plan), [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
+    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
     {
       location: 'B',
       steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16, minimum: 0 },
-        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
+        { kind: 'unload', ticker: 'RAT', amount: 16 },
+        { kind: 'load', ticker: 'FE', amount: 3 },
       ],
     },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
+    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
   ]);
 });
 
@@ -2123,20 +2186,25 @@ const loopInput = bs => ({
   capacity: { weight: 100, volume: 100, freeWeight: 100, freeVolume: 100 },
   originStock: {},
 });
-const fakeEstimate = hoursOf => async ({ stops }) => {
-  const h = hoursOf();
-  const legs = [];
-  let t = 1_000_000;
-  const per = h / (stops.length + 1);
-  for (let i = 0; i <= stops.length; i++) {
-    legs.push({ ok: true, hours: per, departAtMs: t, arriveAtMs: t + per * 3600000 });
-    t += per * 3600000;
-  }
-  return { ok: true, shipRegistration: 'S', legs, totalHours: h };
-};
+const fakeEstimate =
+  hoursOf =>
+  async ({ stops }) => {
+    const h = hoursOf();
+    const legs = [];
+    let t = 1_000_000;
+    const per = h / (stops.length + 1);
+    for (let i = 0; i <= stops.length; i++) {
+      legs.push({ ok: true, hours: per, departAtMs: t, arriveAtMs: t + per * 3600000 });
+      t += per * 3600000;
+    }
+    return { ok: true, shipRegistration: 'S', legs, totalHours: h };
+  };
 
 await check('loop iteration converges and overrides cycle days', async () => {
-  const r = await computeLoopPlan(loopInput(bases()), fakeEstimate(() => 48));
+  const r = await computeLoopPlan(
+    loopInput(bases()),
+    fakeEstimate(() => 48),
+  );
   assert.equal(r.ok, true);
   assert.equal(r.converged, true);
   assert.equal(r.iterations, 2);
@@ -2185,7 +2253,10 @@ await check('loop blocks when flight estimate is incomplete', async () => {
 });
 
 await check('loop requires at least one base', async () => {
-  const r = await computeLoopPlan(loopInput([]), fakeEstimate(() => 48));
+  const r = await computeLoopPlan(
+    loopInput([]),
+    fakeEstimate(() => 48),
+  );
   assert.equal(r.ok, false);
   assert.ok(r.reasons.some(x => x.includes('基地')));
 });
@@ -2283,4 +2354,48 @@ await check('native RT merge preserves per-round fuel snapshot', () => {
   assert.equal(mergeRouteRecord(server, 'S', undefined).fuelPerRound, undefined);
 });
 
+await check('loop bills each base by the cycle, not the hand-entered days', () => {
+  const bs = bases();
+  for (const base of bs) {
+    fixture.bills[base.siteId] = config => ({ RAT: config.days });
+  }
+  const single = collectChainPlanningSnapshot({ originNaturalId: 'CX', capacity, bases: bs });
+  assert.equal(single.bases[0].bill.RAT, 10);
+  assert.equal(single.bases[0].days, 10);
+  const looped = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    capacity,
+    bases: bs,
+    loop: true,
+    cycleDays: 2,
+  });
+  assert.deepEqual(
+    looped.bases.map(base => [base.bill.RAT, base.days]),
+    [
+      [2, 2],
+      [2, 2],
+    ],
+  );
+  // 每轮 CX 采购量必须落在周期口径上：2 天 × 2 个基地 = 4，而不是 10 天 × 2 = 20。
+  assert.equal(computeChainPlan(looped, String).cxBill.RAT, 4);
+});
+
+await check('fuel tank capacity converts tonnes to units and floors the fraction', () => {
+  fixture.materials.SF = { weight: 0.06, volume: 10 };
+  fixture.materials.FF = { weight: 0.05, volume: 10 };
+  fixture.stores.sf = {
+    id: 'sf',
+    weightCapacity: 210,
+    items: [{ type: 'INVENTORY', quantity: { amount: 100 } }],
+  };
+  fixture.stores.ff = { id: 'ff', weightCapacity: 500, items: [] };
+  const fuel = shipFuelRemainingFor({ stlFuelStoreId: 'sf', ftlFuelStoreId: 'ff' });
+  // 210 t / 0.06 t/u = 3499.9999999999995 → 整数罐容量 3500 u（带小数尾巴会流进备货账）。
+  assert.equal(fuel.stlCap, 3500);
+  assert.equal(fuel.stlRemaining, 100);
+  assert.equal(fuel.ftlCap, 10000);
+  assert.equal(fuel.ftlRemaining, 0);
+  assert.equal(shipFuelRemainingFor({}).stlCap, 0);
+  assert.equal(shipFuelRemainingFor({}).ftlCap, 0);
+});
 console.log(`PASS ${passes}/${passes}`);

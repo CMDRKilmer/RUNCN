@@ -331,6 +331,8 @@ function onClear(siteId: string) {
   background-color: rgba(255, 255, 255, 0.09);
 }
 
+/* 原样主题（无 data-rp-theme）用半透明白；自定义主题由 refined-prun.css 的
+   全局 placeholder 兜底改成 45% 透明的 muted 色，确保比已填内容明显更淡。 */
 .aliasInput::placeholder {
   color: rgba(255, 255, 255, 0.35);
 }

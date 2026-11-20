@@ -19,13 +19,11 @@ import filterToolbarStyle from '@src/components/filter-toolbar.module.css';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { useChainPlanning } from './use-chain-planning';
 import { useChainLoopPlanning } from './use-chain-loop-planning';
-import { fuelPerRound } from './native-route-loop';
-import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import { sanitizeActName } from './chain-identity';
 import type { ShipChainPlan } from './chain-allocation';
 import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
-import type { ChainFlightLeg } from './chain-flight-time';
+import { chainShipFuelCaps, type ChainFlightLeg } from './chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { matWeightVolume } from './chain-data';
 import { getBaseGroups } from '@src/core/base-groups';
@@ -49,6 +47,7 @@ import {
   type RouteData,
 } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
+import type { RouteStatus } from './native-route-rte';
 import {
   collectNativeRoutes,
   matchRunningRoutes,
@@ -67,11 +66,7 @@ import {
   cxShortfallPackage,
   readOriginStock,
 } from './native-route-purchase';
-import {
-  roundBill as buildRoundBill,
-  sustainRounds,
-  fuelPerRound as computeFuelPerRound,
-} from './native-route-loop';
+import { loopSustain, fuelPerRound, actBlockedReason } from './native-route-loop';
 import { getFleetRuntime } from './chain-runtime';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
@@ -231,7 +226,11 @@ const {
 const loopShip = computed(() =>
   selectedShips.value.length === 1 ? selectedShips.value[0] : undefined,
 );
-const { result: loopPlan, computing: loopComputing } = useChainLoopPlanning({
+const {
+  result: loopPlan,
+  computing: loopComputing,
+  error: loopError,
+} = useChainLoopPlanning({
   ship: () => loopShip.value,
   bases: () => selectedBases.value,
   enabled: () => chainLoopMode.value && loopShip.value !== undefined,
@@ -244,6 +243,9 @@ const loopActive = computed(
     loopPlan.value?.ok === true &&
     loopPlan.value.plan !== undefined,
 );
+// 「执行环线」的唯一拦截口径：tooltip、execute() 早退与按钮置灰都读它，避免守卫条件
+// 只加在一处（比如以后再加「多船」「缺估时」），出现「提示拦住、按钮还能点」。
+const actBlocked = computed(() => actBlockedReason(loopActive.value));
 const loopCycleText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
@@ -257,6 +259,10 @@ const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
 // ── 执行 ─────────────────────────────────────────────────────
 const executeTooltip = computed(() => {
+  // 循环模式下规划表是稳态口径，ACT 包只能按单趟量下发，等于把每轮运量少写一个数量级。
+  if (actBlocked.value !== undefined) {
+    return actBlocked.value;
+  }
   if (chainGroup.value === undefined) {
     return '请先选择产业链分组';
   }
@@ -285,11 +291,10 @@ function openNativeRoutePlan() {
     const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
     const waypoints = buildNativeWaypoints(plan, loop);
     // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
-    const fuelNow = shipFuelRemainingFor(candidate.ship.ship);
-    const loopFuel = fuelPerRound(loopPlan.value?.estimate?.legs ?? [], {
-      stlCap: fuelNow.stlCap,
-      ftlCap: fuelNow.ftlCap,
-    });
+    const loopFuel = fuelPerRound(
+      loopPlan.value?.estimate?.legs ?? [],
+      chainShipFuelCaps(candidate.ship.ship),
+    );
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {
@@ -330,7 +335,7 @@ interface NativeRouteView {
   // 出发地库存可支撑轮数文本（∞ = 无消耗）。
   sustainText: string;
   // RTE 阻塞/等待状态（待实采校准）：blocked / waiting / undefined。
-  status: string | undefined;
+  status: RouteStatus | undefined;
   // 卡片告警（船况、循环停止、库存不足、阻塞）。
   alerts: string[];
   // 循环补货包：按 1 轮 roundBill 扣出发地库存的缺口（运行中也可用）。
@@ -339,30 +344,15 @@ interface NativeRouteView {
   purchase: UserData.ActionPackageData | undefined;
 }
 
-// 循环卡片的运行态信息：周期、支撑轮数、补货缺口与告警。燃料缺快照时按罐容量保守估。
+// 循环卡片的运行态信息：周期、支撑轮数、补货缺口与告警。燃料只认记录里的每轮快照，
+// 没有快照（游戏手建的循环航线）就不给支撑轮数，见 loopSustain。
 function loopCardInfo(
   record: NativeRouteRecord,
   ship: PrunApi.Ship | undefined,
   running: boolean,
-  status: string | undefined,
+  status: RouteStatus | undefined,
 ) {
   const isLoop = record.loop === true || record.repeats === true;
-  const cycleText =
-    record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
-  const cargoCapacity = nativeRouteCapacity(ship);
-  const supplyDays =
-    isLoop && cargoCapacity.weight > 0
-      ? nativeRouteUsableDays(record.waypoints, cargoCapacity)
-      : undefined;
-  const supplyText = supplyDays === undefined ? '' : `${supplyDays.toFixed(1)} 天`;
-  const origin = record.waypoints[0]?.location.trim() ?? '';
-  const fuelNow = ship === undefined ? undefined : shipFuelRemainingFor(ship);
-  const fuel =
-    record.fuelPerRound ??
-    computeFuelPerRound([], { stlCap: fuelNow?.stlCap ?? 0, ftlCap: fuelNow?.ftlCap ?? 0 });
-  const bill = buildRoundBill(nativeRouteOriginBill(record), fuel);
-  const sustain = sustainRounds(bill, readOriginStock(origin));
-  const sustainText = sustain === Infinity ? '∞' : String(sustain);
   const alerts: string[] = [];
   if (ship !== undefined && ship.condition < 0.8) {
     alerts.push(`船况 ${Math.round(ship.condition * 100)}%（低于 80%，建议维修后再跑）。`);
@@ -370,13 +360,43 @@ function loopCardInfo(
   if (record.repeats === true && !running) {
     alerts.push('循环已开但无船执行：可能 PRO 失效或已解除分配，请续费后重新分配。');
   }
-  if (isLoop && sustain < 1) {
-    alerts.push('出发地库存不足 1 轮，请补货后再分配。');
+  // 状态文案是从手册候选词推的（未实采）：只对循环航线报，别外溢到单趟卡片。
+  if (isLoop) {
+    if (status === 'blocked') {
+      alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
+    } else if (status === 'waiting') {
+      alerts.push('等待中：上游产出或仓库空间不足。');
+    }
   }
-  if (status === 'blocked') {
-    alerts.push('阻塞：步骤缺料或目标仓库无空间；飞行段阻塞需解除分配后重新分配。');
-  } else if (status === 'waiting') {
-    alerts.push('等待中：上游产出或仓库空间不足。');
+  // 非循环卡片不展示周期/支撑轮数/补货，跳过仓库与账单读取。
+  if (!isLoop) {
+    return {
+      isLoop,
+      cycleText: '',
+      supplyText: '',
+      sustainText: '—',
+      alerts,
+      replenish: undefined,
+    };
+  }
+  const cycleText =
+    record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
+  // 一次运输实际可用（满载加权分摊展示口径）：船总舱容 ÷ Σ航点基地净日耗；BURN 未加载显示 —。
+  const cargoCapacity = nativeRouteCapacity(ship);
+  const supplyDays =
+    cargoCapacity.weight > 0 ? nativeRouteUsableDays(record.waypoints, cargoCapacity) : undefined;
+  const supplyText = supplyDays === undefined ? '' : `${supplyDays.toFixed(1)} 天`;
+  const origin = record.waypoints[0]?.location.trim() ?? '';
+  // 燃料只认生成时快照（见 loopSustain）：游戏里手建的循环航线没快照时不给支撑轮数，
+  // 补货包也只按物料算，避免拿罐容量当整圈油耗去误报「不足 1 轮」。
+  const { bill, sustain } = loopSustain(
+    nativeRouteOriginBill(record),
+    record.fuelPerRound,
+    readOriginStock(origin),
+  );
+  const sustainText = sustain === undefined ? '—' : sustain === Infinity ? '∞' : String(sustain);
+  if (sustain !== undefined && sustain < 1) {
+    alerts.push('出发地库存不足 1 轮，请补货后再分配。');
   }
   return {
     isLoop,
@@ -384,7 +404,7 @@ function loopCardInfo(
     supplyText,
     sustainText,
     alerts,
-    replenish: isLoop ? cxShortfallPackage(origin, bill) : undefined,
+    replenish: cxShortfallPackage(origin, bill),
   };
 }
 
@@ -712,6 +732,12 @@ function onClearShipPlanClick(
 function execute() {
   const allPlans = shipPlans.value;
   if (allPlans.length === 0) {
+    return;
+  }
+  // 循环模式：规划表是闭环稳态计划，而 shipPlans 仍是单趟口径——生成 ACT 包会把每轮运量
+  // 按单趟写一遍。循环走「生成原生 RT」+ 游戏 Loop，这里直接拒绝。
+  if (actBlocked.value !== undefined) {
+    executeNotice.value = actBlocked.value;
     return;
   }
   // 时间均衡分段计算中：此时 shipPlans 还是舱容贪心（未充分利用多船）。
@@ -1323,9 +1349,13 @@ function flightTotalText(shipId: string): string {
         生成原生 RT
       </PrunButton>
       <Tooltip v-if="executeTooltip" position="top" :tooltip="executeTooltip" no-icon>
-        <PrunButton primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
+        <PrunButton primary :disabled="!hasStops || actBlocked !== undefined" @click="execute"
+          >执行环线</PrunButton
+        >
       </Tooltip>
-      <PrunButton v-else primary :disabled="!hasStops" @click="execute">执行环线</PrunButton>
+      <PrunButton v-else primary :disabled="!hasStops || actBlocked !== undefined" @click="execute"
+        >执行环线</PrunButton
+      >
     </div>
 
     <!-- 分组内基地勾选 -->
@@ -1412,6 +1442,9 @@ function flightTotalText(shipId: string): string {
           >
           <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
         </template>
+        <template v-else
+          >循环周期未估算：{{ loopError ?? '请在计划里分配 1 艘船并勾选至少 1 个基地。' }}</template
+        >
       </div>
       <div
         v-if="chainTab === 'plan' && allocBanner"

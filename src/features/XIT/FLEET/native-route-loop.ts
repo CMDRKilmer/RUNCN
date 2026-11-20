@@ -142,6 +142,21 @@ export function sustainRounds(
   return rounds;
 }
 
+// 每轮出发地账单 + 可支撑轮数。燃料只认生成时的每轮快照：游戏里手建的循环航线没有快照，
+// 按罐容量估会把整圈当成耗满一罐（支撑轮数偏少、误报「不足 1 轮」），故不猜——账单只含物料，
+// 支撑轮数返回 undefined（未知，卡片显示「—」）。
+export function loopSustain(
+  cxBill: Readonly<Record<string, number>>,
+  fuel: LoopFuel | undefined,
+  stock: Readonly<Record<string, number>>,
+): { bill: Record<string, number>; sustain: number | undefined } {
+  if (fuel === undefined) {
+    return { bill: { ...cxBill }, sustain: undefined };
+  }
+  const bill = roundBill(cxBill, fuel);
+  return { bill, sustain: sustainRounds(bill, stock) };
+}
+
 export interface LoopEligibility {
   shipCount: number;
   baseCount: number;
@@ -164,4 +179,14 @@ export function loopEligibility(input: LoopEligibility): { ok: boolean; reasons:
     reasons.push('飞行估时不完整，无法确定循环周期。');
   }
   return { ok: reasons.length === 0, reasons };
+}
+
+// 循环模式与 ACT 执行面的边界：循环下规划表展示的是闭环稳态，而 ACT 执行面（shipPlans →
+// executeChainPlans）仍是单趟口径，放行会把每轮运量少写一个数量级。按钮 tooltip 与 execute()
+// 拦截共用这一处文案，避免两处口径漂移；唯一出口是「生成原生 RT」。
+export const LOOP_ACT_BLOCKED =
+  '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
+
+export function actBlockedReason(loopActive: boolean): string | undefined {
+  return loopActive ? LOOP_ACT_BLOCKED : undefined;
 }

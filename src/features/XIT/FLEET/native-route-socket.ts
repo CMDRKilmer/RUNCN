@@ -234,7 +234,7 @@ export async function socketEditStep(
   materialId: string,
   units: number,
   // 缺省 min=max（出发地装载保留缺料停跑背压）；其余装/卸由调用方传 0（机会式不阻塞）。
-  minimum: number = units,
+  minimum = units,
 ) {
   return await sendRouteAction(
     `SHIP_ROUTES_EDIT_${type}_STEP`,

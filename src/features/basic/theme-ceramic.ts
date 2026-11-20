@@ -415,7 +415,9 @@ ${P} tbody tr:nth-child(even) {
 ${P} tbody tr:hover {
   background-color: var(--rp-cc-table-row-hover) !important;
 }
-${P} :is(tr[class*='selected'], tr[class*='Selected'], [class*='Table__selected']) {
+/* 选中行必须压过斑马纹：tbody tr:nth-child(even) 的特异性是 (0,3,3)，
+   这里再叠一级 [data-rp-theme] 抬到 (0,4,2)，否则偶数选中行会被斑马纹盖掉。 */
+${P}[data-rp-theme] :is(tr[class*='selected'], tr[class*='Selected'], [class*='Table__selected']) {
   background-color: var(--rp-cc-table-row-selected) !important;
 }
 ${P} :is([class*='Pagination__'], [class*='Selections__selection']) {

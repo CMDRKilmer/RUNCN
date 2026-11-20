@@ -134,22 +134,27 @@ export function useChainLoopPlanning(input: {
 }) {
   const result = ref<LoopPlanResult | undefined>(undefined);
   const computing = ref(false);
+  // 循环为什么没结果（资格/缺载重/估时抛错）：界面横幅要能说清楚，不能留空条。
+  const error = ref<string>();
   let token = 0;
   async function recompute() {
     const current = ++token;
     const ship = input.ship();
     const bases = input.bases();
     if (!input.enabled() || ship === undefined || bases.length === 0) {
+      error.value = undefined;
       result.value = undefined;
       computing.value = false;
       return;
     }
     const capacity = shipChainCapacity(ship);
     if (capacity === undefined) {
+      error.value = '该船缺少载重数据，无法估算循环周期。';
       result.value = undefined;
       computing.value = false;
       return;
     }
+    error.value = undefined;
     computing.value = true;
     try {
       const next = await computeLoopPlan({
@@ -166,6 +171,7 @@ export function useChainLoopPlanning(input: {
     } catch (e) {
       console.warn('[XIT/FLEET] loop plan failed', e);
       if (current === token) {
+        error.value = `循环估算失败：${e instanceof Error ? e.message : String(e)}`;
         result.value = undefined;
       }
     } finally {
@@ -181,5 +187,5 @@ export function useChainLoopPlanning(input: {
   onScopeDispose(() => {
     token++;
   });
-  return { result, computing, recompute };
+  return { result, computing, error, recompute };
 }
