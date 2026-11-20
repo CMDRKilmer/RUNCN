@@ -75,6 +75,7 @@ async function check(name, fn) {
     materials: {},
     stations: {},
     exchanges: {},
+    warehouses: {},
   });
   Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
@@ -1724,8 +1725,14 @@ await check('native RT purchase: the bill is reduced by the origin stock', async
 });
 
 await check('native RT purchase: an unplanned route gets a CX Buy package', async () => {
-  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'station-wh' };
   fixture.exchanges.HRT = { code: 'IC1' };
+  fixture.warehouses.HRT = { warehouseId: 'player-wh', storeId: 'wh' };
+  // 站级 warehouseId 不是玩家 store id：诱饵库存若被读到说明键型又混了。
+  fixture.stores['station-wh'] = {
+    id: 'station-wh',
+    items: [{ quantity: { material: { ticker: 'RAT' }, amount: 1000 } }],
+  };
   fixture.stores.wh = {
     id: 'wh',
     items: [{ quantity: { material: { ticker: 'RAT' }, amount: 30 } }],
@@ -1750,7 +1757,8 @@ await check('native RT purchase: no package outside a CX or with full stock', as
   const record = purchaseRecord([{ kind: 'load', ticker: 'RAT', amount: 100 }]);
   assert.equal(nativeRoutePurchasePackage(record), undefined);
   fixture.exchanges.HRT = { code: 'IC1' };
-  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'wh' };
+  fixture.stations.HRT = { naturalId: 'HRT', warehouseId: 'station-wh' };
+  fixture.warehouses.HRT = { warehouseId: 'player-wh', storeId: 'wh' };
   fixture.stores.wh = {
     id: 'wh',
     items: [{ quantity: { material: { ticker: 'RAT' }, amount: 100 } }],

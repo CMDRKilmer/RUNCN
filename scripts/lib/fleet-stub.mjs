@@ -12,6 +12,7 @@ export const fixture = {
   materials: {},
   stations: {},
   exchanges: {},
+  warehouses: {},
 };
 export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: [] });
 export const sitesStore = {
@@ -30,7 +31,10 @@ export const exchangesStore = {
   getByNaturalId: id => fixture.exchanges[id],
 };
 export const starsStore = { all: ref([]) };
-export const warehousesStore = { all: ref([]) };
+export const warehousesStore = {
+  all: ref([]),
+  getByEntityNaturalId: id => fixture.warehouses[id],
+};
 export const getStarNaturalId = star => star.systemId;
 // 航点地址编码只在按航班推断航线时参与匹配；本套契约不覆盖那条路径。
 export const encodeAddress = () => undefined;
