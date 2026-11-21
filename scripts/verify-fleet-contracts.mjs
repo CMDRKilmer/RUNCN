@@ -10,8 +10,18 @@ import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
-const { fixture, userData, sitesStore, shipsStore, flightsStore, transport, windows, estimation } =
-  await import('./lib/fleet-stub.mjs');
+const {
+  fixture,
+  userData,
+  sitesStore,
+  shipsStore,
+  flightsStore,
+  transport,
+  windows,
+  estimation,
+  socketMessages,
+  dispatchForce,
+} = await import('./lib/fleet-stub.mjs');
 const { collectChainPlanningSnapshot } = await import('../src/features/XIT/FLEET/chain-data.ts');
 const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-core.ts');
 const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-planning.ts');
@@ -62,6 +72,8 @@ const {
   actBlockedReason,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
+const { socketEditStep, socketEditRefuelStep } =
+  await import('../src/features/XIT/FLEET/native-route-socket.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.chainRuns = {};
@@ -2253,42 +2265,80 @@ await check('loop usable days read ship capacity and base BURN, not UNLOAD steps
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
 });
 
-await check('waypoints: loop and single-trip both write min=max=planned amount', () => {
-  const plan = {
-    originNaturalId: 'CX',
-    cxBill: { RAT: 14 },
-    finalUnload: { FE: 3 },
-    stops: [
-      {
-        naturalId: 'A',
-        unloadCx: {},
-        unloadChain: new Map(),
-        load: new Map([['RAT', { amount: 2 }]]),
-      },
-      {
-        naturalId: 'B',
-        unloadCx: { RAT: 14 },
-        unloadChain: new Map([['RAT', { amount: 2 }]]),
-        load: new Map([['FE', { amount: 3 }]]),
-      },
-    ],
-  };
-  // 循环与单趟同口径（用户 2026-11-21 定，取代 2026-11-19 的机会式 min=0/max=Q）：
-  // 装卸步骤一律 min=max=计划量，缺料/减产时由步骤原地等待；同 ticker 的采购与链上卸货合并。
-  const expected = [
-    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
-    {
-      location: 'B',
-      steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 16 },
-        { kind: 'load', ticker: 'FE', amount: 3 },
+await check(
+  'waypoints: each ticker gets one exact-amount step (purchased + chain UNLOAD merge)',
+  () => {
+    const plan = {
+      originNaturalId: 'CX',
+      cxBill: { RAT: 14 },
+      finalUnload: { FE: 3 },
+      stops: [
+        {
+          naturalId: 'A',
+          unloadCx: {},
+          unloadChain: new Map(),
+          load: new Map([['RAT', { amount: 2 }]]),
+        },
+        {
+          naturalId: 'B',
+          unloadCx: { RAT: 14 },
+          unloadChain: new Map([['RAT', { amount: 2 }]]),
+          load: new Map([['FE', { amount: 3 }]]),
+        },
       ],
-    },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
-  ];
-  assert.deepEqual(buildNativeWaypoints(plan), expected);
-});
+    };
+    // 循环与单趟同口径（用户 2026-11-21 定，取代 2026-11-19 的机会式 min=0/max=Q）：
+    // 装卸步骤一律 min=max=计划量，缺料/减产时由步骤原地等待；同 ticker 的采购与链上卸货合并。
+    const expected = [
+      { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
+      { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
+      {
+        location: 'B',
+        steps: [
+          { kind: 'unload', ticker: 'RAT', amount: 16 },
+          { kind: 'load', ticker: 'FE', amount: 3 },
+        ],
+      },
+      { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
+    ];
+    assert.deepEqual(buildNativeWaypoints(plan), expected);
+  },
+);
+
+await check(
+  'socket step payload: LOAD/UNLOAD send min=max=units, refuel stays CAPACITY',
+  async () => {
+    // 写入口径的报文断言（用户 2026-11-21 定）：同一个数量同时下发到 minimum 与 maximum，
+    // 缺量时由原生步骤原地等待；新建步骤默认 min=1，所以 minimum 必须显式写。
+    socketMessages.length = 0;
+    const edit = socketEditStep('r1', 'w1', 's1', 'LOAD', 'm1', 42);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const sent = socketMessages.at(-1);
+    assert.equal(sent.messageType, 'SHIP_ROUTES_EDIT_LOAD_STEP');
+    assert.equal(sent.contextId, 'CTX');
+    assert.deepEqual(sent.payload.minimum, { type: 'ABSOLUTE', units: 42 });
+    assert.deepEqual(sent.payload.maximum, { type: 'ABSOLUTE', units: 42 });
+    assert.equal(sent.payload.retain, 0);
+    dispatchForce({
+      type: 'SHIP_ROUTES_ROUTE',
+      data: { id: 'r1', naturalId: 'N1', waypoints: [] },
+    });
+    assert.equal((await edit).id, 'r1');
+
+    // 补油是唯一例外：上下限都 CAPACITY（= 补满），不带绝对数量。
+    const refuel = socketEditRefuelStep('r1', 'w1', 's1', 'STL');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const fuel = socketMessages.at(-1).payload;
+    assert.deepEqual(fuel.minimum, { type: 'CAPACITY', units: 0 });
+    assert.deepEqual(fuel.maximum, { type: 'CAPACITY', units: 0 });
+    assert.equal(fuel.source, 'LOCAL_STORE');
+    dispatchForce({
+      type: 'SHIP_ROUTES_ROUTE',
+      data: { id: 'r1', naturalId: 'N1', waypoints: [] },
+    });
+    await refuel;
+  },
+);
 
 const loopInput = bs => ({
   ship: { id: 'S', registration: 'S' },

@@ -183,7 +183,7 @@
 
 回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
 
-- `../../scripts/verify-fleet-contracts.mjs`：稳态**净缺口**账单与 need（`loopBurnBill`/`computeChainPlan` loop 口径：周期×日耗扣自产，自给材料不送、基地自留一轮生产所需）、**一次运输实际可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、周期闭环迭代、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、装卸步骤一律 `min=max`（循环与单趟同写同一组数量）、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
+- `../../scripts/verify-fleet-contracts.mjs`：稳态**净缺口**账单与 need（`loopBurnBill`/`computeChainPlan` loop 口径：周期×日耗扣自产，自给材料不送、基地自留一轮生产所需）、**一次运输实际可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、周期闭环迭代、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、装卸步骤一律 `min=max`（`buildNativeWaypoints` 不再有 loop 参数，同 ticker 采购与链上卸货合并为一条精确量；`socketEditStep` 报文经桩录制断言 `minimum`/`maximum` 同为 `ABSOLUTE` 数量、补油仍 `CAPACITY`）、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
 - `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
 - 循环模式不生成 ACT 的**守卫在 `ChainView.vue`**（按钮置灰 + `execute()` 早退）：脚本只核对两处共用 `actBlockedReason` 的同一文案、没有各自硬编码；置灰与拦截行为本身属浏览器验收。
 - 浏览器：循环模式下「执行环线」置灰、tooltip 指向「生成原生 RT」；点不可用按钮不产生 ACT 包/触发器。
@@ -197,7 +197,7 @@
 - 「至多/最少」两栏在 `min=max` 下的界面回退路径写入顺序（先最大后最小）已在单趟口径实机用过；循环模式改用同一口径后仍需一次实机确认数量回显一致。
 - RTE 各状态的界面文案（中/英）。
 - 对话框隐藏 CXOB 窗口能否在真实会话里及时回推 `COMEX_BROKER_DATA`（脚本以桩替代）。读不到按「未知即可买」处理，代价是订单簿确实为空时会多下一单燃料。
-- LOAD 步骤 `retain` 字段语义（实采回显 46，RPrun 不写不读）。
+- LOAD 步骤 `retain` 字段语义（实采回显 46；RPrun 在装卸步骤固定写 0、不读取）。
 - 未知步骤类型（`UNLOAD_ALL`/`UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`）目前被 `toStep` 丢弃：手动增删 `UNLOAD_ALL`/`UNLOAD_FUEL` 不触发下游时长作废，是否纳入签名待扩展。
 - （可选）`CREATE_ROUTE` 是否能直接带 `repeats`：已有独立 `SET_REPEAT`，非必需。
 

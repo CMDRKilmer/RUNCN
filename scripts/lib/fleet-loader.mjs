@@ -33,6 +33,8 @@ const adapters = new Set([
   '@src/infrastructure/org-api/session',
   '@src/infrastructure/prun-ui/buffers',
   '@src/infrastructure/prun-api/data/api-messages',
+  '@src/infrastructure/prun-api/data/user-data',
+  '@src/infrastructure/prun-api/socket-io-middleware',
   '@src/utils/on-node-disconnected',
 ]);
 export function resolve(specifier, context, nextResolve) {
