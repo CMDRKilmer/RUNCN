@@ -770,18 +770,10 @@ function toStep(step: RouteStepData): NativeRouteStep | undefined {
   // CAPACITY（装载=装满 / 卸船=全部）没有绝对数量，标记出来避免按 0 吨计算。
   const capacity = step.maximum?.type === 'CAPACITY' || step.minimum?.type === 'CAPACITY';
   const amount = capacity ? 0 : (step.maximum?.units ?? step.minimum?.units ?? 0);
-  // 循环步骤 min=0/max=Q：最小量与最大量不同时记下来（min=max 缺省不写，单趟口径不变）。
-  const minUnits = step.minimum?.units;
-  const maxUnits = step.maximum?.units;
-  const minimum =
-    !capacity && typeof minUnits === 'number' && minUnits !== (maxUnits ?? minUnits)
-      ? minUnits
-      : undefined;
   return {
     kind: step.type === 'LOAD' ? 'load' : 'unload',
     ticker,
     amount,
     capacity: capacity || undefined,
-    ...(minimum === undefined ? {} : { minimum }),
   };
 }

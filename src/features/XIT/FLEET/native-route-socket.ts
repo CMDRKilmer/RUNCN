@@ -233,8 +233,6 @@ export async function socketEditStep(
   type: 'LOAD' | 'UNLOAD',
   materialId: string,
   units: number,
-  // 缺省 min=max（出发地装载保留缺料停跑背压）；其余装/卸由调用方传 0（机会式不阻塞）。
-  minimum = units,
 ) {
   return await sendRouteAction(
     `SHIP_ROUTES_EDIT_${type}_STEP`,
@@ -243,7 +241,7 @@ export async function socketEditStep(
       waypointId,
       stepId,
       material: materialId,
-      minimum: { type: 'ABSOLUTE', units: minimum },
+      minimum: { type: 'ABSOLUTE', units },
       maximum: { type: 'ABSOLUTE', units },
       retain: 0,
     },
@@ -386,15 +384,7 @@ async function writeRoute(
         throw new Error(`未找到材料 ${step.ticker}。`);
       }
       const stepType = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
-      route = await socketEditStep(
-        route.id,
-        added.id,
-        stepId,
-        stepType,
-        material.id,
-        step.amount,
-        step.minimum,
-      );
+      route = await socketEditStep(route.id, added.id, stepId, stepType, material.id, step.amount);
     }
   }
   const name = input.name.trim();

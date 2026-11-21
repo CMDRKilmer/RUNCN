@@ -2253,7 +2253,7 @@ await check('loop usable days read ship capacity and base BURN, not UNLOAD steps
   assert.equal(nativeRouteUsableDays(waypoints, { weight: 100, volume: 100 }), undefined);
 });
 
-await check('waypoints: origin load min=max, all other steps min=0/max=Q', () => {
+await check('waypoints: loop and single-trip both write min=max=planned amount', () => {
   const plan = {
     originNaturalId: 'CX',
     cxBill: { RAT: 14 },
@@ -2273,23 +2273,9 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
       },
     ],
   };
-  // 用户 2026-11-19 定：出发站只改卸货 min=0（装载 min=max 背压保留）；其余站点装/卸 min=0。
-  // 循环：同 ticker 的采购卸货与链上卸货分成两个步骤。
-  assert.deepEqual(buildNativeWaypoints(plan, true), [
-    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
-    { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2, minimum: 0 }] },
-    {
-      location: 'B',
-      steps: [
-        { kind: 'unload', ticker: 'RAT', amount: 14, minimum: 0 },
-        { kind: 'unload', ticker: 'RAT', amount: 2, minimum: 0 },
-        { kind: 'load', ticker: 'FE', amount: 3, minimum: 0 },
-      ],
-    },
-    { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 }] },
-  ]);
-  // 单趟：采购/链上卸货合并，min=max=计划量（与循环前的口径一致）。
-  assert.deepEqual(buildNativeWaypoints(plan), [
+  // 循环与单趟同口径（用户 2026-11-21 定，取代 2026-11-19 的机会式 min=0/max=Q）：
+  // 装卸步骤一律 min=max=计划量，缺料/减产时由步骤原地等待；同 ticker 的采购与链上卸货合并。
+  const expected = [
     { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 14 }] },
     { location: 'A', steps: [{ kind: 'load', ticker: 'RAT', amount: 2 }] },
     {
@@ -2300,7 +2286,8 @@ await check('waypoints: origin load min=max, all other steps min=0/max=Q', () =>
       ],
     },
     { location: 'CX', steps: [{ kind: 'unload', ticker: 'FE', amount: 3 }] },
-  ]);
+  ];
+  assert.deepEqual(buildNativeWaypoints(plan), expected);
 });
 
 const loopInput = bs => ({
@@ -2348,8 +2335,8 @@ await check('loop delivery stays steady while usable days show full load', async
   assert.ok(r.plan.stops.every(s => s.unloadCx.RAT === 2));
   // 满载加权只作显示：100 ÷ (1+1) = 50 天。
   assert.equal(r.plan.fullLoadUsableDays, 50);
-  // 出发地装载 min=max 精确量（缺料停跑背压）。
-  assert.deepEqual(buildNativeWaypoints(r.plan, true)[0].steps, [
+  // 出发地装载 min=max=计划量（缺料在出发地停跑）。
+  assert.deepEqual(buildNativeWaypoints(r.plan)[0].steps, [
     { kind: 'load', ticker: 'RAT', amount: 4 },
   ]);
 });
@@ -2410,7 +2397,7 @@ await check('native RT merge: server repeats overrides local loop snapshot', () 
   assert.equal(fresh.cycleHours, undefined);
 });
 
-await check('native RT merge: loop min=0 step is preserved', () => {
+await check('native RT merge: step amount reads from maximum, min range is not recorded', () => {
   const waypoint = steps => ({
     id: 'w0',
     destination: 'S|PLA|STA,B0',
@@ -2443,9 +2430,9 @@ await check('native RT merge: loop min=0 step is preserved', () => {
     ],
   };
   const stepsOut = mergeRouteRecord(server, undefined, undefined).waypoints[0].steps;
-  // min=0/max=Q 记下 minimum；min=max 缺省不写（单趟口径不变）。
+  // 玩家手建的 min≠max 也只按 maximum.units 记数量：RPrun 不写、不存弹性区间。
   assert.deepEqual(stepsOut, [
-    { kind: 'load', ticker: 'RAT', amount: 50, capacity: undefined, minimum: 0 },
+    { kind: 'load', ticker: 'RAT', amount: 50, capacity: undefined },
     { kind: 'unload', ticker: 'RAT', amount: 50, capacity: undefined },
   ]);
 });

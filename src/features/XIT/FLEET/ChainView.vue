@@ -289,7 +289,7 @@ function openNativeRoutePlan() {
   try {
     const loop = loopActive.value;
     const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
-    const waypoints = buildNativeWaypoints(plan, loop);
+    const waypoints = buildNativeWaypoints(plan);
     // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
     const loopFuel = fuelPerRound(
       loopPlan.value?.estimate?.legs ?? [],

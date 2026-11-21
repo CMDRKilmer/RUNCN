@@ -587,7 +587,7 @@ export async function fillNativeStep(tile: RtTile, editor: HTMLElement, step: Na
     await selectMaterial(editor, step.ticker);
     // Set maximum first so a quantity above the native default stays valid.
     await setLimit(editor, 'Maximum', step.amount);
-    await setLimit(editor, 'Minimum', step.minimum ?? step.amount);
+    await setLimit(editor, 'Minimum', step.amount);
   }
 }
 

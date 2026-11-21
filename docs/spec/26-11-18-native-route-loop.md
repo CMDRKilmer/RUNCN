@@ -1,6 +1,6 @@
 # 原生 RT 循环执行（XIT FLEET）
 
-> 状态：已实现（待浏览器验收）。纯数据/计算层（步骤 1–3、4 核心、6 数据、8 文档）、向导/规划 UI（步骤 4b、5）与运行中卡片循环状态/补货/预检（步骤 7）均已落地。UI 均需浏览器验收；RTE 阻塞/等待中文文案、min=0 运行语义待实采校准。
+> 状态：已实现（待浏览器验收）。纯数据/计算层（步骤 1–3、4 核心、6 数据、8 文档）、向导/规划 UI（步骤 4b、5）与运行中卡片循环状态/补货/预检（步骤 7）均已落地。UI 均需浏览器验收；RTE 阻塞/等待中文文案、缺量时步骤等待最少数量的实机表现待验收。
 
 给 XIT FLEET 生成的原生 RT 增加可选「循环执行」：写完航点与装卸步骤后打开游戏自带的 Loop，由游戏服务端反复执行同一闭环。循环不依赖浏览器内的 ACT 触发器，关掉页面仍继续跑。
 
@@ -59,14 +59,14 @@
 
 - 原生步骤是固定绝对量、每轮重复执行。运送量严格按 `cycleDays × BURN 日输入/日输出`：送达（bill/need）= 周期净缺口 `max(0, ceil(cycleDays × (input + workforce − output)))`（`cycleDelivery`，按连续净额取整；逐项 `ceil(日耗) − floor(日产)` 会在非整数周期下让自给基地虚报 1 单位缺口，进而被当成组内产出缺口阻塞生成），**不减当前库存**——基地保留原有缓冲，每轮恰好补上一轮消耗。**既是原料又是产出的材料按单个基地自身日产抵扣日耗**：自给（日产 ≥ 日耗）不安排送达、基地自留一轮生产所需量，只提取净余量；净消耗（日产 < 日耗）只送净缺口。账单由 `loopBurnBill` 直接从 BURN 生成（`chain-data.ts`），不走补给配置（`config.days`、supplies-cap 钳制、消耗品过滤、维修材料都不适用）。
 - 提取（avail/最终产物/余量运回）= 周期净余量 `floor(cycleDays × (output − input − workforce))`，实际提取再补回本轮送达覆盖的自产自耗量（`loopExtractable` = 净余量 + 送达；流量分配阶段 incoming 未知先按全额自用保守扣）。不动基地现有库存、不用排产预测库存——装尽库存首轮会抽走基地缓冲、逐轮库存漂移。
-- 链上产物提取（基地 LOAD）= 平衡后的 flow，best-effort：减产轮少提、不阻塞。物理约束保留：超舱容裁剪、CX 订单簿供应不足缩减，均警告。
+- 链上产物提取（基地 LOAD）= 平衡后的 flow，写成精确绝对量：减产轮库存不足该量时步骤原地等待，不再按 `min=0` 少提（用户 2026-11-21 定）。物理约束保留：超舱容裁剪、CX 订单簿供应不足缩减，均警告。
 - 「一次运输实际可用」按**满载加权分摊展示口径**（用户 2026-11-20 定）：满载天数 = 船总舱容 ÷ Σ各基地净日耗 bundle（Σ max(0, 日耗 − 自产日产) × 单件重量/体积，重量/体积取较小），等价于各基地份额 ∝ 净日耗、可用天数拉平；自给基地 bundle 为 0、不占分摊。单基地独享全舱故天数多于多基地。展示口径，≠ 实际每轮送达（装载/补货按周期 × 日耗稳态精确量）、≠ 周期。文案统一「一次运输实际可用 X 天」：规划横幅用 `ChainPlan.fullLoadUsableDays`（全部基地），向导/运行中卡片用 `nativeRouteUsableDays`（航点基地 + BURN + 船总舱容；任一基地 BURN 或净消耗物料缺重量/体积时显示 —）。
 
-**步骤 min/max（出发站装载保留背压，其余机会式）**
+**步骤 min/max（一律准确数值）**
 
-- 出发站（航点 0）**装载**（`cxBill` 采购/消耗品）：LOAD `min=max=Q`（缺料在出发地阻塞，船不发，「缺料停跑」背压保留）；出发站**卸货**（归航 `finalUnload`）`min=0, max=Q`。
-- 其余站点：装/卸都 `min=0, max=Q`——基地提取 LOAD、下游/链上 UNLOAD 均机会式，上游减产时船上货不足 Q 也不阻塞（用户 2026-11-19 定：出发站只改卸货，其他站点装货也 min=0）。
-- `min=0` **socket 可写已实采**（2026-11-19）：`EDIT_LOAD_STEP` 与 `EDIT_UNLOAD_STEP` 写 `minimum:{type:'ABSOLUTE',units:0}` 均被服务端接受并回显 `units:0`（**UNLOAD 对称性成立**；新建步骤默认 `min=1`，需显式改 0）。「不足不等待、只按现有量搬运」由手册规则推导（min=0 永不触发「不足最小值」），实机执行行为待确认。目标仓库无空间仍原地等待（仓储背压保留）。
+- 所有装卸步骤 `min=max=计划量`（用户 2026-11-21 定，取代 2026-11-19 的「出发站只改卸货、其余站点装/卸 `min=0`」机会式口径）：循环与单趟写同一组数量。缺料或上游减产时步骤按「等待最少数量」原地停住，不做「只搬现有量」的弹性搬运；出发地缺料同样让船不发（背压）。
+- 同 ticker 的采购卸货与链上卸货合并为一条 UNLOAD（与单趟一致）：数量精确后，拆开已无法表达不同 min/max。
+- `min=0` 的 socket 能力仍算已实采（2026-11-19：`EDIT_LOAD_STEP`/`EDIT_UNLOAD_STEP` 写 `minimum:{type:'ABSOLUTE',units:0}` 均被服务端接受并回显；新建步骤默认 `min=1`），RPrun 只是不再写 0。目标仓库无空间仍原地等待（仓储背压）。
 
 **仓储与慢基地**
 
@@ -155,15 +155,15 @@
 - `ChainPlan` 增加 `fullLoadUsableDays?`（一次运输实际可用天数，满载加权分摊展示口径：总舱容 ÷ Σ各基地净日耗 bundle）。
 - `NativeRouteRecord` 增加 `loop?: boolean`、`cycleHours?: number`。
 - `RouteData` / `NativeRouteView` 增加 `repeats?: boolean`，以游戏定义覆盖本地快照。
-- `computeChainPlan` 增加稳态 need 口径开关（loop）；`buildNativeWaypoints` 写 min/max：出发站装载 `min=max`（背压），出发站卸货与其余站点装/卸 `min=0`。
+- `computeChainPlan` 增加稳态 need 口径开关（loop）。`buildNativeWaypoints` 不接 `loop`：装卸步骤一律 `min=max=计划量`，循环与单趟写同一组数量。
 - 新纯函数建议放 `native-route-loop.ts`：周期换算、稳态每轮账单、每轮 SF/FF 消耗、备货轮数上限、可支撑轮数、资格校验。
 - 复用 `native-route-purchase.ts` 的缺口算法，输入改为 N 轮账单。
 
 ## 实现步骤
 
-1. `native-route-socket.ts` 补 `RouteData.repeats` 与 `socketSetRouteRepeats`（`SHIP_ROUTES_SET_REPEAT`）；装卸步骤支持 `min=0`（报文均已实采，实机执行语义待验证）。
+1. `native-route-socket.ts` 补 `RouteData.repeats` 与 `socketSetRouteRepeats`（`SHIP_ROUTES_SET_REPEAT`）；装卸步骤写 `minimum=maximum=数量`（报文均已实采）。
 2. `ChainFlightLeg` 补逐段油耗；新增 `native-route-loop.ts`（周期、稳态每轮账单、SF/FF 消耗、N 轮备货、资格校验）。
-3. `computeChainPlan` 加稳态 need 口径；`buildNativeWaypoints` 按装载端写 min/max。
+3. `computeChainPlan` 加稳态 need 口径；`buildNativeWaypoints` 装卸一律写 `min=max`。
 4. `use-chain-planning.ts` 支持 `cycleDays` 覆盖与整闭环迭代；`ChainView.vue` 暴露循环模式。
 5. `NativeRouteDialog.vue` 增加循环选项、写后开 Loop、N 轮备货与警告。
 6. `native-route-registry.ts` / `native-route-game.ts` 记录并合并循环状态；`native-route-rte.ts` 解析阻塞状态。
@@ -174,7 +174,7 @@
 
 - **直接给现有单趟计划打开 Loop**：运量按目标天数计算，与飞行周期不一致；也没有按轮备货。
 - **按 need（减库存）写循环绝对量**：固定步骤重复执行会逐轮少送、基地饿死；循环必须按稳态流量写。
-- **满载送达（每轮装满、按净日耗加权分给基地）**：基地每轮只消耗 周期×日耗，输入逐轮累积到仓满（仓满后 UNLOAD 可能原地等待阻塞循环），出发地每轮需供满载。用户 2026-11-20 先批准当日又否决：装载/补货/送达改回稳态精确量、出发地 min=max 背压保留；满载加权仅作「一次运输实际可用」展示口径。
+- **满载送达（每轮装满、按净日耗加权分给基地）**：基地每轮只消耗 周期×日耗，输入逐轮累积到仓满（仓满后 UNLOAD 可能原地等待阻塞循环），出发地每轮需供满载。用户 2026-11-20 先批准当日又否决：装载/补货/送达改回稳态精确量，全部装卸步骤 `min=max` 精确量（2026-11-21 起含基地端，缺料即等待）；满载加权仅作「一次运输实际可用」展示口径。
 - **按基地 cap 钳短循环周期**：各基地共用一个周期，单独钳短会失同步；改为余量警告。
 - **Loop + ACT 触发器并存**：原生步骤已经装卸，触发器会重复搬运。
 - **多船共用一条循环航线**：每艘船都按同一组绝对量装卸，实际流量按船数倍增，计划失效。
@@ -183,7 +183,7 @@
 
 回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
 
-- `../../scripts/verify-fleet-contracts.mjs`：稳态**净缺口**账单与 need（`loopBurnBill`/`computeChainPlan` loop 口径：周期×日耗扣自产，自给材料不送、基地自留一轮生产所需）、**一次运输实际可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、周期闭环迭代、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、min/max 按装载端、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
+- `../../scripts/verify-fleet-contracts.mjs`：稳态**净缺口**账单与 need（`loopBurnBill`/`computeChainPlan` loop 口径：周期×日耗扣自产，自给材料不送、基地自留一轮生产所需）、**一次运输实际可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、周期闭环迭代、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、装卸步骤一律 `min=max`（循环与单趟同写同一组数量）、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
 - `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
 - 循环模式不生成 ACT 的**守卫在 `ChainView.vue`**（按钮置灰 + `execute()` 早退）：脚本只核对两处共用 `actBlockedReason` 的同一文案、没有各自硬编码；置灰与拦截行为本身属浏览器验收。
 - 浏览器：循环模式下「执行环线」置灰、tooltip 指向「生成原生 RT」；点不可用按钮不产生 ACT 包/触发器。
@@ -193,8 +193,8 @@
 
 ## 待实采
 
-- `min=0` 的**实机执行**语义：不足时是否「不等待、只搬现有量」（LOAD/UNLOAD 协议均已确认可写且回显，2026-11-19）；减产轮链上提取/卸载不阻塞需实机验证。
-- 界面回退路径写 `min=0`：socket 侧已实采（LOAD/UNLOAD 对称回显），但编辑器「至少」输入框对 0 的反应未知——若被钳制或拒绝，`setLimit` 会在写入中途抛「Minimum 数量未写入。」并留下半成品航线。需实机确认 0 能写入并保存。
+- `min=max` 缺量时的**实机执行**：步骤停在「等待最少数量」后，玩家补齐库存/等基地追产出，该步骤能否自行续跑（不重新分配、不重开航线）。
+- 「至多/最少」两栏在 `min=max` 下的界面回退路径写入顺序（先最大后最小）已在单趟口径实机用过；循环模式改用同一口径后仍需一次实机确认数量回显一致。
 - RTE 各状态的界面文案（中/英）。
 - 对话框隐藏 CXOB 窗口能否在真实会话里及时回推 `COMEX_BROKER_DATA`（脚本以桩替代）。读不到按「未知即可买」处理，代价是订单簿确实为空时会多下一单燃料。
 - LOAD 步骤 `retain` 字段语义（实采回显 46，RPrun 不写不读）。
