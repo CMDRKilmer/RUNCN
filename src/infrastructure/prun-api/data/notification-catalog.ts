@@ -132,6 +132,17 @@ export const NOTIFICATION_GROUPS: NotificationGroup[] = [
     types: [{ type: 'SHIP_FLIGHT_ENDED', name: '飞船到达' }],
   },
   {
+    label: '航线',
+    color: '#e040fb',
+    types: [
+      { type: 'SHIP_ROUTE_EXECUTION_COMPLETED', name: '航线执行完成' },
+      { type: 'SHIP_ROUTE_EXECUTION_ABORTED_NOT_FLYABLE', name: '航线中止：无法飞行' },
+      { type: 'SHIP_ROUTE_EXECUTION_ABORTED_NO_LICENSE', name: '航线中止：无执照' },
+      { type: 'SHIP_ROUTE_SHIPMENT_TOO_LARGE', name: '航线货物过大' },
+      { type: 'SHIP_ROUTE_SHIPMENT_NOT_UNLOADED', name: '航线货物未卸下' },
+    ],
+  },
+  {
     label: '报告',
     color: '#00c9b7',
     types: [{ type: 'POPULATION_REPORT_AVAILABLE', name: '人口报告发布' }],
