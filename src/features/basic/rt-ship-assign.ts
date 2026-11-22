@@ -153,8 +153,15 @@ function markTileInner(tile: PrunTile) {
   const headers = Array.from(
     anchor.querySelectorAll<HTMLElement>('[class*="SectionHeader__container"]'),
   );
-  const shipHeader = headers.find(h => h.textContent?.trim() === '船只分配');
-  const routeHeader = headers.find(h => h.textContent?.trim() === '航线');
+  // 开关会插进「船只分配」这个标题里，textContent 从此变成「船只分配仅显示起点待命船只」，
+  // 若仍用严格等号查找，React 一旦复用该节点，后续每次 markTile 都会在开头 return，
+  // 行分类/按钮置灰/表头重排就全部停在旧状态。优先取已打标记的那个，否则用前缀匹配。
+  const shipHeader =
+    anchor.querySelector<HTMLElement>(`.${SHIP_HEADER}`) ??
+    headers.find(h => h.textContent?.trim().startsWith('船只分配'));
+  const routeHeader =
+    anchor.querySelector<HTMLElement>(`.${ROUTE_HEADER}`) ??
+    headers.find(h => h.textContent?.trim() === '航线');
   const table = anchor.querySelector<HTMLTableElement>('table');
   const waypoints = anchor.querySelector<HTMLElement>('[class*="Waypoints__container"]');
   if (!shipHeader || !routeHeader || !table || !waypoints) {
@@ -176,12 +183,19 @@ function markTileInner(tile: PrunTile) {
   const wp1NaturalId = getEntityNaturalIdFromAddress(wp1Address);
 
   // 匹配条件：航线列为 "--"（空闲、未分配航线）且船停靠地点 = 路径点1。
+  const allShips = shipsStore.all.value ?? [];
   const rows = table.querySelectorAll<HTMLTableRowElement>(`tbody tr:not(.${COLHEAD})`);
   rows.forEach(tr => {
     const cells = tr.querySelectorAll('td');
     const route = cells[1]?.textContent?.trim() ?? '';
     const name = cells[0]?.textContent?.trim() ?? '';
-    const ship = shipsStore.getByName(name);
+    // 表格只渲染船名，不暴露 registration/船 id（fiber 上也拿不到 ship 对象）。
+    // 而 shipsStore.getByName 是按「大写船名」建索引的：同名或仅大小写不同的船会并成
+    // 同一个键，直接查会把 A 船的位置套到 B 船上 —— 可用的被置灰、远处的被当成待命。
+    // 所以只有名字唯一时才判定；重名无法区分，宁可不动（保持可点）也不误伤。
+    const upperName = name.toUpperCase();
+    const sameName = allShips.filter(s => s.name?.toUpperCase() === upperName);
+    const ship = sameName.length === 1 ? sameName[0] : undefined;
     const shipNaturalId = ship
       ? getEntityNaturalIdFromAddress(ship.address ?? undefined)
       : undefined;
