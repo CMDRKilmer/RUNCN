@@ -24,6 +24,9 @@ html[data-rp-theme='nebula'] {
   --rp-cc-text-muted: #6b7f96;
   --rp-cc-text-inverse: #0d1626;
   --rp-cc-text-link: #5d8797;
+  /* 「已指定」徽章：每个主题独立配色，底色取本主题主色的加深/霓虹版，文字取与其对比 ≥6.9:1 的一侧（避免用通用 selection 色在深色主题下变半透明）。 */
+  --rp-cc-chosen-bg: #35c4e8;
+  --rp-cc-chosen-fg: #04121a;
   --rp-cc-text-disabled: #484e56;
   /* 「临近阈值」告警字色（R45）：船名等元素在本主题实际渲染成金色（#f5d27a），
      状态 warning 的琥珀与它几乎同色，故改用更红更亮的橙。 */

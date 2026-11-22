@@ -953,7 +953,13 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <div :class="$style.exchangeMeta">
             <span v-if="et.complete" :class="$style.completeTag">凑齐</span>
             <span v-else :class="$style.incompleteTag">缺 {{ et.missing }} 种</span>
-            <span v-if="singleMarketMode && forcedExchange === et.code" :class="$style.chosenTag">
+            <span
+              v-if="singleMarketMode && forcedExchange === et.code"
+              :class="$style.chosenMark"
+              :style="{
+                backgroundColor: 'var(--rp-cc-chosen-bg, #33566f)',
+                color: 'var(--rp-cc-chosen-fg, #ffffff)',
+              }">
               ✓ 已指定
             </span>
           </div>
@@ -1418,14 +1424,16 @@ function isBest(component: { bestExchange?: string }, code: string) {
   color: rgb(229, 115, 115);
 }
 
-/* 「已指定」从一行 11px 细字改成实心徽章，和 2px 选中框一起明确指向当前市场。 */
-.exchangeTotals .chosenTag {
+/* 「已指定」实心徽章，和 2px 选中框一起明确指向当前市场。
+   配色由主题各自提供：每个主题在 themes/*.css 里定义 --rp-cc-chosen-bg / -fg
+   （底色取该主题主色的加深或霓虹版，文字取对比 ≥6.9:1 的一侧）。
+   颜色只写在模板内联 :style 里 —— 主题引擎会把样式表里出现的 background-color
+   改写成 accent 的 16% 透明并带上 !important（深色主题下浅色字压上去几乎看不见），
+   所以这里一个颜色声明都不留，只保留排版属性。 */
+.exchangeTotals .chosenMark {
   margin-left: auto;
   padding: 2px 6px !important;
   border-radius: 3px;
-  background-color: var(--rp-skin-selection, #33566f) !important;
-  color: var(--rp-skin-bg, #f2f5f7) !important;
-  -webkit-text-fill-color: var(--rp-skin-bg, #f2f5f7) !important;
   font-size: 11px !important;
   font-weight: 700 !important;
   letter-spacing: 0.3px;
