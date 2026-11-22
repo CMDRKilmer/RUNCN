@@ -47,6 +47,16 @@ function writeMatchOnly(value: boolean) {
   }
 }
 
+// React fiber 的最小形状：只需要沿 return 链向上找渲染时透传的 props。
+// 只声明用得到的字段，避免用 any 破坏类型检查。
+type FiberLike = {
+  memoizedProps?: {
+    waypoint?: { destination?: PrunApi.Address };
+    destination?: PrunApi.Address;
+  };
+  return?: FiberLike | null;
+};
+
 // 从 DOM 元素的 React fiber 链里挖出第一个 waypoint 的 destination（结构化 address）。
 // RT 界面把路径点目的地渲染成「Hortus Station (Hortus)」文本，但 naturalId（HRT）
 // 只存在于 fiber 的 waypoint.destination 上，故从 fiber 读取。
@@ -59,18 +69,14 @@ function findFirstWaypointAddress(waypoints: HTMLElement): PrunApi.Address | und
   if (!fiberKey) {
     return undefined;
   }
-  let fiber: any = (destEl as any)[fiberKey];
+  let fiber = (destEl as unknown as Record<string, FiberLike | undefined>)[fiberKey];
   for (let i = 0; i < 12 && fiber; i++) {
-    const props = fiber.memoizedProps;
-    const candidate = props?.waypoint?.destination ?? props?.destination;
-    if (
-      candidate &&
-      typeof candidate === 'object' &&
-      Array.isArray((candidate as PrunApi.Address).lines)
-    ) {
-      return candidate as PrunApi.Address;
+    const candidate =
+      fiber.memoizedProps?.waypoint?.destination ?? fiber.memoizedProps?.destination;
+    if (candidate !== undefined && Array.isArray(candidate.lines)) {
+      return candidate;
     }
-    fiber = fiber.return;
+    fiber = fiber.return ?? undefined;
   }
   return undefined;
 }
@@ -190,10 +196,12 @@ function markTileInner(tile: PrunTile) {
   // 单路径点航线游戏根本不渲染「分配」按钮，此时保持完全空白，不补任何占位内容。
   // 已分配船只的「执行」按钮属于有效操作，保持原样不动。
   rows.forEach(tr => {
-    const cell = tr.querySelectorAll('td')[2];
-    if (!cell) {
+    const cells = tr.querySelectorAll('td');
+    // 行结构异常（不足三列）时跳过，避免读到 undefined。
+    if (cells.length < 3) {
       return;
     }
+    const cell = cells[2];
     const btn = cell.querySelector<HTMLButtonElement>('button');
     if (!btn) {
       return;
