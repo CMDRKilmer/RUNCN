@@ -121,6 +121,22 @@ const noFtl = predictFormulaFlight(
   natural.gameTimeMs,
 );
 assert(!noFtl.feasible && noFtl.ftlShortage > 0 && noFtl.ftlRemaining < 0);
+const nativeOptions = ftlFuel =>
+  calculateFormulaOptions(
+    { ...natural.request, ftlFuel },
+    natural.blueprint,
+    natural.flightInputs,
+    natural.gameTimeMs,
+    { time: 0 },
+    true,
+    'value',
+  );
+const nativeLowFuel = nativeOptions(600);
+assert(nativeLowFuel.best.feasible, 'RT should choose one of the reachable integer settings');
+assert(nativeLowFuel.best.ftlFuel <= 600);
+assert.equal(Math.round(nativeLowFuel.best.reactor * 100) / 100, nativeLowFuel.best.reactor);
+assert.equal(Math.min(...nativeLowFuel.options.map(option => option.reactor)), 0.47);
+assert.equal(nativeOptions(533).feasibleCount, 0, 'The fractional 46.35% setting cannot be stored');
 for (const row of fixtures.filter(x => x.source.startsWith('2026-11-15-mixed-'))) {
   const estimate = predictFormulaFlight(
     row.request,

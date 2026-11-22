@@ -45,6 +45,9 @@ export interface RouteData {
 }
 
 const ROUTE_TIMEOUT_MS = 15000;
+
+export class RouteCreateUnconfirmedError extends Error {}
+
 // 服务端不回 actionId，只能按「一次请求一份响应」的顺序匹配（所有请求串行 await）。
 // 变更类请求回 SHIP_ROUTES_ROUTE（单条），删除等回 SHIP_ROUTES_ROUTES（列表）。
 // 游戏里其它窗口也可能同时发航线请求，因此每个请求带匹配谓词：响应与请求的
@@ -105,7 +108,11 @@ function sendRouteRequest(
     };
     const timer = setTimeout(() => {
       pending.delete(request);
-      reject(new Error(`${messageType} 无响应`));
+      reject(
+        messageType === 'SHIP_ROUTES_CREATE_ROUTE'
+          ? new RouteCreateUnconfirmedError('未能确认服务器是否已创建航线。')
+          : new Error(`${messageType} 无响应`),
+      );
     }, ROUTE_TIMEOUT_MS);
     pending.add(request);
     const sent = sendServerMessage({
@@ -150,7 +157,7 @@ function sendRouteAction(
 
 // 建航线请求的响应里没有可对位的 id，而游戏里其它窗口的航线变更同样回单条
 // SHIP_ROUTES_ROUTE。先记下现有航线 id，只接受**不在快照里**的那一条：否则会把别人的
-// 航线当成本次新建，后续航点/改名都写到它上面，取消时还会按 partialRouteId 删掉它。
+// 航线当成本次新建，后续航点/改名会写到它上面，取消时还会删掉它。
 export async function socketCreateRoute() {
   const existing = new Set((await socketGetRoutes()).map(x => x.id));
   return await sendRouteAction(
