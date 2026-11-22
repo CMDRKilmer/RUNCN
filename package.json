@@ -10,6 +10,7 @@
   },
   "scripts": {
     "compile": "vue-tsc --noEmit",
+    "verify:themes": "node scripts/verify-theme-palette.mjs",
     "build": "pnpm run clean && pnpm run compile && vite build && vite build --config vite.content.config.mts && node scripts/fix-innerHTML.mjs && node scripts/build-firefox.mjs",
     "clean": "rimraf dist",
     "dev": "cross-env NODE_ENV=development vite build --config vite.content.config.mts --mode development && vite build -w --mode development",

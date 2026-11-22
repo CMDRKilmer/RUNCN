@@ -5,14 +5,14 @@
 //     启动早期（React 首次绘制之前）引用它，此时 store / 主题引擎 / DOM 都还
 //     没就绪，任何 import 副作用都会破坏首屏。
 //  2. 新增主题只需在这里加一行 + 按 mode 提供一份色板；id / 说明 / ThemeId /
-//     设置页卡片 / 引擎可识别集合 / 首屏防闪 / 图表取色全部自动跟随。
+//     设置页卡片 / 引擎可识别集合 / 首屏防闪 / 图表取色 / 深色标记全部自动跟随。
 //  3. 历史数据迁移（user-data-migrations.ts）里的主题 id 必须硬编码，禁止引用
 //     本文件：迁移描述的是「当时的数据」，不能随注册表一起变化。
 //  4. 任何主题逻辑的改动，都必须同步检查：原样主题（default）不受影响、
 //     自定义主题的取色全部走 var(--rp-skin-*)、图表有回退色板。
 
 /** 主题的实现模式，决定引擎走哪条路径。 */
-export type ThemeMode = 'native' | 'skin' | 'token';
+export type ThemeMode = 'native' | 'token';
 
 export interface ThemeDefinition {
   /** userData.settings.theme 的值，同时也是 html[data-rp-theme] 的值。 */
@@ -23,14 +23,19 @@ export interface ThemeDefinition {
   desc: string;
   /**
    * native：游戏原生外观。不注入覆盖表、不写 data-rp-theme。全表只能有一个。
-   * skin ：色板写在 theme.ts 的 SKINS 里，--rp-skin-* 由 tokensFor() 注入；
-   *        走通用 CONTROL_CSS，不做组件类型级映射。
-   * token：色板写在 refined-prun.css 的 html[data-rp-theme='<id>'] 块里，
+   * token：色板写在 src/features/basic/themes/<id>.css 的精确块
+   *        html[data-rp-theme='<id>'] 里（构建时合并进 dist/refined-prun.css），
    *        --rp-cc-* 是唯一颜色字面量来源；引擎从 token 组装 Skin，并复用
    *        buildComponentCss(<id>) 生成组件类型 → token 的映射骨架。
    *        token 模式自动获得：首屏防闪标记、图表 token 取色。
    */
   mode: ThemeMode;
+  /**
+   * 深色底。引擎与首屏据此写 html[data-rp-dark]，CSS 里共享的「染深」覆盖
+   * （顶栏 / 状态栏 / 提醒 / 表格单元格…）与选中态反色字都只认这个属性。
+   * 新增深色主题只需在这里标 true，不必再去补 CSS 的 id 白名单。
+   */
+  dark?: boolean;
 }
 
 export const THEMES = [
@@ -44,13 +49,13 @@ export const THEMES = [
     id: 'light',
     label: '浅色明亮',
     desc: '浅底深字、低饱和：窗口、表格、按钮、物料图标、输入框统一重配色，彩色收敛为石板蓝；保留黄红异常标记，图片与涨跌含义不变。',
-    mode: 'skin',
+    mode: 'token',
   },
   {
     id: 'paper',
     label: '暖米纸',
     desc: '参考暖色纸张界面：淡米白底、近白卡片、卡其细边框，赭金强调搭配小面积墨绿与暗红；低饱和暖调，黄红异常标记照旧保留。',
-    mode: 'skin',
+    mode: 'token',
   },
   {
     id: 'ceramic-colorful',
@@ -69,12 +74,21 @@ export const THEMES = [
     label: '星海霓虹',
     desc: '参考深空星海科幻界面：近黑深蓝底 + 半透明玻璃面板，青蓝霓虹（#35c4e8）作为唯一主强调色贯穿选中态/主按钮/边框发光；金/绿/红/紫/青绿/玫红/蓝/黄八类功能彩色各司其职、同类同色，信息编码不刺眼。',
     mode: 'token',
+    dark: true,
   },
   {
     id: 'starforge',
     label: '星铸工业',
     desc: '参考深空工业控制台：近黑深蓝底 + 深钢板面板，橙金（#f4ac69）作为唯一主强调色贯穿标题、主按钮、选中态与焦点环；青绿/蓝/紫/黄绿/橙红/玫红等八类功能彩色只用于分类与状态色块，同类同色。',
     mode: 'token',
+    dark: true,
+  },
+  {
+    id: 'htb',
+    label: 'HTB 终端',
+    desc: '参考 Hack The Box 深色界面：近黑蓝底 + 深蓝灰面板，石板蓝次级文字；酸橙绿只分两档——主按钮等动作目标保留品牌原色，到处重复的指示线/焦点环/选中块用降亮变体免得刺眼。青/青绿/琥珀/蓝/紫/梅红/玫红八类功能彩色只用于分类与状态色块，同类同色，正文、控件边界与禁用态经 WCAG 对比度校验。',
+    mode: 'token',
+    dark: true,
   },
 ] as const satisfies readonly ThemeDefinition[];
 
@@ -116,3 +130,8 @@ export function usesTokenPalette(id: string | undefined | null): boolean {
 
 /** 首屏防闪白名单：色板在 CSS 里的主题必须在 React 首次绘制前就位。 */
 export const needsStartupMarker = usesTokenPalette;
+
+/** 深色主题：决定 html[data-rp-dark] 与「实色块上的反色字」取深还是留白。 */
+export function isDarkTheme(id: string | undefined | null): boolean {
+  return themeById(id)?.dark === true;
+}

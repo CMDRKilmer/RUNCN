@@ -1,0 +1,170 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ── Claude 暖陶（claude）：token 模式，仿 Claude 暖米白 + 陶土橘配色 ────
+   画布暖米白 → 卡片象牙白 → 表头深米色；陶土橘 #d97757 是主强调色的色相
+   基准，落到窗口描边 / 选中光晕 / 装饰线时加深到 #cf6a45（选中态边框也要
+   够 3:1），正文级陶土文字再加深到 #a84c2c 保证 WCAG 4.5:1。八类功能彩色
+   按色相带收敛为低饱和大地色系，同类同色。
+   所有颜色字面量只在此精确块内（R01）。变量名与 ceramic 完全一致，
+   由 buildComponentCss('claude') 与 buildCeramicSkin() 复用。 */
+html[data-rp-theme='claude'] {
+  color-scheme: light;
+
+  /* 背景 */
+  --rp-cc-canvas: #f0eee6;
+  --rp-cc-surface: #faf9f5;
+  --rp-cc-surface-alt: #e8e6dc;
+  --rp-cc-overlay: rgba(31, 30, 29, 0.55);
+  --rp-cc-shadow-card: 0 1px 2px rgba(60, 54, 40, 0.08), 0 4px 12px rgba(60, 54, 40, 0.07);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(60, 54, 40, 0.2);
+
+  /* 文字 */
+  --rp-cc-text-primary: #1f1e1d;
+  --rp-cc-text-secondary: #4a4741;
+  --rp-cc-text-muted: #6e6a61;
+  --rp-cc-text-inverse: #faf9f5;
+  --rp-cc-text-link: #a84c2c;
+  --rp-cc-text-disabled: #8a857c;
+  /* 「临近阈值」告警字色（R45）：本主题链接是陶土橘，告警用深金拉开色相。 */
+  --rp-cc-warn-accent: #8f5f00;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #e3e1d5;
+  --rp-cc-border-default: #948f80;
+  --rp-cc-border-strong: #7a766a;
+  --rp-cc-border-focus: #c15f3c;
+  --rp-cc-ring: #c15f3c;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 2px;
+  --rp-cc-ring-halo: rgba(193, 95, 60, 0.2);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #b0512f;
+  --rp-cc-btn-primary-text: #faf9f5;
+  --rp-cc-btn-primary-border: #8f3f22;
+  --rp-cc-btn-primary-hover: #9c4626;
+  --rp-cc-btn-primary-active: #873c20;
+  --rp-cc-btn-secondary-bg: #faf9f5;
+  --rp-cc-btn-secondary-text: #1f1e1d;
+  --rp-cc-btn-secondary-border: #948f80;
+  --rp-cc-btn-secondary-hover: #f0eee6;
+  --rp-cc-btn-secondary-active: #e8e6dc;
+  --rp-cc-btn-danger-bg: #a83a32;
+  --rp-cc-btn-danger-text: #faf9f5;
+  --rp-cc-btn-danger-border: #8a2f28;
+  --rp-cc-btn-danger-hover: #93312a;
+  --rp-cc-btn-danger-active: #7d2923;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #a84c2c;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: #f5e9e2;
+  --rp-cc-btn-ghost-active: #eeddd2;
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #a84c2c;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: #f7e8e0;
+  --rp-cc-btn-link-active: #f0dcd0;
+  --rp-cc-btn-disabled-bg: #e8e6dc;
+  --rp-cc-btn-disabled-text: #8a857c;
+  --rp-cc-btn-disabled-border: #d6d3c6;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #fffefb;
+  --rp-cc-control-alt-bg: #f0eee6;
+  --rp-cc-control-text: #1f1e1d;
+  --rp-cc-control-placeholder: #6e6a61;
+  --rp-cc-control-border: #948f80;
+  --rp-cc-control-border-strong: #7a766a;
+  --rp-cc-control-focus: #c15f3c;
+  --rp-cc-control-checked: #c15f3c;
+  --rp-cc-control-track: #e3e1d5;
+  --rp-cc-control-thumb: #c15f3c;
+  --rp-cc-control-disabled-bg: #f0eee6;
+  --rp-cc-control-disabled-text: #8a857c;
+  --rp-cc-tooltip-bg: #262624;
+  --rp-cc-tooltip-text: #faf9f5;
+  --rp-cc-tooltip-border: #4a4741;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #f0eee6;
+  --rp-cc-table-head-text: #4a4741;
+  --rp-cc-table-row: #faf9f5;
+  --rp-cc-table-row-alt: #f5f4ee;
+  --rp-cc-table-row-hover: #efece1;
+  --rp-cc-table-row-selected: #f3e4db;
+  --rp-cc-table-border: #e3e1d5;
+  --rp-cc-table-text: #1f1e1d;
+
+  /* 状态：底色 + 深字 + 边框；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: #e7efe3;
+  --rp-cc-status-success-text: #3d6b35;
+  --rp-cc-status-success-border: #9dbb8f;
+  --rp-cc-status-warning-bg: #f7ecd4;
+  --rp-cc-status-warning-text: #7a5a10;
+  --rp-cc-status-warning-border: #d3b264;
+  --rp-cc-status-danger-bg: #f6e3df;
+  --rp-cc-status-danger-text: #9c3a30;
+  --rp-cc-status-danger-border: #d8a196;
+  --rp-cc-status-info-bg: #e4ebf1;
+  --rp-cc-status-info-text: #33566e;
+  --rp-cc-status-info-border: #9fb6c6;
+  /* 呼吸灯三档：青绿 / 暖琥珀 / 砖红，与大地色系一致。 */
+  --rp-cc-pulse-success: #2f6b62;
+  --rp-cc-pulse-secondary: #8a5a1c;
+  --rp-cc-pulse-danger: #a83a32;
+
+  /* 分类 1..8 / 图表同序号同色：浅底深字 + 低饱和大地色图形。
+     序号按色相带排列（1 青 2 青绿 3 橄榄 4 琥珀/陶土 5 砖红 6 紫 7 蓝 8 玫红），
+     与 theme-ceramic.ts 的 ceramicHueBands() 映射一致。 */
+  --rp-cc-cat-1-bg: #e3eef2;
+  --rp-cc-cat-1-text: #2a5666;
+  --rp-cc-cat-1-border: #9dc0cb;
+  --rp-cc-cat-1-chart: #4e8fa3;
+  --rp-cc-cat-2-bg: #e4efe7;
+  --rp-cc-cat-2-text: #2c5544;
+  --rp-cc-cat-2-border: #9fc2b0;
+  --rp-cc-cat-2-chart: #4f8a70;
+  --rp-cc-cat-3-bg: #eef0dc;
+  --rp-cc-cat-3-text: #4c5122;
+  --rp-cc-cat-3-border: #bcc186;
+  --rp-cc-cat-3-chart: #7d8440;
+  /* cat-4 图表色比品牌陶土 #d97757 略深，保证浅底上图形 ≥3:1。 */
+  --rp-cc-cat-4-bg: #f7e8e0;
+  --rp-cc-cat-4-text: #8f3f22;
+  --rp-cc-cat-4-border: #e0aa94;
+  --rp-cc-cat-4-chart: #cf6a45;
+  --rp-cc-cat-5-bg: #f6e4df;
+  --rp-cc-cat-5-text: #7c352c;
+  --rp-cc-cat-5-border: #d9a396;
+  --rp-cc-cat-5-chart: #b2544a;
+  --rp-cc-cat-6-bg: #ece7f3;
+  --rp-cc-cat-6-text: #4d3f6b;
+  --rp-cc-cat-6-border: #b9abd2;
+  --rp-cc-cat-6-chart: #7c6bab;
+  --rp-cc-cat-7-bg: #e6eaf2;
+  --rp-cc-cat-7-text: #35486a;
+  --rp-cc-cat-7-border: #a6b4cd;
+  --rp-cc-cat-7-chart: #5b759f;
+  --rp-cc-cat-8-bg: #f4e7ec;
+  --rp-cc-cat-8-text: #6f3d52;
+  --rp-cc-cat-8-border: #d5a9bb;
+  --rp-cc-cat-8-chart: #b06a86;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色减半深度得到（R33），专用于
+     <progress> 容量条（FLT 燃料条等），与图表实色分离。 */
+  --rp-cc-progress-primary: #a7c7d1;
+  --rp-cc-progress-secondary: #a7c5b8;
+  --rp-cc-chart-grid: #ddd9cc;
+  --rp-cc-chart-axis: #6e6a61;
+  --rp-cc-chart-label: #4a4741;
+  /* 指示线同时是选中态边框（theme.ts 的 INDICATOR_LINE_RE），要 ≥3:1；
+     品牌陶土 #d97757 只有 2.96:1，取 cat-4 图表色。 */
+  --rp-cc-accent-line: #cf6a45;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='claude'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}

@@ -663,12 +663,39 @@ function init() {
 
 ### 界面主题（token 模式）
 
-唯一事实源是 `src/features/basic/theme-registry.ts`。新增 token 模式主题只改两处：注册表加一行
-（id/label/desc/mode:'token'），以及在 `src/refined-prun.css` 加一个 `html[data-rp-theme='<id>']`
-精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token（含 `--rp-cc-pulse-*` 三档呼吸灯色），外加
-首屏防闪的 `body` 底色规则。设置页卡片、首屏标记、图表取色、引擎映射全部自动派生，不改其它
-文件。颜色字面量只允许出现在该精确块内；组件规则一律 `var()`，复用 `buildComponentCss(<id>)` 与
-`buildCeramicSkin()`。
+唯一事实源是 `src/features/basic/theme-registry.ts`。新增 token 模式主题改三处：注册表加一行
+（id/label/desc/mode:'token'，深色主题再标 `dark: true`）；新建 `src/features/basic/themes/<id>.css`，
+里面写一个 `html[data-rp-theme='<id>']` 精确块，定义与 ceramic 同名的全套 `--rp-cc-*` token（含
+`--rp-cc-pulse-*` 三档呼吸灯色），外加首屏防闪的 `body` 底色规则，深色主题再补自己的格式层；
+最后在 `src/refined-prun.ts` 按主题顺序 `import` 这个文件，构建时它才与 `src/refined-prun.css`
+合并成同一个 `dist/refined-prun.css`，首屏时序与特异性都不变。设置页卡片、首屏标记、图表取色、
+引擎映射全部自动派生，不改其它文件。颜色字面量只允许出现在该精确块内；组件规则一律 `var()`，
+复用 `buildComponentCss(<id>)` 与 `buildCeramicSkin(<id>)`。自检跑 `pnpm run verify:themes`
+（`scripts/verify-theme-palette.mjs`）：token 名契约、精确块结构、对比度硬门槛、模拟窗口取色一次查完。
+
+另有四个可不写的 token，缺省时行为与不写完全一致：`--rp-cc-bg-image`（画布上的方向性提亮，
+如暖米纸右上角的高光渐变，默认 `none`）、`--rp-cc-neutral-shift`（引擎重映射中性色时的偏移，
+默认浅色 `[2,1,-4]`、深色 `[-4,0,10]`）、`--rp-cc-indicator-glow` 与
+`--rp-cc-indicator-line-soft`（指示点光晕与柔线强度，默认取强调色实色；浅底主题要写半透明变体，
+否则 6px 光晕会在浅灰上糊成一团）。
+
+设置页的卡片本身就是一个模拟窗口（标题栏写主题名、正文写说明，下面用该主题自己的色摆一份表格行 /
+柱图 / 输入框 / 两个按钮）。窗口不画自己的色：`src/features/basic/theme-palette.ts` 从样式表里该主题
+的精确块读出 `PREVIEW_TOKENS` 那组 `--rp-cc-*`，作为内联自定义属性挂到卡片元素上，`THEME.vue` 的窗口
+样式一律裸 `var()`、零颜色字面量；所以预览既不会另存一份颜色，也不受当前启用主题影响，8 张卡片同时
+各自为政。原样主题（`mode:'native'`）没有色板块，走同文件里的 `NATIVE_PREVIEW`——那份值全部取自仓库
+既有的原生深色兜底（面板 `rgb(26,33,38)`、表头 `rgb(36,44,52)`、输入框 `#1a2632`、图表 FALLBACK 序列色等），
+只为把「原样」这张卡画齐，不参与主题引擎、不进任何 CSS。
+三个必须记住的坑：① 色板选择器锚在 `html` 上，给卡片挂 `data-rp-theme` 不会命中，只能内联变量；
+② CSSOM 把 `selectorText` 的属性值重新序列化成双引号（源码是单引号），比对必须忽略引号，取值走
+`rule.cssText` 而不是 `rule.style.getPropertyValue()`，否则整窗静默少色；③ 加色位要同步把 token 名
+加进 `PREVIEW_TOKENS`，`verify:themes` 会拦漏网和写进 `THEME.vue` 的颜色字面量。
+
+深色不靠 CSS 认 id：`dark` 标记由首屏（`refined-prun-startup.ts`）和引擎
+（`theme-appearance.ts`）写成 `html[data-rp-dark]`，`refined-prun.css` 里那组共享「染深」覆盖
+（顶栏/状态栏/提醒/表格单元格等）只认这个属性，因此新深色主题不必再往选择器里补 id。
+`--rp-cc-text-inverse` 是「实色强调块上的反色字」：浅色主题是纸白、深色主题是深底，划词选区与
+选中块的字色（`--rp-skin-on-accent`）一律指回它，不写死白色。
 
 特异性：斑马纹 `tbody tr:nth-child(even)` 是 (0,3,3)（`:nth-child` 按类级计）。要压过它的规则
 （如选中行）必须再叠一级 `[data-rp-theme]`，同 `!important` 下文档顺序救不了低特异性。

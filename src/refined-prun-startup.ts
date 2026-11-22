@@ -42,7 +42,8 @@ async function startup() {
     userData = undefined;
   }
   await waitDocumentReady();
-  // 首屏防闪：色板定义在 refined-prun.css 里的主题（注册表中 mode:'token'），
+  // 首屏防闪：色板写在样式表里的主题（注册表中 mode:'token'，色板在
+  // src/features/basic/themes/<id>.css，构建时合并进 dist/refined-prun.css），
   // 只要 data-theme 在游戏脚本恢复执行、React 首次绘制之前就位，第一帧就是
   // 主题底色，不会先闪一帧原生深色。其余主题保持原有加载时序（由 theme.ts
   // 标记），以免改变现有主题的首屏行为。

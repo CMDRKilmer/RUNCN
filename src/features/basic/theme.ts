@@ -2,7 +2,7 @@ import { watchEffect } from 'vue';
 import { userData } from '@src/store/user-data';
 import { applyThemeAppearance } from './theme-appearance';
 import { buildCeramicSkin, buildComponentCss } from './theme-ceramic';
-import { CUSTOM_THEME_ID_SET, DEFAULT_THEME_ID, THEMES, usesTokenPalette } from './theme-registry';
+import { CUSTOM_THEME_ID_SET, DEFAULT_THEME_ID, THEMES } from './theme-registry';
 
 // 界面主题：不再使用 html 上的 invert/hue-rotate 滤镜，而是直接改写颜色。
 // 扫描页面样式表，把每条声明里的颜色按「角色」重映射到一套低饱和浅色皮肤：
@@ -44,8 +44,8 @@ export interface Skin {
   neutralShift: [number, number, number];
   // 深色主题标记：中性色文字的映射方向。浅色主题要把游戏/插件遗留的浅灰文字
   // 反成深色（否则浅底上看不清）；深色主题必须相反——中性文字一律映射为浅色，
-  // 否则 #C8D0D6 这类文字会被反成 #292823 压在深底上完全不可读。由画布亮度
-  // 自动判定（见 theme-ceramic.ts 的 buildCeramicSkin），未设置时按浅色主题处理。
+  // 否则 #C8D0D6 这类文字会被反成 #292823 压在深底上完全不可读。token 模式取
+  // 注册表的 dark 标记（theme-registry.ts），未设置时按浅色主题处理。
   darkText?: boolean;
   // 期限/告警语义色：这类底色承载「还剩几天 / 该修了」的信息，不能和装饰性
   // 橙黄一起收敛成石板蓝。用低饱和的柔和黄/红 + 深色字 + 左侧细色条，
@@ -83,235 +83,8 @@ export interface Skin {
   };
 }
 
-const SKINS: Record<string, Skin> = {
-  // 中性浅色：几乎无彩，强调色是低饱和石板蓝。
-  light: {
-    vars: {
-      '--rp-skin-bg': '#f2f5f7',
-      '--rp-skin-bg-image': 'none',
-      '--rp-skin-panel': '#e8edf1',
-      '--rp-skin-panel-strong': '#dbe7f0',
-      '--rp-skin-hover': '#dde6ed',
-      '--rp-skin-border': '#b6c1cb',
-      '--rp-skin-border-strong': '#7f9cb2',
-      '--rp-skin-ink': '#26333d',
-      '--rp-skin-muted': '#4a5863',
-      '--rp-skin-disabled': '#98a3ac',
-      '--rp-skin-disabled-bg': '#f0f3f5',
-      '--rp-skin-disabled-border': '#d8dee3',
-      '--rp-skin-icon-a': '#edf2f6',
-      '--rp-skin-icon-b': '#d8e2e9',
-      '--rp-skin-icon-border': '#bcc8d2',
-      '--rp-skin-input-bg': '#ffffff',
-      '--rp-skin-indicator-bg': '#f6f9fb',
-      '--rp-skin-active-bg': '#e7eef4',
-      '--rp-skin-scroll-thumb': '#b6c1cb',
-      '--rp-skin-selection': '#33566f',
-      '--rp-accent-rgb': '51, 86, 111',
-      '--rp-color-accent-primary': '#33566f',
-      '--rp-color-text': '#26333d',
-      '--rp-color-text-component': '#26333d',
-      '--rp-color-disabled': '#98a3ac',
-      // FLT ETA 倒计时（组件 inline 色）。action-* 是保留的旧语义色，
-      // 浅色主题下动作按钮已统一走 Button primary 皮肤（见 CONTROL_CSS）。
-      '--rp-skin-eta': '#1f5f8f',
-      '--rp-skin-eta-sub': '#4a5863',
-      '--rp-skin-action-unload': '#8a6327',
-      '--rp-skin-action-flight': '#2f6b48',
-      '--rp-skin-action-fuel': '#9b4741',
-      // 缺料/危险语义红：BRA「所需材料」不足的数量角标用它（见 R27）。
-      '--rp-skin-danger': '#9c3b3b',
-      // 「临近阈值」琥珀：FLT 舰名 0.80–0.83 耐久告警用它。必须给深琥珀——
-      // 组件里写字面色值（如 #f0ad4e）会被引擎按皮肤色相重映射成淡黄，在暖白底上
-      // 对比只有约 1.9:1，根本看不出变色（见 R45）。
-      // 浅色明亮：冷白底 + 深蓝灰链接（#33566f），告警用橙红拉开冷暖与色相。
-      '--rp-skin-warning': '#c2410c',
-      // CXOS「已成交」专用：与「买入」的墨绿、已挂单的深蓝都拉开色相，
-      // 避免状态文字与买卖方向混成同一种颜色。
-      '--rp-skin-action-done': '#5b4a8a',
-      // CXPO「买入」语义绿按钮（约原生按钮 1/3 色深）：浅底 + 深语义字。
-      '--rp-skin-success': '#2f6b48',
-      '--rp-skin-success-bg': '#e8f2eb',
-      '--rp-skin-success-border': '#8bb69c',
-      // CXPO「卖出」与其它 danger 按钮：浅红底 + 深红字（同为 1/3 色深）。
-      '--rp-skin-danger-bg': '#f7eaea',
-      '--rp-skin-danger-border': '#c98f8f',
-      // SFC 燃料条：R33 把大号 FLT 燃料条填充减半，SFC 里 30×9px 的两个小条
-      // 因此和轨道几乎同色。这里给 SFC 专用全深度色，只作用于 ShipFuel 作用域。
-      '--rp-skin-sfc-fuel-stl': '#33566f',
-      '--rp-skin-sfc-fuel-ftl': '#8a5a1c',
-    },
-    palette: {
-      slate: {
-        text: '#33566f',
-        background: '#e7eef4',
-        gradient: ['#eaf1f6', '#d5e3ec'],
-        border: '#a9becd',
-      },
-      red: {
-        text: '#9c3b3b',
-        background: '#f7eaea',
-        gradient: ['#f8eeee', '#ecc9c9'],
-        border: '#c98f8f',
-      },
-      green: {
-        text: '#2f6b48',
-        background: '#e8f2eb',
-        gradient: ['#edf6f0', '#c8e1d2'],
-        border: '#8bb69c',
-      },
-    },
-    neutralShift: [0, 0, 0],
-    status: {
-      warning: { background: '#f8e9c4', text: '#6b4a00', border: '#d6a12c' },
-      danger: { background: '#f7dedd', text: '#8a3331', border: '#c96965' },
-    },
-    indicator: {
-      active: '#33566f',
-      idle: 'rgba(51, 86, 111, 0.18)',
-      success: '#2f6b48',
-      danger: '#9c3b3b',
-      glow: 'rgba(51, 86, 111, 0.4)',
-      line: '#33566f',
-      lineSoft: 'rgba(51, 86, 111, 0.6)',
-    },
-    // 呼吸灯：低饱和石板蓝主色系三档，与浅色界面一致。
-    pulse: {
-      success: '#33566f',
-      secondary: '#5a7f98',
-      danger: '#9c3b3b',
-    },
-    progress: {
-      // 燃料条主/次色深度减半（R33）：原深石板蓝 / 赭棕 → 浅版，避免 FLT 燃料条
-      // 在自定义浅色主题下过重；warning/success/danger 等语义色保持原对比度。
-      primary: '#99abb7',
-      secondary: '#c5b193',
-      warning: '#9c3b3b',
-      success: '#2f6b48',
-      danger: '#9c3b3b',
-      track: '#e3e9ee',
-      border: '#9fb0bd',
-    },
-  },
-  // 暖米纸：参考图的淡米白页面 + 近白卡片 + 卡其细边框，强调色收敛成赭金，
-  // 只用墨绿 / 暗红作小面积语义点缀；整体饱和度低，是一套偏纸张质感的暖色皮肤。
-  paper: {
-    vars: {
-      '--rp-skin-bg': '#f6f3eb',
-      '--rp-skin-bg-image':
-        'radial-gradient(circle at 92% 0%, #fffdf7 0%, rgba(255, 253, 247, 0) 55%)',
-      '--rp-skin-panel': '#eee9dc',
-      '--rp-skin-panel-strong': '#e2d8c2',
-      '--rp-skin-hover': '#ece4d2',
-      '--rp-skin-border': '#c9bda1',
-      '--rp-skin-border-strong': '#a68a5b',
-      '--rp-skin-ink': '#3d3833',
-      '--rp-skin-muted': '#635a4c',
-      '--rp-skin-disabled': '#a89c85',
-      '--rp-skin-disabled-bg': '#f4efe3',
-      '--rp-skin-disabled-border': '#e3dac7',
-      '--rp-skin-icon-a': '#faf6e9',
-      '--rp-skin-icon-b': '#eae0c8',
-      '--rp-skin-icon-border': '#cdbb99',
-      '--rp-skin-input-bg': '#fffdf7',
-      '--rp-skin-indicator-bg': '#f8f3e7',
-      '--rp-skin-active-bg': '#eee5d0',
-      '--rp-skin-scroll-thumb': '#c9bda1',
-      /* 选中态主色同时被 NX 空间站列、CONTGEN 预览选中页签、全局兜底的
-         --rp-color-accent-primary 当文字色用。原 #9b6b2f 在暖米底上只有
-         4.07:1（SELL 的 RadioItem 用 muted 也仅 4.17:1），调到深一档后
-         全部过 4.5:1。--rp-accent-rgb / --rp-color-accent-primary 保持
-         原值不变：那是 BRN 分类头与卡片底色的色彩来源，不是文字色。 */
-      '--rp-skin-selection': '#7f5522',
-      '--rp-accent-rgb': '155, 107, 47',
-      '--rp-color-accent-primary': '#9b6b2f',
-      '--rp-color-text': '#3d3833',
-      '--rp-color-text-component': '#3d3833',
-      '--rp-color-disabled': '#a89c85',
-      // FLT ETA 倒计时（组件 inline 色）。action-* 是保留的旧语义色，
-      // 浅色主题下动作按钮已统一走 Button primary 皮肤（见 CONTROL_CSS）。
-      '--rp-skin-eta': '#2f6b70',
-      '--rp-skin-eta-sub': '#635a4c',
-      '--rp-skin-action-unload': '#8a5a1c',
-      '--rp-skin-action-flight': '#3f6b70',
-      '--rp-skin-action-fuel': '#9b4741',
-      // 缺料/危险语义红：取自本主题 palette.red.text（见 R27）。
-      '--rp-skin-danger': '#9b4741',
-      // 「临近阈值」琥珀：同 light 皮肤，深琥珀保证米纸底上仍能看出变色（见 R45）。
-      // 暖米纸整屏偏暖棕，橙色会被基色吞掉，改用冷玫红拉开。
-      '--rp-skin-warning': '#a4305c',
-      '--rp-skin-action-done': '#5e4a7a',
-      // CXPO「买入」语义绿按钮（约原生按钮 1/3 色深）：浅底 + 深语义字。
-      '--rp-skin-success': '#4a7048',
-      '--rp-skin-success-bg': '#eaf0e2',
-      '--rp-skin-success-border': '#9fb58a',
-      // CXPO「卖出」与其它 danger 按钮：浅红底 + 深红字（同为 1/3 色深）。
-      '--rp-skin-danger-bg': '#f7e8e2',
-      '--rp-skin-danger-border': '#c99a8c',
-      // SFC 燃料条专用全深度色（见 light 段注释 / CONTROL_CSS）。
-      '--rp-skin-sfc-fuel-stl': '#8a5a1c',
-      '--rp-skin-sfc-fuel-ftl': '#33566f',
-    },
-    palette: {
-      slate: {
-        text: '#8a5a1c',
-        background: '#f2e8d3',
-        gradient: ['#f8f1e0', '#e9dcc0'],
-        border: '#c9ab78',
-      },
-      red: {
-        text: '#9b4741',
-        background: '#f7e8e2',
-        gradient: ['#faefe9', '#eed2c8'],
-        border: '#c99a8c',
-      },
-      green: {
-        text: '#4a7048',
-        background: '#eaf0e2',
-        gradient: ['#f1f5e8', '#d5e3c6'],
-        border: '#9fb58a',
-      },
-    },
-    neutralShift: [3, 0, -7],
-    status: {
-      warning: { background: '#f6e7c2', text: '#6d4a10', border: '#cf9c3c' },
-      danger: { background: '#f4ddd6', text: '#8a3a30', border: '#c47a66' },
-    },
-    indicator: {
-      active: '#8a5a1c',
-      idle: 'rgba(138, 90, 28, 0.18)',
-      success: '#4a7048',
-      danger: '#9b4741',
-      glow: 'rgba(138, 90, 28, 0.4)',
-      line: '#8a5a1c',
-      lineSoft: 'rgba(138, 90, 28, 0.6)',
-    },
-    // 呼吸灯：赭金主色系三档，避免出现与米纸底不搭的绿/蓝。
-    pulse: {
-      success: '#8a5a1c',
-      secondary: '#a9782f',
-      danger: '#9b4741',
-    },
-    progress: {
-      // 燃料条主/次色深度减半（R33）：原深赭金 / 青灰 → 浅版，避免 FLT 燃料条过重。
-      primary: '#c5ad8e',
-      secondary: '#9fb5b8',
-      warning: '#9b4741',
-      success: '#4a7048',
-      danger: '#9b4741',
-      track: '#eae3d2',
-      border: '#c9ab78',
-    },
-  },
-};
-
-// 可识别的自定义主题集合由注册表派生。skin 模式主题必须同时在上面的 SKINS
-// 里提供色板；token 模式主题由 buildCeramicSkin() 从 CSS token 组装。
-const SKIN_IDS = CUSTOM_THEME_ID_SET;
-
-function skinFor(theme: string): Skin | undefined {
-  return usesTokenPalette(theme) ? buildCeramicSkin() : SKINS[theme];
-}
+// 自定义主题（注册表里 mode 非 native 的项）都会注入覆盖表；色板一律由
+// buildCeramicSkin() 从 CSS token 组装，不再有第二份 TS 侧色板。
 
 // 控件规则两套皮肤共用，颜色全部走 --rp-skin-* 变量。
 // 这些规则专门对付「样式表里没有的颜色」：运行时 inline style、浏览器默认控件，
@@ -542,7 +315,7 @@ ${decls}
 }
 html[data-rp-theme='${theme}'] ::selection {
   background: var(--rp-skin-selection);
-  color: #fff;
+  color: var(--rp-skin-on-accent, #fff);
 }
 `;
 }
@@ -990,10 +763,12 @@ function semanticOverride(
           out.set(prop, `0 0 6px 0 ${skin.indicator.glow}`);
         }
       }
-      // 深色选中块若带文字（如 forms__active 的 label），字要反过来用浅色，
-      // 否则会被上面「彩色块统一深字」的规则压成深底深字。
+      // 选中块若带文字（如 forms__active 的 label），字要反色，否则会被上面
+      // 「彩色块统一深字」的规则压成深底深字。反色字取主题的 on-accent 墨：
+      // token 深色主题它是深底字（实色块是霓虹亮色），浅色主题与 skin 主题
+      // 走回退的白色，与原先一致。
       if (active) {
-        out.set('color', '#ffffff');
+        out.set('color', 'var(--rp-skin-on-accent, #ffffff)');
       }
     }
   }
@@ -1013,9 +788,9 @@ function semanticOverride(
   return out.size > 0 ? out : null;
 }
 
-// 主题自己的 token 定义块（refined-prun.css 里的
-// html[data-rp-theme='<id>'] { ... }）存的是皮肤色值本身，
-// 不能被当成「游戏原生颜色」重新映射，否则整张色板会被压成中性灰。
+// 主题自己的 token 定义块（src/features/basic/themes/<id>.css 里的
+// html[data-rp-theme='<id>'] { ... }，构建时合并进 dist/refined-prun.css）
+// 存的是皮肤色值本身，不能被当成「游戏原生颜色」重新映射，否则整张色板会被压成中性灰。
 // 只跳过精确的 token 规则，组件映射规则照常参与扫描。
 const TOKEN_RULE_RE = /^html\[data-rp-theme=[^\]]+\](?:\s+body)?$/;
 
@@ -1132,30 +907,23 @@ function init() {
 
   const apply = () => {
     const theme = userData.settings.theme ?? DEFAULT_THEME_ID;
-    if (!SKIN_IDS.has(theme)) {
+    if (!CUSTOM_THEME_ID_SET.has(theme)) {
       style.textContent = '';
       delete document.documentElement.dataset.rpTheme;
       return;
     }
-    // 先标记 data-theme，新主题的 token 才已生效，skinFor 才能读到色值。
+    // 先标记 data-theme，新主题的 token 才已生效，组装色板时才能读到色值。
     document.documentElement.dataset.rpTheme = theme;
-    const skin = skinFor(theme);
-    if (!skin) {
-      // 注册表声明了主题但色板缺失时安全降级为原样，避免 skin.vars 崩溃。
-      style.textContent = '';
-      delete document.documentElement.dataset.rpTheme;
-      return;
-    }
+    const skin = buildCeramicSkin(theme);
     // 覆盖表在前、主题变量与控件规则在后，保证强调色和控件层级以主题为准。
     // 组件映射骨架最后：同特异性下由它决定按钮/控件/表格的最终外观。
-    const componentCss = usesTokenPalette(theme) ? `\n${buildComponentCss(theme)}` : '';
-    style.textContent = `${buildCss(skin)}\n${tokensFor(theme, skin)}\n${CONTROL_CSS}${componentCss}`;
+    style.textContent = `${buildCss(skin)}\n${tokensFor(theme, skin)}\n${CONTROL_CSS}\n${buildComponentCss(theme)}`;
   };
 
   watchEffect(() => {
     const theme = userData.settings.theme ?? DEFAULT_THEME_ID;
     apply();
-    if (!SKIN_IDS.has(theme)) {
+    if (!CUSTOM_THEME_ID_SET.has(theme)) {
       observer?.disconnect();
       observer = undefined;
       return;
