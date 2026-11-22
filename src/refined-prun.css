@@ -1031,3 +1031,145 @@ html[data-rp-dark][data-rp-theme][data-rp-theme]
 html[data-rp-burn-commands] [data-rp-burn-commands-col] {
   display: table-cell;
 }
+
+/* ── RTE 航线执行：顶部「取消分配 + 航线 / 船只 / 状态 / 行程」压成一行 ────
+   原生把「取消分配」按钮放在单独一行，四个 FormComponent__containerPassive
+   再各竖排一行。这里只在 RTE 磁贴内，把按钮与四字段放进同一个 flex-wrap 行：
+   四字段 flex:1 平分、按钮固定 82px 用 order:1 排到最右；字段内部 flex-row 让
+   「标签 + 值」同行且 nowrap 不折行。「进度」SectionHeader 与路径点容器用
+   order:2 + 100% 强制换行，保持原有纵向结构，不受这一行影响。
+   开关由 basic/rte-header-compact 在 <html> 上加 data-rp-rte-compact 控制，
+   取消勾选该 XIT SET 功能后属性消失，样式随之失效、恢复原生布局。 */
+html[data-rp-rte-compact] .rp-command-RTE [class*='ScrollView__view'] > div:first-child {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  /* 组间距由各字段的 margin-right 提供（见下），不用父级 column-gap，
+     以免「取消分配」按钮前也强制留一个整组间距的大空白。 */
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='FormComponent__containerPassive'] {
+  display: flex !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+  white-space: nowrap !important;
+  /* 右侧 12px 作为组间距；四个字段 flex:1 平分剩余宽度（按钮不自占地盘）。 */
+  margin: 0 12px 0 0 !important;
+  padding: 4px 6px !important;
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='FormComponent__containerPassive'] label {
+  /* 保持未压缩时的原生底色块（min-width:140px、浅蓝底），只盖标签不铺满整行；
+     仅强制 nowrap 让标题与值同行。勿固定窄宽度，否则底色块会缩短、显得不协调。 */
+  white-space: nowrap !important;
+  /* 标题底色块与值之间收紧到 3px，比原生 6px 更紧凑。 */
+  margin-right: 3px !important;
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='FormComponent__containerPassive'] [class*='FormComponent__input'] {
+  /* 值区吸收剩余宽度，四个字段的输入框等宽，整行才协调。 */
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  white-space: nowrap !important;
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='ActionBar__container'] {
+  order: 1 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  /* 按钮不参与整行平分：只占自身宽度 + 极小余量，前面不再空出一整格。
+     高度/padding 与字段一致，保证按钮与浅蓝输入框顶部齐平。 */
+  flex: 0 0 auto !important;
+  height: 26px !important;
+  padding: 4px 6px !important;
+  box-sizing: border-box !important;
+  margin: 0 0 0 2px !important;
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='ActionBar__container'] > div {
+  display: flex !important;
+  align-items: center !important;
+  height: 100% !important;
+}
+html[data-rp-rte-compact] .rp-command-RTE [class*='SectionHeader__container'],
+html[data-rp-rte-compact] .rp-command-RTE [class*='Waypoints__container'] {
+  order: 2 !important;
+  flex: 1 1 100% !important;
+}
+
+/* ============================================================
+   RT 航线界面：船只分配移到航线上方 + 船表多栏（默认 3 栏，各带表头）
+   + 起点待命船只筛选开关 + 不可分配船只按钮置灰
+   （rt-ship-assign.ts 给相关区块打标记；此处只做布局与显隐）
+   ============================================================ */
+/* 内容容器改为纵向 flex，用 order 把「船只分配」整块移到「航线」整块之前。
+   其余子元素（header/设置/循环/路径点/指令）保持默认 order:0，仍在最上面。 */
+.rp-command-RT[data-rp-rt-ship] .rp-rt-content {
+  display: flex !important;
+  flex-direction: column !important;
+}
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-header { order: 6 !important; }
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table  { order: 7 !important; }
+.rp-command-RT[data-rp-rt-ship] .rp-rt-route-header { order: 8 !important; }
+.rp-command-RT[data-rp-rt-ship] .rp-rt-waypoints   { order: 9 !important; }
+
+/* 船表：隐藏原表头，tbody 变多栏网格（列优先，栏数/每栏行数由 JS 设变量），
+   每行内部仍是名称/航线/指令三列。 */
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table table { display: block !important; }
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table thead { display: none !important; }
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody {
+  display: grid !important;
+  grid-template-columns: repeat(var(--rp-rt-cols, 3), 1fr) !important;
+  grid-auto-flow: column !important;
+  grid-template-rows: repeat(var(--rp-rt-rows, 9), auto) !important;
+  gap: 1px 10px !important;
+}
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody tr {
+  display: grid !important;
+  /* 名称列给足宽度避免船名折行；指令列内容很窄（单个按钮），不需要太宽。 */
+  grid-template-columns: 1.7fr 1fr 1.1fr !important;
+  align-items: center !important;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15) !important;
+  /* 原生 tr 带极淡的灰底，在网格布局下会盖出一个矩形色块（右侧露出表格底色），
+     去掉后整行与表格底一致，空单元格真正看不见。 */
+  background: transparent !important;
+}
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody td,
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody tr.rp-rt-colhead th {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody td {
+  padding: 3px 4px !important;
+  /* 原生 td 带 border-left 作列分隔、还带米色底。改为网格后，空单元格只有几像素高，
+     这些边框/底色会缩成一小截突兀的短线或色块，故全部清掉，行分隔只由 tr 的底边负责。 */
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+
+/* 每栏的表头行（rt-ship-assign.ts 克隆原 thead 插入）：沿用原表头的米色底/粗体/分隔线。 */
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody tr.rp-rt-colhead {
+  border-bottom: 1px solid rgb(228, 220, 203) !important;
+  margin-bottom: 1px !important;
+}
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody tr.rp-rt-colhead th {
+  padding: 3px 4px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: rgb(38, 43, 40) !important;
+  text-align: left !important;
+  background: rgb(239, 233, 221) !important;
+  border-bottom: none !important;
+}
+
+/* 无法分配的行：指令列显示禁用态的灰色「分配」按钮，不留空白。 */
+.rp-command-RT[data-rp-rt-ship] .rp-rt-ship-table tbody td button.rp-rt-disabled-btn {
+  opacity: 0.45 !important;
+  filter: grayscale(1) !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+}
+
+/* 开关勾选后，只留「空闲且停靠在路径点1」的起点待命船只。 */
+.rp-command-RT[data-rp-rt-ship].rp-rt-match-only .rp-rt-other { display: none !important; }

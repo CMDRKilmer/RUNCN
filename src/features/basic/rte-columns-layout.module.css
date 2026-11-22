@@ -6,8 +6,10 @@
 }
 
 .column {
-  flex: 0 0 200px;
-  width: 200px;
+  /* 200px → 160px：配合 rte-material-abbrev 把明细物料缩成代码后文本变短，
+     每栏可以进一步收窄，一屏能显示更多路径点。 */
+  flex: 0 0 160px;
+  width: 160px;
   border-right: 1px solid var(--rp-skin-border-strong, currentColor);
   /* 原生每个路径点带一条底边线（纵向布局的分隔线），多栏下会变成封口横线。 */
   border-bottom: none;
