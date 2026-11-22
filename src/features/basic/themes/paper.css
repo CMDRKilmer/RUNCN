@@ -34,6 +34,9 @@ html[data-rp-theme='paper'] {
   --rp-cc-text-muted: #6d6656;
   --rp-cc-text-inverse: #fffdf7;
   --rp-cc-text-link: #7f5522;
+  /* 「已指定」徽章：每个主题独立配色，底色取本主题主色的加深/霓虹版，文字取与其对比 ≥6.9:1 的一侧（避免用通用 selection 色在深色主题下变半透明）。 */
+  --rp-cc-chosen-bg: #6b4718;
+  --rp-cc-chosen-fg: #fdf8ec;
   --rp-cc-text-disabled: #8d8371;
   /* 「临近阈值」告警字色（R45）：整屏偏暖棕，橙色会被基色吞掉，改用冷玫红拉开。 */
   --rp-cc-warn-accent: #a4305c;

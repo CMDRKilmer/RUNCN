@@ -41,6 +41,9 @@ html[data-rp-theme='htb'] {
   --rp-cc-text-inverse: #0b121f;
   /* 链接用冷蓝而不是酸绿：主强调色已经占满选中态/按钮，再当链接色会让整屏发酸。 */
   --rp-cc-text-link: #7fb2ff;
+  /* 「已指定」徽章：每个主题独立配色，底色取本主题主色的加深/霓虹版，文字取与其对比 ≥6.9:1 的一侧（避免用通用 selection 色在深色主题下变半透明）。 */
+  --rp-cc-chosen-bg: #9fef00;
+  --rp-cc-chosen-fg: #0b121f;
   --rp-cc-text-disabled: #5a6b85;
   /* 阈值告警走橙，与酸绿主强调、cat-4 amber 分类色都拉开色相，同屏不撞。 */
   --rp-cc-warn-accent: #ff8a3c;
