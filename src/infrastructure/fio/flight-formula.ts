@@ -118,9 +118,17 @@ export class FlightInputError extends Error {
   }
 }
 
+export class FlightFuelError extends FlightInputError {}
+
 function requireInput(ok: boolean, message: string): asserts ok {
   if (!ok) {
     throw new FlightInputError(message);
+  }
+}
+
+function requireFuel(ok: boolean, message: string) {
+  if (!ok) {
+    throw new FlightFuelError(message);
   }
 }
 
@@ -282,7 +290,7 @@ export function predictFormulaFlight(
   const up = takesOff ? surface(true) : { seconds: 0, fuel: 0 };
   const down = lands ? surface(false) : { seconds: 0, fuel: 0 };
   const surfaceFuel = up.fuel + down.fuel;
-  requireInput(q.stlFuel >= surfaceFuel, `STL 余油不足以覆盖起降耗油（${surfaceFuel} u）`);
+  requireFuel(q.stlFuel >= surfaceFuel, `STL 余油不足以覆盖起降耗油（${surfaceFuel} u）`);
   const route = selectFormulaRoute(q, bp, input);
   const hasNatural = route.some(x => x.gate === undefined);
   let mixedNeedsBlindTest = false;
@@ -319,7 +327,7 @@ export function predictFormulaFlight(
     return stlMinimumTransferFuel(speed, a, flow);
   };
   const fromPoint = (from: Vector, to: FlightEndpoint, at: number, fuel: number) => {
-    requireInput(fuel > 0, 'STL 余油不足以分配转移段');
+    requireFuel(fuel > 0, 'STL 余油不足以分配转移段');
     return resolveStlTransferTime(
       seconds => ellipseBetween(from, position(to, at + seconds * 1000)).length,
       at,
@@ -498,7 +506,7 @@ export function predictFormulaFlight(
         offset(point, vectors[0], 1, first && kind(q.origin) === 'STA'),
       ).length;
       const burn = Math.min(departureFuel, stlSaturationFuel(distance, a, flow));
-      requireInput(burn > 0 && approachFuel > 0, 'STL 余油不足以分配离港与进近段');
+      requireFuel(burn > 0 && approachFuel > 0, 'STL 余油不足以分配离港与进近段');
       const speed =
         naturalJumpSpeed(p.ftlMaxSpeed, p.minReactorUsage, q.reactorUsageFactor) *
         flightConditionMultiplier(q.condition);

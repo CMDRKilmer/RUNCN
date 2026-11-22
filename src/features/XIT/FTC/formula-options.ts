@@ -1,5 +1,6 @@
-import { findBalanceOption } from '@src/core/flight/fuel-options';
+import { findBalanceOption, pickBestValueOption } from '@src/core/flight/fuel-options';
 import {
+  FlightFuelError,
   FlightInputError,
   predictFormulaFlight,
   selectFormulaRoute,
@@ -23,6 +24,8 @@ export interface FormulaOption extends FormulaFlight {
   totalCost?: number;
 }
 
+export type FormulaSelection = 'balance' | 'value';
+
 export function calculateFormulaOptions(
   request: FlightRequest,
   blueprint: FlightBlueprint,
@@ -30,6 +33,7 @@ export function calculateFormulaOptions(
   timeMs: number,
   prices: FormulaPrices,
   optimize: boolean,
+  selection: FormulaSelection = 'balance',
 ) {
   if (
     [prices.stl, prices.ftl, prices.time].some(
@@ -43,21 +47,35 @@ export function calculateFormulaOptions(
   const fuelGrid = optimize
     ? Array.from({ length: 20 }, (_, i) => (i + 1) / 20)
     : [request.fuelUsageFactor];
-  const min = blueprint.performance.minReactorUsage;
+  const minimum = blueprint.performance.minReactorUsage;
+  // RT can only store integer percentages. Search the settings the server will actually receive.
+  const percent = Math.max(1, Math.round(minimum * 100));
+  const min =
+    selection === 'value' ? (percent / 100 < minimum ? percent + 1 : percent) / 100 : minimum;
   const reactors = !natural
     ? [request.reactorUsageFactor]
     : optimize
       ? [...new Set([min, ...fuelGrid.filter(x => x > min)])]
       : [request.reactorUsageFactor];
   const options: FormulaOption[] = [];
+  let fuelError: FlightFuelError | undefined;
   for (const fuel of fuelGrid) {
     for (const reactor of reactors) {
-      const flight = predictFormulaFlight(
-        { ...request, fuelUsageFactor: fuel, reactorUsageFactor: reactor },
-        blueprint,
-        input,
-        timeMs,
-      );
+      let flight: FormulaFlight;
+      try {
+        flight = predictFormulaFlight(
+          { ...request, fuelUsageFactor: fuel, reactorUsageFactor: reactor },
+          blueprint,
+          input,
+          timeMs,
+        );
+      } catch (error) {
+        if (selection !== 'value' || !(error instanceof FlightFuelError)) {
+          throw error;
+        }
+        fuelError ??= error;
+        continue;
+      }
       const totalHours = flight.seconds / 3600;
       const priced =
         (flight.stlFuel === 0 || prices.stl !== undefined) &&
@@ -78,13 +96,24 @@ export function calculateFormulaOptions(
   const feasible = options.filter(x => x.feasible);
   const candidates = feasible.length > 0 ? feasible : options;
   const costBased = prices.time > 0 && candidates.every(x => x.totalCost !== undefined);
-  const best = costBased
-    ? candidates.reduce((a, b) => (b.totalCost! < a.totalCost! ? b : a))
-    : findBalanceOption(candidates);
+  const bestValue = selection === 'value' ? pickBestValueOption(feasible) : undefined;
+  const best =
+    bestValue ??
+    (costBased
+      ? candidates.reduce((a, b) => (b.totalCost! < a.totalCost! ? b : a))
+      : findBalanceOption(candidates));
   if (best === undefined) {
-    throw new FlightInputError('当前输入没有可计算方案');
+    throw fuelError ?? new FlightInputError('当前输入没有可计算方案');
   }
-  return { best, options, costBased, feasibleCount: feasible.length, timeMs, request, prices };
+  return {
+    best,
+    options,
+    costBased: bestValue === undefined && costBased,
+    feasibleCount: feasible.length,
+    timeMs,
+    request,
+    prices,
+  };
 }
 
 export type FormulaOptions = ReturnType<typeof calculateFormulaOptions>;

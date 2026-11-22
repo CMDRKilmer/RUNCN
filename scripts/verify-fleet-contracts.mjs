@@ -474,8 +474,8 @@ await check('snapshot projection schedules recurring copies after the batch ends
     burn: { RAT: { input: 0, output: 1, workforce: 0, inventory: 0, daysLeft: Infinity } },
   };
   // 两槽位：非循环订单到 1,010,000 结束；循环订单到 1,020,000 结束。
-  // 到港时刻 = 1,030,000（now + 30 s）。循环副本只能从 1,020,000 开始，
-  // 若提前占用 1,010,000 释放的槽位，到港产量会从 30 高估成 40。
+  // 循环副本只能从 1,020,000 开始。若提前占用 1,010,000 释放的槽位，
+  // 会在 1,130,000 结算，早于实际的 1,140,000。
   fixture.production.A = [
     {
       capacity: 2,
@@ -505,11 +505,9 @@ await check('snapshot projection schedules recurring copies after the batch ends
     originNaturalId: 'CX',
     capacity,
     bases: bs,
-    // 30 s 后到港。
-    arrivalHoursByNaturalId: new Map([['A', 30_000 / 3_600_000]]),
+    arrivalHoursByNaturalId: new Map([['A', 135_000 / 3_600_000]]),
   });
-  // 当前批次：120 × 20 s / 120 s = 20；下一份：120 × 10 s / 120 s = 10。
-  assert.ok(Math.abs(snapshot.bases[0].projectedStock.RAT - 30) < 1e-9);
+  assert.equal(snapshot.bases[0].projectedStock.RAT, 120);
 });
 
 await check(
@@ -2362,10 +2360,11 @@ const fakeEstimate =
   };
 
 await check('loop iteration converges and overrides cycle days', async () => {
-  const r = await computeLoopPlan(
-    loopInput(bases()),
-    fakeEstimate(() => 48),
-  );
+  const r = await computeLoopPlan(loopInput(bases()), input => {
+    assert.equal(input.nativeRoute, true);
+    assert.equal(input.refuelAtOrigin, true);
+    return fakeEstimate(() => 48)(input);
+  });
   assert.equal(r.ok, true);
   assert.equal(r.converged, true);
   assert.equal(r.iterations, 2);

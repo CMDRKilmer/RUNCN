@@ -33,7 +33,7 @@ import { userData } from '@src/store/user-data';
 import { showTileOverlay, showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import ChainSyncDialog from '@src/features/XIT/FLEET/ChainSyncDialog.vue';
-import { buildNativeWaypoints } from './native-route-plan';
+import { buildNativeWaypoints, DEFAULT_WAYPOINT_FUEL_PERCENT } from './native-route-plan';
 import {
   nativeRouteRecords,
   recordNativeRoute,
@@ -277,8 +277,17 @@ const executeTooltip = computed(() => {
 
 const executeNotice = ref<string | undefined>(undefined);
 
+const nativeRouteCandidate = computed(() => {
+  if (chainLoopMode.value) {
+    const ship = loopShip.value;
+    const plan = loopPlan.value?.plan;
+    return loopActive.value && !loopComputing.value && ship && plan ? { ship, plan } : undefined;
+  }
+  return shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
+});
+
 function openNativeRoutePlan() {
-  const candidate = shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
+  const candidate = nativeRouteCandidate.value;
   if (
     candidate === undefined ||
     activeRuns.value.some(run => run.shipId === candidate.ship.ship.id)
@@ -287,14 +296,26 @@ function openNativeRoutePlan() {
     return;
   }
   try {
-    const loop = loopActive.value;
-    const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
-    const waypoints = buildNativeWaypoints(plan);
-    // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
-    const loopFuel = fuelPerRound(
-      loopPlan.value?.estimate?.legs ?? [],
-      chainShipFuelCaps(candidate.ship.ship),
-    );
+    const loop = chainLoopMode.value;
+    const waypoints = buildNativeWaypoints(candidate.plan);
+    let loopSnapshot;
+    if (loop) {
+      const estimate = loopPlan.value?.estimate;
+      if (estimate === undefined || estimate.legs.length !== waypoints.length - 1) {
+        throw new Error('循环估时与航点不匹配。');
+      }
+      const legs = estimate.legs.map(leg => {
+        if (leg.settings === undefined) {
+          throw new Error(`${leg.from} → ${leg.to} 缺少循环飞行档位。`);
+        }
+        return leg.settings;
+      });
+      loopSnapshot = {
+        cycleHours: estimate.totalHours,
+        fuel: fuelPerRound(estimate.legs, chainShipFuelCaps(candidate.ship.ship)),
+        legs: [{ fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT }, ...legs],
+      };
+    }
     executeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {
@@ -303,7 +324,7 @@ function openNativeRoutePlan() {
       waypoints,
       chainName: chainGroup.value ?? '',
       autoStart: true,
-      ...(loop ? { loop: true, cycleHours: loopPlan.value?.cycleHours, loopFuel } : {}),
+      loop: loopSnapshot,
     };
     void showBuffer('XIT RTWIZ');
   } catch (err) {
@@ -1341,9 +1362,8 @@ function flightTotalText(shipId: string): string {
         dark
         :disabled="
           selectedShips.length !== 1 ||
-          shipPlans.length !== 1 ||
-          loading ||
-          (chainLoopMode && !loopActive)
+          nativeRouteCandidate === undefined ||
+          (!chainLoopMode && loading)
         "
         @click="openNativeRoutePlan">
         生成原生 RT

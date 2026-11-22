@@ -7,7 +7,7 @@
 //
 // ⚠️ 明确的局限性（避免误读测试结论）：
 //   - planFormulaFlight 替身由用例脚本控制：默认恒失败（inputIncomplete），覆盖的是
-//     「stlFuel 初始化 / 档位取整改重算 / 油量不足警告」这段编排逻辑；
+//     「stlFuel 初始化 / 写入整数档位 / 油量不足停止」这段编排逻辑；
 //     **不**覆盖公式模型本身（由 verify-ftc-formula.mjs / verify-real-flight.mjs 负责）。
 //   - measureNativeRouteFuel 替身恒返回空结果，只记录收到的出发油量参数。
 //   - 生产代码**没有**为可测性做任何改动（无注入口、无测试开关）。
@@ -45,6 +45,7 @@ export const planFormulaFlight = async input => {
     ftlFuel: input.ftlFuel,
     fuel: input.fuel,
     reactor: input.reactor,
+    selection: input.selection,
   });
   if (optionFixture === null) {
     return {
@@ -54,10 +55,13 @@ export const planFormulaFlight = async input => {
       reactorRelevant: false,
     };
   }
+  const shortage = optionFixture.best.ftlFuel - (input.ftlFuel ?? Infinity);
+  const feasible = shortage <= 0;
   return {
-    ok: true,
-    message: '',
-    best: optionFixture.best,
+    ok: feasible,
+    message: feasible ? '' : `FTL 缺 ${shortage} u`,
+    insufficientFuel: !feasible,
+    best: { ...optionFixture.best, feasible, reactorRelevant: optionFixture.reactorRelevant },
     reactorRelevant: optionFixture.reactorRelevant,
   };
 };
