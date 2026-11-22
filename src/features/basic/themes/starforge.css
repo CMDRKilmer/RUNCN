@@ -1,0 +1,216 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ── 星铸工业（starforge）：token 模式，群星工业纪元深空控制台 ─────────
+   色值全部取自原型实机采样：画布 #0b121b、面板 #1a2936 / #253a48、
+   顶栏 #101923、细线 #23313e、正文 #d7e1e8、次级 #8498a9；橙金 #f4ac69
+   是唯一主强调色（标题 / 主按钮 / 选中 / 焦点环 / 分类 4），其余
+   青绿 / 蓝 / 紫 / 黄绿 / 橙红 / 玫红只用于分类与状态色块，同类同色。
+   8 个色相带按 hue 顺序排列（cyan→teal→olive→amber→plum→violet→blue→rose），
+   与 buildCeramicSkin() 的 bandKeyOf 映射一致；颜色字面量只在此精确块内，
+   变量名与 ceramic / nebula 完全一致，由 buildComponentCss('starforge') 复用。 */
+html[data-rp-theme='starforge'] {
+  color-scheme: dark;
+
+  /* 背景 */
+  --rp-cc-canvas: #0b121b;
+  --rp-cc-surface: #1a2936;
+  --rp-cc-surface-alt: #253a48;
+  --rp-cc-overlay: rgba(5, 10, 16, 0.72);
+  --rp-cc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --rp-cc-shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+  /* 文字：正文冷白、次级冷蓝灰、辅助色在 #253a48 上仍 ≥4.5:1 */
+  --rp-cc-text-primary: #b7bfc5;
+  --rp-cc-text-secondary: #8fa2b1;
+  --rp-cc-text-muted: #8fa5b5;
+  --rp-cc-text-inverse: #0b121b;
+  --rp-cc-text-link: #7aabbd;
+  --rp-cc-text-disabled: #7a8d9d;
+  /* 阈值告警与浅蓝链接拉开冷暖，不与橙金主强调色撞色。 */
+  --rp-cc-warn-accent: #ff8a4c;
+
+  /* 呼吸灯三档：青绿 / 橙金 / 橙红，跟随本主题主色调。 */
+  --rp-cc-pulse-success: #79d7c6;
+  --rp-cc-pulse-secondary: #f4ac69;
+  --rp-cc-pulse-danger: #e0795b;
+
+  /* 边框 / 焦点：1px 冷蓝细线，焦点环用橙金 */
+  --rp-cc-border-subtle: #23313e;
+  --rp-cc-border-default: #385062;
+  --rp-cc-border-strong: #3d5263;
+  --rp-cc-border-focus: #f4ac69;
+  --rp-cc-ring: #f4ac69;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 1px;
+  --rp-cc-ring-halo: rgba(244, 172, 105, 0.28);
+
+  /* 按钮：主按钮橙金实心深字，其余深底细线；跨页面同色 */
+  --rp-cc-btn-primary-bg: #cf9259;
+  --rp-cc-btn-primary-text: #241a10;
+  --rp-cc-btn-primary-border: #d9904d;
+  --rp-cc-btn-primary-hover: #ffbd7d;
+  --rp-cc-btn-primary-active: #d9904d;
+  --rp-cc-btn-secondary-bg: #1a2936;
+  --rp-cc-btn-secondary-text: #b7bfc5;
+  --rp-cc-btn-secondary-border: #3d5263;
+  --rp-cc-btn-secondary-hover: #253a48;
+  --rp-cc-btn-secondary-active: #141f2b;
+  --rp-cc-btn-danger-bg: #a34c32;
+  --rp-cc-btn-danger-text: #fffaf5;
+  --rp-cc-btn-danger-border: #dd9561;
+  --rp-cc-btn-danger-hover: #8f3f28;
+  --rp-cc-btn-danger-active: #7a3521;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #cf9259;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: rgba(244, 172, 105, 0.12);
+  --rp-cc-btn-ghost-active: rgba(244, 172, 105, 0.2);
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #7aabbd;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: rgba(143, 201, 222, 0.12);
+  --rp-cc-btn-link-active: rgba(143, 201, 222, 0.2);
+  --rp-cc-btn-disabled-bg: #131e29;
+  --rp-cc-btn-disabled-text: #7a8d9d;
+  --rp-cc-btn-disabled-border: #23313e;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #101923;
+  --rp-cc-control-alt-bg: #1a2936;
+  --rp-cc-control-text: #b7bfc5;
+  --rp-cc-control-placeholder: #8fa5b5;
+  --rp-cc-control-border: #314452;
+  --rp-cc-control-border-strong: #3d5263;
+  --rp-cc-control-focus: #f4ac69;
+  --rp-cc-control-checked: #f4ac69;
+  --rp-cc-control-track: #1a2936;
+  --rp-cc-control-thumb: #f4ac69;
+  --rp-cc-control-disabled-bg: #0d1823;
+  --rp-cc-control-disabled-text: #7a8d9d;
+  --rp-cc-tooltip-bg: #0d1823;
+  --rp-cc-tooltip-text: #b7bfc5;
+  --rp-cc-tooltip-border: #3d5263;
+
+  /* 表格：米金表头文字、深底行、橙金选中淡底 */
+  --rp-cc-table-head-bg: #16242f;
+  --rp-cc-table-head-text: #a89f8b;
+  --rp-cc-table-row: #0b121b;
+  --rp-cc-table-row-alt: #101923;
+  --rp-cc-table-row-hover: #1a2936;
+  --rp-cc-table-row-selected: rgba(244, 172, 105, 0.2);
+  --rp-cc-table-border: #23313e;
+  --rp-cc-table-text: #b7bfc5;
+
+  /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: rgba(121, 215, 198, 0.13);
+  --rp-cc-status-success-text: #a3e6da;
+  --rp-cc-status-success-border: #3f7a6e;
+  --rp-cc-status-warning-bg: rgba(244, 172, 105, 0.13);
+  --rp-cc-status-warning-text: #f7c48d;
+  --rp-cc-status-warning-border: #8a6238;
+  --rp-cc-status-danger-bg: rgba(224, 121, 91, 0.14);
+  --rp-cc-status-danger-text: #f0a48e;
+  --rp-cc-status-danger-border: #8f5c4c;
+  --rp-cc-status-info-bg: rgba(144, 184, 222, 0.13);
+  --rp-cc-status-info-text: #b6d4ef;
+  --rp-cc-status-info-border: #4d6f8c;
+
+  /* 分类 1..8：按 hue 顺序，同类同色；暗彩底 + 亮彩字 + 彩描边 + 实色图形 */
+  --rp-cc-cat-1-bg: rgba(168, 208, 208, 0.16);
+  --rp-cc-cat-1-text: #bfe4e4;
+  --rp-cc-cat-1-border: #a8d0d0;
+  --rp-cc-cat-1-chart: #a8d0d0;
+  --rp-cc-cat-2-bg: rgba(121, 215, 198, 0.16);
+  --rp-cc-cat-2-text: #a3e6da;
+  --rp-cc-cat-2-border: #79d7c6;
+  --rp-cc-cat-2-chart: #79d7c6;
+  /* 进度条主/次填充：由橙金 / 青绿减半深度得到，与图表实色分离。 */
+  --rp-cc-progress-primary: #a87447;
+  --rp-cc-progress-secondary: #4f9a8a;
+  --rp-cc-cat-3-bg: rgba(180, 192, 120, 0.16);
+  --rp-cc-cat-3-text: #d6dda3;
+  --rp-cc-cat-3-border: #b4c078;
+  --rp-cc-cat-3-chart: #b4c078;
+  --rp-cc-cat-4-bg: rgba(244, 172, 105, 0.16);
+  --rp-cc-cat-4-text: #f7c48d;
+  --rp-cc-cat-4-border: #f4ac69;
+  --rp-cc-cat-4-chart: #f4ac69;
+  --rp-cc-cat-5-bg: rgba(206, 150, 132, 0.16);
+  --rp-cc-cat-5-text: #eeb6a5;
+  --rp-cc-cat-5-border: #ce9684;
+  --rp-cc-cat-5-chart: #ce9684;
+  --rp-cc-cat-6-bg: rgba(186, 161, 237, 0.16);
+  --rp-cc-cat-6-text: #d3c0f5;
+  --rp-cc-cat-6-border: #baa1ed;
+  --rp-cc-cat-6-chart: #baa1ed;
+  --rp-cc-cat-7-bg: rgba(144, 184, 222, 0.16);
+  --rp-cc-cat-7-text: #b6d4ef;
+  --rp-cc-cat-7-border: #90b8de;
+  --rp-cc-cat-7-chart: #90b8de;
+  --rp-cc-cat-8-bg: rgba(217, 143, 168, 0.16);
+  --rp-cc-cat-8-text: #eab7c8;
+  --rp-cc-cat-8-border: #d98fa8;
+  --rp-cc-cat-8-chart: #d98fa8;
+  --rp-cc-chart-grid: #23313e;
+  --rp-cc-chart-axis: #7b8e9f;
+  --rp-cc-chart-label: #a8bed0;
+  --rp-cc-accent-line: #f4ac69;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='starforge'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}
+
+/* ── 星铸工业格式层：卡片 6px 圆角 + 1px 内描边、标题 600 字重、等宽数字 ──
+   原型以 13px 正文 / 11px 辅助 / 600 标题、6px 圆角、1px 冷蓝细线、等宽数据
+   构成统一的工业控制台观感。这里只改不占盒模型的属性（圆角 / 内描边 / 字重 /
+   字距 / 数字变体），禁止改 border / padding / 字号（R09、R14）；颜色一律
+   var(--rp-cc-*)，不在组件规则里写色值。三重前缀把特异性抬到 (0,3,x)，
+   压过游戏与引擎的同级规则，且只作用于本主题（R06、R21）。 */
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme]
+  :is(
+    [class*='SectionHeader__container'],
+    [class*='GridItemView__container'],
+    [class*='ContextControls__container'],
+    [class*='MenuHeadItem__menu'],
+    [class*='AlertListItem__container']
+  ) {
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--rp-cc-border-subtle);
+}
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme]
+  :is([class*='Button__btn'], [class*='StaticInput__static'], [class*='Select__select']) {
+  border-radius: 5px;
+}
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme]
+  :is(
+    [class*='SectionHeader__container'],
+    [class*='TileFrame__header'],
+    [class*='HeadItem__label'],
+    [class*='Frame__title']
+  ) {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+/* 分组头的橙金左色条：对应原型「标题图标 + 色块」的视觉层级。 */
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme] [class*='SectionHeader__container'] {
+  box-shadow:
+    inset 2px 0 0 var(--rp-cc-accent-line),
+    inset 0 0 0 1px var(--rp-cc-border-subtle);
+}
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme]
+  :is(td, th, [class*='ColoredValue'], [class*='numCell'], [class*='Table__number']) {
+  font-variant-numeric: tabular-nums;
+}
+/* 选中态表单 label 会套用橙金主按钮底色，但游戏把 label 文字写死成白色，
+   白字压亮橙只有 1.9:1。文字必须与主按钮同口径走反色 token；后代 ⓘ 图标
+   用 color:inherit 跟随，无需单独覆盖。 */
+html[data-rp-theme='starforge'][data-rp-theme][data-rp-theme]
+  :is([class*='FormComponent__containerActive'], [class*='forms__active'])
+  label {
+  color: var(--rp-cc-text-inverse) !important;
+}

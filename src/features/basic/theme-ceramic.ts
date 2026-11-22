@@ -1,7 +1,8 @@
 // 陶瓷白多彩主题（ceramic-colorful）—— 主题引擎侧。
 //
-// 这里不保存任何颜色字面量：皮肤的全部颜色在运行时从 refined-prun.css 的
-// --rp-cc-* token 读取（getComputedStyle），因此色板只有一处定义。
+// 这里不保存任何颜色字面量：皮肤的全部颜色在运行时从主题文件
+// src/features/basic/themes/<id>.css 的 --rp-cc-* token 读取（getComputedStyle），
+// 构建时这些文件与 refined-prun.css 合并为同一个样式表，首屏时序不变。
 // 本文件负责两件事：
 //   1) buildCeramicSkin()：把 token 组装成 theme.ts 需要的 Skin，使样式表扫描
 //      重映射能按 8 个色相带输出「多彩但同类同色」的颜色；
@@ -13,7 +14,7 @@
 //      <head> 里的 #rprun-theme，同特异性时会反过来压掉本主题的窗口描边；
 //      CONTROL_CSS 的 primary 按钮规则也带两个属性选择器。加这一级即可压过。
 import type { Skin } from './theme';
-import { CERAMIC_THEME_ID } from './theme-registry';
+import { CERAMIC_THEME_ID, isDarkTheme } from './theme-registry';
 
 export { CERAMIC_THEME_ID };
 
@@ -27,17 +28,6 @@ function hexToTriple(hex: string): string {
     return '51, 86, 111';
   }
   return [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16)).join(', ');
-}
-
-// 画布是否足够暗，用来判定「深色主题」——决定中性色文字的映射方向（见 theme.ts）。
-function isDarkColor(hex: string): boolean {
-  const m = hex.match(/^#([\da-f]{6})$/i);
-  if (!m) {
-    return false;
-  }
-  const [r, g, b] = [0, 2, 4].map(i => parseInt(m[1].slice(i, i + 2), 16));
-  // 相对亮度近似；< 90 视为深色主题（ceramic 的暖白画布远高于此）。
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 90;
 }
 
 function band(index: number) {
@@ -66,17 +56,26 @@ export function ceramicHueBands() {
   };
 }
 
-export function buildCeramicSkin(): Skin {
+export function buildCeramicSkin(themeId: string): Skin {
   const accent = token('--rp-cc-accent-line');
-  const canvas = token('--rp-cc-canvas');
-  const isDark = isDarkColor(canvas);
+  // 深色主题判定：注册表的 dark 标记是唯一事实源，与 CSS 的 html[data-rp-dark]
+  // 同源；它决定中性色文字的映射方向与中性灰偏移。
+  const isDark = isDarkTheme(themeId);
+  // 可选 token：不声明就走括号里的默认值，5 个既有主题的产物逐字节不变。
+  // bg-image 用于「画布上一层很淡的方向性提亮」（暖米纸的右上角高光）。
+  const bgImage = token('--rp-cc-bg-image') || 'none';
+  // 中性灰偏移：缺省时浅色主题暖调 [2,1,-4]（暖纸）、深色主题冷蓝 [-4, 0, 10]，
+  // 否则所有中性底/边框会被偏成棕色或与冷底不搭。冷调主题（浅色明亮）显式写 0 0 0。
+  const shift = token('--rp-cc-neutral-shift');
+  // 指示点光晕 / 柔线的强度：同样是可选 token，缺省即强调色实色。
+  const glowColor = token('--rp-cc-indicator-glow') || accent;
+  const lineSoftColor = token('--rp-cc-indicator-line-soft') || accent;
   return {
-    // 深色主题判定（画布亮度），决定中性色映射方向；浅色主题为 false，行为不变。
     darkText: isDark,
     // 别名指回语义 token：现有组件和 CONTROL_CSS 里的 --rp-skin-* 无需改动。
     vars: {
       '--rp-skin-bg': 'var(--rp-cc-canvas)',
-      '--rp-skin-bg-image': 'none',
+      '--rp-skin-bg-image': bgImage,
       '--rp-skin-panel': 'var(--rp-cc-surface-alt)',
       '--rp-skin-panel-strong': 'var(--rp-cc-surface-alt)',
       '--rp-skin-hover': 'var(--rp-cc-table-row-hover)',
@@ -95,6 +94,9 @@ export function buildCeramicSkin(): Skin {
       '--rp-skin-active-bg': 'var(--rp-cc-table-row-selected)',
       '--rp-skin-scroll-thumb': 'var(--rp-cc-border-default)',
       '--rp-skin-selection': 'var(--rp-cc-text-link)',
+      // 实色强调块（划词选区、选中态）上的反色字：深色主题的实色块是霓虹亮色，
+      // 白字只有 1.7–3.2:1，必须换成深底字；浅色主题沿用引擎回退的白色，外观不变。
+      ...(isDark ? { '--rp-skin-on-accent': 'var(--rp-cc-text-inverse)' } : {}),
       '--rp-skin-eta': 'var(--rp-cc-text-link)',
       '--rp-skin-eta-sub': 'var(--rp-cc-text-muted)',
       '--rp-skin-action-unload': 'var(--rp-cc-cat-4-text)',
@@ -129,10 +131,12 @@ export function buildCeramicSkin(): Skin {
       green: band(2),
     },
     hueBands: ceramicHueBands(),
-    // 中性灰偏移：浅色主题暖调 [2,1,-4]（暖纸）；深色主题改冷蓝 [-4,0,10]，
-    // 否则所有中性底/边框都会被偏成棕色（引擎按中性色重映射，如侧栏 #14130e、
-    // FB 面板 #12110c、表格空行线），与深空冷底完全不搭。
-    neutralShift: isDark ? [-4, 0, 10] : [2, 1, -4],
+    // 中性灰偏移来源见上方 shift。
+    neutralShift: shift
+      ? (shift.split(/\s+/).map(Number) as [number, number, number])
+      : isDark
+        ? [-4, 0, 10]
+        : [2, 1, -4],
     status: {
       warning: {
         background: token('--rp-cc-status-warning-bg'),
@@ -150,9 +154,11 @@ export function buildCeramicSkin(): Skin {
       idle: 'var(--rp-cc-control-track)',
       success: 'var(--rp-cc-status-success-text)',
       danger: 'var(--rp-cc-status-danger-text)',
-      glow: accent,
+      // 可选 token：光晕与柔线缺省用强调色实色（深色主题要的就是这个强度），
+      // 浅底主题在自己的块里写半透明变体，免得 6px 光晕在浅灰上糊成一团。
+      glow: glowColor,
       line: accent,
-      lineSoft: accent,
+      lineSoft: lineSoftColor,
     },
     // 呼吸灯的三档独立配色：各 token 主题在自己的 CSS 块里定义
     // --rp-cc-pulse-*，因此同一套组装逻辑对陶瓷白、星海霓虹都成立。
@@ -176,14 +182,15 @@ export function buildCeramicSkin(): Skin {
 
 // 组件类型 → token 的映射骨架。所有选择器都限定在传入的主题下，颜色一律 var()。
 // 顺序在 CONTROL_CSS 之后，因此同特异性时由这里决定按钮/控件的最终外观。
-// 骨架与颜色无关：token 模式的新主题只要在 refined-prun.css 里定义同名
+// 骨架与颜色无关：token 模式的新主题只要在自己的主题文件里定义同名
 // --rp-cc-* 色板，调用 buildComponentCss(<id>) 即可整套复用，无需复制本段。
 function componentCssFor(themeId: string): string {
   const P = `html[data-rp-theme='${themeId}'][data-rp-theme]`;
   return `
 ${P} body {
   background-color: var(--rp-cc-canvas) !important;
-  background-image: none !important;
+  /* 可选 token：主题不声明 --rp-cc-bg-image 时保持纯色底。 */
+  background-image: var(--rp-cc-bg-image, none) !important;
   color: var(--rp-cc-text-primary) !important;
 }
 
@@ -251,8 +258,11 @@ ${P} :is([class*='Button__success'], [data-rp-btn='success']) {
 ${P} :is([class*='Button__success'], [data-rp-btn='success']):hover {
   background-color: var(--rp-cc-status-success-border) !important;
 }
+/* 按下态把底色换成状态字色，字就要反过来用主题的 text-inverse：
+   浅色主题它是纸白（与原先写死的 #fffdf8 同值），深色主题它是深底，
+   否则霓虹浅色的状态字上压白字会糊成一片。 */
 ${P} :is([class*='Button__success'], [data-rp-btn='success']):active {
-  color: #fffdf8 !important;
+  color: var(--rp-cc-text-inverse) !important;
   background-color: var(--rp-cc-status-success-text) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']) {
@@ -264,7 +274,7 @@ ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='dan
   background-color: var(--rp-cc-status-danger-border) !important;
 }
 ${P} :is([class*='Button__danger'], [class*='Button__delete'], [data-rp-btn='danger']):active {
-  color: #fffdf8 !important;
+  color: var(--rp-cc-text-inverse) !important;
   background-color: var(--rp-cc-status-danger-text) !important;
 }
 ${P} :is([class*='Button__ghost'], [data-rp-btn='ghost']) {

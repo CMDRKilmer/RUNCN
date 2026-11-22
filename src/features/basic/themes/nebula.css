@@ -1,0 +1,163 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ── 星海霓虹（nebula）：token 模式，深空星海科幻配色 ──────────────────
+   近黑深蓝底 + 半透明玻璃面板；青蓝霓虹（#35c4e8）作为唯一主强调色贯穿
+   选中态/主按钮/边框发光；金/绿/红/紫/青绿/玫红/蓝/黄八类功能彩色各司其职、
+   同类同色。所有颜色字面量只在此精确块内（R01）。变量名与 ceramic 完全一致，
+   由 buildComponentCss('nebula') 与 buildCeramicSkin() 复用（框架 §5.2）。 */
+html[data-rp-theme='nebula'] {
+  color-scheme: dark;
+
+  /* 背景 */
+  --rp-cc-canvas: #070b14;
+  --rp-cc-surface: #0d1626;
+  --rp-cc-surface-alt: #11213a;
+  --rp-cc-overlay: rgba(5, 8, 16, 0.62);
+  --rp-cc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.62);
+
+  /* 文字 */
+  --rp-cc-text-primary: #acb1b8;
+  --rp-cc-text-secondary: #8797aa;
+  --rp-cc-text-muted: #6b7f96;
+  --rp-cc-text-inverse: #0d1626;
+  --rp-cc-text-link: #5d8797;
+  --rp-cc-text-disabled: #484e56;
+  /* 「临近阈值」告警字色（R45）：船名等元素在本主题实际渲染成金色（#f5d27a），
+     状态 warning 的琥珀与它几乎同色，故改用更红更亮的橙。 */
+  --rp-cc-warn-accent: #c07e64;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #16263a;
+  --rp-cc-border-default: #2a4a66;
+  --rp-cc-border-strong: #4b5d6c;
+  --rp-cc-border-focus: #569aab;
+  --rp-cc-ring: #569aab;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 1px;
+  --rp-cc-ring-halo: rgba(86, 154, 171, 0.35);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #405f78;
+  --rp-cc-btn-primary-text: #b6bec1;
+  --rp-cc-btn-primary-border: #569aab;
+  --rp-cc-btn-primary-hover: #517994;
+  --rp-cc-btn-primary-active: #344e63;
+  --rp-cc-btn-secondary-bg: #12233d;
+  --rp-cc-btn-secondary-text: #879caa;
+  --rp-cc-btn-secondary-border: #2a4a66;
+  --rp-cc-btn-secondary-hover: #19314f;
+  --rp-cc-btn-secondary-active: #0e1c30;
+  --rp-cc-btn-danger-bg: #865958;
+  --rp-cc-btn-danger-text: #ecd2d1;
+  --rp-cc-btn-danger-border: #b46e6e;
+  --rp-cc-btn-danger-hover: #a1605f;
+  --rp-cc-btn-danger-active: #724a49;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #7cadb9;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: rgba(86, 154, 171, 0.12);
+  --rp-cc-btn-ghost-active: rgba(86, 154, 171, 0.2);
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #5d8797;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: rgba(104, 161, 183, 0.12);
+  --rp-cc-btn-link-active: rgba(104, 161, 183, 0.2);
+  --rp-cc-btn-disabled-bg: #0f1a2c;
+  --rp-cc-btn-disabled-text: #484e56;
+  --rp-cc-btn-disabled-border: #1e3048;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #0e1a2e;
+  --rp-cc-control-alt-bg: #11213a;
+  --rp-cc-control-text: #a3abb3;
+  --rp-cc-control-placeholder: #6b7f96;
+  --rp-cc-control-border: #2a4a66;
+  --rp-cc-control-border-strong: #4b5d6c;
+  --rp-cc-control-focus: #569aab;
+  --rp-cc-control-checked: #569aab;
+  --rp-cc-control-track: #1a2a40;
+  --rp-cc-control-thumb: #569aab;
+  --rp-cc-control-disabled-bg: #0a1322;
+  --rp-cc-control-disabled-text: #484e56;
+  --rp-cc-tooltip-bg: #0d1626;
+  --rp-cc-tooltip-text: #acb1b8;
+  --rp-cc-tooltip-border: #2a4a66;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #11213a;
+  --rp-cc-table-head-text: #97a1ac;
+  --rp-cc-table-row: #0d1626;
+  --rp-cc-table-row-alt: #0f1a2e;
+  --rp-cc-table-row-hover: #14304d;
+  --rp-cc-table-row-selected: #1d4a6e;
+  --rp-cc-table-border: #1e3048;
+  --rp-cc-table-text: #a3abb3;
+
+  /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: rgba(100, 166, 128, 0.14);
+  --rp-cc-status-success-text: #7ab393;
+  --rp-cc-status-success-border: #47715e;
+  --rp-cc-status-warning-bg: rgba(172, 139, 90, 0.14);
+  --rp-cc-status-warning-text: #b69d74;
+  --rp-cc-status-warning-border: #80694a;
+  --rp-cc-status-danger-bg: rgba(180, 110, 110, 0.14);
+  --rp-cc-status-danger-text: #c68f8f;
+  --rp-cc-status-danger-border: #865959;
+  --rp-cc-status-info-bg: rgba(104, 161, 183, 0.14);
+  --rp-cc-status-info-text: #87b2c3;
+  --rp-cc-status-info-border: #446270;
+  /* 呼吸灯三档：深空底上取青蓝/靛蓝/橙三色，与霓虹主色系一致。 */
+  --rp-cc-pulse-success: #569aab;
+  --rp-cc-pulse-secondary: #7987ac;
+  --rp-cc-pulse-danger: #c07e64;
+
+  /* 分类 1..8 / 图表同序号同色：暗彩底 + 亮彩字 + 彩描边 + 实色图形 */
+  --rp-cc-cat-1-bg: rgba(86, 154, 171, 0.16);
+  --rp-cc-cat-1-text: #88bcc7;
+  --rp-cc-cat-1-border: #569aab;
+  --rp-cc-cat-1-chart: #569aab;
+  --rp-cc-cat-2-bg: rgba(84, 148, 140, 0.16);
+  --rp-cc-cat-2-text: #7bb7ae;
+  --rp-cc-cat-2-border: #54948c;
+  --rp-cc-cat-2-chart: #54948c;
+  --rp-cc-cat-3-bg: rgba(89, 117, 158, 0.16);
+  --rp-cc-cat-3-text: #879dc1;
+  --rp-cc-cat-3-border: #59759e;
+  --rp-cc-cat-3-chart: #59759e;
+  --rp-cc-cat-4-bg: rgba(149, 124, 202, 0.16);
+  --rp-cc-cat-4-text: #ab96d4;
+  --rp-cc-cat-4-border: #957cca;
+  --rp-cc-cat-4-chart: #957cca;
+  --rp-cc-cat-5-bg: rgba(194, 105, 121, 0.16);
+  --rp-cc-cat-5-text: #d2909e;
+  --rp-cc-cat-5-border: #c26979;
+  --rp-cc-cat-5-chart: #c26979;
+  --rp-cc-cat-6-bg: rgba(173, 140, 91, 0.16);
+  --rp-cc-cat-6-text: #c2a784;
+  --rp-cc-cat-6-border: #ad8c5b;
+  --rp-cc-cat-6-chart: #ad8c5b;
+  --rp-cc-cat-7-bg: rgba(183, 160, 96, 0.16);
+  --rp-cc-cat-7-text: #c6b385;
+  --rp-cc-cat-7-border: #b7a060;
+  --rp-cc-cat-7-chart: #b7a060;
+  --rp-cc-cat-8-bg: rgba(100, 166, 128, 0.16);
+  --rp-cc-cat-8-text: #86bb9b;
+  --rp-cc-cat-8-border: #64a680;
+  --rp-cc-cat-8-chart: #64a680;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色加深得到，专用于 <progress> 容量条 */
+  --rp-cc-progress-primary: #3e6373;
+  --rp-cc-progress-secondary: #1d7a6e;
+  --rp-cc-chart-grid: #1e3048;
+  --rp-cc-chart-axis: #6b7f96;
+  --rp-cc-chart-label: #97a1ac;
+  --rp-cc-accent-line: #569aab;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='nebula'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}

@@ -6,6 +6,7 @@ import Active from '@src/components/forms/Active.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
 import { initialUserData, userData } from '@src/store/user-data';
 import { DEFAULT_THEME_ID, THEMES, type ThemeId } from '@src/features/basic/theme-registry';
+import { themePreviewVars } from '@src/features/basic/theme-palette';
 
 // 主题列表来自注册表（唯一事实源）：新增主题只需改注册表，设置页自动出现卡片。
 // 主题在点击时立即生效（theme.ts 监听 userData），无需刷新页面。
@@ -41,12 +42,46 @@ function reset() {
         :key="t.id"
         type="button"
         :class="[$style.card, current === t.id ? $style.cardActive : '']"
+        :style="themePreviewVars(t.id)"
         @click="pick(t.id)">
-        <span :class="$style.cardHead">
-          <strong>{{ t.label }}</strong>
-          <span v-if="current === t.id" :class="$style.activeTag">当前</span>
+        <!-- 卡片即模拟窗口：标题栏写主题名，正文写说明，下面用该主题自己的色摆一份
+             表格 / 柱图 / 输入框 / 按钮。颜色全部来自内联的 --rp-cc-*（见
+             theme-palette.ts），本文件不写颜色字面量。 -->
+        <span :class="$style.winBar">
+          <strong :class="$style.winName">{{ t.label }}</strong>
+          <span :class="$style.winTools">
+            <span v-if="current === t.id" :class="$style.activeTag">当前</span>
+            <span :class="[$style.dot, $style.dotAccent]" />
+            <span :class="[$style.dot, $style.dotOk]" />
+          </span>
         </span>
-        <span :class="$style.cardDesc">{{ t.desc }}</span>
+        <span :class="$style.winDesc">{{ t.desc }}</span>
+        <span :class="$style.winBody">
+          <span :class="$style.rows">
+            <span :class="$style.row">
+              <span :class="$style.rowLabel" />
+              <span :class="$style.rowValue" />
+            </span>
+            <span :class="[$style.row, $style.rowAlt]">
+              <span :class="$style.rowLabel" />
+              <span :class="$style.rowValue" />
+            </span>
+            <span :class="$style.row">
+              <span :class="$style.rowLabel" />
+              <span :class="$style.rowValue" />
+            </span>
+          </span>
+          <span :class="$style.chart">
+            <span :class="[$style.bar, $style.bar1]" />
+            <span :class="[$style.bar, $style.bar2]" />
+            <span :class="[$style.bar, $style.bar3]" />
+          </span>
+        </span>
+        <span :class="$style.winFoot">
+          <span :class="$style.field" />
+          <span :class="$style.btnPrimary" />
+          <span :class="$style.btnDanger" />
+        </span>
       </button>
     </div>
   </form>
@@ -73,46 +108,183 @@ function reset() {
   gap: 8px;
 }
 
-/* 主题卡片自身也走 token：自定义主题下由 theme.ts 的 --rp-skin-* 提供，
-   default 原样主题回退到游戏原色，视觉不变。 */
+/* 卡片外壳就是窗口的窗体：底色 / 描边 / 正文色一律取内联 token。
+   选中与悬停只改描边（用当前界面强调色），不动窗口内部颜色，
+   否则预览会被「当前主题」染脏。 */
 .card {
   display: flex;
   flex-direction: column;
-  row-gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--rp-skin-border-strong, rgb(61, 74, 84));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--rp-cc-table-border);
   border-radius: 4px;
-  background: var(--rp-skin-panel, rgb(26, 33, 38));
-  color: var(--rp-skin-ink, inherit);
+  background: var(--rp-cc-canvas);
+  color: var(--rp-cc-table-text);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.card:hover {
-  border-color: rgb(var(--rp-accent-rgb));
-}
-
+.card:hover,
 .cardActive {
   border-color: rgb(var(--rp-accent-rgb));
-  background: rgba(var(--rp-accent-rgb), 0.08);
 }
 
-.cardHead {
+.winBar {
   display: flex;
   align-items: center;
-  column-gap: 8px;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--rp-cc-table-border);
+  background: var(--rp-cc-table-head-bg);
+  color: var(--rp-cc-table-head-text);
+}
+
+.winName {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.winTools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
 }
 
 .activeTag {
-  margin-left: auto;
-  color: rgb(var(--rp-accent-rgb));
+  color: var(--rp-cc-accent-line);
   font-size: 11px;
 }
 
-.cardDesc {
-  color: var(--rp-skin-muted, #999);
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.dotAccent {
+  background: var(--rp-cc-accent-line);
+}
+
+.dotOk {
+  background: var(--rp-cc-status-success-text);
+}
+
+/* 说明文字用主题的次级正文色压在窗底上，顺带就是正文对比度的实测位。 */
+.winDesc {
+  padding: 8px 10px 0;
+  color: var(--rp-cc-text-secondary);
   font-size: 11px;
   line-height: 1.5;
+}
+
+.winBody {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px 10px 0;
+}
+
+.rows {
+  display: flex;
+  flex: 1 1 60%;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 9px;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.rowAlt {
+  background: var(--rp-cc-table-row-alt);
+}
+
+.rowLabel {
+  width: 55%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rp-cc-table-text);
+}
+
+.rowValue {
+  width: 22%;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rp-cc-table-text);
+}
+
+.chart {
+  display: flex;
+  flex: 0 0 32%;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--rp-cc-table-border);
+}
+
+.bar {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 1px 1px 0 0;
+}
+
+.bar1 {
+  height: 45%;
+  background: var(--rp-cc-cat-1-chart);
+}
+
+.bar2 {
+  height: 78%;
+  background: var(--rp-cc-cat-4-chart);
+}
+
+.bar3 {
+  height: 62%;
+  background: var(--rp-cc-cat-6-chart);
+}
+
+.winFoot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  padding: 8px 10px;
+  border-top: 1px solid var(--rp-cc-table-border);
+  background: var(--rp-cc-surface-alt);
+}
+
+.field {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 12px;
+  border: 1px solid var(--rp-cc-control-border);
+  border-radius: 2px;
+  background: var(--rp-cc-control-bg);
+}
+
+.btnPrimary {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--rp-cc-btn-primary-bg);
+}
+
+.btnDanger {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--rp-cc-btn-danger-bg);
 }
 </style>

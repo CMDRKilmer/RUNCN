@@ -1,0 +1,179 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ── 浅色明亮（light）：token 模式，冷灰白底 + 低饱和石板蓝 ─────────────
+   色值来源是原 skin 皮肤的 SKINS.light：画布 #f2f5f7、面板 #e8edf1、表头 #dbe7f0、
+   正文 #26333d、次级 #4a5863、禁用 #98a3ac，强调与选中统一收到石板蓝 #33566f，
+   买入绿 #2f6b48 / 卖出红 #9c3b3b 两套语义色保留原值，黄红异常标记照旧。
+   8 个色相带按 hue 顺序排列（cyan→teal→olive→amber→brick→violet→blue→rose），
+   与 buildCeramicSkin() 的 bandKeyOf 映射一致；饱和度整体压到 20–35%，
+   保持本主题「彩色收敛」的观感，同时让图表序列仍可分辨。
+   文字 ≥4.5:1、指示线与控件边界 ≥3:1 由 .tmp/check-tokens.mjs 逐项校验。 */
+html[data-rp-theme='light'] {
+  color-scheme: light;
+
+  /* 中性灰重映射偏移：本主题底已是冷灰白，偏移取 0，原生灰按原样中性化。 */
+  --rp-cc-neutral-shift: 0 0 0;
+
+  /* 背景 */
+  --rp-cc-canvas: #f2f5f7;
+  --rp-cc-surface: #edf2f6;
+  --rp-cc-surface-alt: #e8edf1;
+  --rp-cc-overlay: rgba(24, 32, 38, 0.5);
+  --rp-cc-shadow-card: 0 1px 2px rgba(38, 51, 61, 0.08), 0 4px 12px rgba(38, 51, 61, 0.06);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(38, 51, 61, 0.2);
+
+  /* 文字 */
+  --rp-cc-text-primary: #26333d;
+  --rp-cc-text-secondary: #4a5863;
+  --rp-cc-text-muted: #5f6d78;
+  --rp-cc-text-inverse: #fbfdfe;
+  --rp-cc-text-link: #33566f;
+  --rp-cc-text-disabled: #8b97a1;
+  /* 「临近阈值」告警字色（R45）：本主题链接是冷石板蓝，告警用橙红拉开冷暖与色相。 */
+  --rp-cc-warn-accent: #c2410c;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #ccd6de;
+  --rp-cc-border-default: #bcc8d2;
+  --rp-cc-border-strong: #7f9cb2;
+  --rp-cc-border-focus: #2d5470;
+  --rp-cc-ring: #2d5470;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 2px;
+  --rp-cc-ring-halo: rgba(51, 86, 111, 0.2);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #33566f;
+  --rp-cc-btn-primary-text: #fbfdfe;
+  --rp-cc-btn-primary-border: #2a475c;
+  --rp-cc-btn-primary-hover: #2c4d65;
+  --rp-cc-btn-primary-active: #243f53;
+  --rp-cc-btn-secondary-bg: #edf2f6;
+  --rp-cc-btn-secondary-text: #26333d;
+  --rp-cc-btn-secondary-border: #bcc8d2;
+  --rp-cc-btn-secondary-hover: #e2e9ef;
+  --rp-cc-btn-secondary-active: #d7e0e8;
+  --rp-cc-btn-danger-bg: #9c3b3b;
+  --rp-cc-btn-danger-text: #fbfdfe;
+  --rp-cc-btn-danger-border: #822f2f;
+  --rp-cc-btn-danger-hover: #8a3332;
+  --rp-cc-btn-danger-active: #7a2d2c;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #2d5470;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: #e7eef4;
+  --rp-cc-btn-ghost-active: #dbe6ef;
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #2d5470;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: #eaf1f6;
+  --rp-cc-btn-link-active: #dce7ef;
+  --rp-cc-btn-disabled-bg: #f0f3f5;
+  --rp-cc-btn-disabled-text: #8b97a1;
+  --rp-cc-btn-disabled-border: #d8dee3;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #ffffff;
+  --rp-cc-control-alt-bg: #eef2f5;
+  --rp-cc-control-text: #26333d;
+  --rp-cc-control-placeholder: #6f7d89;
+  --rp-cc-control-border: #bcc8d2;
+  --rp-cc-control-border-strong: #7f9cb2;
+  --rp-cc-control-focus: #2d5470;
+  --rp-cc-control-checked: #33566f;
+  --rp-cc-control-track: #dde5eb;
+  --rp-cc-control-thumb: #33566f;
+  --rp-cc-control-disabled-bg: #f0f3f5;
+  --rp-cc-control-disabled-text: #8b97a1;
+  --rp-cc-tooltip-bg: #26333d;
+  --rp-cc-tooltip-text: #f6f8fa;
+  --rp-cc-tooltip-border: #4a5863;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #dbe7f0;
+  --rp-cc-table-head-text: #26333d;
+  --rp-cc-table-row: #edf2f6;
+  --rp-cc-table-row-alt: #e7edf2;
+  --rp-cc-table-row-hover: #dde6ed;
+  --rp-cc-table-row-selected: #cfe0ee;
+  --rp-cc-table-border: #ccd6de;
+  --rp-cc-table-text: #26333d;
+
+  /* 状态：底色 + 深字 + 边框；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: #e8f2eb;
+  --rp-cc-status-success-text: #2f6b48;
+  --rp-cc-status-success-border: #8bb69c;
+  --rp-cc-status-warning-bg: #f8e9c4;
+  --rp-cc-status-warning-text: #6b4a00;
+  --rp-cc-status-warning-border: #d6a12c;
+  --rp-cc-status-danger-bg: #f7dedd;
+  --rp-cc-status-danger-text: #8a3331;
+  --rp-cc-status-danger-border: #c96965;
+  --rp-cc-status-info-bg: #e7eef4;
+  --rp-cc-status-info-text: #2d5470;
+  --rp-cc-status-info-border: #a9becd;
+  /* 呼吸灯三档：与正文/状态色系分开，保证通知脉冲仍是本主题的主色调。 */
+  --rp-cc-pulse-success: #33566f;
+  --rp-cc-pulse-secondary: #5a7f98;
+  --rp-cc-pulse-danger: #9c3b3b;
+  /* 可选 token：指示点光晕与柔线。浅底上用主色半透明，实色会糊成灰块。 */
+  --rp-cc-indicator-glow: rgba(51, 86, 111, 0.4);
+  --rp-cc-indicator-line-soft: rgba(51, 86, 111, 0.6);
+
+  /* 分类 1..8 / 图表同序号同色：浅底深字 + 低饱和图形色 */
+  --rp-cc-cat-1-bg: #dcecf2;
+  --rp-cc-cat-1-text: #2d5c70;
+  --rp-cc-cat-1-border: #8fb8c8;
+  --rp-cc-cat-1-chart: #3d7c94;
+  --rp-cc-cat-2-bg: #e8f2eb;
+  --rp-cc-cat-2-text: #2f6b48;
+  --rp-cc-cat-2-border: #8bb69c;
+  --rp-cc-cat-2-chart: #2f6b48;
+  --rp-cc-cat-3-bg: #f0f0db;
+  --rp-cc-cat-3-text: #626232;
+  --rp-cc-cat-3-border: #adad6c;
+  --rp-cc-cat-3-chart: #7f7f3c;
+  --rp-cc-cat-4-bg: #f4eee2;
+  --rp-cc-cat-4-text: #75571f;
+  --rp-cc-cat-4-border: #c2a579;
+  --rp-cc-cat-4-chart: #8a6327;
+  --rp-cc-cat-5-bg: #f7eaea;
+  --rp-cc-cat-5-text: #9c3b3b;
+  --rp-cc-cat-5-border: #c98f8f;
+  --rp-cc-cat-5-chart: #9c3b3b;
+  --rp-cc-cat-6-bg: #ebe7f4;
+  --rp-cc-cat-6-text: #4a3b73;
+  --rp-cc-cat-6-border: #a396c4;
+  --rp-cc-cat-6-chart: #5b4a8a;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色减半深度得到（R33），专用于 <progress>
+     容量条（FLT 燃料条等），不再复用图表实色，避免浅色主题下燃料条过重。 */
+  --rp-cc-progress-primary: #99abb7;
+  --rp-cc-progress-secondary: #c5b193;
+  --rp-cc-cat-7-bg: #e7eef4;
+  --rp-cc-cat-7-text: #33566f;
+  --rp-cc-cat-7-border: #a9becd;
+  --rp-cc-cat-7-chart: #33566f;
+  --rp-cc-cat-8-bg: #f4e9ef;
+  --rp-cc-cat-8-text: #7e4560;
+  --rp-cc-cat-8-border: #cba3ba;
+  --rp-cc-cat-8-chart: #97546f;
+  --rp-cc-chart-grid: #d7dfe6;
+  --rp-cc-chart-axis: #5f6d78;
+  --rp-cc-chart-label: #4a5863;
+  --rp-cc-accent-line: #33566f;
+
+  /* INV / SHPI 分类头反色徽标用的 RGB 三元组：纯三元组不是颜色字面量，
+     取值与石板蓝 / 墨绿 / 暗红三条语义带同源。 */
+  --rp-inv-cat-inputs-rgb: 51, 86, 111;
+  --rp-inv-cat-outputs-rgb: 47, 107, 72;
+  --rp-inv-cat-consumables-rgb: 156, 59, 59;
+  --rp-inv-cat-other-rgb: 74, 88, 99;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='light'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}

@@ -19,6 +19,8 @@
 // scripts/lib/chain-flight-time-stub.mjs 注入 store/时钟/地址快照（见 loader 注释），
 // 不覆盖滑块写入（chain-flight-time.ts 从不写滑块）。
 import { register } from 'node:module';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 register('./lib/chain-flight-time-loader.mjs', import.meta.url);
 
@@ -26,6 +28,8 @@ const stub = await import('./lib/chain-flight-time-stub.mjs');
 const { estimateChainFlightTimes, chainShipFuelCaps } =
   await import('../src/features/XIT/FLEET/chain-flight-time.ts');
 const { fuelPerRound } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
+const { planFormulaFlight } = await import('../src/features/XIT/FTC/formula-plan.ts');
+const recorded = JSON.parse(readFileSync(new URL('./fixtures/ftc-formula.json', import.meta.url)));
 
 const summary = { pass: 0, fail: 0 };
 
@@ -415,6 +419,112 @@ await check('逐段载重参与时长：重载航段不会更快', async failure
     loaded.legs[0].hours >= empty.legs[0].hours - 1e-9,
     `empty=${empty.legs[0].hours} loaded=${loaded.legs[0].hours}`,
   );
+});
+
+await check('原生 RT 区分油箱资料缺失和已确认的空罐', async () => {
+  const row = recorded.find(
+    x => x.request.landing && x.segments.some(segment => segment.type === 'TAKE_OFF'),
+  );
+  const [from, to] = row.flightInputs.orbit.endpoints.map(x => x.naturalId);
+  const emptyShip = {
+    ...ship,
+    blueprintNaturalId: row.blueprint.naturalId,
+    condition: row.request.condition,
+  };
+  stub.stubReset();
+  stub.stubSetBlueprint(row.blueprint);
+  stub.stubSetInputs({
+    origin: row.request.origin,
+    destination: row.request.destination,
+    input: row.flightInputs,
+  });
+  const input = {
+    ship: emptyShip,
+    from,
+    to,
+    useGateway: false,
+    payload: row.request.payload,
+    atMs: row.gameTimeMs,
+    ftlFuel: row.request.ftlFuel,
+    selection: 'value',
+  };
+  const unknown = await planFormulaFlight(input);
+  assert.deepEqual(unknown.inputIncomplete, ['STL 油箱数据']);
+  const empty = await planFormulaFlight({ ...input, stlFuel: 0 });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.insufficientFuel, true);
+  assert.match(empty.message, /起降耗油/);
+});
+
+await check('原生循环：网关、逐段档位、时长和备货油量使用同一套方案', async () => {
+  const row = recorded.find(
+    x => x.actual.ftlFuel === 0 && x.segments.some(seg => seg.type === 'JUMP_GATEWAY'),
+  );
+  const [origin, destination] = row.flightInputs.orbit.endpoints.map(x => x.naturalId);
+  const gatewayShip = {
+    ...ship,
+    blueprintNaturalId: row.blueprint.naturalId,
+    condition: row.request.condition,
+  };
+  stub.stubReset();
+  stub.stubSetShip(gatewayShip);
+  stub.stubSetBlueprint(row.blueprint);
+  stub.stubSetFuel({ stlRemaining: 0, stlCap: row.request.stlFuel, ftlRemaining: 0, ftlCap: 0 });
+  stub.stubSetInputs(from => {
+    const forward = from === origin;
+    const snapshot = row.flightInputs;
+    return {
+      origin: forward ? row.request.origin : row.request.destination,
+      destination: forward ? row.request.destination : row.request.origin,
+      input: forward
+        ? snapshot
+        : {
+            ...snapshot,
+            orbit: { ...snapshot.orbit, endpoints: snapshot.orbit.endpoints.toReversed() },
+            environment: snapshot.environment.toReversed(),
+          },
+    };
+  });
+  const route = {
+    ship: gatewayShip,
+    origin,
+    stops: [{ naturalId: destination, planetName: destination }],
+    startAtMs: row.gameTimeMs,
+    legPayloads: [row.request.payload, row.request.payload + 10],
+  };
+  assert.equal((await estimateChainFlightTimes(route)).ok, false, 'needs gateway data');
+  const loop = await estimateChainFlightTimes({ ...route, nativeRoute: true });
+  assert.equal(loop.ok, true, JSON.stringify(loop.legs));
+  assert.equal(loop.legs[1].departAtMs, loop.legs[0].arriveAtMs);
+  assert.equal(
+    loop.totalHours,
+    loop.legs.reduce((sum, leg) => sum + leg.settings.hours, 0),
+  );
+  let stlFuel = row.request.stlFuel;
+  for (const [index, leg] of loop.legs.entries()) {
+    const fixed = await planFormulaFlight({
+      ship: gatewayShip,
+      from: leg.from,
+      to: leg.to,
+      atMs: leg.departAtMs,
+      useGateway: true,
+      payload: route.legPayloads[index],
+      stlFuel,
+      ftlFuel: 0,
+      fuel: leg.settings.fuelPercent / 100,
+      selection: 'value',
+    });
+    assert.equal(fixed.ok, true);
+    assert.equal(leg.settings.reactorPercent, undefined);
+    assert.equal(leg.hours, fixed.best.totalHours);
+    assert.equal(leg.stlUsed, fixed.best.stlFuel);
+    assert.equal(leg.ftlUsed, 0);
+    stlFuel = fixed.best.stlRemaining;
+  }
+  assert.deepEqual(fuelPerRound(loop.legs, chainShipFuelCaps(gatewayShip)), {
+    stl: row.request.stlFuel - stlFuel,
+    ftl: 0,
+  });
 });
 
 console.log(

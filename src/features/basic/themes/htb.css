@@ -1,0 +1,231 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ── HTB 终端（htb）：token 模式，Hack The Box 深色终端风 ────────────────
+   色值取自 hackthebox.com 生产 CSS 实抽：画布 #0b121f、面板 #141d2b / #1a2332、
+   输入底 #0d1117、表头 #101927、正文 #f4f4f4、次级 #a4b1cd、辅助 #8799b5
+   （其 --color-main-nav）、告警红 #f14141；酸橙绿 #9fef00 是唯一主强调色
+   （悬停 #a2ff00 同样来自实抽）。
+   酸橙分两档，避免整屏高亮刺眼（26.11.20.1 已把星海 / 星铸的强调色降亮约 15%）：
+   动作目标保留品牌原色（主按钮 #8fd400 / 悬停 #a2ff00 / 描边 #9fef00、分类 3），
+   而到处重复出现的指示线 / 焦点环 / 选中块 / 滑块 / 呼吸灯次档统一用降亮变体
+   #a3d63f（对画布仍 ≥3:1，色相不变）。
+   分层口径：--rp-cc-border-subtle / table-border / chart-grid 是装饰性分隔线，按仓库既有深色
+   主题（starforge 2.2、nebula 2.1）保持低对比；承载「控件可辨识」的 border-default /
+   border-strong / control-border* / ring / accent-line / 状态描边一律对 canvas 与
+   surface 双底 ≥3:1，全部文字 ≥4.5:1（禁用态按 WCAG 1.4.3 豁免）。
+   代价：border-default 同时被引擎当作物料 / 建筑图标描边与滚动条滑块
+   （theme-ceramic.ts 的 --rp-skin-icon-border / --rp-skin-scroll-thumb），
+   所以本主题的图标框与滚动条比 starforge 明显更亮 —— 这是「控件边界达标」的
+   直接结果，不是疏漏。
+   8 个色相带按 hue 顺序排列（cyan→teal→olive→amber→plum→violet→blue→rose），
+   与 buildCeramicSkin() 的 bandKeyOf 映射一致；cat-3 olive 即品牌酸绿。
+   颜色字面量只在此精确块内，变量名与 ceramic / nebula /
+   starforge 完全一致，由 buildComponentCss('htb') 复用。 */
+html[data-rp-theme='htb'] {
+  color-scheme: dark;
+
+  /* 背景：surface 比画布抬一档（1.24:1），保证面板 / 画布分得开 */
+  --rp-cc-canvas: #0b121f;
+  --rp-cc-surface: #16202e;
+  --rp-cc-surface-alt: #1a2332;
+  --rp-cc-overlay: rgba(4, 9, 17, 0.72);
+  --rp-cc-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.5), 0 4px 16px rgba(0, 0, 0, 0.42);
+  --rp-cc-shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.62);
+
+  /* 文字：正文近白、次级/辅助取自 HTB 的冷板岩蓝，反色用于酸橙绿实底 */
+  --rp-cc-text-primary: #f4f4f4;
+  --rp-cc-text-secondary: #a4b1cd;
+  --rp-cc-text-muted: #8799b5;
+  --rp-cc-text-inverse: #0b121f;
+  /* 链接用冷蓝而不是酸绿：主强调色已经占满选中态/按钮，再当链接色会让整屏发酸。 */
+  --rp-cc-text-link: #7fb2ff;
+  --rp-cc-text-disabled: #5a6b85;
+  /* 阈值告警走橙，与酸绿主强调、cat-4 amber 分类色都拉开色相，同屏不撞。 */
+  --rp-cc-warn-accent: #ff8a3c;
+
+  /* 呼吸灯三档：绿 / 酸橙 / 红，跟随本主题主色调。 */
+  --rp-cc-pulse-success: #57d98a;
+  --rp-cc-pulse-secondary: #a3d63f;
+  --rp-cc-pulse-danger: #f14141;
+
+  /* 边框 / 焦点：细线低调、控件边界与酸橙焦点环 ≥3:1 */
+  --rp-cc-border-subtle: #1e2939;
+  --rp-cc-border-default: #526d8a;
+  --rp-cc-border-strong: #62869f;
+  --rp-cc-border-focus: #a3d63f;
+  --rp-cc-ring: #a3d63f;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 1px;
+  --rp-cc-ring-halo: rgba(163, 214, 63, 0.26);
+
+  /* 按钮：主按钮酸橙绿实心 + 画布色反字，其余深底细线；跨页面同色 */
+  --rp-cc-btn-primary-bg: #8fd400;
+  --rp-cc-btn-primary-text: #0b121f;
+  --rp-cc-btn-primary-border: #9fef00;
+  --rp-cc-btn-primary-hover: #a2ff00;
+  --rp-cc-btn-primary-active: #7cbb00;
+  --rp-cc-btn-secondary-bg: #16202e;
+  --rp-cc-btn-secondary-text: #ccd6e6;
+  --rp-cc-btn-secondary-border: #526d8a;
+  --rp-cc-btn-secondary-hover: #1a2332;
+  --rp-cc-btn-secondary-active: #0f1725;
+  --rp-cc-btn-danger-bg: #a83232;
+  --rp-cc-btn-danger-text: #ffdada;
+  --rp-cc-btn-danger-border: #b8564a;
+  --rp-cc-btn-danger-hover: #c03a3a;
+  --rp-cc-btn-danger-active: #8f2a2a;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #b9d95f;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: rgba(163, 214, 63, 0.12);
+  --rp-cc-btn-ghost-active: rgba(163, 214, 63, 0.2);
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #7fb2ff;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: rgba(127, 178, 255, 0.12);
+  --rp-cc-btn-link-active: rgba(127, 178, 255, 0.2);
+  --rp-cc-btn-disabled-bg: #0f1826;
+  --rp-cc-btn-disabled-text: #5a6b85;
+  --rp-cc-btn-disabled-border: #1e2939;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #0d1117;
+  --rp-cc-control-alt-bg: #16202e;
+  --rp-cc-control-text: #e6ebf2;
+  --rp-cc-control-placeholder: #8799b5;
+  --rp-cc-control-border: #526d8a;
+  --rp-cc-control-border-strong: #62869f;
+  --rp-cc-control-focus: #a3d63f;
+  --rp-cc-control-checked: #a3d63f;
+  /* 轨道比 surface 更暗一档，容量条 / 滑杆的「未填充」才读得出是凹槽。 */
+  --rp-cc-control-track: #101a28;
+  --rp-cc-control-thumb: #a3d63f;
+  --rp-cc-control-disabled-bg: #0a0f16;
+  --rp-cc-control-disabled-text: #5a6b85;
+  --rp-cc-tooltip-bg: #0d1117;
+  --rp-cc-tooltip-text: #e6ebf2;
+  --rp-cc-tooltip-border: #526d8a;
+
+  /* 表格：板岩蓝表头、近黑行底、酸橙选中淡底 */
+  --rp-cc-table-head-bg: #101927;
+  --rp-cc-table-head-text: #a4b1cd;
+  --rp-cc-table-row: #0b121f;
+  --rp-cc-table-row-alt: #0f1825;
+  --rp-cc-table-row-hover: #1a2332;
+  --rp-cc-table-row-selected: rgba(163, 214, 63, 0.16);
+  --rp-cc-table-border: #1e2939;
+  --rp-cc-table-text: #dbe4ef;
+
+  /* 状态：暗彩底 + 亮彩字 + 彩描边；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: rgba(87, 217, 138, 0.13);
+  --rp-cc-status-success-text: #9ee5b8;
+  --rp-cc-status-success-border: #3f8a5c;
+  --rp-cc-status-warning-bg: rgba(255, 178, 36, 0.13);
+  --rp-cc-status-warning-text: #ffd27a;
+  --rp-cc-status-warning-border: #a8762a;
+  --rp-cc-status-danger-bg: rgba(241, 65, 65, 0.14);
+  --rp-cc-status-danger-text: #ff9a94;
+  --rp-cc-status-danger-border: #b8564a;
+  --rp-cc-status-info-bg: rgba(127, 178, 255, 0.13);
+  --rp-cc-status-info-text: #b6d4ff;
+  --rp-cc-status-info-border: #4a6f9e;
+
+  /* 分类 1..8：按 hue 顺序，同类同色；暗彩底 + 亮彩字 + 彩描边 + 实色图形 */
+  --rp-cc-cat-1-bg: rgba(86, 207, 225, 0.16);
+  --rp-cc-cat-1-text: #a6e6f0;
+  --rp-cc-cat-1-border: #56cfe1;
+  --rp-cc-cat-1-chart: #56cfe1;
+  --rp-cc-cat-2-bg: rgba(63, 208, 164, 0.16);
+  --rp-cc-cat-2-text: #92e3c8;
+  --rp-cc-cat-2-border: #3fd0a4;
+  --rp-cc-cat-2-chart: #3fd0a4;
+  --rp-cc-cat-3-bg: rgba(159, 239, 0, 0.16);
+  --rp-cc-cat-3-text: #c7f56a;
+  --rp-cc-cat-3-border: #9fef00;
+  --rp-cc-cat-3-chart: #9fef00;
+  /* 进度条主/次填充：由酸橙绿 / 青绿减半深度得到，与图表实色分离。 */
+  --rp-cc-progress-primary: #74a01a;
+  --rp-cc-progress-secondary: #2f7f6c;
+  --rp-cc-cat-4-bg: rgba(255, 178, 36, 0.16);
+  --rp-cc-cat-4-text: #ffd27a;
+  --rp-cc-cat-4-border: #ffb224;
+  --rp-cc-cat-4-chart: #ffb224;
+  --rp-cc-cat-5-bg: rgba(229, 113, 195, 0.16);
+  --rp-cc-cat-5-text: #f2a8dc;
+  --rp-cc-cat-5-border: #e571c3;
+  --rp-cc-cat-5-chart: #e571c3;
+  --rp-cc-cat-6-bg: rgba(169, 140, 245, 0.16);
+  --rp-cc-cat-6-text: #c9b6fa;
+  --rp-cc-cat-6-border: #a98cf5;
+  --rp-cc-cat-6-chart: #a98cf5;
+  --rp-cc-cat-7-bg: rgba(111, 168, 255, 0.16);
+  --rp-cc-cat-7-text: #a8c8ff;
+  --rp-cc-cat-7-border: #6fa8ff;
+  --rp-cc-cat-7-chart: #6fa8ff;
+  --rp-cc-cat-8-bg: rgba(255, 107, 107, 0.16);
+  --rp-cc-cat-8-text: #ffa3a1;
+  --rp-cc-cat-8-border: #ff6b6b;
+  --rp-cc-cat-8-chart: #ff6b6b;
+  --rp-cc-chart-grid: #1e2939;
+  --rp-cc-chart-axis: #7b8e9f;
+  --rp-cc-chart-label: #a8bed0;
+  --rp-cc-accent-line: #a3d63f;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='htb'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}
+
+/* ── HTB 格式层：4px 圆角 + 1px 冷蓝内描边、标题 600 字重、等宽数字 ──────
+   终端风的观感来自「方角 + 细线 + 等宽数据」，与 starforge 的工业圆角同构。
+   这里只改不占盒模型的属性（圆角 / 内描边 / 字重 / 字距 / 数字变体），
+   禁止改 border / padding / 字号（R09、R14）；颜色一律 var(--rp-cc-*)。
+   三重前缀把特异性抬到 (0,3,x)，压过游戏与引擎的同级规则，且只作用于本主题
+   （R06、R21）。 */
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme]
+  :is(
+    [class*='SectionHeader__container'],
+    [class*='GridItemView__container'],
+    [class*='ContextControls__container'],
+    [class*='MenuHeadItem__menu'],
+    [class*='AlertListItem__container']
+  ) {
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--rp-cc-border-subtle);
+}
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme]
+  :is([class*='Button__btn'], [class*='StaticInput__static'], [class*='Select__select']) {
+  border-radius: 3px;
+}
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme]
+  :is(
+    [class*='SectionHeader__container'],
+    [class*='TileFrame__header'],
+    [class*='HeadItem__label'],
+    [class*='Frame__title']
+  ) {
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+/* 分组头的酸橙左色条：终端提示符式的层级标记。 */
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme] [class*='SectionHeader__container'] {
+  box-shadow:
+    inset 2px 0 0 var(--rp-cc-accent-line),
+    inset 0 0 0 1px var(--rp-cc-border-subtle);
+}
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme]
+  :is(td, th, [class*='ColoredValue'], [class*='numCell'], [class*='Table__number']) {
+  font-variant-numeric: tabular-nums;
+}
+/* 选中态表单 label 套用酸橙主按钮底色，但游戏把 label 文字写死成白色，
+   白字压亮酸橙读不出来；与主按钮同口径改走反色 token，后代 ⓘ 图标靠
+   color:inherit 跟随。 */
+html[data-rp-theme='htb'][data-rp-theme][data-rp-theme]
+  :is([class*='FormComponent__containerActive'], [class*='forms__active'])
+  label {
+  color: var(--rp-cc-text-inverse) !important;
+}

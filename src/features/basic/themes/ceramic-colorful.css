@@ -1,0 +1,175 @@
+/* token 主题的色板按「一主题一文件」拆分。src/refined-prun.ts 在 src/refined-prun.css
+   之后按主题顺序引入，构建时合并成同一个 dist/refined-prun.css：首屏时序、特异性和
+   theme.ts 里 TOKEN_RULE_RE 的跳过行为都不变。颜色字面量只写在本主题的精确块内。 */
+
+/* ══════════════════════════════════════════════════════════════════════
+   陶瓷白多彩主题（ceramic-colorful）—— 语义 token 层
+   ──────────────────────────────────────────────────────────────────────
+   这是本主题唯一的颜色字面量来源：组件规则一律 var(--rp-cc-*) 引用，
+   theme.ts 的 skin.vars 也用 var() 别名指回这里，颜色不复制第二份。
+   色板随本文件进入 startup 注入的全局样式表（dist/refined-prun.css），配合
+   refined-prun-startup.ts 提前设置 data-rp-theme，首屏就是陶瓷白，不会
+   先闪一帧游戏原生深色。theme.ts 的 collect() 会跳过精确的
+   html[data-rp-theme=...] token 定义块，避免这些颜色被当作「游戏原生色」
+   重映射掉。
+
+   层级：canvas 暖陶瓷白 → surface 近白卡片 → surface-alt 表头/次级面。
+   文字统一深墨（不用纯黑），彩色只出现在分类/图表/状态/装饰上；按钮、
+   表单、表格按「组件类型」共享同一套 token，不按页面或卡片变色。
+   对比度由 `pnpm run verify:themes`（scripts/verify-theme-palette.mjs）逐项校验（WCAG 2.1）。
+   ══════════════════════════════════════════════════════════════════════ */
+html[data-rp-theme='ceramic-colorful'] {
+  color-scheme: light;
+
+  /* 背景 */
+  --rp-cc-canvas: #f6f1e7;
+  --rp-cc-surface: #fffdf8;
+  --rp-cc-surface-alt: #efe9dd;
+  --rp-cc-overlay: rgba(38, 40, 36, 0.55);
+  --rp-cc-shadow-card: 0 1px 2px rgba(60, 54, 40, 0.1), 0 4px 12px rgba(60, 54, 40, 0.08);
+  --rp-cc-shadow-popover: 0 8px 24px rgba(60, 54, 40, 0.22);
+
+  /* 文字 */
+  --rp-cc-text-primary: #262b28;
+  --rp-cc-text-secondary: #414a44;
+  --rp-cc-text-muted: #5c655e;
+  --rp-cc-text-inverse: #fffdf8;
+  --rp-cc-text-link: #1f5a7a;
+  --rp-cc-text-disabled: #737a72;
+  /* 「临近阈值」告警字色（R45）：本主题链接是深蓝，告警用深橙拉开冷暖。 */
+  --rp-cc-warn-accent: #b45309;
+
+  /* 边框 / 焦点 */
+  --rp-cc-border-subtle: #e4dccb;
+  --rp-cc-border-default: #9c927e;
+  --rp-cc-border-strong: #7d7058;
+  --rp-cc-border-focus: #1f5a7a;
+  --rp-cc-ring: #1f5a7a;
+  --rp-cc-ring-width: 2px;
+  --rp-cc-ring-offset: 2px;
+  --rp-cc-ring-halo: rgba(31, 90, 122, 0.18);
+
+  /* 按钮：按类型统一，跨页面同色 */
+  --rp-cc-btn-primary-bg: #2f6b62;
+  --rp-cc-btn-primary-text: #fffdf8;
+  --rp-cc-btn-primary-border: #24564e;
+  --rp-cc-btn-primary-hover: #245a53;
+  --rp-cc-btn-primary-active: #1b4842;
+  --rp-cc-btn-secondary-bg: #fffdf8;
+  --rp-cc-btn-secondary-text: #262b28;
+  --rp-cc-btn-secondary-border: #9c927e;
+  --rp-cc-btn-secondary-hover: #efe9dd;
+  --rp-cc-btn-secondary-active: #e4dccb;
+  --rp-cc-btn-danger-bg: #9c3b36;
+  --rp-cc-btn-danger-text: #fffdf8;
+  --rp-cc-btn-danger-border: #7e2e2a;
+  --rp-cc-btn-danger-hover: #84302c;
+  --rp-cc-btn-danger-active: #6f2824;
+  --rp-cc-btn-ghost-bg: transparent;
+  --rp-cc-btn-ghost-text: #2f5f56;
+  --rp-cc-btn-ghost-border: transparent;
+  --rp-cc-btn-ghost-hover: #eaf1ed;
+  --rp-cc-btn-ghost-active: #dce8e2;
+  --rp-cc-btn-link-bg: transparent;
+  --rp-cc-btn-link-text: #1f5a7a;
+  --rp-cc-btn-link-border: transparent;
+  --rp-cc-btn-link-hover: #e2eef5;
+  --rp-cc-btn-link-active: #cfe2ee;
+  --rp-cc-btn-disabled-bg: #e7e2d6;
+  --rp-cc-btn-disabled-text: #737a72;
+  --rp-cc-btn-disabled-border: #d2c9b7;
+
+  /* 控件：输入/下拉/复选/单选/开关/滑块共用 */
+  --rp-cc-control-bg: #fffdf8;
+  --rp-cc-control-alt-bg: #efe9dd;
+  --rp-cc-control-text: #262b28;
+  --rp-cc-control-placeholder: #69716a;
+  --rp-cc-control-border: #9c927e;
+  --rp-cc-control-border-strong: #7d7058;
+  --rp-cc-control-focus: #1f5a7a;
+  --rp-cc-control-checked: #2f6b62;
+  --rp-cc-control-track: #e4dccb;
+  --rp-cc-control-thumb: #2f6b62;
+  --rp-cc-control-disabled-bg: #efe9dd;
+  --rp-cc-control-disabled-text: #737a72;
+  --rp-cc-tooltip-bg: #2f3733;
+  --rp-cc-tooltip-text: #fffdf8;
+  --rp-cc-tooltip-border: #4a514c;
+
+  /* 表格 */
+  --rp-cc-table-head-bg: #efe9dd;
+  --rp-cc-table-head-text: #3b423c;
+  --rp-cc-table-row: #fffdf8;
+  --rp-cc-table-row-alt: #faf6ed;
+  --rp-cc-table-row-hover: #f1f5ef;
+  --rp-cc-table-row-selected: #deede6;
+  --rp-cc-table-border: #e4dccb;
+  --rp-cc-table-text: #262b28;
+
+  /* 状态：底色 + 深字 + 边框；不单靠颜色，界面自带文字/图标 */
+  --rp-cc-status-success-bg: #e4f0e5;
+  --rp-cc-status-success-text: #2b5b3a;
+  --rp-cc-status-success-border: #8fb79a;
+  --rp-cc-status-warning-bg: #faefcf;
+  --rp-cc-status-warning-text: #6a4b08;
+  --rp-cc-status-warning-border: #d9b45a;
+  --rp-cc-status-danger-bg: #f8e3df;
+  --rp-cc-status-danger-text: #8a322c;
+  --rp-cc-status-danger-border: #d39a91;
+  --rp-cc-status-info-bg: #e2eef5;
+  --rp-cc-status-info-text: #1f4f6b;
+  --rp-cc-status-info-border: #94b8ce;
+  /* 呼吸灯三档：与正文/状态色系分开，保证通知脉冲仍是本主题的主色调。 */
+  --rp-cc-pulse-success: #2f6b62;
+  --rp-cc-pulse-secondary: #7f5522;
+  --rp-cc-pulse-danger: #a4305c;
+
+  /* 分类 1..8 / 图表同序号同色：浅底深字 + 中等饱和图形色 */
+  --rp-cc-cat-1-bg: #e3eff5;
+  --rp-cc-cat-1-text: #20536d;
+  --rp-cc-cat-1-border: #93bed2;
+  --rp-cc-cat-1-chart: #3e86a8;
+  --rp-cc-cat-2-bg: #e2f0ec;
+  --rp-cc-cat-2-text: #235148;
+  --rp-cc-cat-2-border: #8fbfb5;
+  --rp-cc-cat-2-chart: #3f887d;
+  /* 进度条主/次填充：由 cat-1 / cat-2 图表色减半深度得到（R33），专用于 <progress>
+     容量条（FLT 燃料条等），不再复用图表实色，避免浅色陶瓷下燃料条过重。
+     与图表色分离，改这里不影响图表序列配色。 */
+  --rp-cc-progress-primary: #9fc3d4;
+  --rp-cc-progress-secondary: #9fc4be;
+  --rp-cc-cat-3-bg: #eff0da;
+  --rp-cc-cat-3-text: #505024;
+  --rp-cc-cat-3-border: #bfc185;
+  --rp-cc-cat-3-chart: #8a8b3b;
+  --rp-cc-cat-4-bg: #f7ebd6;
+  --rp-cc-cat-4-text: #6b4515;
+  --rp-cc-cat-4-border: #d8b77f;
+  --rp-cc-cat-4-chart: #b17a2b;
+  --rp-cc-cat-5-bg: #f7e5df;
+  --rp-cc-cat-5-text: #773a2e;
+  --rp-cc-cat-5-border: #d6a397;
+  --rp-cc-cat-5-chart: #b25d4a;
+  --rp-cc-cat-6-bg: #ede6f4;
+  --rp-cc-cat-6-text: #503b67;
+  --rp-cc-cat-6-border: #bca8d0;
+  --rp-cc-cat-6-chart: #8164a0;
+  --rp-cc-cat-7-bg: #e5eaf3;
+  --rp-cc-cat-7-text: #324462;
+  --rp-cc-cat-7-border: #a3b3ce;
+  --rp-cc-cat-7-chart: #56729e;
+  --rp-cc-cat-8-bg: #f5e6ec;
+  --rp-cc-cat-8-text: #6a384c;
+  --rp-cc-cat-8-border: #d3a6b8;
+  --rp-cc-cat-8-chart: #a2607b;
+  --rp-cc-chart-grid: #dcd3c2;
+  --rp-cc-chart-axis: #5c655e;
+  --rp-cc-chart-label: #414a44;
+  --rp-cc-accent-line: #3e86a8;
+}
+
+/* 首屏防闪：theme.ts 尚未注入覆盖表时，先把整页底色与正文色定下来。 */
+html[data-rp-theme='ceramic-colorful'] body {
+  background-color: var(--rp-cc-canvas);
+  color: var(--rp-cc-text-primary);
+}

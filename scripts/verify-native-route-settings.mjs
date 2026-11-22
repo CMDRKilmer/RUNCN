@@ -11,9 +11,10 @@
 //
 // 用法：node --experimental-strip-types scripts/verify-native-route-settings.mjs
 // 退出码：0 = 全部通过（末行 PASS n/n）；1 = 有失败（打印 FAIL <场景> expected=… actual=…）。
-// 局限：ftc-compute / BTF 是替身（恒失败，只记录入参，见 scripts/lib/native-route-fuel-stub.mjs），
-// 覆盖的是编排层的油量初始化、作废范围与档位写入，不覆盖 FTC 模型数值与真实试飞。
+// 局限：公式入口和 BTF 使用替身，覆盖油量初始化、缺油停止、作废范围及档位写入。
+// FTC 模型数值由 verify-ftc-formula.mjs 验证。
 import { register } from 'node:module';
+import assert from 'node:assert/strict';
 register('./lib/native-route-fuel-loader.mjs', import.meta.url);
 const { stubSetFuel, stubSetOption, ftcCalls, btfCalls } =
   await import('./lib/native-route-fuel-stub.mjs');
@@ -65,7 +66,7 @@ const refuelAtOrigin = [
   },
   { location: 'B', steps: [] },
 ];
-// 替身 computeFtcPlan 恒失败：每段的调用顺序是 FTC → BTF 试飞（没有第三条估算路径），override 全程必须一致。
+// 没有注入档位结果时，公式返回缺输入，FTC 与 BTF 应收到相同的油量。
 async function runFuel(waypoints) {
   await computeNativeRouteFuel(candidate, waypoints, new AbortController().signal, () => {});
   return {
@@ -150,11 +151,11 @@ await check('改档作废：末段没有下游，只清本段', async failures =
   expectEqual(failures, 'stale', [3], hoursInvalidatedBySettingChange(fourStops, 3, 4, ['STL']));
 });
 
-await check('反应堆档被向上取整时要按写入的档位重算', async failures => {
+await check('原样写入公式返回的整数档位与对应时长', async failures => {
   stubSetFuel({ stlRemaining: 3000, ftlRemaining: 500, stlCap: 3000, ftlCap: 500 });
   stubSetOption({
     reactorRelevant: true,
-    best: { fuel: 0.04, reactor: 0.653, totalHours: 1, stlFuel: 100, ftlFuel: 10 },
+    best: { fuel: 0.05, reactor: 0.66, totalHours: 1, stlFuel: 100, ftlFuel: 10 },
   });
   const result = await computeNativeRouteFuel(
     candidate,
@@ -162,10 +163,18 @@ await check('反应堆档被向上取整时要按写入的档位重算', async f
     new AbortController().signal,
     () => {},
   );
-  expectEqual(failures, 'FTC 调用次数', 2, ftcCalls.length);
-  expectEqual(failures, '重算用的反应堆档', 0.66, ftcCalls[1]?.reactor);
-  expectEqual(failures, '重算用的燃料档', 0.04, ftcCalls[1]?.fuel);
-  expectEqual(failures, '写入的反应堆百分比', 66, result.legs[1]?.reactorPercent);
+  expectEqual(failures, 'FTC 调用次数', 1, ftcCalls.length);
+  expectEqual(failures, '按原生 RT 口径选点', 'value', ftcCalls[0]?.selection);
+  expectEqual(
+    failures,
+    '实际写入档位及对应时长',
+    {
+      fuelPercent: 5,
+      reactorPercent: 66,
+      hours: 1,
+    },
+    result.legs[1],
+  );
 });
 
 // 旧口径的「离港饱和点」已随新公式模型删除，编排层没有任何砍档逻辑：
@@ -191,7 +200,7 @@ await check('选中档位原样写入：不砍档、不报封顶', async failure
   );
 });
 
-await check('出发余量不够的航段要给出警告', async failures => {
+await check('已确认油量不足的航段停止自动创建', async failures => {
   stubSetFuel({ stlRemaining: 3000, ftlRemaining: 50, stlCap: 3000, ftlCap: 500 });
   stubSetOption({
     reactorRelevant: true,
@@ -202,30 +211,17 @@ await check('出发余量不够的航段要给出警告', async failures => {
     { location: 'B', steps: [] },
     { location: 'C', steps: [] },
   ];
-  const result = await computeNativeRouteFuel(
-    candidate,
-    threeStops,
-    new AbortController().signal,
-    () => {},
+  await assert.rejects(
+    computeNativeRouteFuel(candidate, threeStops, new AbortController().signal, () => {}),
+    /B → C：FTL 缺 30 u/,
   );
   expectEqual(
     failures,
-    'FTL 不足警告数',
-    1,
-    result.warnings.filter(x => x.includes('FTL 不够')).length,
+    '余量逐段递减',
+    [50, 10],
+    ftcCalls.map(x => x.ftlFuel),
   );
-  expectEqual(
-    failures,
-    '首段不报缺',
-    false,
-    result.warnings.some(x => x.includes('A → B：FTL 不够')),
-  );
-  expectEqual(
-    failures,
-    '第二段报缺',
-    true,
-    result.warnings.some(x => x.includes('B → C：FTL 不够')),
-  );
+  expectEqual(failures, '不降级成试飞', 0, btfCalls.length);
 });
 
 await check('写入档位向上取整：蓝图下限 0.653 不会写成 65%', async failures => {
