@@ -29,22 +29,34 @@ const DISABLED_BTN = 'rp-rt-disabled-btn';
 // 开关状态的持久化键：刷新页面后仍保持上次的选择，直到用户主动取消。
 const STORAGE_KEY = 'rp-rt-match-only';
 
+// 会话内偏好内存态，作为 localStorage 的权威来源与兜底：
+// - 首次 readMatchOnly 时从 localStorage 初始化一次；
+// - 勾选时 writeMatchOnly 同时更新内存态并尝试落盘。
+// 这样即使存储写入失败（隐私模式/配额满），markTile 重绘时重读到的仍是用户本次
+// 选择，不会用旧值把刚勾上的筛选反转回去。undefined 表示尚未初始化。
+let matchOnlyPreference: boolean | undefined;
+
 // 船表分栏数。
 const COLUMNS = 3;
 
 function readMatchOnly(): boolean {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY) === '1';
-  } catch {
-    return false;
+  if (matchOnlyPreference === undefined) {
+    try {
+      matchOnlyPreference = window.localStorage.getItem(STORAGE_KEY) === '1';
+    } catch {
+      matchOnlyPreference = false;
+    }
   }
+  return matchOnlyPreference;
 }
 
 function writeMatchOnly(value: boolean) {
+  // 先更新内存态：即使落盘失败，本次会话的筛选状态也保持不变。
+  matchOnlyPreference = value;
   try {
     window.localStorage.setItem(STORAGE_KEY, value ? '1' : '0');
   } catch {
-    // 隐私模式等无法写入时静默失败，不影响本次会话的显示效果。
+    // 隐私模式等无法写入时静默失败，内存态已更新，本次会话仍按用户选择显示。
   }
 }
 
