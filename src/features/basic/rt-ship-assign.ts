@@ -1,5 +1,6 @@
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getEntityNaturalIdFromAddress } from '@src/infrastructure/prun-api/data/addresses';
+import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
 // RT 航线界面（如 RT RT-UJEN-4862）的展示增强，只改 DOM 展示层（class / order / CSS grid），
 // 不触碰游戏数据、航线计算或按钮的原始行为：
@@ -220,17 +221,27 @@ function markTileInner(tile: PrunTile) {
     if (!btn) {
       return;
     }
-    if (tr.classList.contains(MATCH_ROW)) {
-      // 可分配：确保复原为可点击状态（重绘复用节点时不残留禁用态）。
+    // 清掉本功能加上的置灰（重绘复用节点时不残留禁用态）。
+    const clearDisabled = () => {
       if (btn.classList.contains(DISABLED_BTN)) {
         btn.disabled = false;
         btn.classList.remove(DISABLED_BTN);
       }
+    };
+    if (tr.classList.contains(MATCH_ROW)) {
+      // 可分配：确保可点击。
+      clearDisabled();
       return;
     }
     if (btn.textContent?.trim() === '分配') {
+      // 不在起点的船：禁用「分配」，避免误点。
       btn.disabled = true;
       btn.classList.add(DISABLED_BTN);
+    } else {
+      // 按钮已不是「分配」（React 复用成「执行」等有效操作）：
+      // 此时航线已填充，本行走不到 MATCH_ROW 分支，必须在这里清掉旧的置灰，
+      // 否则合法的「执行」按钮会残留 disabled=true 而点不动。
+      clearDisabled();
     }
   });
 
@@ -280,23 +291,57 @@ function markTileInner(tile: PrunTile) {
   }
 }
 
+// 与「船只是否在起点待命」判定相关的船状态指纹：registration + 船名 + 所在地点。
+// 燃料、货舱等其它字段变化不应触发本功能重绘，避免 SHIP_DATA 高频推送时空转。
+function shipLocationSignature() {
+  return (
+    shipsStore.all.value
+      ?.map(ship =>
+        [
+          ship.registration,
+          ship.name,
+          getEntityNaturalIdFromAddress(ship.address ?? undefined) ?? '',
+        ].join(':'),
+      )
+      .join('\n') ?? ''
+  );
+}
+
 function onTileReady(tile: PrunTile) {
   markTile(tile);
-  // 船只分配表会随分配/取消分配、数据加载重绘，重绘后重新分类行、补回开关、重排表头。
-  // 用 rAF 做帧级节流：markTile 的所有操作都是幂等的（已正确就不动 DOM），
-  // 因此「变更 -> 再跑一次 -> 无变更」会自然收敛，不需要可能吞掉更新的重入标志。
+
+  // DOM 重绘与船位置数据变化共用一条帧级节流通道：markTile 的操作都是幂等的
+  // （已正确就不动 DOM），「变更 -> 再跑一次 -> 无变更」会自然收敛，
+  // 因此一个 scheduled 标志足够，不需要可能吞掉更新的重入标志。
   let scheduled = false;
-  const observer = new MutationObserver(() => {
+  const schedule = () => {
     if (scheduled) {
       return;
     }
     scheduled = true;
     requestAnimationFrame(() => {
       scheduled = false;
+      if (!tile.frame.isConnected) {
+        return;
+      }
       markTile(tile);
     });
-  });
+  };
+
+  // 船只分配表会随分配/取消分配、数据加载重绘，重绘后重新分类行、补回开关、重排表头。
+  const observer = new MutationObserver(schedule);
   observer.observe(tile.anchor, { childList: true, subtree: true });
+
+  // 未分配船抵达路径点1时，地址经 SHIP_DATA 更新进 store，但船表三列 DOM 可能
+  // 完全不变（船名/航线/指令都相同），MutationObserver 抓不到。额外监听船的位置
+  // 指纹，变化时同样调度重分类，避免船一直保持隐藏/置灰直到重开界面。
+  const stopWatchingShips = watch(shipLocationSignature, schedule);
+
+  // tile 关闭或断开时停掉两条监听，避免 watcher/observer 泄漏与对已卸载节点的写入。
+  onNodeDisconnected(tile.frame, () => {
+    observer.disconnect();
+    stopWatchingShips();
+  });
 }
 
 function init() {
