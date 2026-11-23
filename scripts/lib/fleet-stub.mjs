@@ -84,6 +84,7 @@ export function dispatchForce(message) {
   return changed;
 }
 export const companyContextId = { value: 'CTX' };
+export const userDataStore = reactive({ companyId: '' });
 // 客户端→服务器的请求按原样录下，供报文断言；真实发送在这里不发生。
 export const socketMessages = [];
 export function sendServerMessage(message) {

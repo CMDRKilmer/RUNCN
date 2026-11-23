@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MaterialBurn, computeNeed, getResupplyDays } from '@src/core/burn';
+import { getResupplyDays } from '@src/core/burn';
 import MaterialIcon from '@src/components/MaterialIcon.vue';
 import DaysCell from '@src/features/XIT/BURN/DaysCell.vue';
 import { fixed0, fixed01, fixed02, fixed1, fixed2 } from '@src/utils/format';
@@ -7,10 +7,12 @@ import { useTileState } from '@src/features/XIT/BURN/tile-state';
 import { userData } from '@src/store/user-data';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
+import type { BurnReportRow } from '@src/features/XIT/BURN/utils';
+import { burnReportNeed } from '@src/features/XIT/BURN/burn-purchase';
 
 const { alwaysVisible, burn, material, naturalId } = defineProps<{
   alwaysVisible?: boolean;
-  burn: MaterialBurn;
+  burn: BurnReportRow;
   material: PrunApi.Material;
   // 所属星球编码：用于读取该星球的补给天数覆盖与仓储容量上限，
   // 使「需要」列与 FLEET 执行预览、XIT CBUY 的数量完全一致。
@@ -20,6 +22,9 @@ const { alwaysVisible, burn, material, naturalId } = defineProps<{
 
 const production = computed(() => burn.dailyAmount);
 const invAmount = computed(() => {
+  if (burn.inventory === undefined) {
+    return '—';
+  }
   const amount = burn.inventory + burn.remainingAllocation;
   if (amount >= 100) {
     return fixed0(amount);
@@ -37,12 +42,8 @@ const invFraction = computed(() => {
   const dot = invAmount.value.indexOf('.');
   return dot === -1 ? '' : invAmount.value.slice(dot);
 });
-const isInf = computed(() => production.value >= 0);
+const isInf = computed(() => production.value !== undefined && production.value >= 0);
 const days = computed(() => (isInf.value ? 1000 : burn.daysLeft));
-
-const isRed = computed(() => days.value <= userData.settings.burn.red);
-const isYellow = computed(() => days.value <= userData.settings.burn.yellow);
-const isGreen = computed(() => days.value > userData.settings.burn.yellow);
 
 const red = useTileState('red');
 const yellow = useTileState('yellow');
@@ -51,14 +52,16 @@ const inf = useTileState('inf');
 const io = useTileState('io');
 
 const isVisible = computed(() => {
-  if (alwaysVisible) {
+  if (alwaysVisible || days.value === undefined) {
     return true;
   }
   if (isInf.value) {
     return inf.value;
   }
   return (
-    (isRed.value && red.value) || (isYellow.value && yellow.value) || (isGreen.value && green.value)
+    (days.value <= userData.settings.burn.red && red.value) ||
+    (days.value <= userData.settings.burn.yellow && yellow.value) ||
+    (days.value > userData.settings.burn.yellow && green.value)
   );
 });
 
@@ -67,26 +70,29 @@ function formatAmount(value: number) {
   return abs >= 1000 ? fixed0(abs) : abs >= 100 ? fixed1(abs) : fixed2(abs);
 }
 
-const changeText = computed(() => {
-  if (production.value === 0) {
+function formatChange(value: number | undefined) {
+  if (value === undefined) {
+    return '—';
+  }
+  if (value === 0) {
     return 0;
   }
-  const fixed = formatAmount(production.value);
-  return production.value > 0 ? '+' + fixed : '-' + fixed;
-});
+  return (value > 0 ? '+' : '-') + formatAmount(value);
+}
 
+const changeText = computed(() => formatChange(production.value));
 const changeClass = computed(() => ({
-  [C.ColoredValue.positive]: production.value > 0,
+  [C.ColoredValue.positive]: (production.value ?? 0) > 0,
 }));
 
-const inAmount = computed(() => burn.input + burn.workforce);
 const outAmount = computed(() => burn.output);
-
-const inText = computed(() => (inAmount.value === 0 ? 0 : '-' + formatAmount(inAmount.value)));
-const outText = computed(() => (outAmount.value === 0 ? 0 : '+' + formatAmount(outAmount.value)));
+const inText = computed(() =>
+  formatChange(burn.input === undefined ? undefined : -burn.input - burn.workforce),
+);
+const outText = computed(() => formatChange(outAmount.value));
 
 const outClass = computed(() => ({
-  [C.ColoredValue.positive]: outAmount.value > 0,
+  [C.ColoredValue.positive]: (outAmount.value ?? 0) > 0,
 }));
 
 // 「需要」列：补到目标天数的缺口。目标天数 = 该星球的补给天数（含单星球
@@ -95,7 +101,7 @@ const outClass = computed(() => ({
 const needAmt = computed(() => {
   const site = naturalId ? sitesStore.getByPlanetNaturalIdOrName(naturalId) : undefined;
   const targetDays = clampTargetDays(getResupplyDays(naturalId) ?? 10, getSuppliesCap(site));
-  return computeNeed(burn, targetDays);
+  return burnReportNeed(burn, targetDays);
 });
 </script>
 
@@ -124,9 +130,10 @@ const needAmt = computed(() => {
       <span :class="changeClass">{{ changeText }}</span>
     </td>
     <td>
-      <span>{{ isNaN(needAmt) ? '0' : fixed0(needAmt) }}</span>
+      <span>{{ needAmt === undefined ? '—' : fixed0(needAmt) }}</span>
     </td>
-    <DaysCell :days="days" />
+    <DaysCell v-if="days !== undefined" :days="days" />
+    <td v-else>—</td>
   </tr>
 </template>
 

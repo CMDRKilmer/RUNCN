@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { PlanetBurn } from '@src/core/burn';
 import PlanetHeader from '@src/features/XIT/BURN/PlanetHeader.vue';
 import MaterialList from '@src/features/XIT/BURN/MaterialList.vue';
 import { useTileState } from '@src/features/XIT/BURN/tile-state';
+import type { BurnReportSection } from '@src/features/XIT/BURN/utils';
 
-const { burn, canMinimize } = defineProps<{ burn: PlanetBurn; canMinimize?: boolean }>();
+const { burn, canMinimize } = defineProps<{
+  burn: BurnReportSection;
+  canMinimize?: boolean;
+}>();
 
 const expand = useTileState('expand');
 
