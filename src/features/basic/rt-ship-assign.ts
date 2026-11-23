@@ -341,8 +341,26 @@ function onTileReady(tile: PrunTile) {
   };
 
   // 船只分配表会随分配/取消分配、数据加载重绘，重绘后重新分类行、补回开关、重排表头。
-  const observer = new MutationObserver(schedule);
-  observer.observe(tile.anchor, { childList: true, subtree: true });
+  // 除结构变化（childList）外，还要抓「原地改文本」：React 更新第一个路径点时可能直接
+  // 改已有文本节点的内容，既不增删子节点、船数据也没变，只有 characterData 才能捕获，
+  // 否则筛选/置灰会一直按旧路径点分类，直到无关的重绘或船移动。
+  // 但 characterData 不能在整棵 tile 上无脑触发：RT 界面还有报价、倒计时等高频文本更新，
+  // 每次都重排是白费功夫。所以只对「路径点容器内」的文本变化调度，其余结构变化照旧。
+  const needsRerun = (record: MutationRecord) => {
+    if (record.type !== 'characterData') {
+      // 增删节点（重绘、分配变化等）——保持原有行为。
+      return true;
+    }
+    // 文本内容原位变化：只有路径点目的地会影响「起点待命」判定。
+    const el = record.target.parentElement;
+    return el !== null && el.closest('[class*="Waypoints__container"]') !== null;
+  };
+  const observer = new MutationObserver((records: MutationRecord[]) => {
+    if (records.some(needsRerun)) {
+      schedule();
+    }
+  });
+  observer.observe(tile.anchor, { childList: true, subtree: true, characterData: true });
 
   // 未分配船抵达路径点1时，地址经 SHIP_DATA 更新进 store，但船表三列 DOM 可能
   // 完全不变（船名/航线/指令都相同），MutationObserver 抓不到。额外监听船的位置
