@@ -27,6 +27,9 @@ html[data-rp-theme='starforge'] {
   --rp-cc-text-muted: #8fa5b5;
   --rp-cc-text-inverse: #0b121b;
   --rp-cc-text-link: #7aabbd;
+  /* 「已指定」徽章：每个主题独立配色，底色取本主题主色的加深/霓虹版，文字取与其对比 ≥6.9:1 的一侧（避免用通用 selection 色在深色主题下变半透明）。 */
+  --rp-cc-chosen-bg: #f4ac69;
+  --rp-cc-chosen-fg: #1a1206;
   --rp-cc-text-disabled: #7a8d9d;
   /* 阈值告警与浅蓝链接拉开冷暖，不与橙金主强调色撞色。 */
   --rp-cc-warn-accent: #ff8a4c;

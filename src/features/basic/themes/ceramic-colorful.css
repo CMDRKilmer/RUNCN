@@ -35,6 +35,9 @@ html[data-rp-theme='ceramic-colorful'] {
   --rp-cc-text-muted: #5c655e;
   --rp-cc-text-inverse: #fffdf8;
   --rp-cc-text-link: #1f5a7a;
+  /* 「已指定」徽章：每个主题独立配色，底色取本主题主色的加深/霓虹版，文字取与其对比 ≥6.9:1 的一侧（避免用通用 selection 色在深色主题下变半透明）。 */
+  --rp-cc-chosen-bg: #24564f;
+  --rp-cc-chosen-fg: #ffffff;
   --rp-cc-text-disabled: #737a72;
   /* 「临近阈值」告警字色（R45）：本主题链接是深蓝，告警用深橙拉开冷暖。 */
   --rp-cc-warn-accent: #b45309;

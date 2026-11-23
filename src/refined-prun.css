@@ -159,8 +159,8 @@ html
      把居中的行盒整体左移 2px，墨迹因此落在色框正中；左右内边距之和仍与对称版相等，
      色框宽度不变。 */
   margin: auto;
-  color: var(--rp-skin-ink, #26333d) !important;
-  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  color: var(--rp-skin-ink, currentColor) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, currentColor) !important;
   font-size: 12px !important;
   font-weight: 700;
   letter-spacing: 2px;
@@ -751,8 +751,8 @@ html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='ActionFeedback__error
 
 .rp-command-INV:not([data-rp-fb-panel] *) [class*='SectionHeader__container'][data-label]::after {
   content: attr(data-label);
-  color: var(--rp-skin-ink, #26333d) !important;
-  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  color: var(--rp-skin-ink, currentColor) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, currentColor) !important;
   font-size: 12px !important;
   font-weight: 700;
   letter-spacing: 2px;
@@ -811,8 +811,8 @@ html
   :is(.rp-command-INV, .rp-command-SHPI)[data-rp-inv-compact='off']
   [class*='SectionHeader__container'][data-label]::after {
   content: attr(data-label);
-  color: var(--rp-skin-ink, #26333d) !important;
-  -webkit-text-fill-color: var(--rp-skin-ink, #26333d) !important;
+  color: var(--rp-skin-ink, currentColor) !important;
+  -webkit-text-fill-color: var(--rp-skin-ink, currentColor) !important;
   font-size: 12px !important;
   font-weight: 700;
   letter-spacing: 2px;

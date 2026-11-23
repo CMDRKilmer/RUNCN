@@ -9,7 +9,7 @@
 // SFC 按此跳过滑块写入（宁可不动，也不写错值），FLEET 按此标缺。
 import { blueprintsStore } from '@src/infrastructure/prun-api/data/blueprints';
 import { stlFuelMassPerUnit } from '@src/core/flight/stl';
-import { FlightInputError } from '@src/infrastructure/fio/flight-formula';
+import { FlightFuelError, FlightInputError } from '@src/infrastructure/fio/flight-formula';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { gameNow } from '@src/infrastructure/fio/orbit';
 import { sleep } from '@src/utils/sleep';
@@ -18,9 +18,13 @@ import type {
   FlightRequest,
   FormulaFlight,
 } from '@src/infrastructure/fio/flight-formula';
-import { pickBestValueOption } from '@src/core/flight/fuel-options';
 import { loadFormulaInputs } from './formula-inputs';
-import { calculateFormulaOptions, type FormulaOption, type FormulaPrices } from './formula-options';
+import {
+  calculateFormulaOptions,
+  type FormulaOption,
+  type FormulaPrices,
+  type FormulaSelection,
+} from './formula-options';
 import { shipFuelRemainingFor } from './ship-fuel';
 
 export interface FormulaPlanRequest {
@@ -40,8 +44,8 @@ export interface FormulaPlanRequest {
   fuel?: number;
   reactor?: number;
   prices?: Partial<FormulaPrices>;
-  // 选点口径：'balance'（成本/平衡点，SFC 与环线时长）或 'value'（最优性价比，原生 RT）。
-  selection?: 'balance' | 'value';
+  // 'value' 仅用于原生 RT：按整数档在油量足够的方案中选性价比档。
+  selection?: FormulaSelection;
 }
 
 export interface FormulaPlan {
@@ -49,6 +53,7 @@ export interface FormulaPlan {
   message: string;
   // 非空 = 输入缺失，方案不可信：SFC 不得写滑块，FLEET 按缺项显示。
   inputIncomplete?: string[];
+  insufficientFuel?: boolean;
   best?: FormulaOption;
   options?: FormulaOption[];
   request?: FlightRequest;
@@ -107,6 +112,8 @@ export async function planFormulaFlight(input: FormulaPlanRequest): Promise<Form
     };
   }
   const remaining = shipFuelRemainingFor(ship);
+  const stlKnown = input.stlFuel !== undefined || remaining.stlCap > 0;
+  const ftlKnown = input.ftlFuel !== undefined || remaining.ftlCap > 0;
   const stlFuel = input.stlFuel ?? (remaining.stlCap > 0 ? remaining.stlRemaining : 0);
   const ftlFuel = input.ftlFuel ?? (remaining.ftlCap > 0 ? remaining.ftlRemaining : 0);
   const ftlWeight = blueprint.performance.ftlFuelMaterial?.weight ?? 0;
@@ -138,23 +145,39 @@ export async function planFormulaFlight(input: FormulaPlanRequest): Promise<Form
   };
   const optimize = input.fuel === undefined;
   try {
-    const output = calculateFormulaOptions(
+    const { best, options } = calculateFormulaOptions(
       request,
       blueprint,
       loaded.input,
       atMs,
       { stl: input.prices?.stl, ftl: input.prices?.ftl, time: input.prices?.time ?? 0 },
       optimize,
+      input.selection,
     );
-    const best =
-      input.selection === 'value'
-        ? (pickBestValueOption(output.options) ?? output.best)
-        : output.best;
+    const insufficientFuel = input.selection === 'value' && !best.feasible;
+    const unknownTanks = [
+      best.stlShortage > 0 && !stlKnown ? 'STL 油箱数据' : undefined,
+      best.ftlShortage > 0 && !ftlKnown ? 'FTL 油箱数据' : undefined,
+    ].filter(x => x !== undefined);
+    if (insufficientFuel && unknownTanks.length > 0) {
+      return {
+        ok: false,
+        message: `缺少${unknownTanks.join('、')}，无法核对出发余油。`,
+        inputIncomplete: unknownTanks,
+        reactorRelevant: best.reactorRelevant,
+        remaining,
+      };
+    }
+    const shortages = [
+      best.stlShortage > 0 ? `STL 缺 ${Math.ceil(best.stlShortage)} u` : undefined,
+      best.ftlShortage > 0 ? `FTL 缺 ${Math.ceil(best.ftlShortage)} u` : undefined,
+    ].filter(x => x !== undefined);
     return {
-      ok: true,
-      message: '',
+      ok: !insufficientFuel,
+      message: insufficientFuel ? `已扫描的档位均油量不足（${shortages.join('、')}）。` : '',
+      insufficientFuel,
       best,
-      options: output.options,
+      options,
       request: { ...request, origin: loaded.origin, destination: loaded.destination },
       route: best.route,
       reactorRelevant: best.reactorRelevant,
@@ -162,6 +185,18 @@ export async function planFormulaFlight(input: FormulaPlanRequest): Promise<Form
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (input.selection === 'value' && error instanceof FlightFuelError) {
+      if (!stlKnown) {
+        return {
+          ok: false,
+          message: '缺少 STL 油箱数据，无法核对出发余油。',
+          inputIncomplete: ['STL 油箱数据'],
+          reactorRelevant: false,
+          remaining,
+        };
+      }
+      return { ok: false, message, insufficientFuel: true, reactorRelevant: false, remaining };
+    }
     if (error instanceof FlightInputError) {
       return { ok: false, message, inputIncomplete: [message], reactorRelevant: false, remaining };
     }

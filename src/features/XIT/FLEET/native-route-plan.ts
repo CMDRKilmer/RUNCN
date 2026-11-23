@@ -15,6 +15,25 @@ export interface NativeWaypoint {
   steps: NativeRouteStep[];
 }
 
+export interface NativeRouteLegPercent {
+  fuelPercent: number;
+  reactorPercent?: number;
+  hours?: number;
+}
+
+export function nativeFormulaLeg(option: {
+  fuel: number;
+  reactor: number;
+  reactorRelevant: boolean;
+  totalHours: number;
+}): NativeRouteLegPercent {
+  return {
+    fuelPercent: Math.round(option.fuel * 100),
+    reactorPercent: option.reactorRelevant ? Math.round(option.reactor * 100) : undefined,
+    hours: option.totalHours,
+  };
+}
+
 // 航点的燃料消耗与反应堆使用量都是 1–100% 的整数档。
 export function isWaypointPercent(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 100;

@@ -86,12 +86,16 @@ export async function computeLoopPlan(
       stops,
       legPayloads,
       refuelAtOrigin: true,
+      nativeRoute: true,
     });
     // 任一段判缺 ⇒ 得不到可靠周期，退回单趟（不进入循环模式）。
     if (!est.ok) {
+      const failures = est.legs
+        .filter(leg => !leg.ok)
+        .map(leg => `${leg.from} → ${leg.to}：${leg.missingInputs?.join('；') ?? leg.error}`);
       return {
         ok: false,
-        reasons: ['飞行估时不完整，无法确定循环周期。'],
+        reasons: ['飞行估时不完整，无法确定循环周期。', ...failures],
         plan,
         estimate: est,
         iterations,
