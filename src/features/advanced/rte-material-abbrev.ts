@@ -6,7 +6,13 @@ import onNodeDisconnected from '@src/utils/on-node-disconnected';
 // 游戏自己的执行数据驱动，本功能既不影响计算也不影响自动装卸。刷新页面即恢复原文。
 
 // 匹配「<物料名>，<数字(可含千分位)>单位」，排除「从本地仓储加注至…，最大容量」这类说明。
-const SUMMARY_RE = /^(.+)，([\d,]+)单位$/;
+// 千分位分隔符随界面语言走：zh/en 是 ","、de 是 "."、fr 是空格（普通/NBSP/窄 NBSP）、
+// 部分语言是 "'"。只认逗号会让 `水，1.000单位`、`水，1 000单位` 这类本地化数量匹配失败，
+// 那些步骤就保持原文不缩写。数量本身是整数，这些分隔符统统接受，捕获时原样保留。
+// 物料名与数量之间的逗号同样可能被本地化成半角，这里两种都认。
+// 名字用懒惰匹配：数量里允许出现 "," "."，贪婪匹配会把 `水，1,000单位` 拆成
+// 名字「水，1」+ 数量「000」，反过来匹配不到物料名而整行不缩写。
+const SUMMARY_RE = /^(.+?)[，,]\s*(\d[\d.,'’\u00A0\u2009\u202F ]*)\s*单位$/;
 
 function abbreviate(summary: HTMLElement) {
   const text = summary.textContent;
@@ -17,7 +23,9 @@ function abbreviate(summary: HTMLElement) {
   if (!match) {
     return;
   }
-  const [, name, amount] = match;
+  // 数量两侧可能有 NBSP 之类的空白（`1,000 单位`），去掉尾部空白，别把空格带进缩写。
+  const [, name, rawAmount] = match;
+  const amount = rawAmount.trim();
   const material = getMaterialByName(name);
   if (!material?.ticker) {
     // 物料名映射尚未就绪时保持原文，等 i18n / store 加载后由后续 observer 再试。
