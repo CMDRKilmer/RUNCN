@@ -28,7 +28,3 @@ export const govhQuoteRef = shallowRef<GovhQuote | undefined>(undefined);
 export function setGovhQuote(quote: GovhQuote) {
   govhQuoteRef.value = quote;
 }
-
-export function getGovhQuote(): GovhQuote | undefined {
-  return govhQuoteRef.value;
-}
