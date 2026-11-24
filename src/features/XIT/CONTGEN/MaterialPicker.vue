@@ -153,7 +153,8 @@ function onDocClick(e: MouseEvent) {
 onMounted(() => {
   document.addEventListener('mousedown', onDocClick);
   window.addEventListener('scroll', onScroll, true);
-  void nextTick(() => inputEl.value?.focus());
+  // 不自动聚焦：挂载即 focus 会触发 onFocus 弹出下拉菜单，遮挡同面板的
+  // JSON 文本框，也让草案一打开就有个浮动菜单挡在前面。由玩家点击时再聚焦。
 });
 
 onBeforeUnmount(() => {
@@ -215,17 +216,20 @@ onBeforeUnmount(() => {
   border-color: #66afe9;
 }
 
+/* 同 AddressPicker：用主题 token 取色，避免写死的深底/5% 白在浅色主题下
+   hover 看不出、文字糊在底色里。fallback 保留原深色值给老皮肤。 */
 .dropdown {
   z-index: 10000;
   margin: 0;
   padding: 2px;
   list-style: none;
-  background: #1e1e1e;
-  border: 1px solid #555;
+  background: var(--rp-cc-surface, #1e1e1e);
+  color: var(--rp-cc-text-primary, #ddd);
+  border: 1px solid var(--rp-cc-border-default, #555);
   border-radius: 2px;
   max-height: 260px;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--rp-cc-shadow-popover, 0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
 .option {
@@ -235,24 +239,27 @@ onBeforeUnmount(() => {
   padding: 3px 6px;
   cursor: pointer;
   font-size: 11px;
+  border-radius: 2px;
 }
 
 .option:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--rp-cc-table-row-hover, rgba(255, 255, 255, 0.12));
 }
 
 .option.active {
-  background: rgba(102, 175, 233, 0.25);
+  background: var(--rp-cc-table-row-selected, rgba(102, 175, 233, 0.35));
+  color: var(--rp-cc-text-primary, inherit);
+  outline: 1px solid var(--rp-cc-accent-line, transparent);
 }
 
 .ticker {
   font-family: monospace;
   font-weight: bold;
-  color: #f0ad4e;
+  color: var(--rp-cc-warn-accent, #f0ad4e);
   min-width: 40px;
 }
 
 .name {
-  color: #ccc;
+  color: var(--rp-cc-text-secondary, #ccc);
 }
 </style>

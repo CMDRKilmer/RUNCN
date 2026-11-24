@@ -12,7 +12,6 @@ import { lowFuelShips } from '@src/features/basic/auto-refuel';
 import { queueTriggerRun } from '@src/features/XIT/ACT/trigger-queue';
 import EditTrigger from '@src/features/XIT/TRIGGER/EditTrigger.vue';
 import { triggerEngine } from '@src/features/basic/automation-triggers/trigger-engine';
-import { isChainTrigger } from '@src/features/XIT/FLEET/chain-identity';
 
 const eventLabels: Record<UserData.TriggerEventType, string> = {
   FLIGHT_ENDED: '飞船到港',
@@ -77,35 +76,6 @@ function onDeleteClick(e: Event, trigger: UserData.TriggerData) {
     message: `确定要删除触发器 "${trigger.name || '--'}" 吗？`,
     confirmLabel: '删除',
   });
-}
-
-// 环线自动 vs 手动自定义触发器：分页展示。
-// 环线自动 = FLIGHT_ENDED 且操作包为环线命名约定（isChainTrigger）。
-const currentTab = ref<'auto' | 'custom'>('auto');
-const autoTriggers = computed(() => userData.triggers.filter(isChainTrigger));
-const customTriggers = computed(() => userData.triggers.filter(t => !isChainTrigger(t)));
-const currentTriggers = computed(() =>
-  currentTab.value === 'auto' ? autoTriggers.value : customTriggers.value,
-);
-
-// 删除全部：仅删除环线自动触发器（环线重跑可重新生成），
-// 手动创建的自定义触发器不受影响。
-function onDeleteAllClick(e: Event) {
-  showConfirmationOverlay(
-    e,
-    () => {
-      for (let i = userData.triggers.length - 1; i >= 0; i--) {
-        if (isChainTrigger(userData.triggers[i]!)) {
-          userData.triggers.splice(i, 1);
-        }
-      }
-      triggerEngine.start();
-    },
-    {
-      message: `确定要删除全部环线自动触发器（${autoTriggers.value.length} 条）吗？自定义触发器不受影响。`,
-      confirmLabel: '删除全部',
-    },
-  );
 }
 
 // MANUAL 模式：点击执行按钮，直接把操作包入队并打开 XIT ACT 窗口运行。
@@ -206,28 +176,6 @@ function onOpenNxClick() {
     </p>
   </div>
   <SectionHeader>触发器</SectionHeader>
-  <div :class="$style.tabs">
-    <RadioItem
-      :model-value="currentTab === 'auto'"
-      horizontal
-      @update:model-value="
-        v => {
-          if (v) currentTab = 'auto';
-        }
-      ">
-      环线自动（{{ autoTriggers.length }}）
-    </RadioItem>
-    <RadioItem
-      :model-value="currentTab === 'custom'"
-      horizontal
-      @update:model-value="
-        v => {
-          if (v) currentTab = 'custom';
-        }
-      ">
-      自定义（{{ customTriggers.length }}）
-    </RadioItem>
-  </div>
   <table>
     <thead>
       <tr>
@@ -242,15 +190,13 @@ function onOpenNxClick() {
         <th />
       </tr>
     </thead>
-    <tbody v-if="currentTriggers.length === 0">
+    <tbody v-if="userData.triggers.length === 0">
       <tr>
-        <td colspan="8" :class="$style.emptyRow">
-          {{ currentTab === 'auto' ? '还没有环线自动触发器。' : '还没有自定义触发器。' }}
-        </td>
+        <td colspan="9" :class="$style.emptyRow">还没有触发器。</td>
       </tr>
     </tbody>
     <tbody v-else>
-      <tr v-for="trigger in currentTriggers" :key="trigger.id">
+      <tr v-for="trigger in userData.triggers" :key="trigger.id">
         <td>{{ trigger.name || '--' }}</td>
         <td>{{ describeEvent(trigger.event) }}</td>
         <td>
@@ -287,13 +233,7 @@ function onOpenNxClick() {
   </table>
   <form :class="$style.sectionCommands">
     <Commands>
-      <PrunButton v-if="currentTab === 'custom'" primary @click="onAddClick">添加</PrunButton>
-      <PrunButton
-        v-if="currentTab === 'auto' && autoTriggers.length > 0"
-        dark
-        @click="onDeleteAllClick">
-        删除全部
-      </PrunButton>
+      <PrunButton primary @click="onAddClick">添加</PrunButton>
     </Commands>
   </form>
   <p :class="$style.hint">
@@ -314,13 +254,6 @@ function onOpenNxClick() {
 .warning {
   color: #e06c75;
   margin: 0;
-}
-
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
 }
 
 .modeSwitch {
@@ -367,13 +300,6 @@ function onOpenNxClick() {
 
 .emptyRow {
   text-align: center;
-}
-
-.autoBadge {
-  font-size: calc(0.8em + 0.2em * var(--rp-font-enlargement));
-  color: #56b6c2;
-  font-family: monospace;
-  letter-spacing: 0.5px;
 }
 
 .sectionCommands {

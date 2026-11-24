@@ -5,7 +5,6 @@ import { initAudioInterceptor } from '@src/infrastructure/prun-ui/audio-intercep
 import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import { companyStore } from '@src/infrastructure/prun-api/data/company';
 import * as boardApi from '@src/infrastructure/org-api/board';
-import { getFleetRuntime } from '@src/features/XIT/FLEET/chain-runtime';
 import PmmgMigrationGuide from '@src/components/PmmgMigrationGuide.vue';
 
 // 启用扩展时上报当前 PrUn 用户在线（ORG NON_ORG 统计的来源）。
@@ -44,7 +43,6 @@ async function main() {
 
     console.log(`Refined PrUn ${config.version}`);
     initializeUserData();
-    getFleetRuntime();
     void reportExtensionUserOnStartup();
     features.init();
     xit.init();

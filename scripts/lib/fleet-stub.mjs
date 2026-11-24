@@ -13,8 +13,9 @@ export const fixture = {
   stations: {},
   exchanges: {},
   warehouses: {},
+  addresses: {},
 };
-export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: [] });
+export const userData = reactive({ actionPackages: [], triggers: [] });
 export const sitesStore = {
   all: ref([]),
   getByPlanetNaturalId: id => sitesStore.all.value.find(x => x.siteId === id),
@@ -36,8 +37,7 @@ export const warehousesStore = {
   getByEntityNaturalId: id => fixture.warehouses[id],
 };
 export const getStarNaturalId = star => star.systemId;
-// 航点地址编码只在按航班推断航线时参与匹配；本套契约不覆盖那条路径。
-export const encodeAddress = () => undefined;
+export const encodeAddress = address => address?.encoded;
 export const storagesStore = { getByAddressableId: () => [], getById: id => fixture.stores[id] };
 export const productionStore = { getBySiteId: id => fixture.production[id] };
 export const materialsStore = {
@@ -91,8 +91,7 @@ export function sendServerMessage(message) {
   socketMessages.push(message);
   return true;
 }
-// 航点地址编码只在整条航线写入（writeRoute）里参与，本套契约不覆盖那条路径。
-export const resolveEntity = async () => undefined;
+export const resolveEntity = async naturalId => fixture.addresses[naturalId];
 export const sleep = () => Promise.resolve();
 export const estimation = { calls: [], pending: null, result: null };
 export async function estimateChainFlightTimes(input) {
@@ -105,26 +104,6 @@ export async function estimateChainFlightTimes(input) {
   }
   return { ok: false, legs: [], totalHours: 0, approximatedLegs: 0 };
 }
-export const serializeStorage = store => store.id;
 export const fixed0 = n => String(Math.round(n));
-let nextId = 0;
-export const createId = () => String(++nextId).padStart(10, '0');
-export const stripDeletedActions = () => {};
-export class HttpError extends Error {}
-export const loadSession = () => ({ user: { companyCode: 'TEST' } });
-export const transport = { pushes: [], fetches: 0, remote: null, pending: null };
-export async function fetchChainSync() {
-  transport.fetches++;
-  return transport.remote;
-}
-export async function fetchChainSyncs() {
-  transport.fetches++;
-  return [];
-}
-export async function pushChainSync(key, doc, base) {
-  transport.pushes.push({ key, doc: structuredClone(doc), base });
-  if (transport.pending !== null) {
-    await transport.pending;
-  }
-  return transport.result ?? { ok: true, updatedAt: 1000 + transport.pushes.length };
-}
+export const getInvStore = () => undefined;
+export const tilesStore = {};

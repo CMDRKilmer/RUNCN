@@ -41,6 +41,15 @@ interface DraftConfig {
 
 const MARKER = 'data-rprun-auto-fill';
 
+// 嵌入版 CONGEN 容器（advanced/contd-embed-contgen 挂载时）的标记。旧「JSON 配置」
+// 面板只在生成器确实在场时才隐藏：本功能属 basic、始终加载，而无条件隐藏会让
+// BASIC 模式（advanced 功能不加载）或本功能被关掉时，既没有生成器、也没有 JSON
+// 手动入口。标记字符串需与 advanced/contd-embed-contgen.ts 的 MARKER 保持一致。
+const EMBED_MARKER = '[data-rp-contd-embed-contgen]';
+
+// 标记面板「因为被嵌入生成器取代而隐藏」，供 setStatus 判断出错时要不要临时露出来。
+const HIDDEN_BY_EMBED = 'data-rprun-legacy-hidden';
+
 // Per-panel id for the injected textarea. The label's `for` must
 // point at a real element id so the browser associates them — the
 // DevTools accessibility check flags unassociated form fields. A
@@ -949,13 +958,138 @@ function findLabeledInput(root: HTMLElement, labelText: string): HTMLInputElemen
   return null;
 }
 
+function validateConfig(raw: unknown): DraftConfig {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new Error('JSON must be an object');
+  }
+  const cfg = raw as Record<string, unknown>;
+  if (typeof cfg.template !== 'string' || cfg.template.length === 0) {
+    throw new Error('"template" is required (e.g. "BUY", "SELL", "SHIP")');
+  }
+  const template = cfg.template.toUpperCase();
+  if (typeof cfg.currency !== 'string' || cfg.currency.length === 0) {
+    throw new Error('"currency" is required (e.g. "NCC", "ICA", "CIS", "AIC")');
+  }
+  if (!Array.isArray(cfg.items) || cfg.items.length === 0) {
+    throw new Error('"items" must be a non-empty array');
+  }
+  for (let i = 0; i < cfg.items.length; i++) {
+    const item = cfg.items[i] as Record<string, unknown> | null;
+    if (item === null || typeof item !== 'object') {
+      throw new Error(`items[${i}] must be an object`);
+    }
+    if (typeof item.amount !== 'number' || !isFinite(item.amount) || item.amount <= 0) {
+      throw new Error(`items[${i}].amount must be a positive number`);
+    }
+    if (typeof item.commodity !== 'string' || item.commodity.trim().length === 0) {
+      throw new Error(`items[${i}].commodity is required`);
+    }
+    // For BUY/SELL, each row needs a per-row price — unless a top-
+    // level `price` is set, in which case it defaults every row's
+    // price. Per-row `price` overrides the top-level value when
+    // present (so heterogeneous prices work too). For SHIP, the
+    // top-level `price` is required and shared across all rows.
+    if (template !== 'SHIP') {
+      const rowPrice = item.price ?? cfg.price;
+      if (typeof rowPrice !== 'number' || !isFinite(rowPrice) || rowPrice < 0) {
+        throw new Error(`items[${i}].price (or top-level "price") must be a non-negative number`);
+      }
+    } else if (
+      item.price !== undefined &&
+      (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0)
+    ) {
+      throw new Error(`items[${i}].price must be a non-negative number if provided`);
+    }
+  }
+  if (template === 'SHIP') {
+    if (
+      cfg.price === undefined ||
+      typeof cfg.price !== 'number' ||
+      !isFinite(cfg.price) ||
+      cfg.price < 0
+    ) {
+      throw new Error('"price" is required for SHIP contracts (single price for all items)');
+    }
+  }
+  // Location requirements differ by template:
+  //   BUY/SELL — single delivery point (`location`)
+  //   SHIP     — origin + destination (the shipper is the intermediary;
+  //              one of these must match the shipper's current location)
+  if (template === 'SHIP') {
+    if (typeof cfg.origin !== 'string' || cfg.origin.trim().length === 0) {
+      throw new Error('"origin" is required for SHIP contracts');
+    }
+    if (typeof cfg.destination !== 'string' || cfg.destination.trim().length === 0) {
+      throw new Error('"destination" is required for SHIP contracts');
+    }
+    // SHIP is a transport contract between two distinct locations —
+    // PrUn will reject origin === destination. Compare after the
+    // alias expansion so e.g. `HRT`/`hrt`/`Hortus Station` (all
+    // expanded to `VH-331a`) collide as expected.
+    const originExpanded = expandLocationAlias(cfg.origin).trim().toUpperCase();
+    const destinationExpanded = expandLocationAlias(cfg.destination).trim().toUpperCase();
+    if (originExpanded === destinationExpanded) {
+      throw new Error(
+        `"origin" and "destination" must be different for SHIP contracts (both resolved to "${originExpanded}")`,
+      );
+    }
+  } else {
+    if (typeof cfg.location !== 'string' || cfg.location.trim().length === 0) {
+      throw new Error('"location" is required (use "origin" + "destination" for SHIP)');
+    }
+  }
+  if (cfg.deadline !== undefined && (typeof cfg.deadline !== 'number' || !isFinite(cfg.deadline))) {
+    throw new Error('"deadline" must be a number when provided');
+  }
+  if (cfg.name !== undefined && (typeof cfg.name !== 'string' || cfg.name.length === 0)) {
+    throw new Error('"name" must be a non-empty string when provided');
+  }
+  return cfg as unknown as DraftConfig;
+}
+
+// 把 CONTGEN 生成的合同 JSON 直接填充到「当前」打开的 CONTD 草案。
+// 与旧的「粘贴 JSON + 填写」面板共用同一套校验与 applyConfig，故行为完全一致；
+// 嵌入到 CONTD 里的 CONTGEN 生成器调用此函数即可就地填充，不再新建草案。
+export async function fillDraft(tile: PrunTile, json: string): Promise<void> {
+  const parsed: unknown = JSON.parse(json);
+  const config = validateConfig(parsed);
+  await applyConfig(tile, config);
+}
+
+// 隐藏旧「JSON 配置」面板。由嵌入生成器（advanced/contd-embed-contgen）在挂载后
+// 调用，保证「无替代品就不隐藏」。只加 class 不改 DOM 结构：React 重绘时按原
+// 父子关系卸载，移动节点会抛 NotFoundError。
+export function hideLegacyPanel(root: ParentNode): void {
+  for (const row of root.querySelectorAll<HTMLElement>(`[${MARKER}]`)) {
+    // 记下「这次隐藏是嵌入生成器要求的」，出错时 setStatus 才知道可以把面板临时放出来。
+    row.setAttribute(HIDDEN_BY_EMBED, 'true');
+    row.classList.add($style.hiddenLegacy);
+  }
+}
+
 function buildPanel(tile: PrunTile) {
   // Build a native FormComponent row: label on the left, input column on
   // the right. This mirrors the 合同注解 / 周期重复 rows above so the
   // panel blends in with the surrounding CONTD header.
   const row = document.createElement('div');
-  row.className = `${C.FormComponent.containerPassive} ${C.forms.passive} ${C.forms.formComponent}`;
+  // 「JSON 配置」面板在嵌入生成器在场时由它取代，手动入口不再展示；但只有生成器
+  // 确实挂载时才隐藏（无替代品时隐藏等于把功能删掉）。保留 DOM 不 display:none：
+  // 独立 CONTGEN 的「新建合同并填充」仍靠它消费 contgen-output workspace key 并
+  // 自动填充（见下方 autoFilledFromContgen 分支）。与生成器的先后顺序两种都有，
+  // 另一方向由 contd-embed-contgen 调用 hideLegacyPanel 补齐。
+  const hasEmbeddedGenerator = tile.anchor.querySelector(EMBED_MARKER) !== null;
+  row.className = [
+    C.FormComponent.containerPassive,
+    C.forms.passive,
+    C.forms.formComponent,
+    hasEmbeddedGenerator ? $style.hiddenLegacy : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
   row.setAttribute(MARKER, 'true');
+  if (hasEmbeddedGenerator) {
+    row.setAttribute(HIDDEN_BY_EMBED, 'true');
+  }
 
   const inputId = `rprun-contd-json-${nextPanelInputId++}`;
   const label = document.createElement('label');
@@ -1024,98 +1158,14 @@ function buildPanel(tile: PrunTile) {
   function setStatus(text: string, isError = false) {
     status.textContent = text;
     status.classList.toggle($style.error, isError);
-  }
-
-  function validateConfig(raw: unknown): DraftConfig {
-    if (typeof raw !== 'object' || raw === null) {
-      throw new Error('JSON must be an object');
+    // 面板因被嵌入生成器取代而整行藏成 1×1 时，错误信息也会一起看不见。而
+    // 「新建合同并填充 / 发送到 CONTD」的自动填充正是走这条链路（workspace 里
+    // 放 JSON → 面板挂载后自动点「填写」），失败只写在这里，独立 CONTGEN 侧早已
+    // 显示「完成」。所以出错时临时撤销隐藏，把原因和「填写」按钮（重试入口）露
+    // 出来；非错误状态再收回去，平时不占版面。
+    if (row.hasAttribute(HIDDEN_BY_EMBED)) {
+      row.classList.toggle($style.hiddenLegacy, !isError);
     }
-    const cfg = raw as Record<string, unknown>;
-    if (typeof cfg.template !== 'string' || cfg.template.length === 0) {
-      throw new Error('"template" is required (e.g. "BUY", "SELL", "SHIP")');
-    }
-    const template = cfg.template.toUpperCase();
-    if (typeof cfg.currency !== 'string' || cfg.currency.length === 0) {
-      throw new Error('"currency" is required (e.g. "NCC", "ICA", "CIS", "AIC")');
-    }
-    if (!Array.isArray(cfg.items) || cfg.items.length === 0) {
-      throw new Error('"items" must be a non-empty array');
-    }
-    for (let i = 0; i < cfg.items.length; i++) {
-      const item = cfg.items[i] as Record<string, unknown> | null;
-      if (item === null || typeof item !== 'object') {
-        throw new Error(`items[${i}] must be an object`);
-      }
-      if (typeof item.amount !== 'number' || !isFinite(item.amount) || item.amount <= 0) {
-        throw new Error(`items[${i}].amount must be a positive number`);
-      }
-      if (typeof item.commodity !== 'string' || item.commodity.trim().length === 0) {
-        throw new Error(`items[${i}].commodity is required`);
-      }
-      // For BUY/SELL, each row needs a per-row price — unless a top-
-      // level `price` is set, in which case it defaults every row's
-      // price. Per-row `price` overrides the top-level value when
-      // present (so heterogeneous prices work too). For SHIP, the
-      // top-level `price` is required and shared across all rows.
-      if (template !== 'SHIP') {
-        const rowPrice = item.price ?? cfg.price;
-        if (typeof rowPrice !== 'number' || !isFinite(rowPrice) || rowPrice < 0) {
-          throw new Error(`items[${i}].price (or top-level "price") must be a non-negative number`);
-        }
-      } else if (
-        item.price !== undefined &&
-        (typeof item.price !== 'number' || !isFinite(item.price) || item.price < 0)
-      ) {
-        throw new Error(`items[${i}].price must be a non-negative number if provided`);
-      }
-    }
-    if (template === 'SHIP') {
-      if (
-        cfg.price === undefined ||
-        typeof cfg.price !== 'number' ||
-        !isFinite(cfg.price) ||
-        cfg.price < 0
-      ) {
-        throw new Error('"price" is required for SHIP contracts (single price for all items)');
-      }
-    }
-    // Location requirements differ by template:
-    //   BUY/SELL — single delivery point (`location`)
-    //   SHIP     — origin + destination (the shipper is the intermediary;
-    //              one of these must match the shipper's current location)
-    if (template === 'SHIP') {
-      if (typeof cfg.origin !== 'string' || cfg.origin.trim().length === 0) {
-        throw new Error('"origin" is required for SHIP contracts');
-      }
-      if (typeof cfg.destination !== 'string' || cfg.destination.trim().length === 0) {
-        throw new Error('"destination" is required for SHIP contracts');
-      }
-      // SHIP is a transport contract between two distinct locations —
-      // PrUn will reject origin === destination. Compare after the
-      // alias expansion so e.g. `HRT`/`hrt`/`Hortus Station` (all
-      // expanded to `VH-331a`) collide as expected.
-      const originExpanded = expandLocationAlias(cfg.origin).trim().toUpperCase();
-      const destinationExpanded = expandLocationAlias(cfg.destination).trim().toUpperCase();
-      if (originExpanded === destinationExpanded) {
-        throw new Error(
-          `"origin" and "destination" must be different for SHIP contracts (both resolved to "${originExpanded}")`,
-        );
-      }
-    } else {
-      if (typeof cfg.location !== 'string' || cfg.location.trim().length === 0) {
-        throw new Error('"location" is required (use "origin" + "destination" for SHIP)');
-      }
-    }
-    if (
-      cfg.deadline !== undefined &&
-      (typeof cfg.deadline !== 'number' || !isFinite(cfg.deadline))
-    ) {
-      throw new Error('"deadline" must be a number when provided');
-    }
-    if (cfg.name !== undefined && (typeof cfg.name !== 'string' || cfg.name.length === 0)) {
-      throw new Error('"name" must be a non-empty string when provided');
-    }
-    return cfg as unknown as DraftConfig;
   }
 
   button.addEventListener('click', async () => {

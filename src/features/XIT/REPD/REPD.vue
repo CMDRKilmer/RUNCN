@@ -102,7 +102,13 @@ const filteredBases = computed(() => {
   return filter.value === 'all' ? list : list.filter(x => x.status === filter.value);
 });
 
-const dueBases = computed(() => (bases.value ?? []).filter(x => x.status !== 'later'));
+// unknown（最优还没算出来）不计入「到期」统计，避免数据刚加载时数字乱跳。
+const dueBases = computed(() =>
+  (bases.value ?? []).filter(x => x.status === 'overdue' || x.status === 'soon'),
+);
+// 最优还没算出来的站数：> 0 时列表上方显示一条「计算中」提示，
+// 否则玩家看到一片「—」会以为功能坏了。
+const pendingCount = computed(() => (bases.value ?? []).filter(x => x.status === 'unknown').length);
 const dueCost = computed(() => sumBy(dueBases.value, x => x.billCost ?? 0) ?? 0);
 const dueWeight = computed(() => dueBases.value.reduce((sum, x) => sum + x.loadWeight, 0));
 const dueVolume = computed(() => dueBases.value.reduce((sum, x) => sum + x.loadVolume, 0));
@@ -114,6 +120,8 @@ const STATUS_COLORS: Record<RepairBoardStatus, string> = {
   overdue: 'rgba(217, 83, 79, 0.3)',
   soon: 'rgba(247, 166, 0, 0.3)',
   later: 'rgba(92, 184, 92, 0.3)',
+  // 最优还没算出来：不上色，避免看着像正常或逾期
+  unknown: 'rgba(0, 0, 0, 0)',
 };
 
 function statusStyle(status: RepairBoardStatus) {
@@ -130,10 +138,15 @@ function remainingText(dueIn: number) {
   return String(Math.floor(dueIn));
 }
 
+// 明细里的「整站目标」是整站统一口径（所有类型一起修的 sweep），
+// 与左侧列表行内的「最优 / 剩余」不同——后者取最早到期那一类。
 function targetText(base: RepairBoardBase) {
-  return base.targetIsOptimal
-    ? `${fixed0(base.targetDay)}（最优）`
-    : `${fixed0(base.targetDay)}（固定）`;
+  if (base.siteTargetPending) {
+    return '—（数据计算中）';
+  }
+  return base.siteTargetIsOptimal
+    ? `${fixed0(base.siteTargetDay)}（最优）`
+    : `${fixed0(base.siteTargetDay)}（固定）`;
 }
 
 function typeStatus(type: RepairBoardType) {
@@ -153,7 +166,10 @@ function defaultSelectedTypes(base: RepairBoardBase | undefined): Set<string> {
   }
   return new Set(
     base.types
-      .filter(type => repairStatus(type.dueIn, settings.value.dueSoonDays) !== 'later')
+      .filter(type => {
+        const status = repairStatus(type.dueIn, settings.value.dueSoonDays);
+        return status === 'overdue' || status === 'soon';
+      })
       .map(type => type.ticker),
   );
 }
@@ -441,6 +457,13 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
           <span :class="$style.statNote">每多等一天多出的维修材料</span>
         </div>
       </div>
+      <div v-if="pendingCount > 0" :class="$style.loadingHint" data-rp-repd-loading>
+        <span :class="$style.loadingDot"></span>
+        <span>
+          正在计算最优维修间隔（等待价格 / 生产数据）——显示「—」的行算好后会自动补上，不用重开窗口
+        </span>
+        <span :class="$style.loadingCount">{{ pendingCount }} 站</span>
+      </div>
       <div :class="$style.listScroll">
         <table :class="$style.compact">
           <thead>
@@ -466,11 +489,19 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
               </td>
               <td
                 :class="$style.numeric"
-                :title="base.targetIsOptimal ? '插件算出的最优间隔' : '设置里的固定天数'">
-                {{ fixed0(base.targetDay) }}
+                :title="
+                  base.targetPending
+                    ? '价格/生产数据还没就绪，最优间隔稍后自动重算'
+                    : base.targetNonProfit
+                      ? '该类型建筑净收益 ≤ 0（闲置或亏损型），无经济最优，按保守的 90 天计'
+                      : base.targetIsOptimal
+                        ? `最早到期类型${base.targetTicker ? `（${base.targetTicker}）` : ''}的自有最优间隔；整站一次修的间隔见右侧明细「整站目标」`
+                        : '设置里的固定天数'
+                ">
+                {{ base.targetPending ? '—' : fixed0(base.targetDay) }}
               </td>
               <td :class="$style.numeric" :style="statusStyle(base.status)">
-                {{ remainingText(base.dueIn) }}
+                {{ base.targetPending ? '—' : remainingText(base.dueIn) }}
               </td>
               <td :class="$style.numeric">{{ percent1(base.condition) }}</td>
               <td :class="$style.numeric">{{ formatCost(base.billCost) }}</td>
@@ -527,16 +558,20 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
                 <td
                   :class="$style.numeric"
                   :title="
-                    type.targetIsOptimal
-                      ? '按该类型产能收益与建设成本算出的最优间隔'
-                      : '维修设置里的固定天数'
+                    type.targetPending
+                      ? '价格/生产数据还没就绪，稍后自动重算'
+                      : type.targetNonProfit
+                        ? '该类型建筑净收益 ≤ 0（闲置或亏损型），无经济最优，按保守的 90 天计'
+                        : type.targetIsOptimal
+                          ? '按该类型产能收益与建设成本算出的最优间隔'
+                          : '维修设置里的固定天数'
                   ">
-                  {{ fixed0(type.targetDay) }}
+                  {{ type.targetPending ? '—' : fixed0(type.targetDay) }}
                 </td>
                 <td :class="$style.numeric">{{ type.count }}</td>
                 <td :class="$style.numeric">{{ fixed1(type.ageDays) }}</td>
                 <td :class="$style.numeric" :style="statusStyle(typeStatus(type))">
-                  {{ remainingText(type.dueIn) }}
+                  {{ type.targetPending ? '—' : remainingText(type.dueIn) }}
                 </td>
               </tr>
             </tbody>
@@ -795,6 +830,45 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+}
+
+/* 数据未就绪时的提示条：一眼看出「在算」而不是「算坏了」 */
+.loadingHint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  font-size: 1em;
+  color: #e0a83a;
+  background: rgba(247, 166, 0, 0.12);
+  border-top: 1px solid rgba(247, 166, 0, 0.3);
+  border-bottom: 1px solid rgba(247, 166, 0, 0.3);
+}
+
+.loadingDot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: rpRepdPulse 1s ease-in-out infinite;
+}
+
+.loadingCount {
+  margin-left: auto;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+@keyframes rpRepdPulse {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .panel {

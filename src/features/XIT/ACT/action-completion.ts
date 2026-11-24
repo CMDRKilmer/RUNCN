@@ -1,8 +1,6 @@
 import { userData } from '@src/store/user-data';
-import { markChainStageDone } from './chain-state';
 
 export function completeActionPackage(pkg: UserData.ActionPackageData) {
-  markChainStageDone(pkg.global.name);
   if (pkg.autoDelete) {
     const index = userData.actionPackages.findIndex(x => x.global.name === pkg.global.name);
     if (index >= 0) {

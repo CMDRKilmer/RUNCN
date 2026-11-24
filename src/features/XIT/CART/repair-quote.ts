@@ -32,7 +32,3 @@ export const repairQuoteRef = shallowRef<RepairQuote | undefined>(undefined);
 export function setRepairQuote(quote: RepairQuote) {
   repairQuoteRef.value = quote;
 }
-
-export function getRepairQuote(): RepairQuote | undefined {
-  return repairQuoteRef.value;
-}

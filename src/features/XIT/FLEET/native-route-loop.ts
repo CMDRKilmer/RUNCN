@@ -202,13 +202,3 @@ export function loopEligibility(input: LoopEligibility): { ok: boolean; reasons:
   }
   return { ok: reasons.length === 0, reasons };
 }
-
-// 循环模式与 ACT 执行面的边界：循环下规划表展示的是闭环稳态，而 ACT 执行面（shipPlans →
-// executeChainPlans）仍是单趟口径，放行会把每轮运量少写一个数量级。按钮 tooltip 与 execute()
-// 拦截共用这一处文案，避免两处口径漂移；唯一出口是「生成原生 RT」。
-export const LOOP_ACT_BLOCKED =
-  '循环模式不生成 ACT 包/触发器：请用「生成原生 RT」把闭环写入游戏航线。';
-
-export function actBlockedReason(loopActive: boolean): string | undefined {
-  return loopActive ? LOOP_ACT_BLOCKED : undefined;
-}

@@ -5,6 +5,8 @@ import './bbl-hide-book-value';
 import './bs-hide-hq-arc';
 import './bs-hide-zero-workforce';
 import './cogcpex-clean-labels';
+import './contd-condition-header-inline';
+import './contd-embed-contgen';
 import './context-controls-no-hover';
 import './cxob-depth-bars';
 import './cxob-hide-section-headers';

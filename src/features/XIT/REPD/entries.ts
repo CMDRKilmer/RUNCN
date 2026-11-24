@@ -12,7 +12,11 @@
 
 import { getBaseAlias } from '@src/core/base-aliases';
 import { getBuildingBuildMaterials, isRepairableBuilding } from '@src/core/buildings';
-import { calculateSiteOptimalDay, calculateTypeOptimalDay } from '@src/core/repair-plan';
+import {
+  calculateSiteOptimalDayInfo,
+  calculateTypeOptimalDayInfo,
+  type OptimalDayInfo,
+} from '@src/core/repair-plan';
 import { mergeMaterialAmounts } from '@src/core/sort-materials';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import {
@@ -35,7 +39,8 @@ const OPTIMAL_TTL_MS = 10 * 60 * 1000;
 // 没算出结果时的重试间隔：等生产/价格数据到位后再算。
 const OPTIMAL_RETRY_MS = 15 * 1000;
 
-export type RepairBoardStatus = 'overdue' | 'soon' | 'later';
+// unknown = 最优间隔还没算出来（价格/生产数据未就绪），既不算逾期也不算正常。
+export type RepairBoardStatus = 'overdue' | 'soon' | 'later' | 'unknown';
 
 export interface RepairBoardSettings {
   useOptimal: boolean;
@@ -52,11 +57,15 @@ export interface RepairBoardType {
   ageDays: number;
   /** 该类型中最低的状况，0~1 */
   condition: number;
-  /** 该建筑类型自有的最优维修间隔（天）；关闭最优或算不出时为固定天数 */
+  /** 该建筑类型自有的最优维修间隔（天）；固定天数模式下为设置值 */
   targetDay: number;
   /** 该类型的目标日是否来自最优间隔算法 */
   targetIsOptimal: boolean;
-  /** 距离该类型自有目标日还有多少天，负数表示已逾期 */
+  /** 最优模式下该类型最优还没算出来（数据未就绪）——此时 targetDay/dueIn 不可信 */
+  targetPending: boolean;
+  /** 该类型的最优来自「净收益 ≤ 0 → 满折旧 180 天」的兜底，用于悬浮说明 */
+  targetNonProfit: boolean;
+  /** 距离该类型自有目标日还有多少天，负数表示已逾期；未算出来时为 Infinity */
   dueIn: number;
 }
 
@@ -73,9 +82,25 @@ export interface RepairBoardBase {
   types: RepairBoardType[];
   ageDays: number;
   condition: number;
+  /**
+   * 基地整体的目标日 = 最早到期那一类自己的目标日。
+   * 与 dueIn 配对显示，保证「最优 − 年龄 = 剩余」在同一行内对得上。
+   */
   targetDay: number;
   /** 目标日是否来自最优间隔算法 */
   targetIsOptimal: boolean;
+  /** 该目标日取自哪个建筑类型（最早到期的那类），用于悬浮说明 */
+  targetTicker: string | undefined;
+  /** 代表类型的最优还没算出来（整站都算不出来时） */
+  targetPending: boolean;
+  /** 代表类型的最优是「净收益 ≤ 0 → 180 天」兜底 */
+  targetNonProfit: boolean;
+  /** 整站统一最优间隔（明细「整站目标」文案用，不参与行内剩余天数） */
+  siteTargetDay: number;
+  /** 整站目标日是否来自最优间隔算法 */
+  siteTargetIsOptimal: boolean;
+  /** 整站最优还没算出来（此时 siteTargetDay 只是固定天数的占位值） */
+  siteTargetPending: boolean;
   dueIn: number;
   status: RepairBoardStatus;
   /** 抵达当日的完整维修材料账单 */
@@ -94,10 +119,14 @@ export interface RepairBoardBase {
 
 // 整站最优间隔按 siteId 缓存；按类型算的最优间隔按 siteId + 建筑代号缓存。
 // 两者共用同一套 TTL：算不出来时只短暂缓存，等生产/价格数据到位再重试。
-const optimalCache = new Map<string, { at: number; value: number | undefined }>();
-const typeOptimalCache = new Map<string, { at: number; value: number | undefined }>();
+const optimalCache = new Map<string, { at: number; value: OptimalDayInfo | undefined }>();
+const typeOptimalCache = new Map<string, { at: number; value: OptimalDayInfo | undefined }>();
 
 export function repairStatus(dueIn: number, dueSoonDays: number): RepairBoardStatus {
+  // 最优还没算出来：既不能判逾期也不能判正常，单独一档，界面上显示「—」。
+  if (!Number.isFinite(dueIn)) {
+    return 'unknown';
+  }
   if (dueIn < 0) {
     return 'overdue';
   }
@@ -123,7 +152,7 @@ function getOptimalDay(siteId: string, now: number) {
   if (cached && now - cached.at < ttl) {
     return cached.value;
   }
-  const value = calculateSiteOptimalDay(siteId);
+  const value = calculateSiteOptimalDayInfo(siteId);
   optimalCache.set(siteId, { at: now, value });
   return value;
 }
@@ -137,7 +166,7 @@ function getTypeOptimalDay(siteId: string, ticker: string, now: number) {
   if (cached && now - cached.at < ttl) {
     return cached.value;
   }
-  const value = calculateTypeOptimalDay(siteId, ticker);
+  const value = calculateTypeOptimalDayInfo(siteId, ticker);
   typeOptimalCache.set(key, { at: now, value });
   return value;
 }
@@ -220,8 +249,8 @@ function calculateBase(
     return undefined;
   }
 
-  const optimalDay = settings.useOptimal ? getOptimalDay(site.siteId, now) : undefined;
-  const targetDay = optimalDay ?? settings.targetDays;
+  const siteOptimal = settings.useOptimal ? getOptimalDay(site.siteId, now) : undefined;
+  const targetDay = siteOptimal?.day ?? settings.targetDays;
 
   const byTicker = new Map<string, { ages: number[]; conditions: number[] }>();
   let maxAge = 0;
@@ -263,7 +292,10 @@ function calculateBase(
     const typeOptimal = settings.useOptimal
       ? getTypeOptimalDay(site.siteId, ticker, now)
       : undefined;
-    const typeTargetDay = typeOptimal ?? settings.targetDays;
+    const typeTargetDay = typeOptimal?.day ?? settings.targetDays;
+    // 最优模式下算不出来＝数据还没到位：不拿固定天数顶替（那样界面会显示一个
+    // 与设置框相关、却看不出出处的数），标记为 pending，界面显示「—」。
+    const pending = settings.useOptimal && typeOptimal === undefined;
     return {
       ticker,
       count: bucket.ages.length,
@@ -271,12 +303,21 @@ function calculateBase(
       condition: Math.min(...bucket.conditions),
       targetDay: typeTargetDay,
       targetIsOptimal: typeOptimal !== undefined,
-      dueIn: typeTargetDay - typeAge,
+      targetPending: pending,
+      targetNonProfit: typeOptimal?.nonProfit === true,
+      dueIn: pending ? Number.POSITIVE_INFINITY : typeTargetDay - typeAge,
     };
   });
+  // 先按到期日升序（最早到期在前），到期日相同时按目标间隔短的在前：
+  // 这样左侧代表行取 types[0] 时，遇到「两类同一天到期」会选节奏更紧的那类，
+  // 显示的最优/剩余与明细里那一行完全一致，不会被看起来更宽松的 90 天顶上去。
   types.sort((a, b) => {
     const diff = a.dueIn - b.dueIn;
-    return diff !== 0 ? diff : a.ticker.localeCompare(b.ticker);
+    if (diff !== 0) {
+      return diff;
+    }
+    const target = a.targetDay - b.targetDay;
+    return target !== 0 ? target : a.ticker.localeCompare(b.ticker);
   });
 
   const bill = computeBill(site, settings.arrivalDays, now);
@@ -292,7 +333,13 @@ function calculateBase(
       .filter(x => x.amount > 0);
   }
 
-  const dueIn = targetDay - maxAge;
+  // 基地整体的到期天数与右侧明细同一口径：取「最早就到期的那一类」。
+  // 不能再用「整站最优间隔 − 全站最老年龄」：类型各自的最优间隔不同时两者必然打架，
+  // 例如 VH-874b 整站最优 45 天、ECA 单独最优 90 天（已 50 天）、ELP 45 天（已 5 天）——
+  // 45 − 50 = −5 判成逾期，而右侧 ECA 是 90 − 50 = 40、ELP 是 45 − 5 = 40，
+  // 结果左侧一直挂逾期、点开一看两类都还有 40 天。
+  const leadType = types[0];
+  const dueIn = leadType?.dueIn ?? targetDay - maxAge;
 
   return {
     siteId: site.siteId,
@@ -304,8 +351,14 @@ function calculateBase(
     types,
     ageDays: maxAge,
     condition: minCondition,
-    targetDay,
-    targetIsOptimal: optimalDay !== undefined,
+    targetDay: leadType?.targetDay ?? targetDay,
+    targetIsOptimal: leadType?.targetIsOptimal ?? siteOptimal !== undefined,
+    targetTicker: leadType?.ticker,
+    targetPending: leadType?.targetPending ?? false,
+    targetNonProfit: leadType?.targetNonProfit ?? false,
+    siteTargetDay: targetDay,
+    siteTargetIsOptimal: siteOptimal !== undefined,
+    siteTargetPending: settings.useOptimal && siteOptimal === undefined,
     dueIn,
     status: repairStatus(dueIn, settings.dueSoonDays),
     bill,

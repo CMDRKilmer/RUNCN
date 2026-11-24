@@ -14,7 +14,7 @@ import {
   getPackageFinished,
   hasPendingTriggerRun,
 } from '@src/features/XIT/ACT/trigger-queue';
-import { completeActionPackage } from '@src/features/XIT/FLEET/action-completion';
+import { completeActionPackage } from './action-completion';
 import { takeReturnCommand } from '@src/features/XIT/ACT/return-to-source';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 
