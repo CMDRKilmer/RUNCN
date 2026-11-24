@@ -4,6 +4,7 @@
 // Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
 // Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
+// CX BURN cases cover deduplicating route bases and replacing their inventory with CX stock.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -13,6 +14,7 @@ register('./lib/fleet-loader.mjs', import.meta.url);
 const {
   fixture,
   userData,
+  userDataStore,
   sitesStore,
   shipsStore,
   flightsStore,
@@ -56,6 +58,11 @@ const {
   withoutRouteDefinition,
 } = await import('../src/features/XIT/FLEET/native-route-game.ts');
 const { parseRouteStatus } = await import('../src/features/XIT/FLEET/native-route-rte.ts');
+const { ensureGameRouteDefinitions, gameRouteDefinitions } =
+  await import('../src/features/XIT/FLEET/native-route-live.ts');
+const { exchangeBurn } = await import('../src/features/XIT/BURN/burn-totals.ts');
+const { openExchangeBurnAct, openExchangeBurnGenerator } =
+  await import('../src/features/XIT/BURN/exchange-burn-actions.ts');
 const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage, nativeRouteUsableDays } =
   await import('../src/features/XIT/FLEET/native-route-purchase.ts');
 const {
@@ -1685,6 +1692,128 @@ await check('native RT listing: assignedRoute may hold the RT number', async () 
     ['RT-A-1|S1', 'RT-A-2|S2'],
   );
   assert.equal(rows[0].record.shipId, 'S1');
+});
+
+await check('native RT listing: an explicit unassignment overrides a stale RTE row', async () => {
+  const ship = assignedShip(null);
+  const route = nativeRouteServer([{ location: 'A', fuelPercent: 50 }]);
+  const running = { entries: [{ route, shipId: ship.id }], unresolved: 0 };
+  const rows = collectNativeRoutes({}, running, [route]);
+  assert.equal(rows[0].running, false);
+  assert.equal(rows[0].shipId, '');
+});
+
+await check('CX BURN: merge each running loop base once and use only CX inventory', async () => {
+  const route = (...locations) => ({
+    running: true,
+    record: {
+      repeats: true,
+      waypoints: locations.map(location => ({ location })),
+    },
+  });
+  const base = (siteId, input, output, workforce) => ({
+    siteId,
+    burn: { RAT: { input, output, workforce, inventory: 900, remainingAllocation: 100 } },
+  });
+  const bases = {
+    A: base('site-a', 20, 2, 3),
+    'ALIAS-A': base('site-a', 20, 2, 3),
+    B: base('site-b', 5, 9, 1),
+    C: base('site-c', 99, 0, 0),
+  };
+  const singleRun = route('HRT', 'C');
+  singleRun.record.repeats = false;
+  const result = exchangeBurn(
+    'HRT',
+    [
+      route('HRT', 'A', 'HRT'),
+      route('hrt', 'B', 'ALIAS-A'),
+      route('OTHER-CX', 'C'),
+      { ...route('HRT', 'C'), running: false },
+      singleRun,
+    ],
+    x => bases[x],
+    { RAT: 54, SF: 90 },
+  );
+  assert.deepEqual(result, {
+    RAT: {
+      inventory: 54,
+      input: 25,
+      output: 11,
+      dailyAmount: -18,
+      daysLeft: 3,
+      workforce: 4,
+      remainingAllocation: 0,
+      type: 'output',
+    },
+  });
+});
+
+await check('CX BURN: unreceived warehouse stock differs from an empty warehouse', async () => {
+  const routes = [
+    { running: true, record: { repeats: true, waypoints: [{ location: 'HRT' }, { location: 'A' }] } },
+  ];
+  const findBase = x =>
+    x === 'A'
+      ? {
+          siteId: 'site-a',
+          burn: { DW: { input: 2, output: 0, workforce: 1, inventory: 10, remainingAllocation: 5 } },
+        }
+      : undefined;
+  const unknown = exchangeBurn('HRT', routes, findBase, undefined);
+  assert.equal(unknown.DW.dailyAmount, -3);
+  assert.equal(unknown.DW.inventory, undefined);
+  assert.equal(unknown.DW.daysLeft, undefined);
+  const empty = exchangeBurn('HRT', routes, findBase, {});
+  assert.equal(empty.DW.inventory, 0);
+  assert.equal(empty.DW.daysLeft, 0);
+});
+
+await check('CX BURN: ACT uses the supplied shortfall at the report CX', () => {
+  openExchangeBurnAct('IC1', { RAT: 12, DW: 7 });
+  assert.deepEqual(userData.actionPackages, [
+    {
+      global: { name: 'BURN CX IC1 Buy' },
+      groups: [{ type: 'Manual', name: 'Resupply', materials: { RAT: 12, DW: 7 } }],
+      actions: [
+        { type: 'CX Buy', name: 'CX Buy', group: 'Resupply', exchange: 'IC1', useCXInv: false },
+      ],
+    },
+  ]);
+  assert.deepEqual(windows, [{ command: 'XIT ACT_BURN_CX_IC1_Buy', options: undefined }]);
+  openExchangeBurnAct('IC1', {});
+  assert.equal(windows.length, 1);
+});
+
+await check('CX BURN: ACT opens BURNGEN with the report material filter', () => {
+  openExchangeBurnGenerator('IC1', false, true);
+  assert.deepEqual(windows, [{ command: 'XIT BURNGEN CX IC1 WF', options: undefined }]);
+  assert.equal(userData.actionPackages.length, 0);
+
+  openExchangeBurnAct('IC1', { RAT: 4 }, 'CX IC1 Resupply 2.5d');
+  assert.equal(userData.actionPackages[0].global.name, 'CX IC1 Resupply 2.5d');
+  assert.equal(windows[1].command, 'XIT ACT_CX_IC1_Resupply_2.5d');
+});
+
+await check('CX BURN: concurrent panels share one automatic route read', async () => {
+  userDataStore.companyId = 'company-cx-burn';
+  socketMessages.length = 0;
+  try {
+    const first = ensureGameRouteDefinitions();
+    const second = ensureGameRouteDefinitions();
+    assert.equal(second, first);
+    await Promise.resolve();
+    assert.deepEqual(socketMessages.map(x => x.messageType), ['SHIP_ROUTES_GET_ROUTES']);
+
+    const routes = [{ id: 'loop', naturalId: 'RT-TEST-1', repeats: true, waypoints: [] }];
+    dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes } });
+    await Promise.all([first, second]);
+    assert.deepEqual(gameRouteDefinitions.value, routes);
+    await ensureGameRouteDefinitions();
+    assert.equal(socketMessages.length, 1);
+  } finally {
+    userDataStore.companyId = '';
+  }
 });
 
 await check('native RT progress: a route without a ship has no position', async () => {

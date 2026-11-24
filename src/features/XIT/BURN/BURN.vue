@@ -13,11 +13,23 @@ import MaterialRow from '@src/features/XIT/BURN/MaterialRow.vue';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
-import { countDays } from '@src/features/XIT/BURN/utils';
+import { countDays, type BurnReportSection } from '@src/features/XIT/BURN/utils';
+import { filterBurnValues, mergeBurnValues } from '@src/features/XIT/BURN/burn-totals';
+import { useExchangeBurn } from '@src/features/XIT/BURN/use-exchange-burn';
+import {
+  exchangeBurnParameters,
+  pendingExchangeBurnQuote,
+} from '@src/features/XIT/BURN/exchange-burn-actions';
 import InlineFlex from '@src/components/InlineFlex.vue';
 import { querySites } from '@src/features/XIT/shared/site-query';
 
 const parameters = useXitParameters();
+const isExchange = parameters[0]?.toUpperCase() === 'CX';
+const {
+  section: exchangeSection,
+  needs: exchangeNeeds,
+  notice: exchangeNotice,
+} = useExchangeBurn(isExchange ? parameters[1] : undefined, filterBurn);
 
 // 用于整体消耗的虚拟基地。
 const overall: PrunApi.Site = {} as PrunApi.Site;
@@ -43,17 +55,7 @@ const io = useBurnTileState('io');
 const filters = useBurnFilters();
 
 function filterBurn(burn: BurnValues): BurnValues {
-  const filtered: BurnValues = {};
-  for (const ticker of Object.keys(burn)) {
-    const mat = burn[ticker];
-    const hasProd = mat.input > 0 || mat.output > 0;
-    const hasWf = mat.workforce > 0;
-    if (!(hasProd && filters.value.prod) && !(hasWf && filters.value.wf)) {
-      continue;
-    }
-    filtered[ticker] = mat;
-  }
-  return filtered;
+  return filterBurnValues(burn, filters.value.prod, filters.value.wf);
 }
 
 const planetBurn = computed(() => {
@@ -79,42 +81,8 @@ const planetBurn = computed(() => {
     return comparePlanets(a.naturalId, b.naturalId);
   });
 
-  const overallBurn: BurnValues = {};
-  for (const planet of filtered) {
-    for (const ticker of Object.keys(planet.burn)) {
-      const mat = planet.burn[ticker];
-      overallBurn[ticker] ??= {
-        input: 0,
-        output: 0,
-        workforce: 0,
-        dailyAmount: 0,
-        remainingAllocation: 0,
-        inventory: 0,
-        daysLeft: 0,
-        type: 'output',
-      };
-      overallBurn[ticker].input += mat.input;
-      overallBurn[ticker].output += mat.output;
-      overallBurn[ticker].workforce += mat.workforce;
-      overallBurn[ticker].inventory += mat.inventory;
-      overallBurn[ticker].remainingAllocation += mat.remainingAllocation;
-    }
-  }
-
-  for (const ticker of Object.keys(overallBurn)) {
-    const mat = overallBurn[ticker];
-    mat.dailyAmount = mat.output - mat.input - mat.workforce;
-    const inv = mat.remainingAllocation + mat.inventory;
-    // 日均消耗舍入到 0.00（如 -0.001）时视为无消耗，返回 ∞。
-    // 否则库存为 0 时会出现 0 / 0.001 = 0 而非 ∞。
-    mat.daysLeft =
-      mat.dailyAmount >= 0 || Math.abs(mat.dailyAmount) < 0.005
-        ? Number.POSITIVE_INFINITY
-        : inv / -mat.dailyAmount;
-  }
-
   const overallSection = {
-    burn: overallBurn,
+    burn: mergeBurnValues(filtered.map(x => x.burn)),
     planetName: '总览',
     naturalId: '',
     storeId: '',
@@ -129,6 +97,14 @@ const planetBurn = computed(() => {
     sections.push(overallSection);
   }
   return sections;
+});
+
+const sections = computed<BurnReportSection[] | undefined>(() => {
+  if (!isExchange) {
+    return planetBurn.value;
+  }
+  const section = exchangeSection.value;
+  return section === undefined || Object.keys(section.burn).length === 0 ? [] : [section];
 });
 
 const fakeBurn: MaterialBurn = {
@@ -152,7 +128,7 @@ function onExpandAllClick() {
   if (expand.value.length > 0) {
     expand.value = [];
   } else {
-    expand.value = planetBurn.value?.map(x => x.naturalId) ?? [];
+    expand.value = sections.value?.map(x => x.naturalId) ?? [];
   }
 }
 
@@ -160,6 +136,9 @@ function onExpandAllClick() {
 // 「需要」列生成临时清单，不读写 XIT CART 购物车。多星球 / 总览没有唯一的
 // 补货清单，这时不显示按钮。
 const trialNaturalId = computed(() => {
+  if (isExchange) {
+    return undefined;
+  }
   const planets = planetBurn.value;
   if (!planets || planets.length !== 1 || !planets[0].naturalId) {
     return undefined;
@@ -168,6 +147,13 @@ const trialNaturalId = computed(() => {
 });
 
 function onTrialClick() {
+  const code = exchangeSection.value?.exchangeCode;
+  if (isExchange && code !== undefined && exchangeNeeds.value !== undefined) {
+    const command = exchangeBurnParameters(code, prod.value, wf.value);
+    pendingExchangeBurnQuote.value = command;
+    void showBuffer(`XIT CBUY ${command}`);
+    return;
+  }
   if (trialNaturalId.value) {
     showBuffer(`XIT CBUY ${trialNaturalId.value}`);
   }
@@ -175,7 +161,8 @@ function onTrialClick() {
 </script>
 
 <template>
-  <LoadingSpinner v-if="planetBurn === undefined" />
+  <div v-if="isExchange && exchangeSection === undefined">{{ exchangeNotice }}</div>
+  <LoadingSpinner v-else-if="sections === undefined" />
   <template v-else>
     <div :class="[C.ComExOrdersPanel.filter, filterToolbarStyle.toolbar, $style.burnFilter]">
       <RadioItem v-model="red" horizontal>红色</RadioItem>
@@ -203,19 +190,21 @@ function onTrialClick() {
       <RadioItem v-model="io" horizontal>I/O</RadioItem>
       <div :class="$style.spacer" />
       <PrunButton
-        v-if="trialNaturalId"
+        v-if="isExchange || trialNaturalId"
         primary
         :class="$style.compareButton"
-        data-tooltip="按当前星球的补给需求，用游戏实时盘口对比各交易所采购成本"
+        :disabled="isExchange && (exchangeNeeds === undefined || (!prod && !wf))"
+        data-tooltip="按「需要」清单，用游戏实时盘口对比各交易所采购成本"
         data-tooltip-position="top"
         @click="onTrialClick"
         >比价购买</PrunButton
       >
     </div>
+    <p v-if="isExchange && exchangeNotice" role="status">{{ exchangeNotice }}</p>
     <table>
       <thead>
         <tr>
-          <th v-if="planetBurn.length > 1" :class="$style.expand" @click="onExpandAllClick">
+          <th v-if="sections.length > 1" :class="$style.expand" @click="onExpandAllClick">
             {{ anyExpanded ? '-' : '+' }}
           </th>
           <th v-else />
@@ -245,9 +234,9 @@ function onTrialClick() {
         <MaterialRow always-visible :burn="fakeBurn" :material="rat" />
       </tbody>
       <BurnSection
-        v-for="burn in planetBurn"
+        v-for="burn in sections"
         :key="burn.planetName"
-        :can-minimize="planetBurn.length > 1"
+        :can-minimize="sections.length > 1"
         :burn="burn" />
     </table>
   </template>

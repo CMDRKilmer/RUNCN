@@ -261,6 +261,7 @@ Every action that triggers server communication must require a user click. No au
 Developer-approved exceptions (known ToS violations — do not extend this list without discussion):
 
 - `XIT BURN` opens invisible buffers.
+- CX BURN, BURNGEN and CBUY share the company route list. Opening one of these panels reads the list once if it is missing, deferring the read during RT writes. Later route messages update the list passively.
 - `XIT FLEET`「运行中」calibrates once when the panel opens with that tab active (or when the chain view is switched back to): `SHIP_ROUTES_GET_ROUTES` plus a hidden `RTE` read. Tab clicks and wizard writes still calibrate on demand; there is no polling. See `feature-patterns.md` (Chain Planner → 校准触发) for the data flow.
 
 ---
