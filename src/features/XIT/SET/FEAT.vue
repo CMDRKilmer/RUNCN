@@ -13,6 +13,7 @@ import { userData } from '@src/store/user-data';
 import removeArrayElement from '@src/utils/remove-array-element';
 import { saveUserData } from '@src/infrastructure/storage/user-data-serializer';
 import Commands from '@src/components/forms/Commands.vue';
+import { FEATURE_GROUPS, getFeatureGroup, type FeatureGroupId } from '@src/features/feature-groups';
 
 if (userData.settings.mode === undefined) {
   userData.settings.mode = 'BASIC';
@@ -52,15 +53,49 @@ for (const feature of sorted) {
 
 const searchQuery = ref('');
 
+// ── 分组标签 ────────────────────────────────────────────────
+// 分组见 src/features/feature-groups.ts（显式映射 + 命令前缀兜底）。
+// 选中项记在 userData.settings.featureGroup，重开 XIT SET 停在上次那一组。
+type GroupTab = FeatureGroupId | 'all';
+
+const group = ref<GroupTab>((userData.settings.featureGroup as GroupTab | undefined) ?? 'all');
+
+function selectGroup(next: GroupTab) {
+  group.value = next;
+  userData.settings.featureGroup = next;
+  void saveUserData();
+}
+
+// 数量按当前模式可见的功能算（BASIC 下不含完整模式专属功能）。
+const groupTabs = computed(() => {
+  const list = available;
+  return [
+    { id: 'all' as GroupTab, name: '全部', hint: '不分组，显示全部功能', count: list.length },
+    ...FEATURE_GROUPS.map(g => ({
+      id: g.id as GroupTab,
+      name: g.name,
+      hint: g.hint,
+      count: list.filter(feature => getFeatureGroup(feature.id) === g.id).length,
+    })),
+  ];
+});
+
 const filtered = computed(() => {
+  // 功能列表里 id 是英文、说明是中文，所以切词必须按 Unicode 字母/数字走。
+  // 原写法 `.replaceAll(/\W/g, ' ')` 里 \W 只保留 [A-Za-z0-9_]，中文会被整段替换成
+  // 空格，于是中文查询切出 0 个关键词、直接返回全部功能（表现为「搜中文没用」）。
   const keywords = searchQuery.value
     .toLowerCase()
-    .replaceAll(/\W/g, ' ')
-    .split(/\s+/)
+    .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean); // Ignore empty strings
   if (keywords.length === 0) {
-    return sorted;
+    // 没在搜索：按当前分组过滤。
+    if (group.value === 'all') {
+      return sorted;
+    }
+    return sorted.filter(feature => getFeatureGroup(feature.id) === group.value);
   }
+  // 有搜索词时跨全部分组搜，避免「明明有这个功能、只是不在当前标签下」搜不到。
   return sorted.filter(feature => keywords.some(x => searchIndex.get(feature.id)!.includes(x)));
 });
 
@@ -108,7 +143,9 @@ async function onChangeModeClick() {
         </PrunButton>
       </Commands>
       <Active :class="$style.warningRoot" label="搜索">
-        <TextInput v-model="searchQuery" />
+        <TextInput
+          v-model="searchQuery"
+          placeholder="搜索：英文 id 或中文说明，如 库存 / 维修 / cxob" />
         <PrunButton
           v-if="!isEmpty(Object.keys(changed))"
           primary
@@ -119,23 +156,36 @@ async function onChangeModeClick() {
       </Active>
     </form>
     <SectionHeader>
-      功能: {{ sorted.length }}
+      功能: {{ filtered.length }}
+      <span v-if="filtered.length !== sorted.length"> / {{ sorted.length }}</span>
       <span v-if="disabledFeatures.size > 0">({{ disabledFeatures.size }} 已关闭) </span>
       <span v-if="!isFullMode">(+{{ advanced.length }} 个完整模式可用功能)</span>
     </SectionHeader>
-    <table>
-      <tbody>
-        <tr v-for="feature in filtered" :key="feature.id">
-          <td :class="$style.row" @click="toggleFeature(feature.id)">
-            <div :class="[C.RadioItem.indicator, $style.indicator, toggleClass(feature.id)]" />
-            <div>
-              <div :class="$style.id">{{ feature.id }}</div>
-              <div :class="$style.description">{{ feature.description }}</div>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+    <div :class="$style.groups">
+      <button
+        v-for="tab in groupTabs"
+        :key="tab.id"
+        type="button"
+        :class="[$style.groupTab, group === tab.id && $style.groupTabActive]"
+        :title="tab.hint"
+        @click="selectGroup(tab.id)">
+        {{ tab.name }}
+        <span :class="$style.groupCount">{{ tab.count }}</span>
+      </button>
+    </div>
+    <div :class="$style.grid">
+      <div
+        v-for="feature in filtered"
+        :key="feature.id"
+        :class="$style.cell"
+        @click="toggleFeature(feature.id)">
+        <div :class="[C.RadioItem.indicator, $style.indicator, toggleClass(feature.id)]" />
+        <div :class="$style.cellBody">
+          <div :class="$style.id">{{ feature.id }}</div>
+          <div :class="$style.description">{{ feature.description }}</div>
+        </div>
+      </div>
+    </div>
     <template v-if="!isFullMode">
       <SectionHeader>完整模式功能</SectionHeader>
       <table>
@@ -166,6 +216,63 @@ async function onChangeModeClick() {
 
 .warningRoot {
   position: relative;
+}
+
+.groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.groupTab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid #3a4a55;
+  border-radius: 10px;
+  color: #a8b6c0;
+  font-size: calc(10px + 1px * var(--rp-font-enlargement));
+  cursor: pointer;
+}
+
+.groupTab:hover {
+  border-color: #5f7382;
+  color: #d7e1e8;
+}
+
+/* 选中态沿用游戏 RadioItem 的橙色系，不引入新的强调色 */
+.groupTabActive {
+  border-color: #f7a600;
+  color: #f7a600;
+}
+
+.groupCount {
+  opacity: 0.65;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  column-gap: 18px;
+}
+
+.cell {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  align-self: start;
+  cursor: pointer;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.16);
+  min-width: 0;
+}
+
+.cellBody {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .row {
