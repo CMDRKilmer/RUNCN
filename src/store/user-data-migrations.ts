@@ -114,9 +114,49 @@ const DESKTOP_NOTIFICATION_TYPES_20261109 = [
   'USER_STEAM_REVIEW',
 ];
 
+interface LegacyFleetRun {
+  stops?: { pkgName: string }[];
+  finalPkgName?: string;
+}
+
+function disableLegacyFleetRouteTriggers(data: {
+  chainRuns?: Record<string, LegacyFleetRun>;
+  triggers?: UserData.TriggerData[];
+}) {
+  const packageNames = new Set<string>();
+  for (const run of Object.values(data.chainRuns ?? {})) {
+    for (const stop of run.stops ?? []) {
+      packageNames.add(stop.pkgName);
+    }
+    if (run.finalPkgName !== undefined) {
+      packageNames.add(run.finalPkgName);
+    }
+  }
+
+  for (const trigger of data.triggers ?? []) {
+    if (
+      trigger.event.type !== 'FLIGHT_ENDED' ||
+      trigger.autoDelete !== true ||
+      !trigger.event.ship ||
+      !trigger.event.planet
+    ) {
+      continue;
+    }
+    // Detached triggers from older runs still carry both generated names.
+    const name = trigger.packageName;
+    const generatedStop = trigger.name.endsWith(' 环线站') && / (?:Loop|环线) .+/.test(name);
+    const generatedReturn =
+      trigger.name.endsWith(' 归航卸货') && /^(?:\d+ )?(?:Chain Return|环线归航) .+/.test(name);
+    if (packageNames.has(name) || generatedStop || generatedReturn) {
+      trigger.enabled = false;
+    }
+  }
+}
+
 // 新的迁移应添加到列表顶部。
 // 日期仅供参考，不影响迁移顺序。
 const migrations: MigrationEntry[] = [
+  ['24.11.2026 Disable legacy FLEET route triggers', disableLegacyFleetRouteTriggers],
   [
     '14.11.2026 Split INV compact layout per base',
     userData => {

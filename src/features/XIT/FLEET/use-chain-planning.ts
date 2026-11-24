@@ -28,13 +28,8 @@ function fitsChainPlan(plan: ChainPlan) {
 export function useChainPlanning(input: {
   ships: () => DispatchShip[];
   bases: () => ChainPlannerBase[];
-  runs: () => { shipId: string; run: UserData.ChainRun }[];
 }) {
-  const activeRuns = computed(input.runs);
-  const selectedShips = computed(() => {
-    const runningShips = new Set(activeRuns.value.map(run => run.shipId));
-    return input.ships().filter(ship => !runningShips.has(ship.ship.id));
-  });
+  const selectedShips = computed(input.ships);
   const selectedBases = computed(input.bases);
   // ── 各段飞行时间预估（FTC 最优燃油计划） ─────────────────────
   // 每艘船一条环线预估（shipId → 逐段时长）。计算在后台进行，
@@ -498,7 +493,6 @@ export function useChainPlanning(input: {
   const shipPlans = computed(() =>
     splitFittedRoute(fittedRoute.value, arrivalHoursByNaturalId.value),
   );
-  const hasStops = computed(() => shipPlans.value.length > 0);
 
   // 未参与分配的船（无货舱，或船多于站点数）。
   const unusedShipCount = computed(() =>
@@ -579,33 +573,18 @@ export function useChainPlanning(input: {
   });
 
   // 环线计划变化时逐段估算飞行时间（FTC 最优燃油计划，下游基地用未来位置）。
-  // 同时响应规划（baseShipPlans）与执行中环线（activeRuns）：执行中船已离港时不在
-  // eligibleShips / baseShipPlans 中，但飞行列仍需读取预估——按 shipId 收集
-  // 起点与站点一并估算。计划为空（未规划/无执行中）时保留已有预估。
   // 预估基于 baseShipPlans（不含到达时刻产出），避免最终适配结果反向触发估时。
-  // 执行中环线的逐段离站载重：起点装载 → 各站离站舱载 → 归航舱载。
-  // 旧记录没有计划快照（plan 为空），对应段留空由模型按当前质量反推。
-  function runLegPayloads(run: UserData.ChainRun): (number | undefined)[] {
-    const payloads: (number | undefined)[] = [run.plan?.originLoadOnDeparture.weight];
-    for (let i = 1; i < run.stops.length; i++) {
-      payloads.push(run.stops[i - 1]?.plan?.loadOnDeparture.weight);
-    }
-    payloads.push(run.plan?.loadOnReturn.weight);
-    return payloads;
-  }
-
   let flightTimeToken = 0;
   function registerFlightTimeWatch() {
     watch(
-      [baseShipPlans, activeRuns, () => shipsStore.fetched.value],
-      async ([plans, runs, shipsFetched]) => {
+      [baseShipPlans, () => shipsStore.fetched.value],
+      async ([plans, shipsFetched]) => {
         const token = ++flightTimeToken;
         // 船数据未就绪时跳过（估算需读取飞船实时质量/加速度与蓝图）。
         if (!shipsFetched) {
           flightTimesLoading.value = false;
           return;
         }
-        // 统一为 shipId → {ship, origin, stops}：规划取实时计划，执行中取链快照/持久化链记录。
         const entries = new Map<
           string,
           {
@@ -633,28 +612,6 @@ export function useChainPlanning(input: {
             legPayloads: Array.from({ length: legCount }, (_, index) =>
               legLoadWeight(sp.plan, index + 1, legCount),
             ),
-          });
-        }
-        for (const run of runs) {
-          if (entries.has(run.shipId)) {
-            continue;
-          }
-          const ship = shipsStore.getById(run.shipId);
-          if (!ship) {
-            continue;
-          }
-          if (run.run.stops === undefined) {
-            continue;
-          }
-          const stops = run.run.stops.map(s => ({
-            naturalId: s.naturalId,
-            planetName: s.planetName,
-          }));
-          entries.set(run.shipId, {
-            ship,
-            origin: run.run.originNaturalId,
-            stops,
-            legPayloads: runLegPayloads(run.run),
           });
         }
         if (entries.size === 0) {
@@ -696,13 +653,11 @@ export function useChainPlanning(input: {
   return {
     flightEstimates,
     flightTimesLoading,
-    usableChainShips,
     allocStatus,
     timeAlloc,
     shipPlans,
     basePlan,
     loading,
-    hasStops,
     unusedShipCount,
     allocBanner,
     filteredStopNotices,

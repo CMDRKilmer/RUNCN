@@ -1,13 +1,12 @@
-// Real FLEET planning, package generation, completion, recovery, sync and native RT record regressions.
+// Real FLEET planning, native RT, ACT completion and legacy trigger migration regressions.
 // Usage: node --experimental-strip-types scripts/verify-fleet-contracts.mjs.
 // Exit 0 = PASS (last line PASS n/n); assertions fail with exit 1.
-// Stores, HTTP and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
+// Game stores, transport and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
 // Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // CX BURN cases cover deduplicating route bases and replacing their inventory with CX stock.
 // This does not execute browser actions or contact a server.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { register } from 'node:module';
 import { effectScope, nextTick, ref } from 'vue';
 register('./lib/fleet-loader.mjs', import.meta.url);
@@ -18,7 +17,6 @@ const {
   sitesStore,
   shipsStore,
   flightsStore,
-  transport,
   windows,
   estimation,
   socketMessages,
@@ -29,20 +27,13 @@ const { computeChainPlan } = await import('../src/features/XIT/FLEET/chain-plan-
 const { useChainPlanning } = await import('../src/features/XIT/FLEET/use-chain-planning.ts');
 const { computeLoopPlan } = await import('../src/features/XIT/FLEET/use-chain-loop-planning.ts');
 const { fillInventoryDays } = await import('../src/features/XIT/FLEET/supplies-cap.ts');
-const { executeChainPlans, clearShipChainPlan } =
-  await import('../src/features/XIT/FLEET/chain-commands.ts');
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
 const { planFastestChainSegments, splitChainPlanAcrossShips } =
   await import('../src/features/XIT/FLEET/chain-allocation.ts');
-const { buildChainActionPackages, chainPurchasePackage } =
-  await import('../src/features/XIT/FLEET/chain-actions.ts');
 const { buildNativeWaypoints, legLoadWeight } =
   await import('../src/features/XIT/FLEET/native-route-plan.ts');
-const { completeActionPackage } = await import('../src/features/XIT/FLEET/action-completion.ts');
-const { collectPendingChainSteps } = await import('../src/features/XIT/FLEET/chain-recovery.ts');
-const { normalizeChainRun } = await import('../src/features/XIT/FLEET/chain-run.ts');
-const { createChainSyncController } = await import('../src/features/XIT/FLEET/chain-sync.ts');
-const { applyShipDoc } = await import('../src/features/XIT/FLEET/chain-snapshot.ts');
+const { completeActionPackage } = await import('../src/features/XIT/ACT/action-completion.ts');
+const { migrateUserData } = await import('../src/store/user-data-migrations.ts');
 const storage = new Map();
 globalThis.localStorage = {
   getItem: key => storage.get(key) ?? null,
@@ -63,8 +54,13 @@ const { ensureGameRouteDefinitions, gameRouteDefinitions } =
 const { exchangeBurn } = await import('../src/features/XIT/BURN/burn-totals.ts');
 const { openExchangeBurnAct, openExchangeBurnGenerator } =
   await import('../src/features/XIT/BURN/exchange-burn-actions.ts');
-const { billShortfall, nativeRouteOriginBill, nativeRoutePurchasePackage, nativeRouteUsableDays } =
-  await import('../src/features/XIT/FLEET/native-route-purchase.ts');
+const {
+  billShortfall,
+  nativeRouteOriginBill,
+  nativeRoutePlannedPurchasePackage,
+  nativeRoutePurchasePackage,
+  nativeRouteUsableDays,
+} = await import('../src/features/XIT/FLEET/native-route-purchase.ts');
 const {
   cycleDaysFromHours,
   fuelPerRound,
@@ -76,14 +72,12 @@ const {
   netDailyBundle,
   loopSustain,
   loopEligibility,
-  actBlockedReason,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
 const { socketEditStep, socketEditRefuelStep } =
   await import('../src/features/XIT/FLEET/native-route-socket.ts');
 let passes = 0;
 async function check(name, fn) {
-  userData.chainRuns = {};
   userData.actionPackages = [];
   userData.triggers = [];
   Object.assign(fixture, {
@@ -100,7 +94,6 @@ async function check(name, fn) {
     exchanges: {},
     warehouses: {},
   });
-  Object.assign(transport, { pushes: [], fetches: 0, remote: null, pending: null, result: null });
   storage.clear();
   windows.length = 0;
   estimation.calls = [];
@@ -178,7 +171,7 @@ await check('native RT keeps warehouse departure and return as separate waypoint
     steps: [],
   });
   assert.throws(() => buildNativeWaypoints({ ...plan, hasUnmetChainDemand: true }));
-  const procurement = chainPurchasePackage(ship('S'), plan);
+  const procurement = nativeRoutePlannedPurchasePackage(ship('S'), plan);
   assert.deepEqual(
     procurement.actions.map(x => x.type),
     ['CX Buy'],
@@ -247,177 +240,49 @@ await check('two ships reserve a shared warehouse only once', () => {
     10,
   );
 });
-await check('departure package separates planned purchases from reserved warehouse stock', () => {
-  const plan = planChainRoute({
-    originNaturalId: 'CX',
-    capacity,
-    bases: bases(),
-    originStock: { RAT: 6 },
-  });
-  const { mainPkg } = buildChainActionPackages(ship('S'), plan);
-  const purchase = mainPkg.actions.find(x => x.type === 'CX Buy');
-  const load = mainPkg.actions.find(x => x.type === 'MTRA');
-  assert.deepEqual(mainPkg.groups.find(x => x.name === purchase.group).materials, { RAT: 14 });
-  assert.deepEqual(purchase.cxInvReserve, { RAT: 6 });
-  assert.deepEqual(mainPkg.groups.find(x => x.name === load.group).materials, { RAT: 20 });
-});
-await check('cargo verification retains cargo allocated to the next stop', () => {
-  const plan = planChainRoute({ originNaturalId: 'CX', capacity, bases: bases() });
-  const built = buildChainActionPackages(ship('S'), plan);
-  assert.deepEqual(
-    built.stopPkgs[0].pkg.actions.find(x => x.type === 'Verify Ship Cargo').verifyRemaining,
-    { RAT: 10 },
-  );
-  assert.deepEqual(
-    built.stopPkgs[1].pkg.actions.find(x => x.type === 'Verify Ship Cargo').verifyRemaining,
-    { RAT: 0 },
-  );
-  plan.stops[0].load.set('RAT', { amount: 5, to: 'CX' });
-  assert.deepEqual(
-    buildChainActionPackages(ship('S'), plan).stopPkgs[0].pkg.actions.find(
-      x => x.type === 'Verify Ship Cargo',
-    ).verifyRemaining,
-    { RAT: 15 },
-  );
-});
-await check('successful retained package removes one-shot triggers and marks progress', () => {
-  const pkg = { global: { name: '1 A Loop S' }, groups: [], actions: [] };
+await check('successful retained package removes only one-shot triggers', () => {
+  const pkg = { global: { name: 'Unload at A' }, groups: [], actions: [] };
   userData.actionPackages.push(pkg);
   userData.triggers.push(
     { id: 'one', packageName: pkg.global.name, autoDelete: true },
     { id: 'keep', packageName: pkg.global.name },
   );
-  userData.chainRuns.S = { stops: [{ pkgName: pkg.global.name, state: 'pending' }] };
   completeActionPackage(pkg);
-  assert.equal(userData.chainRuns.S.stops[0].state, 'done');
   assert.equal(userData.actionPackages.length, 1);
   assert.deepEqual(
     userData.triggers.map(x => x.id),
     ['keep'],
   );
 });
-await check('normalization advances passed stops before recovery selection', () => {
-  fixture.ships.S = { address: { id: 'B' } };
-  const run = {
-    shipId: 'S',
-    originNaturalId: 'CX',
-    stops: ['A', 'B'].map(id => ({ naturalId: id, pkgName: id, state: 'pending' })),
+await check('upgrade disables generated FLEET triggers and preserves ordinary arrivals', () => {
+  const arrival = {
+    enabled: true,
+    event: { type: 'FLIGHT_ENDED', ship: 'S', planet: 'A' },
+    autoDelete: true,
   };
-  userData.actionPackages = ['A', 'B'].map(name => ({ global: { name } }));
-  userData.chainRuns.S = run;
-  const steps = collectPendingChainSteps(false);
+  const triggers = [
+    { ...arrival, name: 'Edited label', packageName: '1 A Loop S 1234567890' },
+    { ...arrival, name: 'A 环线站', packageName: 'A Loop S' },
+    { ...arrival, name: '2 CX 归航卸货', packageName: '2 Chain Return S 1234567890' },
+    { ...arrival, name: '到港卸货', packageName: 'A Unload' },
+    { ...arrival, name: 'Custom Loop', packageName: 'A Loop S' },
+    { ...arrival, name: 'B 环线站', packageName: 'B Loop S', autoDelete: false },
+    { ...arrival, name: 'B 环线站', packageName: 'B Loop S', event: { type: 'INTERVAL' } },
+  ];
+  const packages = triggers.map(x => ({ global: { name: x.packageName } }));
+  const data = {
+    migrations: migrateUserData({}).migrations.filter(x => !x.includes('legacy FLEET')),
+    triggers,
+    chainRuns: { S: { stops: [{ pkgName: triggers[0].packageName }] } },
+    actionPackages: packages,
+  };
+  migrateUserData(data);
   assert.deepEqual(
-    steps.map(x => x.pkgName),
-    ['B'],
+    triggers.map(x => x.enabled),
+    [false, false, false, true, true, true, true],
   );
-  normalizeChainRun(run);
-  assert.deepEqual(
-    run.stops.map(x => x.state),
-    ['done', 'arrived'],
-  );
-});
-function syncRun() {
-  const name = '0 Chain S 1234567890';
-  userData.chainRuns.S = {
-    shipId: 'S',
-    shipName: 'S',
-    fp: '1234567890',
-    mainPkgName: name,
-    originNaturalId: 'CX',
-    stops: [],
-    originState: 'pending',
-  };
-  userData.actionPackages.push({ global: { name }, groups: [], actions: [] });
-}
-await check('a modification during upload remains dirty for the next batch', async () => {
-  syncRun();
-  const controller = createChainSyncController({ resolveShipName: () => 'S' });
-  controller.start();
-  let release;
-  transport.pending = new Promise(resolve => {
-    release = resolve;
-  });
-  controller.markDirtyShip('S');
-  const upload = controller.pushNow();
-  for (let i = 0; i < 100 && transport.pushes.length === 0; i++) {
-    await new Promise(resolve => setImmediate(resolve));
-  }
-  assert.equal(transport.pushes.length, 1, JSON.stringify(controller.state));
-  userData.chainRuns.S.originState = 'done';
-  controller.markDirtyShip('S');
-  transport.pending = null;
-  release();
-  await upload;
-  assert.equal(controller.state.dirty, true);
-  await controller.pushNow();
-  controller.stop();
-  assert.equal(transport.pushes.length, 2);
-  assert.equal(transport.pushes[1].doc.chainRuns.S.originState, 'done');
-});
-await check('pending updates survive controller restart without a new edit', async () => {
-  syncRun();
-  const first = createChainSyncController({ resolveShipName: () => 'S' });
-  first.start();
-  first.markDirtyShip('S');
-  first.stop();
-  const second = createChainSyncController({ resolveShipName: () => 'S' });
-  second.start();
-  await second.pushNow();
-  second.stop();
-  assert.equal(transport.pushes.length, 1);
-});
-await check(
-  'remote replacement applies full trigger settings while retaining local id',
-  async () => {
-    syncRun();
-    const trigger = {
-      id: 'local',
-      name: 'arrival',
-      packageName: userData.chainRuns.S.mainPkgName,
-      event: { type: 'FLIGHT_ENDED' },
-      mode: 'AUTO',
-      enabled: true,
-      cooldownMin: 60,
-      autoDelete: false,
-    };
-    userData.triggers.push(trigger);
-    const doc = {
-      version: 1,
-      updatedAt: 1,
-      chainRuns: { S: structuredClone(userData.chainRuns.S.__v_raw) },
-      actionPackages: [],
-      triggers: [{ ...trigger, id: 'remote', enabled: false, cooldownMin: 10, autoDelete: true }],
-    };
-    applyShipDoc('S', doc, () => 'S');
-    await nextTick();
-    assert.equal(userData.triggers[0].id, 'local');
-    assert.equal(userData.triggers[0].enabled, false);
-    assert.equal(userData.triggers[0].cooldownMin, 10);
-    assert.equal(userData.triggers[0].autoDelete, true);
-  },
-);
-await check('conflicts stay gated until an explicit force upload', async () => {
-  syncRun();
-  const controller = createChainSyncController({ resolveShipName: () => 'S' });
-  controller.start();
-  controller.markDirtyShip('S');
-  transport.result = {
-    ok: false,
-    latest: {
-      updatedAt: 2000,
-      payload: { version: 1, updatedAt: 100, chainRuns: {}, actionPackages: [], triggers: [] },
-    },
-  };
-  await controller.pushNow();
-  assert.equal(controller.state.conflict, true);
-  await controller.pushNow();
-  assert.equal(transport.pushes.length, 1);
-  transport.result = null;
-  await controller.pushNow(true, 'S');
-  controller.stop();
-  assert.equal(transport.pushes.length, 2);
-  assert.equal(transport.pushes[1].base, 2000);
-  assert.equal(controller.state.conflict, false);
+  assert.deepEqual(data.actionPackages, packages);
+  assert.equal(data.actionPackages.length, 7);
 });
 await check('a captured plan remains reproducible after live data changes', () => {
   const bs = bases();
@@ -508,13 +373,16 @@ await check('snapshot projection schedules recurring copies after the batch ends
       ],
     },
   ];
-  const snapshot = collectChainPlanningSnapshot({
-    originNaturalId: 'CX',
-    capacity,
-    bases: bs,
-    arrivalHoursByNaturalId: new Map([['A', 135_000 / 3_600_000]]),
-  });
-  assert.equal(snapshot.bases[0].projectedStock.RAT, 120);
+  const projectedRat = ms =>
+    collectChainPlanningSnapshot({
+      originNaturalId: 'CX',
+      capacity,
+      bases: bs,
+      arrivalHoursByNaturalId: new Map([['A', ms / 3_600_000]]),
+    }).bases[0].projectedStock.RAT;
+  // 空闲槽位提前 10 秒释放，循环副本仍须等前一批结束。
+  assert.equal(projectedRat(135_000), 120);
+  assert.equal(projectedRat(140_000), 240);
 });
 
 await check(
@@ -604,12 +472,10 @@ await check('combined planning retains stops for ships at another exchange', asy
   fixture.supply['RAT.AI1'] = 0;
   fixture.supply['RAT.NC1'] = 10;
   const scope = effectScope();
-  const planning = scope.run(() =>
-    useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-  );
+  const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
   assert.equal(planning.basePlan.value.stops.length, 2);
   assert.equal(planning.shipPlans.value.length, 1);
-  assert.equal(planning.hasStops.value, true);
+  assert.ok(planning.shipPlans.value.length > 0);
   assert.equal(planning.shipPlans.value.find(x => x.ship.ship.id === 'S2').plan.cxBill.RAT, 10);
   scope.stop();
   await nextTick();
@@ -679,9 +545,7 @@ await check(
     });
     const scope = effectScope();
     try {
-      const planning = scope.run(() =>
-        useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-      );
+      const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
       await new Promise(resolve => setImmediate(resolve));
       assert.deepEqual(
         estimation.calls.filter(call => call.includeEndpointHours).map(call => call.origin),
@@ -720,11 +584,10 @@ await check(
     second.cargoStore.weightCapacity = 32;
     second.cargoStore.weightLoad = 2;
     const selected = ref([first]);
-    const runs = ref([]);
     const scope = effectScope();
     try {
       const planning = scope.run(() =>
-        useChainPlanning({ ships: () => selected.value, bases: () => bs, runs: () => runs.value }),
+        useChainPlanning({ ships: () => selected.value, bases: () => bs }),
       );
       const days = () => planning.shipPlans.value.flatMap(p => p.plan.stops.map(stop => stop.days));
       assert.deepEqual(days(), [15, 15]);
@@ -742,8 +605,6 @@ await check(
         planning.shipPlans.value.map(p => p.ship.ship.id),
         ['S2'],
       );
-      runs.value = [{ shipId: 'S1', run: {} }];
-      assert.deepEqual(days(), [15, 15]);
       assert.deepEqual(
         bs.map(base => [base.config.ship, base.config.days]),
         [
@@ -772,9 +633,7 @@ await check('capacity fitting can assign complementary ships in reverse order', 
   Object.assign(ships[1].cargoStore, { weightCapacity: 2, volumeCapacity: 1 });
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
     assert.deepEqual(
       planning.shipPlans.value.map(p => [
         p.ship.ship.id,
@@ -821,7 +680,7 @@ await check(
     const scope = effectScope();
     try {
       const planning = scope.run(() =>
-        useChainPlanning({ ships: () => ships.value, bases: () => bs, runs: () => [] }),
+        useChainPlanning({ ships: () => ships.value, bases: () => bs }),
       );
       const stops = planning.shipPlans.value.flatMap(p => p.plan.stops);
       const consumer = stops.find(stop => stop.naturalId === 'B');
@@ -851,9 +710,7 @@ await check('fitting counts clipped deliveries without rejecting clipped surplus
   Object.assign(vessel.cargoStore, { weightCapacity: 10, volumeCapacity: 10 });
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => [vessel], bases: () => bs }));
     const plan = planning.shipPlans.value[0].plan;
     assert.equal(plan.stops[0].clipped, true);
     assert.equal(plan.hasUnmetChainDemand, undefined);
@@ -905,9 +762,7 @@ await check('return surplus leaves room for deliveries picked up at later stops'
 
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => [vessel], bases: () => bs }));
     const plan = planning.shipPlans.value[0].plan;
     assert.equal(plan.hasUnmetChainDemand, undefined);
     assert.equal(plan.stops[2].days, 10);
@@ -933,9 +788,7 @@ await check('fitting checks stock at a later selected ship’s warehouse', () =>
   const ships = [ship('S1'), stocked];
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
     const [part] = planning.shipPlans.value;
     assert.equal(part.ship.ship.id, 'S2');
     assert.equal(part.plan.stops[1].days, 10);
@@ -972,7 +825,7 @@ await check('fitting swaps split segments to use the correct warehouses', () => 
   const scope = effectScope();
   try {
     const planning = scope.run(() =>
-      useChainPlanning({ ships: () => ships, bases: () => [...bs, producer], runs: () => [] }),
+      useChainPlanning({ ships: () => ships, bases: () => [...bs, producer] }),
     );
     assert.deepEqual(
       planning.shipPlans.value.map(part => [part.ship.ship.id, part.plan.stops[0].naturalId]),
@@ -1011,9 +864,7 @@ await check('capacity fitting ignores optional return cargo', () => {
   }
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
     assert.deepEqual(
       planning.shipPlans.value.map(part => [
         part.ship.ship.id,
@@ -1061,9 +912,7 @@ await check('capacity fitting counts chain cargo once per segment', () => {
   }
   const scope = effectScope();
   try {
-    const planning = scope.run(() =>
-      useChainPlanning({ ships: () => ships, bases: () => bs, runs: () => [] }),
-    );
+    const planning = scope.run(() => useChainPlanning({ ships: () => ships, bases: () => bs }));
     const plans = planning.shipPlans.value;
     assert.deepEqual(
       plans.map(part => [part.ship.ship.id, part.plan.stops.map(stop => stop.naturalId)]),
@@ -1080,27 +929,15 @@ await check('capacity fitting counts chain cargo once per segment', () => {
     scope.stop();
   }
 });
-await check('zero supply excludes empty ship plans without creating a run or scripts', async () => {
+await check('zero supply excludes empty ship plans', async () => {
   const bs = bases();
   const vessel = ship('S');
   fixture.ships.S = vessel.ship;
   fixture.supply['RAT.AI1'] = 0;
   const scope = effectScope();
-  const planning = scope.run(() =>
-    useChainPlanning({ ships: () => [vessel], bases: () => bs, runs: () => [] }),
-  );
+  const planning = scope.run(() => useChainPlanning({ ships: () => [vessel], bases: () => bs }));
   assert.equal(planning.basePlan.value.stops.length, 2);
   assert.deepEqual(planning.shipPlans.value, []);
-  assert.equal(planning.hasStops.value, false);
-  const result = executeChainPlans(planning.shipPlans.value, {
-    autoLaunch: false,
-    autoTrigger: false,
-  });
-  assert.equal(result.plans.length, 0);
-  assert.deepEqual(userData.chainRuns, {});
-  assert.equal(userData.actionPackages.length, 0);
-  assert.equal(userData.triggers.length, 0);
-  assert.equal(windows.length, 0);
   scope.stop();
   await nextTick();
 });
@@ -1126,7 +963,7 @@ await check('clearing selection invalidates pending allocation and flight estima
   });
   const scope = effectScope();
   const planning = scope.run(() =>
-    useChainPlanning({ ships: () => selected.value, bases: () => bs, runs: () => [] }),
+    useChainPlanning({ ships: () => selected.value, bases: () => bs }),
   );
   assert.equal(planning.allocStatus.value, 'computing');
   selected.value = [];
@@ -1146,79 +983,13 @@ await check('a disposed planning scope cannot publish its pending result', async
   });
   const scope = effectScope();
   const planning = scope.run(() =>
-    useChainPlanning({ ships: () => [ship('S1')], bases: () => bs, runs: () => [] }),
+    useChainPlanning({ ships: () => [ship('S1')], bases: () => bs }),
   );
   scope.stop();
   release({ ok: false, legs: [], totalHours: 100, approximatedLegs: 0 });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(planning.flightEstimates.value.size, 0);
 });
-await check('execution command persists scripts and rejects duplicate runs', () => {
-  const bs = bases();
-  const vessel = ship('S');
-  fixture.ships.S = vessel.ship;
-  const plan = planChainRoute({ originNaturalId: 'CX', capacity, bases: bs });
-  const result = executeChainPlans([{ ship: vessel, plan }], {
-    autoLaunch: false,
-    autoTrigger: false,
-  });
-  assert.equal(result.plans.length, 1);
-  assert.equal(userData.chainRuns.S.plan.originLoadOnDeparture.weight, 20);
-  assert.equal(userData.actionPackages.length, 3);
-  assert.equal(userData.triggers.length, 2);
-  assert.equal(windows.length, 1);
-  const original = JSON.stringify(userData.chainRuns.S);
-  const repeat = executeChainPlans([{ ship: vessel, plan }], {
-    autoLaunch: true,
-    autoTrigger: true,
-  });
-  assert.equal(repeat.plans.length, 0);
-  assert.equal(JSON.stringify(userData.chainRuns.S), original);
-  assert.equal(windows.length, 1);
-});
-await check('shared runtime survives the component scope that first opened it', async () => {
-  syncRun();
-  const { getFleetRuntime } = await import('../src/features/XIT/FLEET/chain-runtime.ts');
-  const panelScope = effectScope();
-  const runtime = panelScope.run(() => getFleetRuntime());
-  panelScope.stop();
-  assert.equal(getFleetRuntime(), runtime);
-  assert.equal(transport.fetches, 0);
-  userData.chainRuns.S.originState = 'done';
-  await nextTick();
-  await runtime.chainSync.pushNow();
-  assert.equal(transport.pushes.length, 1);
-  assert.equal(transport.pushes[0].doc.chainRuns.S.originState, 'done');
-  userData.chainRuns.orphan = {
-    shipId: 'orphan',
-    originNaturalId: 'CX',
-    stops: [],
-    mainPkgName: 'missing',
-    originState: 'pending',
-    finalState: 'pending',
-  };
-  userData.chainRuns.completed = {
-    shipId: 'completed',
-    originNaturalId: 'CX',
-    stops: [],
-    mainPkgName: 'completed',
-    originState: 'done',
-    finalState: 'done',
-  };
-  await nextTick();
-  assert.equal(userData.chainRuns.orphan, undefined);
-  assert.equal(userData.chainRuns.completed.finalState, 'done');
-  const fp = userData.chainRuns.S.fp;
-  clearShipChainPlan('S', 'S');
-  await nextTick();
-  assert.equal(userData.chainRuns.S, undefined);
-  assert.equal(userData.chainRuns.completed.finalState, 'done');
-  assert.equal(userData.actionPackages.length, 0);
-  await runtime.chainSync.pushNow();
-  assert.equal(transport.pushes.filter(x => x.key === 'S').at(-1).doc.clearedFp, fp);
-  runtime.chainSync.stop();
-});
-
 // 原生 RT：服务器航线（玩家可能改过）与本地记录合并时，只有输入完全一致才沿用预计时长。
 // refuels 项可以是油罐名（补满），也可以是 { tank, limited }（游戏里改成固定数量）。
 const refuelsOf = waypoint =>
@@ -1751,13 +1522,18 @@ await check('CX BURN: merge each running loop base once and use only CX inventor
 
 await check('CX BURN: unreceived warehouse stock differs from an empty warehouse', async () => {
   const routes = [
-    { running: true, record: { repeats: true, waypoints: [{ location: 'HRT' }, { location: 'A' }] } },
+    {
+      running: true,
+      record: { repeats: true, waypoints: [{ location: 'HRT' }, { location: 'A' }] },
+    },
   ];
   const findBase = x =>
     x === 'A'
       ? {
           siteId: 'site-a',
-          burn: { DW: { input: 2, output: 0, workforce: 1, inventory: 10, remainingAllocation: 5 } },
+          burn: {
+            DW: { input: 2, output: 0, workforce: 1, inventory: 10, remainingAllocation: 5 },
+          },
         }
       : undefined;
   const unknown = exchangeBurn('HRT', routes, findBase, undefined);
@@ -1803,7 +1579,10 @@ await check('CX BURN: concurrent panels share one automatic route read', async (
     const second = ensureGameRouteDefinitions();
     assert.equal(second, first);
     await Promise.resolve();
-    assert.deepEqual(socketMessages.map(x => x.messageType), ['SHIP_ROUTES_GET_ROUTES']);
+    assert.deepEqual(
+      socketMessages.map(x => x.messageType),
+      ['SHIP_ROUTES_GET_ROUTES'],
+    );
 
     const routes = [{ id: 'loop', naturalId: 'RT-TEST-1', repeats: true, waypoints: [] }];
     dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes } });
@@ -1942,29 +1721,6 @@ await check('loop fuel per round sums leg usage and falls back to tank caps', ()
     { stl: 30, ftl: 300 },
   );
   assert.deepEqual(fuelPerRound([], { stlCap: 1500, ftlCap: 300 }), { stl: 1500, ftl: 300 });
-});
-
-await check('loop mode blocks ACT execution with one shared reason', () => {
-  assert.equal(actBlockedReason(false), undefined);
-  const blocked = actBlockedReason(true);
-  assert.equal(typeof blocked, 'string');
-  assert.match(blocked, /生成原生 RT/);
-  // 守卫的最终落点是 ChainView 的置灰与 execute() 拦截（渲染层，脚本驱动不到）：这里只核对
-  // 它确实是唯一来源——一个 computed 派生、置灰不读裸 loopActive、没有第二份硬编码文案。
-  const view = readFileSync(
-    new URL('../src/features/XIT/FLEET/ChainView.vue', import.meta.url),
-    'utf8',
-  );
-  assert.equal(view.split('actBlockedReason(').length - 1, 1);
-  assert.equal(view.includes('循环模式不生成 ACT'), false);
-  const hasStopGuards = [...view.matchAll(/:disabled="([^"]*)"/g)]
-    .map(match => match[1])
-    .filter(expr => expr.includes('hasStops'));
-  assert.equal(hasStopGuards.length, 2);
-  for (const expr of hasStopGuards) {
-    assert.match(expr, /actBlocked !== undefined/);
-  }
-  assert.equal(view.includes('|| loopActive'), false);
 });
 
 await check('loop round bill adds SF/FF to the origin load', () => {

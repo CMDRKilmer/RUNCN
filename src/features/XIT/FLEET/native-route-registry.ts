@@ -110,13 +110,3 @@ export function removeNativeRoute(routeId: string) {
   delete next[routeId];
   records.value = next;
 }
-
-// 该船最近一次创建的原生 RT。
-export function nativeRouteForShip(shipId: string | undefined) {
-  if (shipId === undefined) {
-    return undefined;
-  }
-  return Object.values(records.value)
-    .filter(x => x.shipId === shipId)
-    .sort((a, b) => b.createdAt - a.createdAt)[0];
-}

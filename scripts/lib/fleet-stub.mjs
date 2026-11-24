@@ -14,7 +14,7 @@ export const fixture = {
   exchanges: {},
   warehouses: {},
 };
-export const userData = reactive({ chainRuns: {}, actionPackages: [], triggers: [] });
+export const userData = reactive({ actionPackages: [], triggers: [] });
 export const sitesStore = {
   all: ref([]),
   getByPlanetNaturalId: id => sitesStore.all.value.find(x => x.siteId === id),
@@ -105,26 +105,6 @@ export async function estimateChainFlightTimes(input) {
   }
   return { ok: false, legs: [], totalHours: 0, approximatedLegs: 0 };
 }
-export const serializeStorage = store => store.id;
 export const fixed0 = n => String(Math.round(n));
-let nextId = 0;
-export const createId = () => String(++nextId).padStart(10, '0');
-export const stripDeletedActions = () => {};
-export class HttpError extends Error {}
-export const loadSession = () => ({ user: { companyCode: 'TEST' } });
-export const transport = { pushes: [], fetches: 0, remote: null, pending: null };
-export async function fetchChainSync() {
-  transport.fetches++;
-  return transport.remote;
-}
-export async function fetchChainSyncs() {
-  transport.fetches++;
-  return [];
-}
-export async function pushChainSync(key, doc, base) {
-  transport.pushes.push({ key, doc: structuredClone(doc), base });
-  if (transport.pending !== null) {
-    await transport.pending;
-  }
-  return transport.result ?? { ok: true, updatedAt: 1000 + transport.pushes.length };
-}
+export const getInvStore = () => undefined;
+export const tilesStore = {};
