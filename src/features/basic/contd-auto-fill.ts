@@ -41,6 +41,12 @@ interface DraftConfig {
 
 const MARKER = 'data-rprun-auto-fill';
 
+// 嵌入版 CONGEN 容器（advanced/contd-embed-contgen 挂载时）的标记。旧「JSON 配置」
+// 面板只在生成器确实在场时才隐藏：本功能属 basic、始终加载，而无条件隐藏会让
+// BASIC 模式（advanced 功能不加载）或本功能被关掉时，既没有生成器、也没有 JSON
+// 手动入口。标记字符串需与 advanced/contd-embed-contgen.ts 的 MARKER 保持一致。
+const EMBED_MARKER = '[data-rp-contd-embed-contgen]';
+
 // Per-panel id for the injected textarea. The label's `for` must
 // point at a real element id so the browser associates them — the
 // DevTools accessibility check flags unassociated form fields. A
@@ -1047,16 +1053,34 @@ export async function fillDraft(tile: PrunTile, json: string): Promise<void> {
   await applyConfig(tile, config);
 }
 
+// 隐藏旧「JSON 配置」面板。由嵌入生成器（advanced/contd-embed-contgen）在挂载后
+// 调用，保证「无替代品就不隐藏」。只加 class 不改 DOM 结构：React 重绘时按原
+// 父子关系卸载，移动节点会抛 NotFoundError。
+export function hideLegacyPanel(root: ParentNode): void {
+  for (const row of root.querySelectorAll<HTMLElement>(`[${MARKER}]`)) {
+    row.classList.add($style.hiddenLegacy);
+  }
+}
+
 function buildPanel(tile: PrunTile) {
   // Build a native FormComponent row: label on the left, input column on
   // the right. This mirrors the 合同注解 / 周期重复 rows above so the
   // panel blends in with the surrounding CONTD header.
   const row = document.createElement('div');
-  // 「JSON 配置」面板现已由嵌入到条件区下方的 CONTGEN 生成器取代，手动入口不再展示。
-  // 但保留这个隐藏面板：独立 CONTGEN 的「新建合同并填充」流程仍靠它消费 contgen-output
-  // workspace key 并自动填充（见下方 autoFilledFromContgen 分支）。用 hidden 样式隐藏，
-  // 不 display:none，确保 textarea/按钮可 programmatic focus/click 完成自动填充。
-  row.className = `${C.FormComponent.containerPassive} ${C.forms.passive} ${C.forms.formComponent} ${$style.hiddenLegacy}`;
+  // 「JSON 配置」面板在嵌入生成器在场时由它取代，手动入口不再展示；但只有生成器
+  // 确实挂载时才隐藏（无替代品时隐藏等于把功能删掉）。保留 DOM 不 display:none：
+  // 独立 CONTGEN 的「新建合同并填充」仍靠它消费 contgen-output workspace key 并
+  // 自动填充（见下方 autoFilledFromContgen 分支）。与生成器的先后顺序两种都有，
+  // 另一方向由 contd-embed-contgen 调用 hideLegacyPanel 补齐。
+  const hasEmbeddedGenerator = tile.anchor.querySelector(EMBED_MARKER) !== null;
+  row.className = [
+    C.FormComponent.containerPassive,
+    C.forms.passive,
+    C.forms.formComponent,
+    hasEmbeddedGenerator ? $style.hiddenLegacy : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
   row.setAttribute(MARKER, 'true');
 
   const inputId = `rprun-contd-json-${nextPanelInputId++}`;

@@ -244,15 +244,8 @@ const newDraftStatus = ref<string | null>(null);
 const newDraftError = ref<string | null>(null);
 const isNewing = computed(() => newDraftStatus.value !== null);
 
-// 统一收集当前要显示的错误（运行期填充错误优先，否则是表单校验错误）。
-// 嵌入模式与独立模式共用同一份模板片段。
-const displayedErrors = computed<string[]>(() =>
-  newDraftError.value !== null
-    ? [newDraftError.value]
-    : canSubmit.value
-      ? []
-      : validationErrors.value,
-);
+// 填充/新建的运行期错误单独存一份：它无论独立还是嵌入模式都要显示，
+// 而表单校验提示只在独立模式显示（见模板）。
 
 // Maps helper milestones to the user-facing status string. Picked
 // at await points so the button text updates as work progresses.
@@ -551,10 +544,15 @@ function applyTotalPrice() {
       </Commands>
     </div>
 
-    <!-- 独立 CONTGEN：校验提示留在可滚动表单下方、紧贴 JSON 区，保持原样。
-         嵌入 CONTD 时不显示校验提示（物品清单占满整行）。 -->
-    <div v-if="!isEmbedded && displayedErrors.length > 0" :class="$style.errors">
-      <div v-for="err in displayedErrors" :key="err">⚠ {{ err }}</div>
+    <!-- 运行期失败（填充当前草案 / 新建并填充抛错）两种模式都必须报出来：
+         嵌入时若一并抑制，按钮只是悄悄回到初始文字，用户不知道刚才为什么没填进去，
+         而原生字段可能已经被填了一部分。 -->
+    <div v-if="newDraftError" :class="$style.errors">
+      <div>⚠ {{ newDraftError }}</div>
+    </div>
+    <!-- 表单校验提示只在独立模式显示：嵌入模式下物品清单占满整行，不占版面。 -->
+    <div v-else-if="!isEmbedded && !canSubmit" :class="$style.errors">
+      <div v-for="err in validationErrors" :key="err">⚠ {{ err }}</div>
     </div>
 
     <div :class="$style.preview">
@@ -610,10 +608,15 @@ function applyTotalPrice() {
   overflow: hidden;
 }
 .form {
-  /* 按内容高度排布，不再 flex:1 撑满剩余空间——否则内容少时表单内部底部
-     留出大片空白，把校验提示和 JSON 区顶到很下面。改为内容紧凑在上，
-     剩余空白自然落到容器底部（连同校验提示、JSON 区整体上移）。 */
-  flex: 0 0 auto;
+  /* 按内容高度排布，不撑满剩余空间——否则内容少时表单内部底部留出大片空白，
+     把校验提示和 JSON 区顶到很下面。改为内容紧凑在上，剩余空白自然落到容器
+     底部（连同校验提示、JSON 区整体上移）。
+     但必须允许收缩（flex-shrink: 1）：根节点是 height:100% + overflow:hidden、
+     预览区又固定占 200px，若 basis 取内容高度且不可缩小，内容一多（长 CART/BPC
+     清单、或把独立 CONTGEN 窗口拉矮）总高就会超出根节点被裁掉，此时表单自己的
+     overflow-y 根本不会生效，底部按钮也点不到。basis:auto + shrink:1 让「内容少
+     时紧凑、内容多时内部滚动」两者兼得；min-height:0 是让滚动生效的前提。 */
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 6px 8px;

@@ -13,7 +13,7 @@
 //    条件容器上重建；用 marker 检测已挂载且仍连接的容器，避免重复注入。容器断开时
 //    createFragmentApp.appendTo 内置的 onNodeDisconnected 会自动卸载 Vue app。
 import CONTGEN from '@src/features/XIT/CONTGEN/CONTGEN.vue';
-import { fillDraft } from '@src/features/basic/contd-auto-fill';
+import { fillDraft, hideLegacyPanel } from '@src/features/basic/contd-auto-fill';
 import { tileStatePlugin } from '@src/store/user-data-tiles';
 import { tileKey } from '@src/hooks/use-tile';
 import { createFragmentApp } from '@src/utils/vue-fragment-app';
@@ -67,6 +67,13 @@ function mountGenerator(tile: PrunTile, conditions: HTMLElement) {
 
   // 先放入 DOM 锚点，再挂载，appendTo 才能绑定 onNodeDisconnected 监听。
   findInsertionAnchor(conditions).after(container);
+
+  // 生成器已如实挂载，这时才隐藏 contd-auto-fill 的旧「JSON 配置」手动面板——
+  // 隐藏动作归本 feature 负责，而不是让 auto-fill 无条件隐藏：本功能属 advanced，
+  // BASIC 模式或被用户关掉时不会加载，旧面板必须保持可用，否则用户既没有生成器、
+  // 也没有 JSON 手动入口。反方向（旧面板晚于生成器创建）由 buildPanel 里的
+  // EMBED_MARKER 检查补齐。
+  hideLegacyPanel(tile.anchor);
 
   createFragmentApp(CONTGEN, {
     fillCurrent: (json: string) => fillDraft(tile, json),
