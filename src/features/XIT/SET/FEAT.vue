@@ -135,7 +135,7 @@ async function onChangeModeClick() {
 </script>
 
 <template>
-  <div>
+  <div :class="$style.root">
     <form :class="$style.form">
       <Commands label="切换功能集">
         <PrunButton primary @click="onChangeModeClick">
@@ -253,10 +253,23 @@ async function onChangeModeClick() {
   opacity: 0.65;
 }
 
+/* 磁贴宽度由玩家拖动，媒体查询看的是视口而不是磁贴，所以用容器查询：
+   默认两栏，容器窄于 620px 时回退单栏。不用 auto-fit —— 宽窗口会排成三栏，
+   每栏只剩 270px，中文说明被挤到三四行反而更难读。 */
+.root {
+  container-type: inline-size;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 18px;
+}
+
+@container (max-width: 620px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .cell {
