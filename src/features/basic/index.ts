@@ -110,7 +110,6 @@ import './rprun-version-label';
 import './rte-columns-layout';
 import './rte-header-compact';
 import './rt-show-waypoint-actions';
-import './rt-ship-assign';
 import './screen-layout-lock';
 import './screen-tab-bar/screen-tab-bar';
 import './screen-variables';

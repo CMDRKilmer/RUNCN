@@ -1049,13 +1049,18 @@ html[data-rp-rte-compact] .rp-command-RTE [class*='ScrollView__view'] > div:firs
 }
 html[data-rp-rte-compact] .rp-command-RTE [class*='FormComponent__containerPassive'] {
   display: flex !important;
-  flex: 1 1 0 !important;
-  min-width: 0 !important;
+  /* basis 不能是 0：字段里的 label 保留了原生 min-width:140px 且不换行，basis 为 0
+     时字段会被压到比 label 还窄，label 直接溢出压到隔壁字段上（父级 flex-wrap 也
+     救不了——这些字段的 basis 与 min-width 都是 0，永远不会换行）。给一个能容纳
+     「label 140 + 内边距 12 + 一点值区」的 basis/min-width，窄窗口下会自动换行成
+     两行甚至一行一个，而不是互相覆盖。 */
+  flex: 1 1 190px !important;
+  min-width: 190px !important;
   flex-direction: row !important;
   align-items: center !important;
   box-sizing: border-box !important;
   white-space: nowrap !important;
-  /* 右侧 12px 作为组间距；四个字段 flex:1 平分剩余宽度（按钮不自占地盘）。 */
+  /* 右侧 12px 作为组间距；字段在能放下时平分剩余宽度（按钮不自占地盘）。 */
   margin: 0 12px 0 0 !important;
   padding: 4px 6px !important;
 }

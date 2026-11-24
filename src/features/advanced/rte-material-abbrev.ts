@@ -1,4 +1,5 @@
 import { getMaterialByName } from '@src/infrastructure/prun-ui/i18n';
+import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
 // RTE 航线执行明细里，把「物料名，N单位」改写成「TICKER×N」（如「水，32单位」→「H2O×32」）。
 // 只改屏幕上显示的文字（DOM 文本节点），不触碰游戏内部数据：RTE 的装载/卸船动作由
@@ -42,13 +43,27 @@ function abbreviateAll(tile: PrunTile) {
   tile.anchor.querySelectorAll<HTMLElement>('[class*="Step__summary"]').forEach(abbreviate);
 }
 
+// 每个 anchor 当前的观察器。同一磁贴重复激活时先断开旧的，保证始终只有一个在跑。
+const observers = new WeakMap<HTMLElement, MutationObserver>();
+
 function onTileReady(tile: PrunTile) {
   abbreviateAll(tile);
+  observers.get(tile.anchor)?.disconnect();
   // Step__summary 文本会随执行进度变化，且 RTE 明细是滚动/增量渲染的。
   // 监听 anchor 子树的节点增改与文本内容变更，新增或重绘的步骤行都再缩写一次。
   // 自己做缩写时会改动文本节点，但改完的内容不再匹配 SUMMARY_RE，故不会无限循环。
   const observer = new MutationObserver(() => abbreviateAll(tile));
   observer.observe(tile.anchor, { childList: true, subtree: true, characterData: true });
+  observers.set(tile.anchor, observer);
+  // 切标签页 / 移动 FB 时 React 会保留 frame、断连后再挂回，并在重新激活时再次调用
+  // 本回调。不在这里断开，每次重激活都会多留一个活动观察器，长会话里文本一变就要
+  // 重复扫描多遍。与 RT 功能一致，绑定到 frame 的断开事件上。
+  onNodeDisconnected(tile.frame, () => {
+    observer.disconnect();
+    if (observers.get(tile.anchor) === observer) {
+      observers.delete(tile.anchor);
+    }
+  });
 }
 
 function init() {

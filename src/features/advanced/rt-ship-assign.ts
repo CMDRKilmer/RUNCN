@@ -60,34 +60,80 @@ function writeMatchOnly(value: boolean) {
   }
 }
 
-// React fiber 的最小形状：只需要沿 return 链向上找渲染时透传的 props。
-// 只声明用得到的字段，避免用 any 破坏类型检查。
+// React 渲染时透传给组件的 props 的最小形状（只声明用得到的字段，不用 any）。
+type PropsLike = {
+  waypoint?: { destination?: PrunApi.Address };
+  destination?: PrunApi.Address;
+};
+
+// React fiber 的最小形状：兜底路径要沿 return 链向上找，并能取到 alternate。
 type FiberLike = {
-  memoizedProps?: {
-    waypoint?: { destination?: PrunApi.Address };
-    destination?: PrunApi.Address;
-  };
+  memoizedProps?: PropsLike;
+  alternate?: FiberLike | null;
   return?: FiberLike | null;
 };
 
-// 从 DOM 元素的 React fiber 链里挖出第一个 waypoint 的 destination（结构化 address）。
-// RT 界面把路径点目的地渲染成「Hortus Station (Hortus)」文本，但 naturalId（HRT）
-// 只存在于 fiber 的 waypoint.destination 上，故从 fiber 读取。
+function pickAddress(props: PropsLike | undefined): PrunApi.Address | undefined {
+  const candidate = props?.waypoint?.destination ?? props?.destination;
+  if (candidate === undefined || !Array.isArray(candidate.lines)) {
+    return undefined;
+  }
+  return candidate;
+}
+
+// 这条 address 的某个名字是否出现在屏幕上渲染的文本里（「Hortus Station (Hortus)」）。
+// 用来在 current / alternate 两个 fiber 给出不同目的地时，判断哪个才是当前渲染结果。
+function addressMatchesText(address: PrunApi.Address, text: string): boolean {
+  const names = address.lines
+    .map(line => line.entity?.name)
+    .filter((name): name is string => name !== undefined && name.length > 0);
+  return names.some(name => text.includes(name));
+}
+
+// 从一层 fiber 里取 destination。React 复用路径点节点时，DOM 上记的 __reactFiber$
+// 可能仍指向挂载时的 fiber，最新 props 落在它的 alternate 上——只看一方会在路径点被
+// 原地修改后一直返回旧目的地（起点的船继续被藏/置灰）。两边都有且不一致时，以屏幕上
+// 实际渲染出的名字为准。
+function chooseAddress(fiber: FiberLike, text: string): PrunApi.Address | undefined {
+  const own = pickAddress(fiber.memoizedProps);
+  const alt = pickAddress(fiber.alternate?.memoizedProps);
+  if (own === undefined) {
+    return alt;
+  }
+  if (alt === undefined || alt === own) {
+    return own;
+  }
+  if (addressMatchesText(own, text)) {
+    return own;
+  }
+  if (addressMatchesText(alt, text)) {
+    return alt;
+  }
+  return alt;
+}
+
+// 挖出第一个 waypoint 的 destination（结构化 address）。
+// RT 界面把目的地渲染成「Hortus Station (Hortus)」文本，但 naturalId（HRT）只存在于
+// address 上，所以必须从 React fiber 里取。
 function findFirstWaypointAddress(waypoints: HTMLElement): PrunApi.Address | undefined {
   const destEl = waypoints.querySelector('[class*="Waypoint__destination"]');
   if (!destEl) {
     return undefined;
   }
   const fiberKey = Object.keys(destEl).find(k => k.startsWith('__reactFiber$'));
-  if (!fiberKey) {
+  if (fiberKey === undefined) {
     return undefined;
   }
+  // 空白折叠后再比对，避免换行/多空格导致名字匹配失败。
+  const text = (destEl.textContent ?? '').replaceAll(/\s+/g, ' ');
   let fiber = (destEl as unknown as Record<string, FiberLike | undefined>)[fiberKey];
-  for (let i = 0; i < 12 && fiber; i++) {
-    const candidate =
-      fiber.memoizedProps?.waypoint?.destination ?? fiber.memoizedProps?.destination;
-    if (candidate !== undefined && Array.isArray(candidate.lines)) {
-      return candidate;
+  for (let i = 0; i < 12; i++) {
+    if (fiber === undefined || fiber === null) {
+      break;
+    }
+    const found = chooseAddress(fiber, text);
+    if (found !== undefined) {
+      return found;
     }
     fiber = fiber.return ?? undefined;
   }
