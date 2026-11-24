@@ -18,6 +18,11 @@ const MS_PER_DAY = 86400000;
 const DAY_MIN = 0;
 const DAY_MAX = 180;
 
+// 非盈利类型（全部建筑净收益 ≤ 0）没有经济最优，按这个保守天数计。
+// 不取 DAY_MAX：满折旧 180 天离玩家直觉太远，看起来像算错；90 天是维修设置里的
+// 默认口径，作为「没收益就按常规周期修」的人工兜底更好理解。
+const NON_PROFIT_DAY = 90;
+
 // Sigmoid 效率公式来自 MoonSugarTravels 退化研究,被 PRUNplanner 采用。
 // η(D) = 0.33 + 0.67 / (1 + e^((1789/25000) × (D − 100.87)))
 // D = 距上次维修的天数,η ∈ [0.33, 1]。
@@ -167,11 +172,20 @@ export function calculateOptimalRepair(units: RepairUnit[]): OptimalRepair | und
   return { optimalDay: bestDay };
 }
 
+export interface OptimalDayInfo {
+  day: number;
+  /**
+   * true = 该值来自「全部建筑净收益 ≤ 0」的满折旧兜底（180 天），不是 sweep 出的
+   * 经济最优。调用方应据此说明来源，避免玩家把它当成算错。
+   */
+  nonProfit: boolean;
+}
+
 // 维修间隔 sweep 的公共实现。ticker 省略 = 整站统一最优；传入建筑代号 =
 // 只把该类型的建筑纳入 sweep，得到该类型自有的最优维修间隔。
 // 严格沿用 REPP 算法的口径:per-building dailyRevenue − workforce share − constructionCost/180。
-// 仅当所有建筑都有价格/订单数据时返回数值,否则 undefined(调用方应回退为固定天数)。
-function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): number | undefined {
+// 拿不到收益/价格数据时返回 undefined，由调用方决定是显示「—」还是回退固定天数。
+function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): OptimalDayInfo | undefined {
   const repairable = site.platforms.filter(isRepairableBuilding);
   if (repairable.length === 0) {
     return undefined;
@@ -194,6 +208,9 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): number | u
     ageDays: number;
   }
   const buildingDataList: BuildingData[] = [];
+  // 是否有建筑没拿到可用数据（价格缺失 / 产量与订单都没加载）。这类建筑会被下面的
+  // filter 排除，因此不能拿剩余的 units 当作「整类」的样子下结论。
+  let dataIncomplete = false;
   for (const building of target) {
     const fullMaterials = getBuildingBuildMaterials(building, site);
     const lines = productionStore.getBySiteId(site.siteId);
@@ -210,6 +227,9 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): number | u
     if (rawDailyRevenue !== undefined && constructionCost !== undefined) {
       adjustedDailyRevenue = rawDailyRevenue - workforceShare - constructionCost / 180;
     }
+    if (adjustedDailyRevenue === undefined || fullMaterials.length === 0) {
+      dataIncomplete = true;
+    }
     const lastRepair = getBuildingLastRepair(building);
     const ageDays = Math.max(0, (now - lastRepair) / MS_PER_DAY);
     buildingDataList.push({ dailyRevenue: adjustedDailyRevenue, fullMaterials, ageDays });
@@ -221,17 +241,43 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): number | u
       fullMaterials: b.fullMaterials,
       ageDays: b.ageDays,
     }));
-  return calculateOptimalRepair(units)?.optimalDay;
+  // 全部建筑净收益 ≤ 0（闲置或亏损的类型）：不存在经济最优，因为不产出的建筑越晚修
+  // 每摊到每天的维修成本越低。calculateOptimalRepair 只统计 dailyRevenue > 0 的单元，
+  // 这类会被整个丢掉并返回 undefined，调用方就会退回「固定天数」；而最优模式下那个
+  // 输入框是禁用/不可见的，回退过去等于让界面上的数字凭空出现（实测 VH-874b 的 ECA
+  // 每栋 -2344/天，最优列直接跟着固定天数变）。
+  // 只在「该类型全部建筑都拿到了可用数据」时才下这个结论：直接对 units 判 every，
+  // 会漏掉那些因价格/产量未就绪而被 filter 掉的建筑——只要还在加载的恰好是盈利类，
+  // 剩下的亏损类就会被误判成整类非盈利，返回值还会被调用方缓存 10 分钟（而不是按
+  // undefined 走 15 秒重试），盈利数据到位后长期显示错误值。
+  if (!dataIncomplete && units.length > 0 && units.every(u => u.dailyRevenue <= 0)) {
+    return { day: NON_PROFIT_DAY, nonProfit: true };
+  }
+  const optimalDay = calculateOptimalRepair(units)?.optimalDay;
+  return optimalDay === undefined ? undefined : { day: optimalDay, nonProfit: false };
 }
 
-// 整站统一最优间隔（左侧基地列表沿用）。
+// 整站统一最优间隔（FLEET 维修列沿用，只要天数）。
 export function calculateSiteOptimalDay(siteId: string): number | undefined {
+  return calculateSiteOptimalDayInfo(siteId)?.day;
+}
+
+// 同上的完整信息（区分「算不出」与「非盈利兜底」）。
+export function calculateSiteOptimalDayInfo(siteId: string): OptimalDayInfo | undefined {
   const site = sitesStore.getById(siteId);
   return site ? calculateOptimalDayFor(site) : undefined;
 }
 
 // 单一建筑类型自有的最优间隔（XIT REPD 右侧明细每行一个值）。
 export function calculateTypeOptimalDay(siteId: string, ticker: string): number | undefined {
+  return calculateTypeOptimalDayInfo(siteId, ticker)?.day;
+}
+
+// 同上的完整信息（区分「算不出」与「非盈利兜底」）。
+export function calculateTypeOptimalDayInfo(
+  siteId: string,
+  ticker: string,
+): OptimalDayInfo | undefined {
   const site = sitesStore.getById(siteId);
   return site ? calculateOptimalDayFor(site, ticker) : undefined;
 }
