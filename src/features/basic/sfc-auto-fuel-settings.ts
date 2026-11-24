@@ -483,8 +483,4 @@ function init() {
   tiles.observe('SFC', onTileReady);
 }
 
-features.add(
-  import.meta.url,
-  init,
-  'SFC：自动把飞船/起终点推送给 FTC 计算最优燃料参数，并把燃料消耗/反应堆使用量设为该参数（未计算过时不改动）。',
-);
+features.add(import.meta.url, init, 'SFC：自动把飞船 / 起终点推给 FTC 算最优燃料参数并应用。');

@@ -34,5 +34,5 @@ function init() {
 features.add(
   import.meta.url,
   init,
-  'BS：隐藏上下文菜单里游戏原生的 HQ「总部」与 ARC「APEX 代表中心」命令键，只影响 BS 命令窗口，PLI / INV / BRA 等其它命令键保留。关闭本功能后两个命令键恢复显示。适用于所有主题，以及独立窗口与面板内嵌的基地窗口。',
+  'BS：隐藏上下文菜单里的原生 HQ「总部」与 ARC「代表中心」命令键。',
 );

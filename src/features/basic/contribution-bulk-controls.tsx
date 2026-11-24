@@ -53,8 +53,4 @@ function init() {
   tiles.observe(['COGCU', 'POPID'], onTileReady);
 }
 
-features.add(
-  import.meta.url,
-  init,
-  'Adds bulk controls (NONE, ALL) to contribution menus in CoGC and population upkeep tiles.',
-);
+features.add(import.meta.url, init, 'COGC 与人口维护面板的贡献菜单加 NONE / ALL 批量按钮。');
