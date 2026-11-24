@@ -18,31 +18,25 @@ import { useTileState } from '@src/store/user-data-tiles';
 
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { buildNativeWaypoints } from './native-route-plan';
+import { buildNativeWaypoints, DEFAULT_WAYPOINT_FUEL_PERCENT } from './native-route-plan';
 import {
   nativeRouteRecords,
   recordNativeRoute,
   removeNativeRoute,
   type NativeRouteRecord,
 } from './native-route-registry';
-import {
-  socketDeleteRoute,
-  socketGetRoutes,
-  hasPendingRouteRequest,
-  type RouteData,
-} from './native-route-socket';
+import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
 import type { RouteStatus } from './native-route-rte';
 import {
-  collectNativeRoutes,
   matchRunningRoutes,
   recordsToRemoveAfterDelete,
   routeProgressText,
   routeStopStates,
   withoutRouteDefinition,
   type RouteStopState,
-  type RunningRoutes,
 } from './native-route-game';
+import { gameRouteDefinitions, gameRunningRoutes, liveNativeRoutes } from './native-route-live';
 import { stagedNativeRoute } from './native-route-staged';
 import { stagedDispatch } from './staged';
 import {
@@ -54,7 +48,9 @@ import {
 } from './native-route-purchase';
 import { loopSustain, fuelPerRound } from './native-route-loop';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
+import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
+import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import { fixed0, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
@@ -222,14 +218,17 @@ const loopSupplyText = computed(() => {
 const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
 const routeNotice = ref<string>();
-const nativeRouteCandidate = computed(() =>
-  selectedShips.value.length === 1 &&
-  shipPlans.value.length === 1 &&
-  !loading.value &&
-  (!chainLoopMode.value || loopActive.value)
-    ? shipPlans.value[0]
-    : undefined,
-);
+const nativeRouteCandidate = computed(() => {
+  if (selectedShips.value.length !== 1) {
+    return undefined;
+  }
+  if (chainLoopMode.value) {
+    const ship = loopShip.value;
+    const plan = loopPlan.value?.plan;
+    return loopActive.value && !loopComputing.value && ship && plan ? { ship, plan } : undefined;
+  }
+  return !loading.value && shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
+});
 
 function openNativeRoutePlan() {
   const candidate = nativeRouteCandidate.value;
@@ -237,14 +236,26 @@ function openNativeRoutePlan() {
     return;
   }
   try {
-    const loop = loopActive.value;
-    const plan = loop && loopPlan.value?.plan ? loopPlan.value.plan : candidate.plan;
-    const waypoints = buildNativeWaypoints(plan);
-    // 每轮 SF/FF 取收敛估时的逐段油耗之和；缺油量数据时按罐容量保守估。
-    const loopFuel = fuelPerRound(
-      loopPlan.value?.estimate?.legs ?? [],
-      chainShipFuelCaps(candidate.ship.ship),
-    );
+    const loop = chainLoopMode.value;
+    const waypoints = buildNativeWaypoints(candidate.plan);
+    let loopSnapshot;
+    if (loop) {
+      const estimate = loopPlan.value?.estimate;
+      if (estimate === undefined || estimate.legs.length !== waypoints.length - 1) {
+        throw new Error('循环估时与航点不匹配。');
+      }
+      const legs = estimate.legs.map(leg => {
+        if (leg.settings === undefined) {
+          throw new Error(`${leg.from} → ${leg.to} 缺少循环飞行档位。`);
+        }
+        return leg.settings;
+      });
+      loopSnapshot = {
+        cycleHours: estimate.totalHours,
+        fuel: fuelPerRound(estimate.legs, chainShipFuelCaps(candidate.ship.ship)),
+        legs: [{ fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT }, ...legs],
+      };
+    }
     routeNotice.value = undefined;
     // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
     stagedNativeRoute.value = {
@@ -253,19 +264,13 @@ function openNativeRoutePlan() {
       waypoints,
       chainName: chainGroup.value ?? '',
       autoStart: true,
-      ...(loop ? { loop: true, cycleHours: loopPlan.value?.cycleHours, loopFuel } : {}),
+      loop: loopSnapshot,
     };
     void showBuffer('XIT RTWIZ');
   } catch (err) {
     routeNotice.value = err instanceof Error ? err.message : String(err);
   }
 }
-
-// RTE 里「哪些船正在跑哪条航线」——只用来把执行中的卡片换成游戏里的定义，列表本身
-// 不依赖它：「运行中」列出全部创建过的原生 RT，点页签立刻有内容。
-const gameRunningRoutes = ref<RunningRoutes>();
-// `SHIP_ROUTES_GET_ROUTES` 拿到的全部航线定义：没在执行的航线也按游戏里的内容显示。
-const gameRouteDefinitions = ref<RouteData[]>([]);
 
 interface NativeRouteView {
   record: NativeRouteRecord;
@@ -276,6 +281,7 @@ interface NativeRouteView {
   running: boolean;
   // 游戏侧 Loop 开关（服务端 repeats 为准）：运行中卡片标「循环」。
   repeats: boolean;
+  cxBurnCode: string | undefined;
   // 循环航线（本地标记或服务端 repeats 开）：显示周期/支撑轮数，运行中也可补货。
   isLoop: boolean;
   // 生成时快照的飞行周期文本（预计）；非循环或无快照为空。
@@ -364,19 +370,20 @@ function nativeRouteRowKey(entry: NativeRouteView) {
 }
 
 const nativeRoutes = computed<NativeRouteView[]>(() =>
-  collectNativeRoutes(
-    nativeRouteRecords.value,
-    gameRunningRoutes.value,
-    gameRouteDefinitions.value,
-  ).map(row => {
+  liveNativeRoutes.value.map(row => {
     const ship = shipsStore.getById(row.shipId);
+    const repeats = row.record.repeats === true;
     return {
       record: row.record,
       ship,
       loads: nativeRouteLoads(row.record),
       capacity: nativeRouteCapacity(ship),
       running: row.running,
-      repeats: row.record.repeats === true,
+      repeats,
+      cxBurnCode:
+        row.running && repeats
+          ? exchangesStore.getByNaturalId(row.record.waypoints[0]?.location.trim())?.code
+          : undefined,
       status: row.status,
       ...loopCardInfo(row.record, ship, row.running, row.status),
       purchase: row.running ? undefined : nativeRoutePurchasePackage(row.record),
@@ -435,6 +442,7 @@ async function refreshGameRoutes() {
     return;
   }
   refreshingGameRoutes = true;
+  const companyId = userDataStore.companyId;
   try {
     // 响应反映的是发起请求那一刻的航线列表：期间向导可能刚建完一条航线（不在快照里，
     // 不能判定「已删除」），也可能刚删掉一条（不能把快照里的旧定义写回去）。
@@ -444,6 +452,9 @@ async function refreshGameRoutes() {
       // 先拉航线、再开 RTE：RTE 窗口自己可能发 socket 请求，和航线请求混在一起会
       // 打乱按 FIFO 对位的响应匹配。
       const routes = await socketGetRoutes();
+      if (userDataStore.companyId !== companyId) {
+        return;
+      }
       // 等待期间删过航线：这份快照已经过期，重拉一次；仍未稳定就放弃发布。
       if (seq !== routeMutationSeq) {
         continue;
@@ -473,6 +484,9 @@ async function refreshGameRoutes() {
         break;
       }
       const executions = await readRouteExecutions();
+      if (userDataStore.companyId !== companyId) {
+        return;
+      }
       // 读执行状态期间删过航线：这份执行状态对不上已发布的列表，重拉一份。
       if (seq !== routeMutationSeq) {
         continue;
@@ -541,7 +555,7 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
     // 游戏 UI 手动创建的航线没有本地记录：直接把它从缓存的航线定义与执行列表里摘掉，
     // 不必等下一次校准（否则列表会一直显示这张已删除的卡）。
     gameRouteDefinitions.value = withoutRouteDefinition(
-      gameRouteDefinitions.value,
+      gameRouteDefinitions.value ?? [],
       record.routeId,
       record.naturalId,
     );
@@ -1174,6 +1188,12 @@ function flightTotalText(shipId: string): string {
               <li v-for="alert in entry.alerts" :key="alert">{{ alert }}</li>
             </ul>
             <div :class="$style.shipActions">
+              <PrunButton
+                v-if="entry.cxBurnCode"
+                dark
+                @click="showBuffer(`XIT BURN CX ${entry.cxBurnCode}`)"
+                >CX 消耗</PrunButton
+              >
               <PrunButton
                 v-if="entry.isLoop"
                 dark

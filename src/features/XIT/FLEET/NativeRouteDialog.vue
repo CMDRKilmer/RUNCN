@@ -25,9 +25,11 @@ import {
   unparkWindow,
 } from './native-route-editor';
 import { computeNativeRouteFuel } from './native-route-fuel';
-import { recordNativeRoute } from './native-route-registry';
+import { recordNativeRoute, removeNativeRoute } from './native-route-registry';
 import {
+  RouteCreateUnconfirmedError,
   socketDeleteRoute,
+  socketGetRoutes,
   socketSetRouteRepeats,
   writeNativeRouteBySocket,
 } from './native-route-socket';
@@ -58,6 +60,7 @@ import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { stagedDispatch } from './staged';
+import type { NativeRouteLoopSnapshot } from './native-route-staged';
 
 // 清理上一次未完成航线失败时抛出：绝不能继续写新航线，否则旧航线会变成无人认领的残留。
 class PartialRouteCleanupError extends Error {}
@@ -67,9 +70,7 @@ const {
   initialWaypoints,
   chainName = '',
   autoStart = false,
-  loop = false,
-  cycleHours,
-  loopFuel,
+  loopPlan,
 } = defineProps<{
   candidate: ShipChainPlan;
   initialWaypoints: NativeWaypoint[];
@@ -77,24 +78,25 @@ const {
   chainName?: string;
   // 首次打开向导时直接跑燃料计算与写入（FLEET「生成原生 RT」默认开启）。
   autoStart?: boolean;
-  // 循环模式：写完航点/步骤后打开游戏 Loop，按轮备货（v1 单船）。
-  loop?: boolean;
-  // 生成时快照的飞行周期（小时），界面标「预计」。
-  cycleHours?: number;
-  // 每轮 SF/FF 消耗。循环模式必有（ChainView 用 fuelPerRound 算，缺逐段油耗时它自己已回退罐容量）；
-  // 只有非循环暂存才没有，此时 roundBill 不含燃料、也不展示备货口径。
-  loopFuel?: { stl: number; ftl: number };
+  loopPlan?: NativeRouteLoopSnapshot;
 }>();
 const emit = defineEmits<{ close: []; started: [] }>();
 
+const loop = loopPlan !== undefined;
 // 出发地默认补满 STL 与 FTL（不做线路检测：自动流程没有勾选时机，循环几圈后
 // 任何一箱油耗尽都会把航线阻塞）。
 const tanks = ref<RouteTank[]>(['STL', 'FTL']);
-const fuelUsagePercents = ref(initialWaypoints.map(() => DEFAULT_WAYPOINT_FUEL_PERCENT));
+const fuelUsagePercents = ref(
+  initialWaypoints.map(
+    (_, index) => loopPlan?.legs[index]?.fuelPercent ?? DEFAULT_WAYPOINT_FUEL_PERCENT,
+  ),
+);
 // 空串 = 该航点不写反应堆使用量（无自然跃迁或 BTF 未设置），保持游戏原值。
-const reactorUsagePercents = ref<(number | '')[]>(initialWaypoints.map(() => ''));
+const reactorUsagePercents = ref<(number | '')[]>(
+  initialWaypoints.map((_, index) => loopPlan?.legs[index]?.reactorPercent ?? ''),
+);
 // 与航点等长：飞到该航点的预计飞行时长（小时），由 FTC/BTF 计算时顺带带回。
-const legHours = ref<(number | undefined)[]>([]);
+const legHours = ref<(number | undefined)[]>(loopPlan?.legs.map(leg => leg.hours) ?? []);
 // 计算时长时对应的档位快照：玩家手改任一档位后，该段时长失效。
 const legHoursBasis = ref<{ fuel: number | undefined; reactor: number | '' }[]>([]);
 watch(
@@ -166,7 +168,9 @@ const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ??
 const origin = computed(() => waypoints.value[0]?.location.trim() ?? '');
 const cxBill = computed(() => billFromLoadSteps(waypoints.value[0]?.steps ?? []));
 // 每轮账单：循环模式带 fuelPerRound 的 SF/FF；非循环暂存没有燃料数据，按 0 算（此时不展示备货）。
-const roundBill = computed(() => buildRoundBill(cxBill.value, loopFuel ?? { stl: 0, ftl: 0 }));
+const roundBill = computed(() =>
+  buildRoundBill(cxBill.value, loopPlan?.fuel ?? { stl: 0, ftl: 0 }),
+);
 const roundMaterials = computed(() => {
   const mats: Record<string, { weight: number; volume: number }> = {};
   for (const ticker of Object.keys(roundBill.value)) {
@@ -266,7 +270,7 @@ const stockingBill = computed(() => {
 const stockingPackage = computed(() => cxShortfallPackage(origin.value, stockingBill.value));
 const sustain = computed(() => sustainRounds(roundBill.value, readOriginStock(origin.value)));
 const cycleText = computed(() =>
-  cycleHours === undefined ? '' : formatFlightDuration(cycleHours * 3600000),
+  loopPlan === undefined ? '' : formatFlightDuration(loopPlan.cycleHours * 3600000),
 );
 // 一次运输实际可用 = 满载加权分摊：船总舱容 ÷ ΣBURN 净日耗（自给材料不计）。
 const supplyText = computed(() => {
@@ -299,7 +303,7 @@ const routeId = ref<string>();
 // 游戏内航线号（RT-XXXX-NNNN）：打开窗口用它，`routeId` 是服务端哈希。
 const routeNaturalId = ref<string>();
 // socket 写入中途停止时已创建的服务端 id：重试前先删掉，避免出现两条航线。
-const partialRouteId = ref<string>();
+const partialRoute = shallowRef<{ id: string; naturalId: string }>();
 const busy = ref(false);
 const autoFilling = ref(false);
 const error = ref<string>();
@@ -327,7 +331,8 @@ type Progress =
 
 type WaypointTarget = Awaited<ReturnType<typeof addWaypoint>>;
 
-const progress = shallowRef<Progress>({ phase: 'scan-fuel' });
+const progress = shallowRef<Progress>({ phase: loop ? 'write' : 'scan-fuel' });
+const routeCreationUnconfirmed = ref(false);
 let tile: Awaited<ReturnType<typeof openNativeRoute>> | undefined;
 let nativeStepClick: AbortController | undefined;
 let fuelScan: AbortController | undefined;
@@ -370,9 +375,9 @@ function recordRoute(routeId: string, naturalId: string) {
     chainName: name,
     createdAt: Date.now(),
     loop: loop ? true : undefined,
-    cycleHours: loop ? cycleHours : undefined,
+    cycleHours: loopPlan?.cycleHours,
     repeats: repeats.value,
-    fuelPerRound: loop ? loopFuel : undefined,
+    fuelPerRound: loopPlan?.fuel,
     waypoints: waypoints.value.map((waypoint, index) => {
       const reactor = reactorUsagePercents.value[index];
       return {
@@ -401,9 +406,9 @@ onBeforeUnmount(() => {
   disposed = true;
   stopAutoFill();
   // 半成品航线不留给玩家自己排查：关向导时尽力删掉。删除失败（已无 socket）就保留。
-  if (partialRouteId.value !== undefined) {
-    void socketDeleteRoute(partialRouteId.value).catch(() => undefined);
-    partialRouteId.value = undefined;
+  if (partialRoute.value !== undefined) {
+    void socketDeleteRoute(partialRoute.value.id).catch(() => undefined);
+    partialRoute.value = undefined;
   }
 });
 
@@ -414,7 +419,7 @@ function startAutoFill() {
     disposed ||
     busy.value ||
     routeId.value !== undefined ||
-    progress.value.phase !== 'scan-fuel' ||
+    progress.value.phase !== (loop ? 'write' : 'scan-fuel') ||
     initialWaypoints.length === 0
   ) {
     return;
@@ -439,6 +444,9 @@ watch(
 );
 
 const retryAction = computed(() => {
+  if (routeCreationUnconfirmed.value) {
+    return undefined;
+  }
   const phase = progress.value.phase;
   if (phase === 'scan-fuel') {
     return '重试计算燃料消耗';
@@ -507,10 +515,11 @@ function nextWaypoint() {
   stepIndex.value = 0;
   progress.value = { phase: waypoint.value === undefined ? 'done' : 'select' };
   if (progress.value.phase === 'done') {
-    if (loop) {
-      void enableLoop();
-    } else {
+    if (!loop) {
       checkLoop();
+    }
+    if (routeId.value !== undefined) {
+      recordRoute(routeId.value, routeNaturalId.value ?? routeId.value);
     }
   }
 }
@@ -535,11 +544,18 @@ function setLoopWarning(message: string | undefined) {
 // 循环模式：航点/步骤写完后打开游戏 Loop（SHIP_ROUTES_SET_REPEAT），用响应 repeats 校验。
 // 失败保留单趟航线并提示手动开启——开关与航点/步骤独立，socket 不可用时不阻断已写好的航线。
 async function enableLoop() {
-  if (!loop || routeId.value === undefined) {
+  const routeKey = routeId.value;
+  if (!loop || routeKey === undefined) {
     return;
   }
-  const id = routeId.value;
   try {
+    const id =
+      routeKey === routeNaturalId.value
+        ? (await socketGetRoutes()).find(route => route.naturalId === routeKey)?.id
+        : routeKey;
+    if (id === undefined) {
+      throw new Error('未找到已创建航线的服务端 ID。');
+    }
     const route = await socketSetRouteRepeats(id, true);
     repeats.value = route.repeats === true;
     // 重试成功后清掉上一次的失败提示，避免「已开」和「未生效」同时挂在页面上。
@@ -548,6 +564,13 @@ async function enableLoop() {
         ? undefined
         : '循环开关未生效（服务端 repeats 仍为关），请在原生 RT 手动开启 Loop。',
     );
+    if (progress.value.phase === 'done') {
+      if (routeKey !== id) {
+        removeNativeRoute(routeKey);
+        routeId.value = id;
+      }
+      recordRoute(id, route.naturalId);
+    }
   } catch (err) {
     repeats.value = false;
     setLoopWarning(
@@ -555,6 +578,26 @@ async function enableLoop() {
         '已保留单趟航线，请在原生 RT 手动开启 Loop 后再分配。',
     );
   }
+}
+
+async function cleanupPartialRoute() {
+  const route = partialRoute.value;
+  if (route === undefined) {
+    return;
+  }
+  try {
+    await socketDeleteRoute(route.id);
+  } catch (err) {
+    const routes = await socketGetRoutes().catch(() => undefined);
+    if (routes === undefined || routes.some(found => found.id === route.id)) {
+      throw new PartialRouteCleanupError(
+        `上次未完成的航线 ${route.naturalId} 删除失败` +
+          `（${err instanceof Error ? err.message : String(err)}）。` +
+          '请先在原生 RT 手动删除或稍后重试。',
+      );
+    }
+  }
+  partialRoute.value = undefined;
 }
 
 function waypointNames(location: string) {
@@ -649,19 +692,8 @@ async function advanceOnce(retrying: boolean) {
     writeTask = controller;
     fuelStatus.value = '正在通过 socket 写入原生 RT';
     try {
-      // 上一轮在创建航线后被打断：先删掉半成品，再从头写，否则重试会多出一条航线。
-      if (partialRouteId.value !== undefined) {
-        try {
-          await socketDeleteRoute(partialRouteId.value);
-        } catch (err) {
-          throw new PartialRouteCleanupError(
-            `上次未完成的航线 ${partialRouteId.value} 删除失败` +
-              `（${err instanceof Error ? err.message : String(err)}）。请先在原生 RT 手动删除或稍后重试；` +
-              '为避免出现重复航线，本次不会继续创建。',
-          );
-        }
-        partialRouteId.value = undefined;
-      }
+      await cleanupPartialRoute();
+      controller.signal.throwIfAborted();
       const legs = waypoints.value.map((_, index) => {
         const reactor = reactorUsagePercents.value[index];
         return {
@@ -675,19 +707,19 @@ async function advanceOnce(retrying: boolean) {
         status => {
           fuelStatus.value = status;
         },
-        id => {
-          partialRouteId.value = id;
+        (id, naturalId) => {
+          partialRoute.value = { id, naturalId };
           // 窗口在建航线响应回来之前就已关闭：终止清理钩子已经跑过，这里立即补删。
           if (disposed) {
             void socketDeleteRoute(id).catch(() => undefined);
-            partialRouteId.value = undefined;
+            partialRoute.value = undefined;
           }
         },
       );
       if (controller.signal.aborted) {
         return;
       }
-      partialRouteId.value = undefined;
+      partialRoute.value = undefined;
       routeId.value = result.routeId;
       routeNaturalId.value = result.naturalId;
       fuelWarnings.value = [...fuelWarnings.value, ...result.warnings];
@@ -699,6 +731,10 @@ async function advanceOnce(retrying: boolean) {
       recordRoute(result.routeId, result.naturalId);
       progress.value = { phase: 'done' };
     } catch (err) {
+      if (err instanceof RouteCreateUnconfirmedError) {
+        routeCreationUnconfirmed.value = true;
+        throw err;
+      }
       if (controller.signal.aborted) {
         throw err;
       }
@@ -706,10 +742,11 @@ async function advanceOnce(retrying: boolean) {
       if (err instanceof PartialRouteCleanupError) {
         throw err;
       }
-      // socket 写入失败（游戏未连接/接口变化）：退回界面填写路径。
+      await cleanupPartialRoute();
+      controller.signal.throwIfAborted();
       fuelWarnings.value = [
         ...fuelWarnings.value,
-        `socket 写入失败：${err instanceof Error ? err.message : String(err)}。改用界面填写（可能残留未完成的航线）。`,
+        `socket 写入失败：${err instanceof Error ? err.message : String(err)}。改用界面填写。`,
       ];
       progress.value = { phase: 'open' };
     } finally {
@@ -750,7 +787,6 @@ async function advanceOnce(retrying: boolean) {
       repeats.value = false;
       setLoopWarning('循环开关未开启：界面路径不自动开启 Loop，请在原生 RT 手动开启后再分配飞船。');
     }
-    recordRoute(routeId.value, routeId.value);
     progress.value = { phase: 'select' };
     return;
   }
@@ -833,7 +869,7 @@ async function openPurchase() {
 }
 
 async function showRoute() {
-  const id = routeNaturalId.value ?? routeId.value;
+  const id = routeNaturalId.value ?? partialRoute.value?.naturalId;
   await showBuffer(id === undefined ? 'RT' : `RT ${id}`);
 }
 </script>
@@ -872,7 +908,7 @@ async function showRoute() {
         >出发地库存可支撑：<strong>{{ sustainText }}</strong> 轮</div
       >
     </div>
-    <div v-if="routeId === undefined" :class="$style.controls">
+    <div v-if="!loop && routeId === undefined" :class="$style.controls">
       <label
         ><input
           v-model="tanks"
@@ -890,10 +926,11 @@ async function showRoute() {
         出发地补满 FTL</label
       >
     </div>
-    <p
+    <p v-if="loop">航点档位和出发地补满设置沿用循环规划，备货量按这套档位计算。</p>
+    <p v-else
       >燃料消耗与反应堆使用量按飞往各航点的航段计算：优先用 FTC
-      公式模型；该段缺模型输入（轨道／环境／网关 数据）时改用 BTF
-      试飞实测，两者都算不出时保留游戏默认档。创建航线前可以修改百分比。</p
+      公式模型。确认余油不足时停止创建。缺少轨道、环境或网关数据时改用 BTF
+      试飞，试飞也无结果时保留默认档。创建航线前可以修改百分比。</p
     >
     <ol :class="$style.stops">
       <li v-for="(stop, i) in waypoints" :key="i">
@@ -907,7 +944,7 @@ async function showRoute() {
             min="1"
             max="100"
             step="1"
-            :disabled="busy || routeId !== undefined"
+            :disabled="loop || busy || routeId !== undefined"
             :title="`燃料消耗 ${fuelUsagePercents[i]}%`"
             :aria-label="`${stop.location} 燃料消耗百分比`" />%
         </label>
@@ -921,7 +958,7 @@ async function showRoute() {
             max="100"
             step="1"
             placeholder="—"
-            :disabled="busy || routeId !== undefined"
+            :disabled="loop || busy || routeId !== undefined"
             :title="`反应堆使用量 ${reactorUsagePercents[i]}%`"
             :aria-label="`${stop.location} 反应堆使用量百分比`" />%
         </label>
@@ -1002,7 +1039,7 @@ async function showRoute() {
         复查循环设置
       </PrunButton>
       <PrunButton
-        v-if="loop && routeId && repeats !== true && !autoFilling"
+        v-if="loop && progress.phase === 'done' && routeId && repeats !== true && !autoFilling"
         dark
         :disabled="busy"
         @click="enableLoop">

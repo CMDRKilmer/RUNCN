@@ -60,7 +60,10 @@ export const getEntityNaturalIdFromAddress = address => address?.id;
 export const getEntityNameFromAddress = address => address?.id;
 export const getSystemLineFromAddress = () => undefined;
 export const gameNow = () => 1_000_000;
-export const showBuffer = async () => {};
+export const windows = [];
+export const showBuffer = async (command, options) => {
+  windows.push({ command, options });
+};
 export const onApiMessage = () => {};
 // 强制通道按真实 api-messages 的注册/派发语义实现：航线 socket 写入靠它收响应。
 const forceHandlers = new Map();
@@ -81,6 +84,7 @@ export function dispatchForce(message) {
   return changed;
 }
 export const companyContextId = { value: 'CTX' };
+export const userDataStore = reactive({ companyId: '' });
 // 客户端→服务器的请求按原样录下，供报文断言；真实发送在这里不发生。
 export const socketMessages = [];
 export function sendServerMessage(message) {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
-import { PlanetBurn } from '@src/core/burn';
 import MaterialRow from '@src/features/XIT/BURN/MaterialRow.vue';
+import type { BurnReportSection } from '@src/features/XIT/BURN/utils';
 import { sortMaterials } from '@src/core/sort-materials';
 
-const { burn } = defineProps<{ burn: PlanetBurn }>();
+const { burn } = defineProps<{ burn: BurnReportSection }>();
 
 const materials = computed(() => Object.keys(burn.burn).map(materialsStore.getByTicker));
 const sorted = computed(() => sortMaterials(materials.value.filter(x => x !== undefined)));

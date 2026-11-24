@@ -81,7 +81,7 @@ export const loadFormulaInputs = async (from, to, useGateways) => {
   if (state.inputsError !== undefined) {
     throw new Error(state.inputsError);
   }
-  return state.inputs;
+  return typeof state.inputs === 'function' ? state.inputs(from, to) : state.inputs;
 };
 
 // '@src/utils/sleep'：蓝图等待循环用它退避；测试里立即返回，避免「缺蓝图」用例空等 6 s。

@@ -43,8 +43,8 @@
 
 **周期估算（生成时快照）**
 
-- `cycleHours = estimateChainFlightTimes({ ship, origin, stops, legPayloads, refuelAtOrigin: true }).totalHours`。`legPayloads` 取计划的 `legLoadWeight(plan, i, legCount)`（逐段离站载重）；首段按出发地补满油罐、后续段按上一段余油递推（与原生 RT 只在出发地补满一致，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
-- `est.ok === false`（任一段判缺）时不得进入循环模式：得不到可靠周期，列出缺数据段并退回单趟。
+- `cycleHours = estimateChainFlightTimes({ ship, origin, stops, legPayloads, refuelAtOrigin: true, nativeRoute: true }).totalHours`。`legPayloads` 取计划的 `legLoadWeight(plan, i, legCount)`（逐段离站载重）；首段按出发地补满油罐、后续段按上一段余油递推（与原生 RT 只在出发地补满一致，`../../src/features/XIT/FLEET/chain-flight-time.ts`）。
+- 估时启用网关，按每段的起飞时刻及余油选择可行整数档位。向导沿用这份循环计划的装卸步骤、档位、出发地补满设置与逐段油耗，备货按同一份油耗计算。任一段缺输入或余油不足时列出航段和原因，并停用循环 RT 生成。
 - `cycleDays = cycleHours / 24`。循环模式把所勾选基地的 `days` 覆盖为 `cycleDays`，不写回 `base.config`；循环账单与提取都不读 `config.days`，FLEET 配置表的天数输入仍可编辑但对循环无效（只有单趟环线用它）。
 - **周期逐轮漂移**：估时按出发时刻的天体位置推算，循环每轮实际出发时刻不同，实际周期 ≠ 生成时 `cycleDays`。`cycleDays` 只是写步骤时的快照；不做后台重算（不轮询），运行中卡片的周期标「预计」。
 
@@ -96,6 +96,8 @@
 - 「出发地库存可支撑 N 轮」= `min over roundBill 物料 floor(stock / 每轮量)`（含 SF/FF），最先耗尽者决定。
 - **燃料只认生成时快照**（`record.fuelPerRound`，`loopSustain`）：游戏 UI 手建的循环航线没有快照，按罐容量估会把整圈当成耗满一罐（支撑轮数偏少、误报「不足 1 轮」），完全不估又会把 SF/FF 从账单里漏掉（支撑轮数偏高）。没有快照时一律不给数字：卡片显示「—」、不报「不足 1 轮」、补货包只含物料。
 - 船离港后出发地仓库空出，正好补下一轮。运行中卡片也提供「补货」：按 `N × roundBill − 当前 originStock` 算缺口（不再只在未运行时显示）；出发地非交易所或已备齐时置灰。
+- 运行中卡片的「CX 消耗」打开 `XIT BURN CX <交易所代码>`。汇总经过该 CX 且正在执行的循环航线上的自有基地，每个基地只计一次。日均输入、产出和劳动力消耗直接合并基地 BURN，库存取该 CX 的玩家仓库。「天数」按日均净耗计算，「需要」按全局 BURN 补给天数计算。CX 报告、向导和比价页共用游戏航线列表，打开时缺少列表才发起一次读取，游戏后续推送的航线变更会更新列表。
+- CX BURN 的「ACT」打开 `XIT BURNGEN CX <交易所代码>`，沿用全局 BURN 补给天数及当前生产和劳动力筛选。向导可调整天数和物料来源、预览缺口，再生成目标 CX 的补库包。「比价购买」将当前筛选带入 `XIT CBUY CX <交易所代码>`，比较各交易所盘口，操作包在目标 CX 采购。补库包只含 `CX Buy`，缺口已扣目标仓库库存一次。
 
 ### Loop 开关
 

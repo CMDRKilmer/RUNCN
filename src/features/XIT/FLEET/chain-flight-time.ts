@@ -18,6 +18,7 @@
 import { gameNow } from '@src/infrastructure/fio/orbit';
 import { planFormulaFlight } from '@src/features/XIT/FTC/formula-plan';
 import { shipFuelRemainingFor } from '@src/features/XIT/FTC/ship-fuel';
+import { nativeFormulaLeg, type NativeRouteLegPercent } from './native-route-plan';
 
 /** 环线的一个航段：从 `from` 到 `to` 的预计飞行。 */
 export interface ChainFlightLeg {
@@ -39,6 +40,8 @@ export interface ChainFlightLeg {
   // 该段油耗（出发油量 − 到达余量），供循环每轮 SF/FF 账单；缺油量数据时 undefined。
   stlUsed?: number;
   ftlUsed?: number;
+  // 循环 RT 写入的档位，与本段估时和油耗来自同一个方案。
+  settings?: NativeRouteLegPercent;
 }
 
 /** 一条环线（一艘船）的各段飞行时间预估。 */
@@ -72,6 +75,7 @@ export interface ChainFlightTimeInput {
   timeValue?: number;
   // 是否走网关航线（缺省 false：环线实际用自然航线飞行）。
   useGateway?: boolean;
+  nativeRoute?: boolean;
 }
 
 interface LegFuel {
@@ -109,7 +113,7 @@ export async function estimateChainFlightTimes(
     ftl: input.ftlPrice ?? 0,
     time: input.timeValue ?? 0,
   };
-  const useGateway = input.useGateway ?? false;
+  const useGateway = input.nativeRoute === true || input.useGateway === true;
 
   const nameOf = new Map<string, string>();
   nameOf.set(origin.toUpperCase(), origin);
@@ -150,7 +154,7 @@ export async function estimateChainFlightTimes(
       useGateway,
       atMs: departAtMs,
       prices,
-      selection: 'balance',
+      selection: input.nativeRoute ? 'value' : 'balance',
       ...(payload === undefined ? {} : { payload }),
       ...(fuel.stl === undefined ? {} : { stlFuel: fuel.stl }),
       ...(fuel.ftl === undefined ? {} : { ftlFuel: fuel.ftl }),
@@ -181,6 +185,11 @@ export async function estimateChainFlightTimes(
     }
     if (typeof fuel.ftl === 'number' && Number.isFinite(plan.best.ftlRemaining)) {
       leg.ftlUsed = Math.max(0, fuel.ftl - Math.max(0, plan.best.ftlRemaining));
+    }
+    if (input.nativeRoute) {
+      leg.settings = nativeFormulaLeg(plan.best);
+      leg.stlUsed = plan.best.stlFuel;
+      leg.ftlUsed = plan.best.ftlFuel;
     }
     return { leg, remaining };
   }
