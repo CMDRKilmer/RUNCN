@@ -145,7 +145,9 @@ async function onChangeModeClick() {
       <Active :class="$style.warningRoot" label="搜索">
         <TextInput
           v-model="searchQuery"
-          placeholder="搜索：英文 id 或中文说明，如 库存 / 维修 / cxob" />
+          :class="$style.searchInput"
+          placeholder="搜索 id 或中文说明"
+          title="可搜英文功能 id 或中文说明，例如：库存 / 维修 / cxob" />
         <PrunButton
           v-if="!isEmpty(Object.keys(changed))"
           primary
@@ -155,7 +157,7 @@ async function onChangeModeClick() {
         </PrunButton>
       </Active>
     </form>
-    <SectionHeader>
+    <SectionHeader :class="$style.compactHeader">
       功能: {{ filtered.length }}
       <span v-if="filtered.length !== sorted.length"> / {{ sorted.length }}</span>
       <span v-if="disabledFeatures.size > 0">({{ disabledFeatures.size }} 已关闭) </span>
@@ -211,7 +213,26 @@ async function onChangeModeClick() {
   top: 0;
   background-color: #222222;
   z-index: 1;
-  margin-bottom: 18px;
+  /* 原来是 18px，加上 SectionHeader 自带的 6+6 margin / 4px padding，
+     从设置区到功能列表空了 73px，浪费一整行。这里压到 6px。 */
+  margin-bottom: 6px;
+}
+
+/* 「功能: N」这行紧贴搜索框、紧贴分组标签：
+   SectionHeader 原生 margin 6/6 + padding-top 4 全部收掉。 */
+/* 搜索框只有 179px 宽，原来的中文提示（285px）必然被截断。这里把输入框字号
+   调小一档，提示文字缩到「搜索 id 或中文说明」，例子放进 title 悬浮提示。
+   字号跟随主题字号设置（--rp-font-enlargement）一起放大。 */
+.searchInput input {
+  font-size: calc(9px + 1px * var(--rp-font-enlargement));
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.compactHeader {
+  margin: 0 0 4px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
 }
 
 .warningRoot {
@@ -222,7 +243,7 @@ async function onChangeModeClick() {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .groupTab {
