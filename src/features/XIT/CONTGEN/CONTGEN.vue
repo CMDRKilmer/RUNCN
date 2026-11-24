@@ -1,5 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+
+// 嵌入到 CONTD 草案详情时使用：提供后，主按钮改为「填充当前草案」并调用此回调，
+// 而不是走独立的「新建合同并填充」流程。各 XIT 页面保持零耦合——填充由宿主注入。
+const props = defineProps<{
+  fillCurrent?: (json: string) => Promise<void>;
+}>();
 import Active from '@src/components/forms/Active.vue';
 import Commands from '@src/components/forms/Commands.vue';
 import SelectInput from '@src/components/forms/SelectInput.vue';
@@ -72,6 +78,11 @@ const importStatus = ref<ImportStatus | null>(null);
 // 拿到即清空），但走显式 key 避免与 cart-utils 的 parseCartImport
 // 工作区混淆。
 onMounted(() => {
+  // 嵌入模式下不消费跨面板的 workspace 导入：那是给独立 CONTGEN 页面用的，
+  // 且 workspace key 是「拿到即清空」的一次性语义，嵌入实例抢走会破坏独立页面。
+  if (props.fillCurrent !== undefined) {
+    return;
+  }
   const pending = getTileState<{ json?: string }>('contgen-import');
   if (typeof pending.json === 'string' && pending.json.length > 0) {
     applyImportedRaw(pending.json);
@@ -85,7 +96,12 @@ type PreviewMode = 'output' | 'import';
 const previewMode = ref<PreviewMode>('output');
 
 const currencies = ['ICA', 'NCC', 'AIC', 'CIS'];
-const templates: Template[] = ['BUY', 'SELL', 'SHIP'];
+// 下拉外显用中文，内部值保持 BUY/SELL/SHIP（JSON 输出与校验都依赖这些值）。
+const templates = [
+  { label: '购买', value: 'BUY' },
+  { label: '销售', value: 'SELL' },
+  { label: '运输', value: 'SHIP' },
+];
 
 const isShip = computed(() => template.value === 'SHIP');
 const isBuyOrSell = computed(() => template.value === 'BUY' || template.value === 'SELL');
@@ -228,22 +244,39 @@ const newDraftStatus = ref<string | null>(null);
 const newDraftError = ref<string | null>(null);
 const isNewing = computed(() => newDraftStatus.value !== null);
 
+// 填充/新建的运行期错误单独存一份：它无论独立还是嵌入模式都要显示，
+// 而表单校验提示只在独立模式显示（见模板）。
+
 // Maps helper milestones to the user-facing status string. Picked
 // at await points so the button text updates as work progresses.
 const NEW_DRAFT_STATUS_LABELS = {
   starting: '打开 CONTD…',
   filled: '完成',
 } as const;
+const FILL_CURRENT_STATUS_LABELS = {
+  starting: '填充中…',
+  filled: '完成',
+} as const;
+const isEmbedded = computed(() => props.fillCurrent !== undefined);
+const primaryLabel = computed(() => (isEmbedded.value ? '填充当前草案' : '新建合同并填充'));
+const activeStatusLabels = computed(() =>
+  isEmbedded.value ? FILL_CURRENT_STATUS_LABELS : NEW_DRAFT_STATUS_LABELS,
+);
 
 async function handleNewDraftAndFill() {
   if (!canSubmit.value || isNewing.value) {
     return;
   }
   newDraftError.value = null;
-  newDraftStatus.value = NEW_DRAFT_STATUS_LABELS.starting;
+  newDraftStatus.value = activeStatusLabels.value.starting;
   try {
-    await newContractDraftAndFill(outputJson.value);
-    newDraftStatus.value = NEW_DRAFT_STATUS_LABELS.filled;
+    if (props.fillCurrent !== undefined) {
+      // 嵌入模式：就地填充当前草案，由宿主（CONTD feature）注入填充实现。
+      await props.fillCurrent(outputJson.value);
+    } else {
+      await newContractDraftAndFill(outputJson.value);
+    }
+    newDraftStatus.value = activeStatusLabels.value.filled;
     // Clear the status after a short delay so the user can see
     // "完成" before the button returns to its default label.
     setTimeout(() => {
@@ -389,53 +422,60 @@ function applyTotalPrice() {
 </script>
 
 <template>
-  <div :class="$style.root">
+  <div :class="[$style.root, { [$style.embedded]: isEmbedded }]">
     <div :class="$style.form">
-      <Active label="合同类型">
-        <SelectInput v-model="template" :options="templates" />
-      </Active>
-      <Active label="币种">
-        <SelectInput v-model="currency" :options="currencies" />
-      </Active>
-      <Active label="合同名称" tooltip="可选。生成后会自动写入 CONTD 合同的标题。">
-        <input
-          v-model="contractName"
-          type="text"
-          :class="$style.input"
-          placeholder="例如: Hortus → Animus 运输" />
-      </Active>
-
-      <Active v-if="isBuyOrSell" label="目的地" tooltip="行星 naturalId，例如 ZV-307a 或别名 HRT。">
-        <AddressPicker v-model="location" />
-      </Active>
-
-      <template v-if="isShip">
-        <Active label="出发地" tooltip="行星 naturalId，例如 VH-331a。">
-          <AddressPicker v-model="origin" />
+      <!-- 头部字段：嵌入 CONTD 时用 grid 平均分布成一行（label 上、值下）；
+           独立 CONTGEN 页面保持原生的 label 左 + 值右纵向堆叠。 -->
+      <div :class="$style.topFields">
+        <Active label="合同类型">
+          <SelectInput v-model="template" :options="templates" />
         </Active>
-        <Active label="目的地" tooltip="行星 naturalId，不能与出发地相同。">
-          <AddressPicker v-model="destination" />
+        <Active label="币种">
+          <SelectInput v-model="currency" :options="currencies" />
         </Active>
-        <Active label="运费" tooltip="所有物品共享同一运费。">
+        <Active label="合同名称" tooltip="可选。生成后会自动写入 CONTD 合同的标题。">
           <input
-            v-model.number="price"
-            type="number"
-            min="0"
-            step="0.01"
+            v-model="contractName"
+            type="text"
             :class="$style.input"
-            placeholder="0.00" />
+            placeholder="例如: Hortus → Animus 运输" />
         </Active>
-      </template>
 
-      <Active label="限期（天）" tooltip="可选。不填则使用模板默认值（约 3 天）。">
-        <input
-          v-model.number="deadline"
-          type="number"
-          min="1"
-          step="1"
-          :class="$style.input"
-          placeholder="3" />
-      </Active>
+        <Active
+          v-if="isBuyOrSell"
+          label="目的地"
+          tooltip="行星 naturalId，例如 ZV-307a 或别名 HRT。">
+          <AddressPicker v-model="location" />
+        </Active>
+
+        <template v-if="isShip">
+          <Active label="出发地" tooltip="行星 naturalId，例如 VH-331a。">
+            <AddressPicker v-model="origin" />
+          </Active>
+          <Active label="目的地" tooltip="行星 naturalId，不能与出发地相同。">
+            <AddressPicker v-model="destination" />
+          </Active>
+          <Active label="运费" tooltip="所有物品共享同一运费。">
+            <input
+              v-model.number="price"
+              type="number"
+              min="0"
+              step="0.01"
+              :class="$style.input"
+              placeholder="0.00" />
+          </Active>
+        </template>
+
+        <Active label="限期（天）" tooltip="可选。不填则使用模板默认值（约 3 天）。">
+          <input
+            v-model.number="deadline"
+            type="number"
+            min="1"
+            step="1"
+            :class="$style.input"
+            placeholder="3" />
+        </Active>
+      </div>
 
       <Active label="物品清单" tooltip="每行一个物品；BUY/SELL 需填单价，SHIP 共享运费。">
         <div :class="$style.items">
@@ -477,20 +517,6 @@ function applyTotalPrice() {
         </div>
       </Active>
 
-      <Commands label="操作">
-        <PrunButton :disabled="!canSubmit || isNewing" primary @click="handleNewDraftAndFill">
-          {{ isNewing ? newDraftStatus : '新建合同并填充' }}
-        </PrunButton>
-        <PrunButton :disabled="!canSubmit || isNewing" primary @click="copyJson"
-          >复制 JSON</PrunButton
-        >
-        <PrunButton primary @click="onImportClick">识别 JSON</PrunButton>
-        <PrunButton primary @click="onUploadClick">上传 JSON</PrunButton>
-        <PrunButton primary @click="previewMode = previewMode === 'output' ? 'import' : 'output'">
-          {{ previewMode === 'output' ? '切到导入 JSON' : '切到合同 JSON' }}
-        </PrunButton>
-      </Commands>
-
       <Active v-if="isBuyOrSell" label="总价" tooltip="拆分到首行单价；其余行单价统一为 1。">
         <input
           v-model.number="totalPrice"
@@ -503,12 +529,30 @@ function applyTotalPrice() {
         <PrunButton dark :disabled="!canApplyTotal" @click="applyTotalPrice">应用总价</PrunButton>
       </Active>
 
-      <div v-if="newDraftError" :class="$style.errors">
-        <div>⚠ {{ newDraftError }}</div>
-      </div>
-      <div v-else-if="!canSubmit" :class="$style.errors">
-        <div v-for="err in validationErrors" :key="err">⚠ {{ err }}</div>
-      </div>
+      <Commands label="操作">
+        <PrunButton :disabled="!canSubmit || isNewing" primary @click="handleNewDraftAndFill">
+          {{ isNewing ? newDraftStatus : primaryLabel }}
+        </PrunButton>
+        <PrunButton :disabled="!canSubmit || isNewing" primary @click="copyJson"
+          >复制 JSON</PrunButton
+        >
+        <PrunButton primary @click="onImportClick">识别 JSON</PrunButton>
+        <PrunButton primary @click="onUploadClick">上传 JSON</PrunButton>
+        <PrunButton primary @click="previewMode = previewMode === 'output' ? 'import' : 'output'">
+          {{ previewMode === 'output' ? '切到导入 JSON' : '切到合同 JSON' }}
+        </PrunButton>
+      </Commands>
+    </div>
+
+    <!-- 运行期失败（填充当前草案 / 新建并填充抛错）两种模式都必须报出来：
+         嵌入时若一并抑制，按钮只是悄悄回到初始文字，用户不知道刚才为什么没填进去，
+         而原生字段可能已经被填了一部分。 -->
+    <div v-if="newDraftError" :class="$style.errors">
+      <div>⚠ {{ newDraftError }}</div>
+    </div>
+    <!-- 表单校验提示只在独立模式显示：嵌入模式下物品清单占满整行，不占版面。 -->
+    <div v-else-if="!isEmbedded && !canSubmit" :class="$style.errors">
+      <div v-for="err in validationErrors" :key="err">⚠ {{ err }}</div>
     </div>
 
     <div :class="$style.preview">
@@ -563,13 +607,106 @@ function applyTotalPrice() {
   flex-direction: column;
   overflow: hidden;
 }
-
 .form {
-  flex: 1;
+  /* 按内容高度排布，不撑满剩余空间——否则内容少时表单内部底部留出大片空白，
+     把校验提示和 JSON 区顶到很下面。改为内容紧凑在上，剩余空白自然落到容器
+     底部（连同校验提示、JSON 区整体上移）。
+     但必须允许收缩（flex-shrink: 1）：根节点是 height:100% + overflow:hidden、
+     预览区又固定占 200px，若 basis 取内容高度且不可缩小，内容一多（长 CART/BPC
+     清单、或把独立 CONTGEN 窗口拉矮）总高就会超出根节点被裁掉，此时表单自己的
+     overflow-y 根本不会生效，底部按钮也点不到。basis:auto + shrink:1 让「内容少
+     时紧凑、内容多时内部滚动」两者兼得；min-height:0 是让滚动生效的前提。 */
+  flex: 0 1 auto;
   min-height: 0;
   overflow-y: auto;
   padding: 6px 8px;
   border-bottom: 1px solid #444;
+}
+
+/* 头部字段容器：独立页面保持原生纵向堆叠（display:contents 不产生布局盒）。 */
+.topFields {
+  display: contents;
+}
+
+/* 嵌入 CONTD 时：头部字段合并成一行、平均分布。
+   用 grid + auto-fit 让列数随字段数自适应（BUY/SELL 5 列、SHIP 7 列时缩小列宽）。
+   原生 Active 是 label 左 + input 右的横向布局，此处覆盖为 label 上 + 值下，
+   让每个字段在窄列里也能完整显示。 */
+.embedded .topFields {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.embedded .topFields > :global([class*='FormComponent__containerActive']) {
+  flex-direction: column !important;
+  align-items: stretch !important;
+  min-width: 0 !important;
+  height: auto !important;
+}
+/* 去掉原生 FormComponent 的浅蓝底色——表头合并一行后，输入框下方的底色块
+   显得多余，改为透明融入面板背景（label 自身的深色标题条保留）。
+   主题引擎用 `html[data-rp-theme="light"][data-rp-theme] [class*=...]` 高特异性
+   + !important 设底色，这里必须匹配同等特异性才能覆盖。 */
+:global(html[data-rp-theme])
+  .embedded
+  .topFields
+  > :global([class*='FormComponent__containerActive']) {
+  background: transparent !important;
+}
+.embedded .topFields > :global([class*='FormComponent__containerActive']) > label {
+  width: auto !important;
+  min-width: 0 !important;
+  flex: 0 0 18px !important;
+  line-height: 18px !important;
+  height: 18px !important;
+  white-space: nowrap !important;
+}
+/* 值区：放宽到 22px 容纳控件并垂直居中；去掉原生 DynamicInput 左右 4px
+   内边距，让下拉框/输入框与上方标题左右对齐（否则两边各留 4px 余量）。 */
+.embedded
+  .topFields
+  > :global([class*='FormComponent__containerActive'])
+  > :global([class*='FormComponent__input']) {
+  flex: 0 0 22px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 22px !important;
+  display: flex !important;
+  align-items: center !important;
+  padding: 0 !important;
+}
+.embedded
+  .topFields
+  > :global([class*='FormComponent__containerActive'])
+  > :global([class*='FormComponent__input'])
+  > :global([class*='DynamicInput__dynamic']) {
+  width: 100% !important;
+  padding: 0 !important;
+}
+.embedded
+  .topFields
+  > :global([class*='FormComponent__containerActive'])
+  > :global([class*='FormComponent__input'])
+  > :global([class*='DynamicInput__dynamic'])
+  > * {
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+/* 统一 5 个字段的控件框高度：原生 select 与 input 的默认高度不同（select 17px、
+   input 19px，前者还受 UA 的 13.33px 字号影响），合并成一行后前两个下拉框比后
+   三个输入框矮一截。这里强制三者同高同字号，5 个框视觉严格一致。 */
+.embedded .topFields input,
+.embedded .topFields select {
+  height: 19px !important;
+  min-height: 19px !important;
+  max-height: 19px !important;
+  box-sizing: border-box !important;
+  padding: 0 4px !important;
+  margin: 0 !important;
+  line-height: 17px !important;
+  font-size: 11px !important;
 }
 
 .preview {
@@ -676,6 +813,19 @@ function applyTotalPrice() {
   width: 100%;
 }
 
+/* 仅嵌入模式：Ticker 列（表头 + 每行的 MaterialPicker）吃掉剩余宽度，物品清单
+   表格整体随窗口伸缩；数量/单价/删除保持固定宽度不被拉伸。独立 CONTGEN 维持
+   原有固定列宽。MaterialPicker 根元素自带 flex: 0 0 80px，需 !important 覆盖。
+   min-width 取 0（不设像素下限），窄窗口下可继续收缩而非溢出。 */
+.embedded .itemHeaderCellTicker {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+.embedded .itemRow > :first-child {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
 .itemHeader {
   display: flex;
   gap: 4px;
@@ -748,7 +898,8 @@ function applyTotalPrice() {
 }
 
 .errors {
-  margin-top: 8px;
+  flex: 0 0 auto;
+  margin: 0 8px 4px;
   padding: 6px 8px;
   background: rgba(217, 83, 79, 0.15);
   border: 1px solid rgba(217, 83, 79, 0.5);

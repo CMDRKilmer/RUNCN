@@ -37,11 +37,10 @@ const inputEl = ref<HTMLInputElement>();
 const candidates = computed<PlanetRow[]>(() => {
   const all = (planetsStore.all.value ?? []) as PlanetRow[];
   const q = query.value.trim();
+  // 空输入不显示候选：聚焦只是准备输入，不该立刻弹一个整屏的星球列表挡住
+  // 下面的表单。只在玩家真正键入后才按输入内容筛选。
   if (q.length === 0) {
-    // Empty query → shortlist of "common" planets first. There isn't
-    // a clean popularity signal available, so we just show the head
-    // of the naturalId-sorted list. Better than nothing.
-    return all.slice(0, 12);
+    return [];
   }
   const upper = q.toUpperCase();
   const lower = q.toLowerCase();
@@ -83,6 +82,11 @@ watch(
 );
 
 function onFocus() {
+  // 聚焦时不弹下拉：空输入没有候选，弹出来只会挡住下方表单。候选由 onInput
+  // 在真正键入后按输入筛选显示。
+  if (query.value.trim().length === 0) {
+    return;
+  }
   open.value = true;
   activeIndex.value = 0;
   void nextTick(updateDropdownPosition);
@@ -93,9 +97,12 @@ function onInput() {
   // case-insensitive on lookup. We keep the player's casing for
   // display purposes and uppercase only when committing to JSON.
   model.value = query.value.trim();
-  open.value = true;
+  // 输入清空时收起下拉，避免闪出一个空列表。
+  open.value = query.value.trim().length > 0;
   activeIndex.value = 0;
-  void nextTick(updateDropdownPosition);
+  if (open.value) {
+    void nextTick(updateDropdownPosition);
+  }
 }
 
 // Position the dropdown beneath the input via `position: fixed` so
@@ -155,7 +162,8 @@ function onDocClick(e: MouseEvent) {
 onMounted(() => {
   document.addEventListener('mousedown', onDocClick);
   window.addEventListener('scroll', onScroll, true);
-  void nextTick(() => inputEl.value?.focus());
+  // 不自动聚焦：挂载即 focus 会触发 onFocus 弹出下拉菜单，遮挡同面板的
+  // JSON 文本框，也让草案一打开就有个浮动菜单挡在前面。由玩家点击时再聚焦。
 });
 
 onBeforeUnmount(() => {
@@ -217,17 +225,21 @@ onBeforeUnmount(() => {
   border-color: #66afe9;
 }
 
+/* 下拉用主题 token 取色：写死 #1e1e1e / rgba(255,255,255,.05) 在浅色（paper/
+   ceramic/light）主题下要么糊成一片、要么 hover 几乎看不出。token 让深/浅主题
+   都拿到与界面同源的底色、文字与高亮。fallback 保留深色值，避免老皮肤无 token。 */
 .dropdown {
   z-index: 10000;
   margin: 0;
   padding: 2px;
   list-style: none;
-  background: #1e1e1e;
-  border: 1px solid #555;
+  background: var(--rp-cc-surface, #1e1e1e);
+  color: var(--rp-cc-text-primary, #ddd);
+  border: 1px solid var(--rp-cc-border-default, #555);
   border-radius: 2px;
   max-height: 260px;
   overflow-y: auto;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--rp-cc-shadow-popover, 0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
 .option {
@@ -237,24 +249,29 @@ onBeforeUnmount(() => {
   padding: 3px 6px;
   cursor: pointer;
   font-size: 11px;
+  border-radius: 2px;
 }
 
+/* 鼠标悬浮与键盘选中都用「表格选中行」级别的对比度，而不是 5% 白——后者在
+   浅色主题下与底色几乎无差，玩家看不出悬浮在哪一项。 */
 .option:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--rp-cc-table-row-hover, rgba(255, 255, 255, 0.12));
 }
 
 .option.active {
-  background: rgba(102, 175, 233, 0.25);
+  background: var(--rp-cc-table-row-selected, rgba(102, 175, 233, 0.35));
+  color: var(--rp-cc-text-primary, inherit);
+  outline: 1px solid var(--rp-cc-accent-line, transparent);
 }
 
 .ticker {
   font-family: monospace;
   font-weight: bold;
-  color: #f0ad4e;
+  color: var(--rp-cc-warn-accent, #f0ad4e);
   min-width: 64px;
 }
 
 .name {
-  color: #ccc;
+  color: var(--rp-cc-text-secondary, #ccc);
 }
 </style>
