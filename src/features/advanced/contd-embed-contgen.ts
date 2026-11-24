@@ -52,6 +52,12 @@ function mountGenerator(tile: PrunTile, conditions: HTMLElement) {
   const container = document.createElement('div');
   container.className = $style.container;
   container.setAttribute(MARKER, 'true');
+  // 同时打上框架的 data-rp-ui 标记：切标签页 / 移动 FB 时 frame 会断开再挂回，
+  // appendTo 的 onNodeDisconnected 会卸载 Vue app，但容器节点本身留在 frame 上；
+  // prun-ui/tiles.ts 的重新激活清理只移除 [data-rp-ui] 节点。不打标记的话容器会被
+  // 保留，而下面的 existing 判断看到它仍 connected 就不再挂载，结果是一个没有内嵌
+  // app 的空壳（旧 JSON 面板又已被隐藏，用户没有任何入口）。
+  container.setAttribute('data-rp-ui', 'contd-embed-contgen');
 
   // 标题行：复用游戏原生 SectionHeader 类，格式与「发送合同草案」完全一致。
   const title = document.createElement('div');

@@ -47,6 +47,9 @@ const MARKER = 'data-rprun-auto-fill';
 // 手动入口。标记字符串需与 advanced/contd-embed-contgen.ts 的 MARKER 保持一致。
 const EMBED_MARKER = '[data-rp-contd-embed-contgen]';
 
+// 标记面板「因为被嵌入生成器取代而隐藏」，供 setStatus 判断出错时要不要临时露出来。
+const HIDDEN_BY_EMBED = 'data-rprun-legacy-hidden';
+
 // Per-panel id for the injected textarea. The label's `for` must
 // point at a real element id so the browser associates them — the
 // DevTools accessibility check flags unassociated form fields. A
@@ -1058,6 +1061,8 @@ export async function fillDraft(tile: PrunTile, json: string): Promise<void> {
 // 父子关系卸载，移动节点会抛 NotFoundError。
 export function hideLegacyPanel(root: ParentNode): void {
   for (const row of root.querySelectorAll<HTMLElement>(`[${MARKER}]`)) {
+    // 记下「这次隐藏是嵌入生成器要求的」，出错时 setStatus 才知道可以把面板临时放出来。
+    row.setAttribute(HIDDEN_BY_EMBED, 'true');
     row.classList.add($style.hiddenLegacy);
   }
 }
@@ -1082,6 +1087,9 @@ function buildPanel(tile: PrunTile) {
     .filter(Boolean)
     .join(' ');
   row.setAttribute(MARKER, 'true');
+  if (hasEmbeddedGenerator) {
+    row.setAttribute(HIDDEN_BY_EMBED, 'true');
+  }
 
   const inputId = `rprun-contd-json-${nextPanelInputId++}`;
   const label = document.createElement('label');
@@ -1150,6 +1158,14 @@ function buildPanel(tile: PrunTile) {
   function setStatus(text: string, isError = false) {
     status.textContent = text;
     status.classList.toggle($style.error, isError);
+    // 面板因被嵌入生成器取代而整行藏成 1×1 时，错误信息也会一起看不见。而
+    // 「新建合同并填充 / 发送到 CONTD」的自动填充正是走这条链路（workspace 里
+    // 放 JSON → 面板挂载后自动点「填写」），失败只写在这里，独立 CONTGEN 侧早已
+    // 显示「完成」。所以出错时临时撤销隐藏，把原因和「填写」按钮（重试入口）露
+    // 出来；非错误状态再收回去，平时不占版面。
+    if (row.hasAttribute(HIDDEN_BY_EMBED)) {
+      row.classList.toggle($style.hiddenLegacy, !isError);
+    }
   }
 
   button.addEventListener('click', async () => {
