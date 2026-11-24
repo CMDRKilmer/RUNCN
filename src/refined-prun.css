@@ -1131,8 +1131,34 @@ html[data-rp-burn-commands] [data-rp-burn-commands-col] {
    CONTD 草案详情：点击「选择模板」进入原生模板编辑态（出现
    TemplateSelection 容器）时，隐藏嵌入的合同生成器，只显示原生模板界面。
    用 :has() 检测同容器内的编辑态标记，无需 JS 监听 React 的挂载/卸载。
+
+   但「正在显示运行期错误」时不能连错误一起藏：填充超时（物料/地址查不到）
+   时 applyConfig 会抛错并**保持编辑态打开**，错误提示就在生成器里；若整块
+   display:none，玩家要手动取消编辑才知道刚才失败了（还可能已经填了一半）。
+   所以这种状态下改成一个紧凑的错误条：容器恢复可见但不占 560px 高度，
+   生成器根节点里除错误提示以外的子节点（表单、JSON 预览）全部不显示，
+   避免一整块表单重新冒出来把编辑界面挤走、也避免错误被推到看不见的地方。
    ============================================================ */
-.rp-command-CONTD [class*='ScrollView__view']:has([class*='TemplateSelection__container']) [data-rp-contd-embed-contgen] {
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:not(:has([class*='errors'])) {
+  display: none !important;
+}
+
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:has([class*='errors']) {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* 只留错误提示。选择器不命中时（类名变了）不会误伤——退化成整块生成器可见，
+   错误仍然看得到。 */
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:has([class*='errors'])
+  [class*='CONTGEN__root']
+  > :not([class*='errors']) {
   display: none !important;
 }
 
