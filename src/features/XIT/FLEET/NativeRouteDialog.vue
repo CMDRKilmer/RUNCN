@@ -4,8 +4,6 @@ import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { findStationBySystemId } from '@src/infrastructure/prun-ui/utils/select-address';
 import type { ShipChainPlan } from './chain-allocation';
-import { chainPurchasePackage } from './chain-actions';
-import { getActiveChainRuns } from './chain-run';
 import {
   addNativeStep,
   addWaypoint,
@@ -50,6 +48,7 @@ import {
 import {
   billFromLoadSteps,
   cxShortfallPackage,
+  nativeRoutePlannedPurchasePackage,
   nativeRouteUsableDays,
   readOriginStock,
 } from './native-route-purchase';
@@ -159,7 +158,7 @@ const waypoints = computed(() =>
       : stop,
   ),
 );
-const purchase = chainPurchasePackage(candidate.ship, candidate.plan);
+const purchase = nativeRoutePlannedPurchasePackage(candidate.ship, candidate.plan);
 const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ?? {}).length > 0);
 
 // ── 循环备货（N 轮）─────────────────────────────────────────────
@@ -728,9 +727,6 @@ async function advanceOnce(retrying: boolean) {
     return;
   }
   if (state.phase === 'create') {
-    if (getActiveChainRuns().some(run => run.shipId === candidate.ship.ship.id)) {
-      throw new Error('该船仍有旧环线在执行，请在归航后切换。');
-    }
     routeId.value = await createNativeRoute(state.list);
     routeNaturalId.value = routeId.value;
     progress.value = { phase: 'open-route' };

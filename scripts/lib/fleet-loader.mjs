@@ -7,6 +7,8 @@ const adapters = new Set([
   '@src/core/base-products',
   '@src/core/game-lookups',
   '@src/core/storage-analysis',
+  '@src/core/store-id',
+  '@src/infrastructure/prun-api/data/tiles',
   '@src/infrastructure/fio/orbit',
   '@src/infrastructure/prun-api/data/materials',
   '@src/infrastructure/prun-api/data/production',
@@ -22,15 +24,10 @@ const adapters = new Set([
   '@src/infrastructure/prun-api/data/warehouses',
   '@src/infrastructure/prun-api/data/flight-test-collector',
   '@src/features/XIT/FLEET/utils',
-  '@src/features/XIT/ACT/actions/utils',
-  '@src/features/XIT/ACT/utils',
   '@src/store/user-data',
   '@src/store/create-id',
   '@src/utils/format',
   '@src/utils/sleep',
-  '@src/infrastructure/org-api/chain-sync',
-  '@src/infrastructure/org-api/client',
-  '@src/infrastructure/org-api/session',
   '@src/infrastructure/prun-ui/buffers',
   '@src/infrastructure/prun-api/data/api-messages',
   '@src/infrastructure/prun-api/data/user-data',
@@ -45,17 +42,20 @@ export function resolve(specifier, context, nextResolve) {
   ) {
     return { url: stub, shortCircuit: true };
   }
-  if (specifier === '@src/utils/watch') {
-    return { url: new URL('../../src/utils/watch.ts', import.meta.url).href, shortCircuit: true };
+  if (
+    [
+      '@src/store/user-data-versioned-migrations',
+      '@src/utils/remove-array-element',
+      '@src/utils/watch',
+    ].includes(specifier)
+  ) {
+    return {
+      url: new URL(`../../src/${specifier.slice(5)}.ts`, import.meta.url).href,
+      shortCircuit: true,
+    };
   }
   if (adapters.has(specifier)) {
     return { url: stub, shortCircuit: true };
-  }
-  if (specifier === '@src/features/XIT/ACT/trigger-queue') {
-    return {
-      url: new URL('../../src/features/XIT/ACT/trigger-queue.ts', import.meta.url).href,
-      shortCircuit: true,
-    };
   }
   if (specifier.startsWith('@src/features/XIT/FLEET/')) {
     return {
@@ -63,10 +63,7 @@ export function resolve(specifier, context, nextResolve) {
       shortCircuit: true,
     };
   }
-  if (
-    (specifier.startsWith('./chain-') || specifier === './staged') &&
-    !specifier.endsWith('.ts')
-  ) {
+  if (specifier.startsWith('./chain-') && !specifier.endsWith('.ts')) {
     return { url: new URL(`${specifier}.ts`, context.parentURL).href, shortCircuit: true };
   }
   if (specifier.startsWith('./use-chain-') && !specifier.endsWith('.ts')) {

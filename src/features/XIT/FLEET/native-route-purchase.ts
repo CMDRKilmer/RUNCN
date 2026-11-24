@@ -5,8 +5,31 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { effectiveBurn } from './chain-data';
 import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
+import type { ChainPlan } from './chain-types';
+import type { DispatchShip } from './utils';
 import type { NativeRouteStep } from './native-route-plan';
 import type { NativeRouteRecord } from './native-route-registry';
+
+export function nativeRoutePlannedPurchasePackage(
+  ship: DispatchShip,
+  plan: ChainPlan,
+): UserData.ActionPackageData {
+  const name = `购买 ${ship.exchangeCode}`;
+  return {
+    global: { name },
+    groups: [{ type: 'Manual', name, materials: { ...plan.purchaseBill } }],
+    actions: [
+      {
+        type: 'CX Buy',
+        name,
+        group: name,
+        exchange: ship.exchangeCode,
+        useCXInv: true,
+        cxInvReserve: { ...plan.originPickup },
+      },
+    ],
+  };
+}
 
 // 出发地起飞前必须备好的物料：一组「装载」步骤的汇总。
 // 「按容量装载」没有确定数量，无法下单，跳过。
