@@ -1,6 +1,8 @@
 import { onApiMessageForce } from '@src/infrastructure/prun-api/data/api-messages';
 import { companyContextId } from '@src/infrastructure/prun-api/data/user-data';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import {
   encodeAddress,
   resolveEntity,
@@ -17,6 +19,7 @@ export interface RouteStepData {
   material?: { id: string; ticker: string };
   // 补油步骤的油箱；游戏 UI 手动创建的航线可能没有绝对数量（type = CAPACITY）。
   fuel?: 'STL' | 'FTL';
+  source?: string;
   minimum?: { type?: string; units?: number };
   maximum?: { type?: string; units?: number };
   retain?: number;
@@ -202,6 +205,8 @@ export async function socketAddWaypoint(routeId: string, destination: string) {
   return await sendRouteAction('SHIP_ROUTES_ADD_WAYPOINT', { routeId, destination }, routeId);
 }
 
+const waypointPreferences = { ftlPreference: 'LEAST_JUMPS', useGateways: true };
+
 export async function socketEditWaypoint(
   routeId: string,
   waypointId: string,
@@ -219,7 +224,7 @@ export async function socketEditWaypoint(
       fuelUsageFactor,
       reactorUsageFactor,
       // 与游戏自己写入航点时的默认偏好一致（实采值）。
-      preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+      preferences: waypointPreferences,
     },
     routeId,
   );
@@ -292,11 +297,50 @@ export async function socketEditRefuelStep(
   );
 }
 
-export interface SocketWriteInput {
+export async function checkNativeRoute(waypoints: readonly NativeWaypoint[], signal: AbortSignal) {
+  const addresses = new Map<string, string | undefined>();
+  const materialIds = new Map<string, string | undefined>();
+  const issues: string[] = [];
+  for (const waypoint of waypoints) {
+    signal.throwIfAborted();
+    const { location } = waypoint;
+    if (!addresses.has(location)) {
+      const knownAddress =
+        sitesStore.getByPlanetNaturalId(location)?.address ??
+        stationsStore.getByNaturalId(location)?.address;
+      let address = knownAddress === undefined ? undefined : encodeAddress(knownAddress);
+      if (address === undefined) {
+        const resolved = await resolveEntity(location).catch(() => undefined);
+        signal.throwIfAborted();
+        address = resolved === undefined ? undefined : encodeAddress(resolved);
+      }
+      if (address === undefined) {
+        issues.push(`无法确认航点 ${location} 的地址。`);
+      }
+      addresses.set(location, address);
+    }
+    for (const step of waypoint.steps) {
+      if (step.kind === 'refuel') {
+        continue;
+      }
+      if (!materialIds.has(step.ticker)) {
+        materialIds.set(step.ticker, materialsStore.getByTicker(step.ticker)?.id);
+      }
+      if (materialIds.get(step.ticker) === undefined) {
+        issues.push(`${location} · 找不到物料 ${step.ticker}。`);
+      }
+    }
+  }
+  return { addresses, materialIds, issues: [...new Set(issues)] };
+}
+
+export type CheckedRoute = Awaited<ReturnType<typeof checkNativeRoute>>;
+
+interface SocketWriteInput {
   waypoints: readonly NativeWaypoint[];
-  // 与 waypoints 等长（首站不写档位）。
   legs: readonly { fuelPercent: number; reactorPercent?: number }[];
   name: string;
+  checkedRoute: CheckedRoute;
 }
 
 export interface SocketWriteResult {
@@ -306,7 +350,23 @@ export interface SocketWriteResult {
   warnings: string[];
 }
 
-// 一次性写完：建航线 → 逐站加航点/写档位/加步骤/写数量 → 改名。
+function waypointDestination(waypoint: RouteWaypointData) {
+  const { destination } = waypoint;
+  if (typeof destination === 'string') {
+    return destination;
+  }
+  if (
+    typeof destination === 'object' &&
+    destination !== null &&
+    'lines' in destination &&
+    Array.isArray(destination.lines)
+  ) {
+    return encodeAddress(destination as PrunApi.Address);
+  }
+  return undefined;
+}
+
+// 一次性写完：建航线 → 逐站添加航点和步骤，按回包补写属性 → 改名。
 // 全部走 socket，不开窗口、不点 UI。onCreated 在航线创建后立即回调，
 // 中止写入时调用方可根据它删除半成品，避免下次重试再建一条重复航线。
 export async function writeNativeRouteBySocket(
@@ -315,26 +375,27 @@ export async function writeNativeRouteBySocket(
   onProgress: (status: string) => void,
   onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
-  const codes = new Map<string, string>();
-  const addressCode = async (location: string) => {
-    const key = location.trim().toUpperCase();
-    const cached = codes.get(key);
-    if (cached !== undefined) {
-      return cached;
+  signal.throwIfAborted();
+  const { addresses, materialIds, issues } = input.checkedRoute;
+  if (issues.length !== 0) {
+    throw new Error(issues.join('\n'));
+  }
+  const destinations = input.waypoints.map(waypoint => {
+    const destination = addresses.get(waypoint.location);
+    if (destination === undefined) {
+      throw new Error(`航点 ${waypoint.location} 尚未校验。`);
     }
-    const address = await resolveEntity(location);
-    const code = address === undefined ? undefined : encodeAddress(address);
-    if (code === undefined) {
-      throw new Error(`无法解析 ${location} 的地址。`);
+    for (const step of waypoint.steps) {
+      if (step.kind !== 'refuel' && materialIds.get(step.ticker) === undefined) {
+        throw new Error(`${waypoint.location} · 物料 ${step.ticker} 尚未校验。`);
+      }
     }
-    codes.set(key, code);
-    return code;
-  };
-
+    return destination;
+  });
   onProgress('创建航线');
   activeSessions++;
   try {
-    return await writeRoute(input, signal, onProgress, addressCode, onCreated);
+    return await writeRoute(input, destinations, signal, onProgress, onCreated);
   } finally {
     activeSessions--;
   }
@@ -342,9 +403,9 @@ export async function writeNativeRouteBySocket(
 
 async function writeRoute(
   input: SocketWriteInput,
+  destinations: readonly string[],
   signal: AbortSignal,
   onProgress: (status: string) => void,
-  addressCode: (location: string) => Promise<string>,
   onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
   const warnings: string[] = [];
@@ -354,7 +415,7 @@ async function writeRoute(
   for (const [index, waypoint] of input.waypoints.entries()) {
     signal.throwIfAborted();
     onProgress(`写入航点 ${index + 1}/${input.waypoints.length} · ${waypoint.location}`);
-    const destination = await addressCode(waypoint.location);
+    const destination = destinations[index]!;
     const before = route.waypoints.length;
     route = await socketAddWaypoint(route.id, destination);
     if (route.waypoints.length <= before) {
@@ -362,7 +423,15 @@ async function writeRoute(
     }
     const added = route.waypoints.at(-1)!;
     const leg = input.legs[index];
-    if (leg !== undefined) {
+    if (
+      leg !== undefined &&
+      (waypointDestination(added) !== destination ||
+        added.landing !== true ||
+        added.fuelUsageFactor !== leg.fuelPercent / 100 ||
+        added.reactorUsageFactor !== (leg.reactorPercent ?? 50) / 100 ||
+        added.preferences?.ftlPreference !== waypointPreferences.ftlPreference ||
+        added.preferences.useGateways !== waypointPreferences.useGateways)
+    ) {
       route = await socketEditWaypoint(
         route.id,
         added.id,
@@ -374,24 +443,47 @@ async function writeRoute(
     let stepCount = route.waypoints.at(-1)?.steps.length ?? 0;
     for (const step of waypoint.steps) {
       signal.throwIfAborted();
-      const type = step.kind === 'refuel' ? 'REFUEL' : step.kind === 'load' ? 'LOAD' : 'UNLOAD';
+      const materialStepType = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
+      const type = step.kind === 'refuel' ? 'REFUEL' : materialStepType;
       route = await socketAddStep(route.id, added.id, type);
       const createdSteps = route.waypoints.at(-1)?.steps ?? [];
       if (createdSteps.length <= stepCount) {
         throw new Error(`${waypoint.location} 的 ${type} 步骤未返回 id。`);
       }
       stepCount = createdSteps.length;
-      const stepId = createdSteps.at(-1)!.id;
+      const addedStep = createdSteps.at(-1)!;
+      const stepId = addedStep.id;
       if (step.kind === 'refuel') {
-        route = await socketEditRefuelStep(route.id, added.id, stepId, step.tank);
+        if (
+          addedStep.type !== type ||
+          addedStep.fuel !== step.tank ||
+          addedStep.source !== 'LOCAL_STORE' ||
+          addedStep.minimum?.type !== 'CAPACITY' ||
+          addedStep.maximum?.type !== 'CAPACITY'
+        ) {
+          route = await socketEditRefuelStep(route.id, added.id, stepId, step.tank);
+        }
         continue;
       }
-      const material = materialsStore.getByTicker(step.ticker);
-      if (material === undefined) {
-        throw new Error(`未找到材料 ${step.ticker}。`);
+      const materialId = input.checkedRoute.materialIds.get(step.ticker)!;
+      if (
+        addedStep.type !== type ||
+        addedStep.material?.id !== materialId ||
+        addedStep.minimum?.type !== 'ABSOLUTE' ||
+        addedStep.minimum.units !== step.amount ||
+        addedStep.maximum?.type !== 'ABSOLUTE' ||
+        addedStep.maximum.units !== step.amount ||
+        addedStep.retain !== 0
+      ) {
+        route = await socketEditStep(
+          route.id,
+          added.id,
+          stepId,
+          materialStepType,
+          materialId,
+          step.amount,
+        );
       }
-      const stepType = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
-      route = await socketEditStep(route.id, added.id, stepId, stepType, material.id, step.amount);
     }
   }
   const name = input.name.trim();

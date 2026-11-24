@@ -37,3 +37,24 @@
 .error {
   color: rgb(217, 83, 79);
 }
+
+/* 旧「JSON 配置」手动面板已由嵌入 CONTGEN 取代：视觉上完全隐藏，
+   但保留在 DOM 中让 new-and-fill 自动链路能 programmatic 填充。 */
+.hiddenLegacy {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
+  /* 裁剪 1×1 加 pointer-events:none 只是「看不见、点不到」，键盘仍能 Tab 到里面的
+     textarea 和「填写」按钮：面板里残留着上一次的 JSON 时，一次误按回车就会拿旧条件
+     覆盖玩家正在编辑的草案。visibility:hidden 让这些控件彻底退出 Tab 序与可达性树，
+     同时保留几何尺寸（仍是 absolute，不参与排版，出错的 setStatus 会摘掉这个类，
+     面板和键盘访问一起恢复）。 */
+  visibility: hidden;
+}
