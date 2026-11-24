@@ -162,11 +162,18 @@ function syncColumnHeaders(
 ) {
   const tbody = table.querySelector('tbody');
   const theadRow = table.querySelector<HTMLTableRowElement>('thead tr');
-  if (!tbody || !theadRow || visible.length === 0) {
+  if (!tbody || !theadRow) {
     return;
   }
   const isHead = (el: Element) => el.classList.contains(COLHEAD);
   const heads = Array.from(tbody.children).filter(isHead);
+  // 过滤后一个可见行都没有：这里必须把之前克隆的栏表头删掉再返回。
+  // 否则 layoutShipTable 已把网格重置成 1 栏 2 行，而残留的 1~2 份克隆表头
+  // 还留在 tbody 里，界面上就是重复表头，多出来的那份还会撑出一列。
+  if (visible.length === 0) {
+    heads.forEach(h => h.remove());
+    return;
+  }
   // 实际分出的栏数：每栏 perColumn 行时能铺满几栏。
   const columnCount = Math.max(1, Math.min(COLUMNS, Math.ceil(visible.length / perColumn)));
   const anchors: (HTMLTableRowElement | undefined)[] = [];
