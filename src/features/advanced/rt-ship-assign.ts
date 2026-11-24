@@ -363,8 +363,11 @@ function markTileInner(tile: PrunTile) {
   }
 }
 
-// 与「船只是否在起点待命」判定相关的船状态指纹：registration + 船名 + 所在地点。
-// 燃料、货舱等其它字段变化不应触发本功能重绘，避免 SHIP_DATA 高频推送时空转。
+// 与「船只是否在起点待命」判定相关的船状态指纹：registration + 船名 + 所在地点 + 是否已分配航线。
+// 燃料、货舱等其它字段变化不应触发本功能重绘，避免 SHIP_DATA 高频推送时空转；
+// 但 assignedRoute 必须算进来——分配/取消分配会改变「是否空闲」，而船本身停着不动，
+// 位置指纹不变，否则这条船要等下一次无关重绘才会重新分类（表现为分配后仍被当成
+// 起点待命、或取消后仍被隐藏）。
 function shipLocationSignature() {
   return (
     shipsStore.all.value
@@ -373,6 +376,7 @@ function shipLocationSignature() {
           ship.registration,
           ship.name,
           getEntityNaturalIdFromAddress(ship.address ?? undefined) ?? '',
+          ship.assignedRoute ?? '',
         ].join(':'),
       )
       .join('\n') ?? ''
@@ -411,9 +415,15 @@ function onTileReady(tile: PrunTile) {
       // 增删节点（重绘、分配变化等）——保持原有行为。
       return true;
     }
-    // 文本内容原位变化：只有路径点目的地会影响「起点待命」判定。
+    // 文本内容原位变化：路径点目的地会影响「起点待命」判定；船表的航线/指令列同理——
+    // 分配或取消分配时 React 会原地改写这两格文本，船本身可能一动不动（位置指纹不变），
+    // 只认路径点就会漏掉这类转移，船会保持隐藏/置灰直到下一次无关重绘。
     const el = record.target.parentElement;
-    return el !== null && el.closest('[class*="Waypoints__container"]') !== null;
+    return (
+      el !== null &&
+      (el.closest('[class*="Waypoints__container"]') !== null ||
+        el.closest(`.${SHIP_TABLE}`) !== null)
+    );
   };
   const observer = new MutationObserver((records: MutationRecord[]) => {
     if (records.some(needsRerun)) {
