@@ -254,7 +254,11 @@ export function getResupplyDays(planetNaturalId?: string | null) {
  *   先按基地仓储容量上限钳制（见 clampTargetDays）
  * @param useBaseInv 是否用基地现有库存抵扣；false 时按「从零补满」计算
  */
-export function computeNeed(mat: MaterialBurn, resupplyDays: number, useBaseInv = true) {
+export function computeNeed(
+  mat: Pick<MaterialBurn, 'dailyAmount' | 'inventory'>,
+  resupplyDays: number,
+  useBaseInv = true,
+) {
   const dailyConsume = -mat.dailyAmount;
   if (!Number.isFinite(dailyConsume) || dailyConsume <= 0) {
     return 0;

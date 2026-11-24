@@ -488,8 +488,10 @@ export function collectNativeRoutes(
     const local = findRouteRecord(records, entry.route.id, entry.route.naturalId);
     // RTE 行里的船名可能配不上（或已经换船）：推送的分配才是权威答案。
     const assignedShips = takeAssignedShips(entry.route.id, entry.route.naturalId);
-    const shipIds =
-      assignedShips.length > 0 ? assignedShips : [entry.shipId ?? local?.shipId ?? ''];
+    const fallbackShipId = entry.shipId ?? local?.shipId ?? '';
+    // Null is an explicit unassignment. RTE only fills in when the assignedRoute field is absent.
+    const useFallback = shipsStore.getById(fallbackShipId)?.assignedRoute === undefined;
+    const shipIds = assignedShips.length > 0 ? assignedShips : useFallback ? [fallbackShipId] : [];
     for (const shipId of shipIds) {
       pushExecuting(
         mergeRouteRecord(entry.route, shipId === '' ? undefined : shipId, local),

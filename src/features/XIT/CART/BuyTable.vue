@@ -25,25 +25,45 @@ import { configurableValue } from '@src/features/XIT/ACT/shared-types';
 import { computeNeed, getPlanetBurn, getResupplyDays } from '@src/core/burn';
 import { clampTargetDays, getSuppliesCap } from '@src/features/XIT/FLEET/supplies-cap';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
+import { useExchangeBurn } from '@src/features/XIT/BURN/use-exchange-burn';
+import { filterBurnValues } from '@src/features/XIT/BURN/burn-totals';
+import {
+  openExchangeBurnAct,
+  pendingExchangeBurnQuote,
+} from '@src/features/XIT/BURN/exchange-burn-actions';
 import { useXitParameters } from '@src/hooks/use-xit-parameters';
 import { computeComponents, computeTotals, type BpcExchange } from '../BPC/bp-utils';
 
 const cart = computed(() => userData.cart);
 const parameters = useXitParameters();
 
-// XIT CBUY 有三种清单来源：
-//   1. XIT CBUY            -> XIT CART 购物车（原版行为）
-//   2. XIT CBUY <星球编码>  -> 该星球 XIT BURN 消耗品「需要」列（BURN 比价）
-//   3. XIT CBUY REPD       -> XIT REPD 当前勾选后的维修购物清单（临时内存）
-// 后两种都是临时清单，不读写 userData.cart，不会覆盖用户在 XIT CART 里维护的清单。
+// XIT CBUY 的临时清单来自基地 BURN、CX BURN、维修或政府补给。
+const cxBurnMode = parameters[0]?.toUpperCase() === 'CX';
+const cxBurnCode = cxBurnMode ? (parameters[1]?.toUpperCase() ?? '') : '';
+const source = parameters[2]?.toUpperCase();
+const {
+  section: exchangeBurnSection,
+  needs: exchangeBurnNeeds,
+  notice: exchangeBurnNotice,
+} = useExchangeBurn(cxBurnMode ? cxBurnCode : undefined, burn =>
+  filterBurnValues(burn, source !== 'WF', source !== 'PROD'),
+);
+const cxBurnItems = computed(() =>
+  Object.entries(exchangeBurnNeeds.value ?? {}).map(([ticker, amount]) => ({
+    ticker,
+    name: ticker,
+    amount,
+  })),
+);
 const repairMode = computed(() => parameters[0] === REPD_QUOTE_PARAM);
 const govhMode = computed(() => parameters[0] === GOVH_QUOTE_PARAM);
 const burnNaturalId = computed(() =>
-  repairMode.value || govhMode.value ? '' : (parameters[0] ?? ''),
+  cxBurnMode || repairMode.value || govhMode.value ? '' : (parameters[0] ?? ''),
 );
 const burnMode = computed(() => burnNaturalId.value !== '');
-// 临时清单模式：自动刷新盘口、默认全选、价格进度条等行为对 2 / 3 / 4 一视同仁。
-const tempMode = computed(() => burnMode.value || repairMode.value || govhMode.value);
+const deductInventory = computed(() => burnMode.value || repairMode.value || govhMode.value);
+const tempMode = computed(() => cxBurnMode || deductInventory.value);
 // 读响应式 ref，而不是一次性取模块变量：CBUY 窗口会被复用，
 // 每次点「比价」都要立刻反映最新勾选的临时清单。
 const repairQuote = computed(() => (repairMode.value ? repairQuoteRef.value : undefined));
@@ -114,36 +134,46 @@ const cartNeeds = computed(() =>
 // 上游传来的「完整需求」：REPD 传未扣库存的完整维修账单；BURN 传补足到
 // 补给天数的消耗品缺口（本身已相对基地库存）；购物车传用户手工维护的数量。
 // 所有仓库抵扣都在下面统一做，改这一份即可让比价 / ACT / CONTGEN 同步。
-const grossNeeds = computed(() =>
-  repairMode.value
+const grossNeeds = computed(() => {
+  if (cxBurnMode) {
+    return cxBurnItems.value;
+  }
+  return repairMode.value
     ? repairNeeds.value
     : govhMode.value
       ? govhNeeds.value
       : burnMode.value
         ? burnNeeds.value
-        : cartNeeds.value,
-);
+        : cartNeeds.value;
+});
 
 // 比价模式下生成的 ACT 包 / CONTGEN 清单用独立名字，避免覆盖购物车那份。
-const listName = computed(() =>
-  repairMode.value
+const listName = computed(() => {
+  if (cxBurnMode) {
+    return `BURN CX ${cxBurnCode}`;
+  }
+  return repairMode.value
     ? `REPD ${repairQuote.value?.naturalId ?? ''}`
     : govhMode.value
       ? `GOVH ${govhQuote.value?.planet ?? ''}`
       : burnMode.value
         ? `BURN ${burnNaturalId.value}`
-        : cart.value.name,
-);
+        : cart.value.name;
+});
 
 const selectedTickers = ref<Set<string>>(new Set());
 
-// 硬编码 4 个玩家 CX 交易所（与 BPC/BMAT/ARB 一致），避免运行时依赖 exchangesStore。
+// 与 BPC/BMAT/ARB 默认市场一致，CX BURN 也要报价目标交易所。
 const exchanges: BpcExchange[] = [
   { code: 'AI1', currency: 'AIC' },
   { code: 'CI1', currency: 'CIS' },
   { code: 'IC1', currency: 'ICA' },
   { code: 'NC1', currency: 'NCC' },
 ];
+const targetExchange = exchangesStore.getByCode(cxBurnCode);
+if (targetExchange !== undefined && !exchanges.some(x => x.code === targetExchange.code)) {
+  exchanges.push({ code: targetExchange.code, currency: targetExchange.currency.code });
+}
 
 // ── 交易所选择（提前定义：抵扣基准要跟随当前选中的市场）──────────────
 // 单市场模式：选中最便宜且凑齐全部物品的交易所整单购买。
@@ -201,7 +231,11 @@ const exchangeInventories = computed<Record<string, CbuyInventory>>(() => {
   }
   return map;
 });
-const inventoryReady = computed(() => !tempMode.value || isCbuyInventoryReady());
+const inventoryReady = computed(() =>
+  cxBurnMode
+    ? exchangeBurnNeeds.value !== undefined
+    : !deductInventory.value || isCbuyInventoryReady(),
+);
 
 // 每种物料在「该交易所自己的仓库库存」抵扣后的采购量。交易所卡片账单、
 // 「最便宜单交易所」与自动选定市场三者共用这一份数据：同一物料在 CI1 有库存、
@@ -210,7 +244,7 @@ const inventoryReady = computed(() => !tempMode.value || isCbuyInventoryReady())
 // 非临时模式没有库存抵扣，返回空表让 computeTotals 走原逻辑。
 const needsByExchange = computed<Map<string, Map<string, number>>>(() => {
   const map = new Map<string, Map<string, number>>();
-  if (!tempMode.value) {
+  if (!deductInventory.value) {
     return map;
   }
   for (const ex of exchanges) {
@@ -243,14 +277,18 @@ const totals = computed(() =>
 );
 const cheapestSingleExchange = computed(() => totals.value.cheapestSingle?.code);
 const chosenSingleExchange = computed(() =>
-  singleMarketMode.value ? forcedExchange.value || cheapestSingleExchange.value : undefined,
+  cxBurnMode
+    ? cxBurnCode
+    : singleMarketMode.value
+      ? forcedExchange.value || cheapestSingleExchange.value
+      : undefined,
 );
 
 // 抵扣基准跟随当前指定的交易所（用户点卡片 = forcedExchange，默认 = 最优单市场）。
 // 盘口尚未推回来时最优市场为空，此时依次回退到购物车设定的常用交易所、
 // 再兜底第一个交易所，保证页面一打开就按仓库库存抵扣，不会先显示虚高的完整数量。
 const deductionExchange = computed(() => {
-  if (!tempMode.value) {
+  if (!deductInventory.value) {
     return '';
   }
   return (
@@ -275,7 +313,7 @@ function outboundExchange(ticker: string): string | undefined {
 }
 
 const deductions = computed<CbuyDeduction[]>(() =>
-  tempMode.value
+  deductInventory.value
     ? deductNeeds(
         grossNeeds.value,
         baseInventory.value,
@@ -400,6 +438,9 @@ function exchangeBadge(et: (typeof totals.value.exchanges)[number]) {
 
 // 点击卡片选定该交易所；再点一次当前已选中的卡片则取消单市场，回到最优混合。
 function pickExchange(code: string) {
+  if (cxBurnMode) {
+    return;
+  }
   if (singleMarketMode.value && chosenSingleExchange.value === code) {
     singleMarketMode.value = false;
     forcedExchange.value = '';
@@ -477,6 +518,13 @@ function asciiSafe(value: string): string {
 function generateAct() {
   // 与按钮的 disabled 判定同源，防止非点击路径（或库存刚好在此刻失效）绕过门槛。
   if (!inventoryReady.value || actGroups.value.size === 0) {
+    return;
+  }
+  if (cxBurnMode) {
+    const group = actGroups.value.get(cxBurnCode);
+    if (group !== undefined) {
+      openExchangeBurnAct(cxBurnCode, group.buy);
+    }
     return;
   }
   const groups: UserData.MaterialGroupData[] = [];
@@ -660,8 +708,22 @@ async function autoRefreshPrices() {
 }
 
 onMounted(() => {
+  if (cxBurnMode) {
+    const quoteCommand = parameters.map(x => x.toUpperCase()).join(' ');
+    watch(
+      pendingExchangeBurnQuote,
+      pending => {
+        if (pending !== quoteCommand) {
+          return;
+        }
+        pendingExchangeBurnQuote.value = undefined;
+        void autoRefreshPrices();
+      },
+      { immediate: true },
+    );
+  }
   watch(
-    () => (tempMode.value ? pricedComponents.value.map(c => c.ticker).join('|') : ''),
+    () => (deductInventory.value ? pricedComponents.value.map(c => c.ticker).join('|') : ''),
     key => {
       if (key) {
         void autoRefreshPrices();
@@ -752,7 +814,10 @@ function isBest(component: { bestExchange?: string }, code: string) {
     <div :class="$style.controls">
       <span :class="$style.controlLabel">{{ tempMode ? '比价来源' : '购物车' }}</span>
       <span :class="$style.cartMeta" data-cbu-meta>
-        <template v-if="repairMode">
+        <template v-if="cxBurnMode">
+          <strong>XIT BURN CX {{ cxBurnCode }}</strong> · {{ needs.length }} 种需补物资
+        </template>
+        <template v-else-if="repairMode">
           <strong>XIT REPD {{ repairQuote?.naturalId ?? '' }}</strong> ·
           {{ needs.length }} 种维修材料
         </template>
@@ -768,7 +833,7 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <template v-if="cart.exchange"> · {{ cart.exchange }}</template>
           · {{ cart.items.length }} 种
         </template>
-        <template v-if="tempMode">
+        <template v-if="deductInventory">
           · 抵扣仓库
           <strong :data-cbu-exchange="deductionExchange">{{
             splitMarketMode ? '分市场' : deductionExchange || '—'
@@ -790,6 +855,7 @@ function isBest(component: { bestExchange?: string }, code: string) {
         placeholder="搜索物品 ticker 或名称" />
       <PrunButton primary :disabled="noItems" @click="refreshPrices">更新价格</PrunButton>
       <label
+        v-if="!cxBurnMode"
         :class="$style.control"
         data-tooltip="按各物品最优价分市场采购；不勾选则按选中卡片的交易所整单购买"
         data-tooltip-position="bottom">
@@ -801,8 +867,9 @@ function isBest(component: { bestExchange?: string }, code: string) {
         <span :class="$style.controlLabel">分市场购买</span>
       </label>
       <label
+        v-if="!cxBurnMode"
         :class="$style.control"
-        data-tooltip="生成 ACT 时追加 MTRA 步骤：把物料从交易所仓库搬进飞船货舱（目的地执行时选船）。从 BURN 比价进来默认勾选"
+        data-tooltip="生成 ACT 时追加 MTRA，把物料从交易所仓库搬进飞船货舱。基地 BURN 默认勾选。"
         data-tooltip-position="bottom">
         <input
           id="cbu-transfer-ship"
@@ -837,14 +904,21 @@ function isBest(component: { bestExchange?: string }, code: string) {
       >
     </div>
 
-    <div v-if="burnMode && !burnSite" :class="$style.empty">
+    <div v-if="cxBurnMode && !exchangeBurnSection" :class="$style.empty">
+      请输入有效的交易所代码，例如 XIT CBUY CX IC1。
+    </div>
+    <div v-else-if="cxBurnMode && !inventoryReady" :class="$style.empty">
+      {{ exchangeBurnNotice || `正在读取 ${cxBurnCode} 的仓库库存。` }}
+    </div>
+    <div v-else-if="burnMode && !burnSite" :class="$style.empty">
       找不到星球 {{ burnNaturalId }}，无法生成比价清单。
     </div>
     <div v-else-if="burnLoading" :class="$style.empty">
       正在加载 {{ burnNaturalId }} 的消耗品数据，请稍候…
     </div>
     <div v-else-if="noItems" :class="$style.empty">
-      <template v-if="allCoveredByInventory">
+      <template v-if="cxBurnMode"> {{ cxBurnCode }} 当前没有需要补给的物料。 </template>
+      <template v-else-if="allCoveredByInventory">
         所需材料已全部由基地仓库现有库存满足，无需采购或运输。
       </template>
       <template v-else-if="repairMode">
@@ -900,6 +974,9 @@ function isBest(component: { bestExchange?: string }, code: string) {
           <template v-if="priceProgress && priceProgress.done < priceProgress.total">
             正在读取游戏实时盘口 {{ priceProgress.done }}/{{ priceProgress.total }}
           </template>
+          <template v-else-if="cxBurnMode">
+            补库交易所 <strong :class="$style.currentMarket">{{ cxBurnCode }}</strong>
+          </template>
           <template v-else-if="splitMarketMode"
             >卡片仅供比价 · 当前按各物品最优价分市场采购</template
           >
@@ -926,14 +1003,16 @@ function isBest(component: { bestExchange?: string }, code: string) {
               : '',
             !et.complete ? $style.exchangeCardIncomplete : '',
             singleMarketMode && chosenSingleExchange === et.code ? $style.exchangeCardChosen : '',
-            $style.exchangeCardClickable,
+            !cxBurnMode ? $style.exchangeCardClickable : '',
           ]"
           :title="
-            splitMarketMode
-              ? '当前为分市场购买；点击卡片即切回该交易所单市场购买'
-              : chosenSingleExchange === et.code
-                ? '当前选中；再点一次或勾选「分市场购买」可改为按最优价分市场购买'
-                : '点击选定该交易所为单市场购买的市场'
+            cxBurnMode
+              ? `${et.code} 采购报价`
+              : splitMarketMode
+                ? '当前为分市场购买；点击卡片即切回该交易所单市场购买'
+                : chosenSingleExchange === et.code
+                  ? '当前选中；再点一次或勾选「分市场购买」可改为按最优价分市场购买'
+                  : '点击选定该交易所为单市场购买的市场'
           "
           @click="pickExchange(et.code)">
           <span
@@ -954,13 +1033,15 @@ function isBest(component: { bestExchange?: string }, code: string) {
             <span v-if="et.complete" :class="$style.completeTag">凑齐</span>
             <span v-else :class="$style.incompleteTag">缺 {{ et.missing }} 种</span>
             <span
-              v-if="singleMarketMode && forcedExchange === et.code"
+              v-if="
+                cxBurnMode ? et.code === cxBurnCode : singleMarketMode && forcedExchange === et.code
+              "
               :class="$style.chosenMark"
               :style="{
                 backgroundColor: 'var(--rp-cc-chosen-bg, #33566f)',
                 color: 'var(--rp-cc-chosen-fg, #ffffff)',
               }">
-              ✓ 已指定
+              {{ cxBurnMode ? '✓ 补库' : '✓ 已指定' }}
             </span>
           </div>
         </div>
