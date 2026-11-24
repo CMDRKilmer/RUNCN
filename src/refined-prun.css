@@ -1031,3 +1031,175 @@ html[data-rp-dark][data-rp-theme][data-rp-theme]
 html[data-rp-burn-commands] [data-rp-burn-commands-col] {
   display: table-cell;
 }
+
+/* ============================================================
+   CONTD 草案详情：「条件」标题与「选择模板」按钮合并到同一行
+   （contd-condition-header-inline.ts 给标题和它后面的 form 打标记）
+   标题是 ScrollView 下的 SectionHeader，按钮在其后兄弟 form 的
+   ActionBar 里；用 absolute 把按钮上移到标题行右侧，form 加
+   padding-top 补回按钮行高度，使条件表头及以下位置不变。
+   ============================================================ */
+/* 标题与按钮合并同行后，压缩这一行的高度：标题去掉上下大 margin，
+   form 不再需要 34px 顶部补偿（按钮已 absolute 到标题行），只留 4px 让
+   条件表头避开按钮。整块高度从约 65px 降到约 25px（接近单行）。 */
+.rp-command-CONTD [data-rp-cond-title] {
+  margin: 2px 0 0 !important;
+}
+.rp-command-CONTD [data-rp-cond-form] {
+  position: relative !important;
+  padding-top: 4px !important;
+}
+.rp-command-CONTD [data-rp-cond-form] > [class*='ActionBar__container'] {
+  position: absolute !important;
+  /* 标题高 19px、按钮高 22px，按钮相对 form 顶部上移 21px 即与标题垂直居中同行。 */
+  top: -21px !important;
+  right: 0 !important;
+  padding: 0 !important;
+  z-index: 2 !important;
+}
+
+/* ============================================================
+   CONTD 草案详情：「发送合同草案」区块，把标题、接收方用户名框、「发送」
+   按钮视觉上整合到同一水平行。
+   关键约束：**不移动任何 DOM 节点**——标题/行/按钮都是 React 渲染的，
+   prepend/appendChild 会让 React 卸载时 removeChild 找不到子节点，抛
+   NotFoundError 导致整个 tile「部件渲染失败」（点击「选择模板」重绘时必现）。
+   因此全部用 CSS：标题 relative 下移进接收方行，form 上移补偿，按钮 absolute
+   贴到 form 右侧。contd-condition-header-inline.ts 只打 data 标记。
+   ============================================================ */
+.rp-command-CONTD [data-rp-send-form] {
+  position: relative !important;
+  margin-top: -13px !important;
+}
+.rp-command-CONTD [data-rp-send-btn] {
+  position: absolute !important;
+  /* 按钮相对 form 定位（form 顶 = 接收方行顶 - 1px）。接收方行高 28、按钮高 19，
+     垂直居中需 top = 1 + (28-19)/2 ≈ 6px，使按钮 cy 与接收方行 cy 一致。 */
+  top: 6px !important;
+  right: 2px !important;
+  /* 按钮虽 absolute 脱离文档流，但仍是隐藏的指令行 input 的后代，
+     visibility 会继承 hidden，必须显式恢复。 */
+  visibility: visible !important;
+  z-index: 3 !important;
+}
+/* 接收方行：左侧留出标题宽度，加高并垂直居中。 */
+.rp-command-CONTD [data-rp-send-recipient] {
+  padding-left: 84px !important;
+  min-height: 28px !important;
+  align-items: center !important;
+}
+/* 指令行：label 与 input 内容隐藏，行高压 0（按钮已 absolute 脱离）。
+   注意必须同时去掉原生边框与背景：游戏给这种命令行带 1px 底边框
+   （rgb(204,214,222)）+ 底色，只把高度压 0 会留下一条 1px 灰线横在
+   发送行下方；margin 也要清零，否则还留 2px 空隙。 */
+.rp-command-CONTD [data-rp-send-row] {
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+}
+.rp-command-CONTD [data-rp-send-row] > label,
+.rp-command-CONTD [data-rp-send-row] > [class*='FormComponent__input'] {
+  visibility: hidden !important;
+}
+/* 接收方行 input 区右侧留出「发送」按钮宽度，避免用户名框与按钮重叠。 */
+.rp-command-CONTD [data-rp-send-recipient] > [class*='FormComponent__input'] {
+  padding-right: 46px !important;
+}
+/* 标题（form 外的 SectionHeader，原生位置在 form 上方）：relative 下移到
+   接收方行内，line-height 撑到行高使其文字垂直居中；上层的 -13px margin
+   让 form 填补标题原位，二者最终落在同一行。 */
+.rp-command-CONTD [data-rp-send-title] {
+  position: relative !important;
+  /* 标题原生在 form 上方，需下移进入接收方行。标题高 28 = 接收方行高，
+     下移 16px 后其中心与接收方行中心重合（含 form 的 -13px 上移补偿）。 */
+  top: 16px !important;
+  z-index: 2 !important;
+  /* 标题是块级元素、宽度撑满整行，又相对定位盖在接收方行之上（z-index:2），
+     会拦截用户名输入框的点击。它只是视觉文字，不接收任何指针事件。 */
+  pointer-events: none !important;
+  height: 28px !important;
+  margin: 0 !important;
+  padding: 0 6px 0 0 !important;
+  line-height: 28px !important;
+  white-space: nowrap !important;
+}
+
+/* ============================================================
+   CONTD 草案详情：点击「选择模板」进入原生模板编辑态（出现
+   TemplateSelection 容器）时，隐藏嵌入的合同生成器，只显示原生模板界面。
+   用 :has() 检测同容器内的编辑态标记，无需 JS 监听 React 的挂载/卸载。
+
+   但「正在显示运行期错误」时不能连错误一起藏：填充超时（物料/地址查不到）
+   时 applyConfig 会抛错并**保持编辑态打开**，错误提示就在生成器里；若整块
+   display:none，玩家要手动取消编辑才知道刚才失败了（还可能已经填了一半）。
+   所以这种状态下改成一个紧凑的错误条：容器恢复可见但不占 560px 高度，
+   生成器根节点里除错误提示以外的子节点（表单、JSON 预览）全部不显示，
+   避免一整块表单重新冒出来把编辑界面挤走、也避免错误被推到看不见的地方。
+   ============================================================ */
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:not(:has([class*='errors'])) {
+  display: none !important;
+}
+
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:has([class*='errors']) {
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+/* 只留错误提示。选择器不命中时（类名变了）不会误伤——退化成整块生成器可见，
+   错误仍然看得到。 */
+.rp-command-CONTD
+  [class*='ScrollView__view']:has([class*='TemplateSelection__container'])
+  [data-rp-contd-embed-contgen]:has([class*='errors'])
+  [class*='CONTGEN__root']
+  > :not([class*='errors']) {
+  display: none !important;
+}
+
+/* ============================================================
+   原生「建议列表」下拉（AddressSelector / MaterialSelector / PanelSelector /
+   UserSelector 共用 `suggestions__*` 通用类）统一换主题 token 配色。
+   游戏原生把容器写成近黑底、高亮项写成 rgb(240,240,240)（浅色主题下与浅底
+   几乎同色，看不出选中项）。改用 --rp-cc-* 后深/浅主题都拿到同源对比度：
+   容器=surface、普通项=text-primary、高亮项=table-row-selected 底 + 强调色描边。
+   三重 [data-rp-theme] 把特异性抬到 (0,3,1)，压过游戏带 !important 的同类规则。
+   ============================================================ */
+/* 注意必须限定 :not(:empty)：游戏会把这些容器常驻在 DOM 里，收起时内容清空但
+   节点仍在（宽度有、高度靠 1px 边框撑出 2px，且是 position:fixed）。若不排除
+   空容器，给它设的边框+底色会在界面上留下一条 2px 灰线，而且因为是 fixed，
+   拖动窗口时它不跟随、停在原地。只对有候选内容的容器上色。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  [class*='suggestions__suggestionsContainer']:not(:empty) {
+  background: var(--rp-cc-surface) !important;
+  color: var(--rp-cc-text-primary) !important;
+  border: 1px solid var(--rp-cc-border-default) !important;
+  box-shadow: var(--rp-cc-shadow-popover) !important;
+}
+/* 分组标题（“搜索结果”“最近联系人”等）降为次级色，仍保持可读。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='suggestions__sectionTitle'] {
+  color: var(--rp-cc-text-secondary) !important;
+}
+/* 普通候选行：正文色（原生是 #999 灰，浅底上偏淡）。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='suggestions__suggestion___'] {
+  color: var(--rp-cc-text-primary) !important;
+}
+/* 高亮行：鼠标悬浮 / 键盘上下选中的那一项。用选中行底色 + 强调色描边，
+   保证浅色主题下也能一眼看出落在哪一项（原生只有极浅的灰）。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme] [class*='suggestions__suggestionHighlighted'] {
+  background: var(--rp-cc-table-row-selected) !important;
+  color: var(--rp-cc-text-primary) !important;
+  outline: 1px solid var(--rp-cc-accent-line) !important;
+  outline-offset: -1px !important;
+}
+/* 高亮行的补全片段（StringHighlight）保留强调色，避免整行同色后看不出匹配位置。 */
+html[data-rp-theme][data-rp-theme][data-rp-theme]
+  [class*='suggestions__suggestionHighlighted']
+  [class*='StringHighlight'] {
+  color: var(--rp-cc-text-link) !important;
+}
