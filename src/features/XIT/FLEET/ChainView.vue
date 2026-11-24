@@ -25,7 +25,12 @@ import {
   removeNativeRoute,
   type NativeRouteRecord,
 } from './native-route-registry';
-import { socketDeleteRoute, socketGetRoutes, hasPendingRouteRequest } from './native-route-socket';
+import {
+  checkNativeRoute,
+  hasPendingRouteRequest,
+  socketDeleteRoute,
+  socketGetRoutes,
+} from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
 import type { RouteStatus } from './native-route-rte';
 import {
@@ -218,6 +223,8 @@ const loopSupplyText = computed(() => {
 const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
 
 const routeNotice = ref<string>();
+const routeCheck = shallowRef<AbortController>();
+const routeCheckIssues = ref<string[]>([]);
 const nativeRouteCandidate = computed(() => {
   if (selectedShips.value.length !== 1) {
     return undefined;
@@ -230,11 +237,21 @@ const nativeRouteCandidate = computed(() => {
   return !loading.value && shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
 });
 
-function openNativeRoutePlan() {
+watch([nativeRouteCandidate, chainGroup], () => {
+  routeCheckIssues.value = [];
+});
+onBeforeUnmount(() => routeCheck.value?.abort());
+
+async function generateNativeRoute() {
   const candidate = nativeRouteCandidate.value;
-  if (candidate === undefined) {
+  if (candidate === undefined || routeCheck.value !== undefined || chainTab.value !== 'plan') {
     return;
   }
+  const group = chainGroup.value;
+  const check = new AbortController();
+  routeCheck.value = check;
+  routeCheckIssues.value = [];
+  routeNotice.value = undefined;
   try {
     const loop = chainLoopMode.value;
     const waypoints = buildNativeWaypoints(candidate.plan);
@@ -256,19 +273,35 @@ function openNativeRoutePlan() {
         legs: [{ fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT }, ...legs],
       };
     }
-    routeNotice.value = undefined;
-    // 向导在独立窗口（XIT RTWIZ）里跑，避免占用 FLEET 磁贴、也避免误点关闭中断后台任务。
+    const checkedRoute = await checkNativeRoute(waypoints, check.signal);
+    if (check.signal.aborted) {
+      return;
+    }
+    if (nativeRouteCandidate.value !== candidate || chainGroup.value !== group) {
+      routeCheckIssues.value = ['规划已更新，请核对后重新生成。'];
+      return;
+    }
+    if (checkedRoute.issues.length > 0) {
+      routeCheckIssues.value = checkedRoute.issues;
+      return;
+    }
+    // 校验通过后，在独立窗口显示写入进度。
     stagedNativeRoute.value = {
       sessionId: Date.now(),
       candidate,
       waypoints,
-      chainName: chainGroup.value ?? '',
+      checkedRoute,
+      chainName: group ?? '',
       autoStart: true,
       loop: loopSnapshot,
     };
-    void showBuffer('XIT RTWIZ');
+    await showBuffer('XIT RTWIZ');
   } catch (err) {
-    routeNotice.value = err instanceof Error ? err.message : String(err);
+    if (!check.signal.aborted) {
+      routeCheckIssues.value = [err instanceof Error ? err.message : String(err)];
+    }
+  } finally {
+    routeCheck.value = undefined;
   }
 }
 
@@ -883,10 +916,11 @@ function flightTotalText(shipId: string): string {
       <RadioItem v-model="chainLoopMode" horizontal>循环模式</RadioItem>
       <div :class="$style.spacer" />
       <PrunButton
+        v-if="chainTab === 'plan'"
         primary
-        :disabled="nativeRouteCandidate === undefined"
-        @click="openNativeRoutePlan">
-        生成原生 RT
+        :disabled="nativeRouteCandidate === undefined || routeCheck !== undefined"
+        @click="generateNativeRoute">
+        {{ routeCheck === undefined ? '生成原生 RT' : '检查航线…' }}
       </PrunButton>
     </div>
 
@@ -927,6 +961,12 @@ function flightTotalText(shipId: string): string {
     </div>
 
     <div v-if="routeNotice" :class="$style.notice">{{ routeNotice }}</div>
+    <div
+      v-if="chainTab === 'plan' && routeCheckIssues.length > 0"
+      :class="$style.notice"
+      role="alert">
+      <div v-for="issue in routeCheckIssues" :key="issue">{{ issue }}</div>
+    </div>
 
     <!-- 规划中 / 运行中 分页：页签始终可见；运行中页列出所有创建过的原生 RT
          （点页签时再向游戏校准航线定义与执行状态）。 -->
