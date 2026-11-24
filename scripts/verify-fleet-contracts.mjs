@@ -3,6 +3,7 @@
 // Exit 0 = PASS (last line PASS n/n); assertions fail with exit 1.
 // Game stores, transport and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
 // Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
+// Native RT writer cases verify that preflight errors prevent creation and that matching responses skip edits.
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // CX BURN cases cover deduplicating route bases and replacing their inventory with CX stock.
 // This does not execute browser actions or contact a server.
@@ -74,7 +75,7 @@ const {
   loopEligibility,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
-const { socketEditStep, socketEditRefuelStep } =
+const { checkNativeRoute, socketEditStep, socketEditRefuelStep, writeNativeRouteBySocket } =
   await import('../src/features/XIT/FLEET/native-route-socket.ts');
 let passes = 0;
 async function check(name, fn) {
@@ -93,6 +94,7 @@ async function check(name, fn) {
     stations: {},
     exchanges: {},
     warehouses: {},
+    addresses: {},
   });
   storage.clear();
   windows.length = 0;
@@ -2220,6 +2222,119 @@ await check(
       data: { id: 'r1', naturalId: 'N1', waypoints: [] },
     });
     await refuel;
+  },
+);
+
+await check('RT preflight reports unresolved waypoints and materials before creation', async () => {
+  socketMessages.length = 0;
+  fixture.stations.CX = { address: { encoded: 'HOME|STA,CX' } };
+  const waypoints = [
+    { location: 'CX', steps: [{ kind: 'load', ticker: 'UNKNOWN', amount: 10 }] },
+    { location: 'MISSING', steps: [{ kind: 'unload', ticker: 'UNKNOWN', amount: 10 }] },
+  ];
+  const signal = new AbortController().signal;
+  const checkedRoute = await checkNativeRoute(waypoints, signal);
+  assert.deepEqual(checkedRoute.issues, [
+    'CX · 找不到物料 UNKNOWN。',
+    '无法确认航点 MISSING 的地址。',
+    'MISSING · 找不到物料 UNKNOWN。',
+  ]);
+  await assert.rejects(
+    writeNativeRouteBySocket({ waypoints, legs: [], name: '', checkedRoute }, signal, () => {}),
+    /无法确认航点 MISSING/,
+  );
+  assert.deepEqual(socketMessages, []);
+});
+
+await check(
+  'RT writer skips matching defaults and edits differing waypoint and step settings',
+  async () => {
+    socketMessages.length = 0;
+    fixture.stations.CX = { address: { encoded: 'HOME|STA,CX' } };
+    fixture.addresses.A = { encoded: 'OTHER|PLA,A' };
+    fixture.materials.H2O = { id: 'water', weight: 1, volume: 1 };
+    const waypoints = [
+      {
+        location: 'CX',
+        steps: [
+          { kind: 'refuel', tank: 'STL' },
+          { kind: 'load', ticker: 'H2O', amount: 10 },
+        ],
+      },
+      { location: 'A', steps: [{ kind: 'unload', ticker: 'H2O', amount: 10 }] },
+    ];
+    const signal = new AbortController().signal;
+    const checkedRoute = await checkNativeRoute(waypoints, signal);
+    assert.deepEqual(checkedRoute.issues, []);
+    assert.deepEqual(socketMessages, []);
+    const legs = [{ fuelPercent: 25 }, { fuelPercent: 25 }];
+    const written = writeNativeRouteBySocket(
+      { waypoints, legs, name: '', checkedRoute },
+      signal,
+      () => {},
+    );
+    const route = { id: 'r1', naturalId: 'RT-TEST-1', waypoints: [] };
+    async function reply(action, response = 'SHIP_ROUTES_ROUTE', data = route) {
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(socketMessages.at(-1)?.messageType, 'SHIP_ROUTES_' + action);
+      dispatchForce({ type: response, data: structuredClone(data) });
+    }
+    const first = {
+      id: 'w1',
+      destination: 'HOME|STA,CX',
+      landing: true,
+      fuelUsageFactor: 0.25,
+      reactorUsageFactor: 0.5,
+      preferences: { ftlPreference: 'LEAST_JUMPS', useGateways: true },
+      steps: [],
+    };
+    const second = {
+      ...first,
+      id: 'w2',
+      destination: { lines: [], encoded: 'OTHER|PLA,A' },
+      preferences: { ...first.preferences, useGateways: false },
+      steps: [],
+    };
+    await reply('GET_ROUTES', 'SHIP_ROUTES_ROUTES', { routes: [] });
+    await reply('CREATE_ROUTE');
+    route.waypoints.push(first);
+    await reply('ADD_WAYPOINT');
+    first.steps.push({
+      id: 's1',
+      type: 'REFUEL',
+      fuel: 'STL',
+      source: 'LOCAL_STORE',
+      minimum: { type: 'CAPACITY', units: 0 },
+      maximum: { type: 'CAPACITY', units: 0 },
+    });
+    await reply('ADD_STEP');
+    first.steps.push({
+      id: 's3',
+      type: 'LOAD',
+      material: { id: 'water' },
+      minimum: { type: 'ABSOLUTE', units: 10 },
+      maximum: { type: 'ABSOLUTE', units: 10 },
+      retain: 0,
+    });
+    await reply('ADD_STEP');
+    route.waypoints.push(second);
+    await reply('ADD_WAYPOINT');
+    second.preferences.useGateways = true;
+    await reply('EDIT_WAYPOINT');
+    const unload = {
+      id: 's2',
+      type: 'UNLOAD',
+      material: { id: 'water' },
+      minimum: { type: 'ABSOLUTE', units: 1 },
+      maximum: { type: 'ABSOLUTE', units: 10 },
+      retain: 0,
+    };
+    second.steps.push(unload);
+    await reply('ADD_STEP');
+    unload.minimum.units = 10;
+    await reply('EDIT_UNLOAD_STEP');
+    assert.equal((await written).routeId, 'r1');
+    assert.equal(socketMessages.length, 9);
   },
 );
 

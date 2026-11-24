@@ -32,6 +32,7 @@ import {
   socketGetRoutes,
   socketSetRouteRepeats,
   writeNativeRouteBySocket,
+  type CheckedRoute,
 } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
@@ -68,15 +69,17 @@ class PartialRouteCleanupError extends Error {}
 const {
   candidate,
   initialWaypoints,
+  checkedRoute,
   chainName = '',
   autoStart = false,
   loopPlan,
 } = defineProps<{
   candidate: ShipChainPlan;
   initialWaypoints: NativeWaypoint[];
+  checkedRoute: CheckedRoute;
   // 产业链名称：写入原生 RT 的航线名，同时记录到 FLEET 展示。
   chainName?: string;
-  // 首次打开向导时直接跑燃料计算与写入（FLEET「生成原生 RT」默认开启）。
+  // 从 FLEET 规划表提交后，打开向导即继续燃料计算与写入。
   autoStart?: boolean;
   loopPlan?: NativeRouteLoopSnapshot;
 }>();
@@ -332,6 +335,7 @@ type Progress =
 type WaypointTarget = Awaited<ReturnType<typeof addWaypoint>>;
 
 const progress = shallowRef<Progress>({ phase: loop ? 'write' : 'scan-fuel' });
+const editing = computed(() => !autoFilling.value && progress.value.phase !== 'done');
 const routeCreationUnconfirmed = ref(false);
 let tile: Awaited<ReturnType<typeof openNativeRoute>> | undefined;
 let nativeStepClick: AbortController | undefined;
@@ -412,7 +416,7 @@ onBeforeUnmount(() => {
   }
 });
 
-// FLEET「生成原生 RT」默认自动跑：先算燃料（FTC/BTF），随后直写航线，不需要再点按钮。
+// FLEET 提交已检查的规划后，在这里计算档位并写入。
 // 已经建过航线（routeId 有值）或不在初始阶段时不再重跑，避免重复创建。
 function startAutoFill() {
   if (
@@ -702,7 +706,7 @@ async function advanceOnce(retrying: boolean) {
         };
       });
       const result = await writeNativeRouteBySocket(
-        { waypoints: waypoints.value, legs, name: chainName },
+        { waypoints: waypoints.value, legs, name: chainName, checkedRoute },
         controller.signal,
         status => {
           fuelStatus.value = status;
@@ -908,7 +912,7 @@ async function showRoute() {
         >出发地库存可支撑：<strong>{{ sustainText }}</strong> 轮</div
       >
     </div>
-    <div v-if="!loop && routeId === undefined" :class="$style.controls">
+    <div v-if="editing && !loop && routeId === undefined" :class="$style.controls">
       <label
         ><input
           v-model="tanks"
@@ -926,13 +930,13 @@ async function showRoute() {
         出发地补满 FTL</label
       >
     </div>
-    <p v-if="loop">航点档位和出发地补满设置沿用循环规划，备货量按这套档位计算。</p>
-    <p v-else
+    <p v-if="editing && loop">航点档位和出发地补满设置沿用循环规划，备货量按这套档位计算。</p>
+    <p v-else-if="editing"
       >燃料消耗与反应堆使用量按飞往各航点的航段计算：优先用 FTC
       公式模型。确认余油不足时停止创建。缺少轨道、环境或网关数据时改用 BTF
       试飞，试飞也无结果时保留默认档。创建航线前可以修改百分比。</p
     >
-    <ol :class="$style.stops">
+    <ol v-if="editing" :class="$style.stops">
       <li v-for="(stop, i) in waypoints" :key="i">
         <strong>{{ stop.location }}</strong>
         <label>
