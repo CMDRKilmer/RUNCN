@@ -208,6 +208,9 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): OptimalDay
     ageDays: number;
   }
   const buildingDataList: BuildingData[] = [];
+  // 是否有建筑没拿到可用数据（价格缺失 / 产量与订单都没加载）。这类建筑会被下面的
+  // filter 排除，因此不能拿剩余的 units 当作「整类」的样子下结论。
+  let dataIncomplete = false;
   for (const building of target) {
     const fullMaterials = getBuildingBuildMaterials(building, site);
     const lines = productionStore.getBySiteId(site.siteId);
@@ -223,6 +226,9 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): OptimalDay
     let adjustedDailyRevenue: number | undefined;
     if (rawDailyRevenue !== undefined && constructionCost !== undefined) {
       adjustedDailyRevenue = rawDailyRevenue - workforceShare - constructionCost / 180;
+    }
+    if (adjustedDailyRevenue === undefined || fullMaterials.length === 0) {
+      dataIncomplete = true;
     }
     const lastRepair = getBuildingLastRepair(building);
     const ageDays = Math.max(0, (now - lastRepair) / MS_PER_DAY);
@@ -240,8 +246,11 @@ function calculateOptimalDayFor(site: PrunApi.Site, ticker?: string): OptimalDay
   // 这类会被整个丢掉并返回 undefined，调用方就会退回「固定天数」；而最优模式下那个
   // 输入框是禁用/不可见的，回退过去等于让界面上的数字凭空出现（实测 VH-874b 的 ECA
   // 每栋 -2344/天，最优列直接跟着固定天数变）。
-  // 这里给一个固定的保守档，保证最优模式下的数字只由该类型自己的数据决定。
-  if (units.length > 0 && units.every(u => u.dailyRevenue <= 0)) {
+  // 只在「该类型全部建筑都拿到了可用数据」时才下这个结论：直接对 units 判 every，
+  // 会漏掉那些因价格/产量未就绪而被 filter 掉的建筑——只要还在加载的恰好是盈利类，
+  // 剩下的亏损类就会被误判成整类非盈利，返回值还会被调用方缓存 10 分钟（而不是按
+  // undefined 走 15 秒重试），盈利数据到位后长期显示错误值。
+  if (!dataIncomplete && units.length > 0 && units.every(u => u.dailyRevenue <= 0)) {
     return { day: NON_PROFIT_DAY, nonProfit: true };
   }
   const optimalDay = calculateOptimalRepair(units)?.optimalDay;
