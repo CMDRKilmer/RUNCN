@@ -36,6 +36,17 @@ const STORAGE_KEY = 'rp-rt-match-only';
 // 选择，不会用旧值把刚勾上的筛选反转回去。undefined 表示尚未初始化。
 let matchOnlyPreference: boolean | undefined;
 
+// 已挂载 RT 磁贴的重绘入口（各自的帧级 schedule）。筛选偏好是模块级共享的，
+// 在 A 磁贴改开关后，B 磁贴必须立刻跟着变——否则它会保留相反的勾选/筛选，直到
+// 下一次无关的 DOM 或船位置更新才突然增减船行，看起来像船表自己乱跳。
+const mountedTiles = new Set<() => void>();
+
+function refreshAllTiles() {
+  for (const refresh of mountedTiles) {
+    refresh();
+  }
+}
+
 // 船表分栏数。
 const COLUMNS = 3;
 
@@ -328,6 +339,9 @@ function markTileInner(tile: PrunTile) {
     chk.addEventListener('change', () => {
       frame.classList.toggle(MATCH_ONLY, chk.checked);
       writeMatchOnly(chk.checked);
+      // 偏好是共享的：其它已打开的 RT 磁贴也要立刻按新值重建（各自重读 readMatchOnly，
+      // 同步勾选状态并重排船行/表头），而不是等下一次无关重绘才变。
+      refreshAllTiles();
       // 过滤会改变可见行数，需重排两栏与表头。
       const currentTable = anchor.querySelector<HTMLTableElement>('table');
       if (currentTable) {
@@ -413,10 +427,14 @@ function onTileReady(tile: PrunTile) {
   // 指纹，变化时同样调度重分类，避免船一直保持隐藏/置灰直到重开界面。
   const stopWatchingShips = watch(shipLocationSignature, schedule);
 
+  // 注册本磁贴的重绘入口，供「在别的 RT 磁贴里改了筛选」时立即跟随。
+  mountedTiles.add(schedule);
+
   // tile 关闭或断开时停掉两条监听，避免 watcher/observer 泄漏与对已卸载节点的写入。
   onNodeDisconnected(tile.frame, () => {
     observer.disconnect();
     stopWatchingShips();
+    mountedTiles.delete(schedule);
   });
 }
 
