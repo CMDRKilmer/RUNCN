@@ -109,6 +109,7 @@ import './sysi-blue-negative-value';
 import './prun-bugs';
 import './rprun-version-label';
 import './rte-columns-layout';
+import './rte-header-compact';
 import './rt-show-waypoint-actions';
 import './screen-layout-lock';
 import './screen-tab-bar/screen-tab-bar';
