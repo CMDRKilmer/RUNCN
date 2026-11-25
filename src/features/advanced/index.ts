@@ -38,6 +38,8 @@ import './pli-cogc-label';
 import './prod-hide-percent';
 import './prodq-hide-government-links';
 import './prodq-shorten-material-links';
+import './rt-ship-assign';
+import './rte-material-abbrev';
 import './screen-tab-bar-compact';
 import './sidebar-hide-zero-currencies';
 import './shorten-shpt-blck-address';

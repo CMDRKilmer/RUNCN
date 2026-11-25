@@ -96,7 +96,7 @@ function init() {
 features.add(
   import.meta.url,
   init,
-  '所有 XIT FLT（独立窗口与 XIT FB / ABCC 面板内）：标题栏右侧一个固定文字「产出装船」的选中 / 非选中双状态按钮（选中=开启 BSN 产物自动装船），不写「开 / 关」字样；独立窗口自动避开游戏原生控件。设置持久化，默认关闭。',
+  'XIT FLT 标题栏右侧「产出装船」开关，控制 BSN 产物自动装船（默认关）。',
   // 与 auto-load-products 一样标 hidden：这个 feature 本身就是开关的载体，
   // 不能让用户在 XIT SET → 功能 里把它关掉（否则按钮消失、开关也没了），
   // 也不该在设置页里再留一条与自动装船相关的条目。
