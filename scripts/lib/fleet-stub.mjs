@@ -105,5 +105,6 @@ export async function estimateChainFlightTimes(input) {
   return { ok: false, legs: [], totalHours: 0, approximatedLegs: 0 };
 }
 export const fixed0 = n => String(Math.round(n));
+export const fixed02 = n => String(Math.round(n * 100) / 100);
 export const getInvStore = () => undefined;
 export const tilesStore = {};

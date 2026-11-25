@@ -37,10 +37,10 @@ export interface ChainFlightLeg {
   // 预计出发/到达时刻（毫秒，游戏世界时间）。
   departAtMs: number;
   arriveAtMs: number;
-  // 该段油耗（出发油量 − 到达余量），供循环每轮 SF/FF 账单；缺油量数据时 undefined。
+  // 该段预计油耗（u），供规划预览和循环每轮 SF/FF 账单。
   stlUsed?: number;
   ftlUsed?: number;
-  // 循环 RT 写入的档位，与本段估时和油耗来自同一个方案。
+  // 档位、估时和油耗来自同一个方案；循环 RT 沿用这些档位。
   settings?: NativeRouteLegPercent;
 }
 
@@ -100,6 +100,14 @@ function departureFuel(ship: PrunApi.Ship, refuelAtOrigin: boolean): LegFuel {
 export function chainShipFuelCaps(ship: PrunApi.Ship): { stlCap: number; ftlCap: number } {
   const fuel = shipFuelRemainingFor(ship);
   return { stlCap: fuel.stlCap, ftlCap: fuel.ftlCap };
+}
+
+export function chainShipFirstRefill(ship: PrunApi.Ship, estimated: { stl: number; ftl: number }) {
+  const fuel = shipFuelRemainingFor(ship);
+  return {
+    stl: fuel.stlCap > 0 ? Math.max(0, fuel.stlCap - fuel.stlRemaining) : estimated.stl,
+    ftl: fuel.ftlCap > 0 ? Math.max(0, fuel.ftlCap - fuel.ftlRemaining) : estimated.ftl,
+  };
 }
 
 // 计算一条环线各段的预计飞行时间（按到访顺序逐段累计）。
@@ -179,18 +187,9 @@ export async function estimateChainFlightTimes(
       stl: Number.isFinite(plan.best.stlRemaining) ? Math.max(0, plan.best.stlRemaining) : fuel.stl,
       ftl: Number.isFinite(plan.best.ftlRemaining) ? Math.max(0, plan.best.ftlRemaining) : fuel.ftl,
     };
-    // 逐段油耗 = 出发油量 − 到达余量；任一端不可读时留 undefined，由账单侧回退罐容量。
-    if (typeof fuel.stl === 'number' && Number.isFinite(plan.best.stlRemaining)) {
-      leg.stlUsed = Math.max(0, fuel.stl - Math.max(0, plan.best.stlRemaining));
-    }
-    if (typeof fuel.ftl === 'number' && Number.isFinite(plan.best.ftlRemaining)) {
-      leg.ftlUsed = Math.max(0, fuel.ftl - Math.max(0, plan.best.ftlRemaining));
-    }
-    if (input.nativeRoute) {
-      leg.settings = nativeFormulaLeg(plan.best);
-      leg.stlUsed = plan.best.stlFuel;
-      leg.ftlUsed = plan.best.ftlFuel;
-    }
+    leg.settings = nativeFormulaLeg(plan.best);
+    leg.stlUsed = plan.best.stlFuel;
+    leg.ftlUsed = plan.best.ftlFuel;
     return { leg, remaining };
   }
 

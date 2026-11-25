@@ -9,7 +9,9 @@ import PlanetRow from '@src/features/XIT/FLEET/PlanetRow.vue';
 import ShipPool from '@src/features/XIT/FLEET/ShipPool.vue';
 import InventoryView from '@src/features/XIT/FLEET/InventoryView.vue';
 import ChainView from '@src/features/XIT/FLEET/ChainView.vue';
+import NativeRouteDialog from '@src/features/XIT/FLEET/NativeRouteDialog.vue';
 import type { ChainPlannerBase } from '@src/features/XIT/FLEET/chain-types';
+import type { NativeRouteGeneration } from '@src/features/XIT/FLEET/native-route-generation';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
@@ -69,6 +71,9 @@ const panesEl = ref<HTMLElement | null>(null);
 // Mode
 type ViewMode = 'plan' | 'inventory' | 'chain';
 const viewMode = useTileState<ViewMode>('viewMode', 'plan');
+const chainView = useTemplateRef<InstanceType<typeof ChainView>>('chainView');
+const routeGeneration = shallowRef<NativeRouteGeneration>();
+const generationTarget = computed(() => chainView.value?.generationTarget);
 
 // Plan mode state
 const baseConfigs = useTileState<Record<string, DispatchBaseConfig>>('baseConfigs', {});
@@ -668,11 +673,28 @@ onUnmounted(() => clearTimeout(noticeTimer));
       </div>
     </div>
 
+    <Teleport
+      v-if="routeGeneration"
+      :to="generationTarget"
+      :disabled="generationTarget === undefined">
+      <NativeRouteDialog
+        v-show="generationTarget !== undefined"
+        v-bind="routeGeneration"
+        @close="routeGeneration = undefined"
+        @view-in-fleet="chainView?.focusNativeRoute($event)" />
+    </Teleport>
+
     <!-- Inventory mode -->
     <InventoryView v-if="viewMode === 'inventory'" />
 
     <!-- Chain loop mode -->
-    <ChainView v-else-if="viewMode === 'chain'" :ships="filteredCxShips" :bases="chainBases" />
+    <ChainView
+      v-else-if="viewMode === 'chain'"
+      ref="chainView"
+      :ships="filteredCxShips"
+      :bases="chainBases"
+      :generation-candidate="routeGeneration?.candidate"
+      @generate="routeGeneration = $event" />
 
     <!-- Plan mode -->
     <template v-else>

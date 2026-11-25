@@ -346,9 +346,12 @@ interface SocketWriteInput {
 export interface SocketWriteResult {
   routeId: string;
   naturalId: string;
+  repeats?: boolean;
   // 未能写入的部分，由对话框提示。
   warnings: string[];
 }
+
+type RouteWriteProgress = (status: string, completedWaypoints: number) => void;
 
 function waypointDestination(waypoint: RouteWaypointData) {
   const { destination } = waypoint;
@@ -372,7 +375,7 @@ function waypointDestination(waypoint: RouteWaypointData) {
 export async function writeNativeRouteBySocket(
   input: SocketWriteInput,
   signal: AbortSignal,
-  onProgress: (status: string) => void,
+  onProgress: RouteWriteProgress,
   onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
   signal.throwIfAborted();
@@ -392,7 +395,7 @@ export async function writeNativeRouteBySocket(
     }
     return destination;
   });
-  onProgress('创建航线');
+  onProgress('创建航线', 0);
   activeSessions++;
   try {
     return await writeRoute(input, destinations, signal, onProgress, onCreated);
@@ -405,7 +408,7 @@ async function writeRoute(
   input: SocketWriteInput,
   destinations: readonly string[],
   signal: AbortSignal,
-  onProgress: (status: string) => void,
+  onProgress: RouteWriteProgress,
   onCreated?: (routeId: string, naturalId: string) => void,
 ): Promise<SocketWriteResult> {
   const warnings: string[] = [];
@@ -414,7 +417,7 @@ async function writeRoute(
   let route = created;
   for (const [index, waypoint] of input.waypoints.entries()) {
     signal.throwIfAborted();
-    onProgress(`写入航点 ${index + 1}/${input.waypoints.length} · ${waypoint.location}`);
+    onProgress(`写入航点 · ${waypoint.location}`, index);
     const destination = destinations[index]!;
     const before = route.waypoints.length;
     route = await socketAddWaypoint(route.id, destination);
@@ -487,10 +490,10 @@ async function writeRoute(
     }
   }
   const name = input.name.trim();
+  onProgress(name === '' ? '航点写入完成' : `改名为 ${name}`, input.waypoints.length);
   if (name !== '') {
     signal.throwIfAborted();
-    onProgress(`改名为 ${name}`);
     route = await socketRenameRoute(route.id, name);
   }
-  return { routeId: route.id, naturalId: route.naturalId, warnings };
+  return { routeId: route.id, naturalId: route.naturalId, repeats: route.repeats, warnings };
 }

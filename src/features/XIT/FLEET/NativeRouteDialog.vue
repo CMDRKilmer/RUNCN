@@ -3,7 +3,6 @@ import PrunButton from '@src/components/PrunButton.vue';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { stationsStore } from '@src/infrastructure/prun-api/data/stations';
 import { findStationBySystemId } from '@src/infrastructure/prun-ui/utils/select-address';
-import type { ShipChainPlan } from './chain-allocation';
 import {
   addNativeStep,
   addWaypoint,
@@ -32,58 +31,44 @@ import {
   socketGetRoutes,
   socketSetRouteRepeats,
   writeNativeRouteBySocket,
-  type CheckedRoute,
 } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
   hoursInvalidatedBySettingChange,
   isWaypointPercent,
   type NativeRouteStep,
-  type NativeWaypoint,
   type RouteTank,
 } from './native-route-plan';
 import {
   billWeightVolume,
-  roundBill as buildRoundBill,
+  loopRecurringBill,
+  loopStockingBill,
+  loopStockingRounds,
   stockingRoundsMax,
-  sustainRounds,
 } from './native-route-loop';
 import {
   billFromLoadSteps,
+  billShortfall,
   cxShortfallPackage,
   nativeRoutePlannedPurchasePackage,
   nativeRouteUsableDays,
   readOriginStock,
 } from './native-route-purchase';
 import { shipChainCapacity } from './chain-allocation';
+import { chainShipFirstRefill } from './chain-flight-time';
 import { formatFlightDuration } from './chain-format';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { stagedDispatch } from './staged';
-import type { NativeRouteLoopSnapshot } from './native-route-staged';
+import type { NativeRouteGeneration } from './native-route-generation';
 
 // 清理上一次未完成航线失败时抛出：绝不能继续写新航线，否则旧航线会变成无人认领的残留。
 class PartialRouteCleanupError extends Error {}
 
-const {
-  candidate,
-  initialWaypoints,
-  checkedRoute,
-  chainName = '',
-  autoStart = false,
-  loopPlan,
-} = defineProps<{
-  candidate: ShipChainPlan;
-  initialWaypoints: NativeWaypoint[];
-  checkedRoute: CheckedRoute;
-  // 产业链名称：写入原生 RT 的航线名，同时记录到 FLEET 展示。
-  chainName?: string;
-  // 从 FLEET 规划表提交后，打开向导即继续燃料计算与写入。
-  autoStart?: boolean;
-  loopPlan?: NativeRouteLoopSnapshot;
-}>();
-const emit = defineEmits<{ close: []; started: [] }>();
+const { candidate, initialWaypoints, checkedRoute, chainName, loopPlan } =
+  defineProps<NativeRouteGeneration>();
+const emit = defineEmits<{ close: []; viewInFleet: [naturalId: string] }>();
 
 const loop = loopPlan !== undefined;
 // 出发地默认补满 STL 与 FTL（不做线路检测：自动流程没有勾选时机，循环几圈后
@@ -167,16 +152,23 @@ const purchase = nativeRoutePlannedPurchasePackage(candidate.ship, candidate.pla
 const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ?? {}).length > 0);
 
 // ── 循环备货（N 轮）─────────────────────────────────────────────
-// 每轮出发地账单 = 航点 0 装载（cxBill）+ 每轮 SF/FF；N 轮总量不超过一船满载。
+// 首轮备齐周转货和当前缺油量，之后仅补每轮的外部消耗。
 const origin = computed(() => waypoints.value[0]?.location.trim() ?? '');
 const cxBill = computed(() => billFromLoadSteps(waypoints.value[0]?.steps ?? []));
-// 每轮账单：循环模式带 fuelPerRound 的 SF/FF；非循环暂存没有燃料数据，按 0 算（此时不展示备货）。
-const roundBill = computed(() =>
-  buildRoundBill(cxBill.value, loopPlan?.fuel ?? { stl: 0, ftl: 0 }),
+const loopReturn = candidate.plan.loopOriginReturn ?? {};
+const cycleFuel = loopPlan?.fuel ?? { stl: 0, ftl: 0 };
+const firstRefill = computed(() => chainShipFirstRefill(candidate.ship.ship, cycleFuel));
+const firstRoundBill = computed(() =>
+  loopStockingBill(cxBill.value, loopReturn, cycleFuel, firstRefill.value, 1),
+);
+const originStock = computed(() => readOriginStock(origin.value));
+const recurringBill = computed(() => loopRecurringBill(cxBill.value, loopReturn, cycleFuel));
+const stockingTickers = computed(
+  () => new Set([...Object.keys(firstRoundBill.value), ...Object.keys(recurringBill.value)]),
 );
 const roundMaterials = computed(() => {
   const mats: Record<string, { weight: number; volume: number }> = {};
-  for (const ticker of Object.keys(roundBill.value)) {
+  for (const ticker of stockingTickers.value) {
     const mat = materialsStore.getByTicker(ticker);
     if (mat !== undefined) {
       mats[ticker] = { weight: mat.weight, volume: mat.volume };
@@ -186,7 +178,7 @@ const roundMaterials = computed(() => {
 });
 // 物料没下发时算不出重量/体积，宁可只备 1 轮，也不按偏小的体积报出偏大的 N。
 const roundsUnweighable = computed(() =>
-  Object.keys(roundBill.value).some(ticker => roundMaterials.value[ticker] === undefined),
+  [...stockingTickers.value].some(ticker => roundMaterials.value[ticker] === undefined),
 );
 const nMax = computed(() => {
   const cap = shipChainCapacity(candidate.ship);
@@ -195,7 +187,8 @@ const nMax = computed(() => {
   }
   return stockingRoundsMax(
     { weight: cap.weight, volume: cap.volume },
-    billWeightVolume(roundBill.value, roundMaterials.value),
+    billWeightVolume(recurringBill.value, roundMaterials.value),
+    billWeightVolume(firstRoundBill.value, roundMaterials.value),
   );
 });
 // 输入框原样保留键入内容（清空时是 ''），只在计费/回显时钳到 1..Nmax：逐键回写会把
@@ -233,13 +226,13 @@ function requestOrderBook(ticker: string, code: string) {
   });
 }
 watch(
-  [exchangeCode, roundBill],
-  ([code, bill]) => {
+  [exchangeCode, stockingTickers],
+  ([code, tickers]) => {
     if (!loop || code === undefined) {
       return;
     }
     for (const ticker of ['SF', 'FF']) {
-      if ((bill[ticker] ?? 0) > 0) {
+      if (tickers.has(ticker)) {
         requestOrderBook(ticker, code);
       }
     }
@@ -253,7 +246,7 @@ const unbuyableFuel = computed(() => {
     return [];
   }
   return ['SF', 'FF'].filter(ticker => {
-    if ((roundBill.value[ticker] ?? 0) <= 0) {
+    if (!stockingTickers.value.has(ticker)) {
       return false;
     }
     const book = cxobStore.getByTicker(`${ticker}.${code}`);
@@ -261,17 +254,25 @@ const unbuyableFuel = computed(() => {
   });
 });
 const stockingBill = computed(() => {
-  const bill: Record<string, number> = {};
-  for (const [ticker, amount] of Object.entries(roundBill.value)) {
-    if (unbuyableFuel.value.includes(ticker)) {
-      continue;
-    }
-    bill[ticker] = amount * stockingRounds.value;
+  const bill = loopStockingBill(
+    cxBill.value,
+    loopReturn,
+    cycleFuel,
+    firstRefill.value,
+    stockingRounds.value,
+  );
+  for (const ticker of unbuyableFuel.value) {
+    delete bill[ticker];
   }
   return bill;
 });
-const stockingPackage = computed(() => cxShortfallPackage(origin.value, stockingBill.value));
-const sustain = computed(() => sustainRounds(roundBill.value, readOriginStock(origin.value)));
+const stockingPackage = computed(() =>
+  cxShortfallPackage(origin.value, stockingBill.value, loopReturn),
+);
+const firstShortfall = computed(() => billShortfall(firstRoundBill.value, originStock.value));
+const sustain = computed(() =>
+  loopStockingRounds(firstRoundBill.value, recurringBill.value, originStock.value),
+);
 const cycleText = computed(() =>
   loopPlan === undefined ? '' : formatFlightDuration(loopPlan.cycleHours * 3600000),
 );
@@ -290,8 +291,14 @@ const stockingWarnings = computed(() => {
   if (sustain.value < 1) {
     warnings.push('出发地库存不足 1 轮，请先备货再分配飞船。');
   }
+  for (const ticker of Object.keys(loopReturn)) {
+    const missing = firstShortfall.value[ticker];
+    if (missing !== undefined) {
+      warnings.push(`首轮请在出发地备好周转货 ${ticker} ×${missing}，后续由归航补回。`);
+    }
+  }
   for (const ticker of unbuyableFuel.value) {
-    warnings.push(`${ticker} 在该交易所无订单簿，请手动补给每轮 ${roundBill.value[ticker]} 单位。`);
+    warnings.push(`${ticker} 在该交易所没有卖单，请手动准备燃料。`);
   }
   return warnings;
 });
@@ -307,12 +314,14 @@ const routeId = ref<string>();
 const routeNaturalId = ref<string>();
 // socket 写入中途停止时已创建的服务端 id：重试前先删掉，避免出现两条航线。
 const partialRoute = shallowRef<{ id: string; naturalId: string }>();
+const knownNaturalId = computed(() => routeNaturalId.value ?? partialRoute.value?.naturalId);
 const busy = ref(false);
 const autoFilling = ref(false);
 const error = ref<string>();
 const canRetryStep = ref(false);
 const repeats = ref<boolean>();
 const waypointIndex = ref(0);
+const socketWrittenWaypoints = ref(0);
 const stepIndex = ref(0);
 const waypoint = computed(() => waypoints.value[waypointIndex.value]);
 const step = computed(() => waypoint.value?.steps[stepIndex.value]);
@@ -335,6 +344,9 @@ type Progress =
 type WaypointTarget = Awaited<ReturnType<typeof addWaypoint>>;
 
 const progress = shallowRef<Progress>({ phase: loop ? 'write' : 'scan-fuel' });
+const completedWaypoints = computed(() =>
+  progress.value.phase === 'write' ? socketWrittenWaypoints.value : waypointIndex.value,
+);
 const editing = computed(() => !autoFilling.value && progress.value.phase !== 'done');
 const routeCreationUnconfirmed = ref(false);
 let tile: Awaited<ReturnType<typeof openNativeRoute>> | undefined;
@@ -382,6 +394,7 @@ function recordRoute(routeId: string, naturalId: string) {
     cycleHours: loopPlan?.cycleHours,
     repeats: repeats.value,
     fuelPerRound: loopPlan?.fuel,
+    loopOriginReturn: loopPlan === undefined ? undefined : loopReturn,
     waypoints: waypoints.value.map((waypoint, index) => {
       const reactor = reactorUsagePercents.value[index];
       return {
@@ -416,36 +429,7 @@ onBeforeUnmount(() => {
   }
 });
 
-// FLEET 提交已检查的规划后，在这里计算档位并写入。
-// 已经建过航线（routeId 有值）或不在初始阶段时不再重跑，避免重复创建。
-function startAutoFill() {
-  if (
-    disposed ||
-    busy.value ||
-    routeId.value !== undefined ||
-    progress.value.phase !== (loop ? 'write' : 'scan-fuel') ||
-    initialWaypoints.length === 0
-  ) {
-    return;
-  }
-  emit('started');
-  void advance(true);
-}
-
-onMounted(() => {
-  if (autoStart) {
-    startAutoFill();
-  }
-});
-// 同一个向导窗口里再次点「生成原生 RT」时组件不会重挂，靠 prop 变化重新触发。
-watch(
-  () => autoStart,
-  value => {
-    if (value) {
-      startAutoFill();
-    }
-  },
-);
+onMounted(() => void advance(true));
 
 const retryAction = computed(() => {
   if (routeCreationUnconfirmed.value) {
@@ -584,6 +568,18 @@ async function enableLoop() {
   }
 }
 
+async function retryLoop() {
+  if (busy.value) {
+    return;
+  }
+  busy.value = true;
+  try {
+    await enableLoop();
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function cleanupPartialRoute() {
   const route = partialRoute.value;
   if (route === undefined) {
@@ -694,7 +690,8 @@ async function advanceOnce(retrying: boolean) {
   if (state.phase === 'write') {
     const controller = new AbortController();
     writeTask = controller;
-    fuelStatus.value = '正在通过 socket 写入原生 RT';
+    socketWrittenWaypoints.value = 0;
+    fuelStatus.value = '准备创建原生 RT';
     try {
       await cleanupPartialRoute();
       controller.signal.throwIfAborted();
@@ -708,8 +705,9 @@ async function advanceOnce(retrying: boolean) {
       const result = await writeNativeRouteBySocket(
         { waypoints: waypoints.value, legs, name: chainName, checkedRoute },
         controller.signal,
-        status => {
+        (status, completed) => {
           fuelStatus.value = status;
+          socketWrittenWaypoints.value = completed;
         },
         (id, naturalId) => {
           partialRoute.value = { id, naturalId };
@@ -726,10 +724,13 @@ async function advanceOnce(retrying: boolean) {
       partialRoute.value = undefined;
       routeId.value = result.routeId;
       routeNaturalId.value = result.naturalId;
+      socketWrittenWaypoints.value = waypoints.value.length;
+      repeats.value = result.repeats;
       fuelWarnings.value = [...fuelWarnings.value, ...result.warnings];
       // 先开 Loop、再落记录：记录里的 repeats 要反映服务端真实结果。顺序反过来时开关
       // 失败会留下「loop: true + repeats 未定」的记录，卡片把没在循环的航线当循环航线。
       if (loop) {
+        fuelStatus.value = '开启循环执行';
         await enableLoop();
       }
       recordRoute(result.routeId, result.naturalId);
@@ -873,201 +874,253 @@ async function openPurchase() {
 }
 
 async function showRoute() {
-  const id = routeNaturalId.value ?? partialRoute.value?.naturalId;
+  const id = knownNaturalId.value;
   await showBuffer(id === undefined ? 'RT' : `RT ${id}`);
 }
 </script>
 
 <template>
   <div :class="$style.body">
-    <h2>生成原生 RT · {{ candidate.ship.ship.name ?? candidate.ship.ship.registration }}</h2>
-    <p v-if="loop"
-      >循环执行。写完航点与步骤后自动打开游戏 Loop，按轮备货后在原生 RT
-      分配船只，分配即开始循环（关掉页面仍继续跑）。</p
-    >
-    <p v-else>单趟归航。备货和核对燃料后，在原生 RT 手动分配船只。分配即开始执行。</p>
-    <div v-if="loop" :class="$style.loopPanel">
-      <div
-        >本轮周期：<strong>{{ cycleText || '—' }}</strong
-        >（预计，随出发时刻漂移）</div
-      >
-      <div
-        >一次运输实际可用：<strong>{{ supplyText || '—' }}</strong></div
-      >
-      <label
-        >备货轮数
-        <input
-          v-model.number="stockingRoundsInput"
-          :class="$style.fuelInput"
-          type="number"
-          min="1"
-          :max="nMax"
-          step="1"
-          :disabled="busy"
-          aria-label="备货轮数"
-          @change="normalizeStockingRounds" />
-        / {{ nMax }} 轮（一船满载上限）</label
-      >
-      <div
-        >出发地库存可支撑：<strong>{{ sustainText }}</strong> 轮</div
-      >
+    <div :class="$style.header">
+      <strong>原生 RT</strong>
+      <span>{{ loop ? '循环' : '单趟' }}</span>
+      <span v-if="knownNaturalId">{{ knownNaturalId }}</span>
     </div>
-    <div v-if="editing && !loop && routeId === undefined" :class="$style.controls">
-      <label
-        ><input
-          v-model="tanks"
-          type="checkbox"
-          value="STL"
-          :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
-        出发地补满 STL</label
-      >
-      <label
-        ><input
-          v-model="tanks"
-          type="checkbox"
-          value="FTL"
-          :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
-        出发地补满 FTL</label
-      >
-    </div>
-    <p v-if="editing && loop">航点档位和出发地补满设置沿用循环规划，备货量按这套档位计算。</p>
-    <p v-else-if="editing"
-      >燃料消耗与反应堆使用量按飞往各航点的航段计算：优先用 FTC
-      公式模型。确认余油不足时停止创建。缺少轨道、环境或网关数据时改用 BTF
-      试飞，试飞也无结果时保留默认档。创建航线前可以修改百分比。</p
-    >
-    <ol v-if="editing" :class="$style.stops">
-      <li v-for="(stop, i) in waypoints" :key="i">
-        <strong>{{ stop.location }}</strong>
-        <label>
-          · 燃料消耗
-          <input
-            v-model.number="fuelUsagePercents[i]"
-            :class="$style.fuelInput"
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            :disabled="loop || busy || routeId !== undefined"
-            :title="`燃料消耗 ${fuelUsagePercents[i]}%`"
-            :aria-label="`${stop.location} 燃料消耗百分比`" />%
-        </label>
-        <label>
-          · 反应堆
-          <input
-            v-model.number="reactorUsagePercents[i]"
-            :class="$style.fuelInput"
-            type="number"
-            min="1"
-            max="100"
-            step="1"
-            placeholder="—"
-            :disabled="loop || busy || routeId !== undefined"
-            :title="`反应堆使用量 ${reactorUsagePercents[i]}%`"
-            :aria-label="`${stop.location} 反应堆使用量百分比`" />%
-        </label>
-        <span v-if="stop.steps.length > 0"> · {{ stop.steps.map(describe).join('、') }}</span>
-      </li>
-    </ol>
-    <ul v-if="fuelWarnings.length > 0" :class="$style.warnings" role="status">
-      <li v-for="warning in fuelWarnings" :key="warning">{{ warning }}</li>
-    </ul>
-    <ul v-if="stockingWarnings.length > 0" :class="$style.warnings" role="status">
-      <li v-for="warning in stockingWarnings" :key="warning">{{ warning }}</li>
-    </ul>
-    <p v-if="routeId"
-      >航线 {{ routeId }} · {{ Math.min(waypointIndex + 1, waypoints.length) }}/{{
-        waypoints.length
-      }}
-      站</p
-    >
-    <p v-if="!usageValid" role="alert"
-      >燃料消耗必须为 1–100% 的整数，反应堆使用量留空或填 1–100% 的整数。</p
-    >
-    <p v-else-if="error" role="alert">
-      {{ error }}
-      <template v-if="!retryAction">请打开原生 RT 核对已写入的内容，再手动补齐。</template>
+    <p v-if="!usageValid" :class="$style.status" role="alert">
+      燃料消耗必须为 1–100% 的整数，反应堆使用量留空或填 1–100% 的整数。
     </p>
-    <p v-else-if="fuelStatus" role="status">{{ fuelStatus }}</p>
-    <p v-else-if="waitingForNativeStep && step" role="status">
+    <p v-else-if="error" :class="$style.status" role="alert">
+      {{ error }}
+      <template v-if="routeCreationUnconfirmed">
+        请打开原生 RT 核对是否已创建航线，再决定是否重新生成。
+      </template>
+      <template v-else-if="!retryAction"> 请打开原生 RT 核对已写入的内容，再手动补齐。 </template>
+    </p>
+    <p v-else-if="fuelStatus" :class="$style.status" role="status">{{ fuelStatus }}</p>
+    <p v-else-if="waitingForNativeStep && step" :class="$style.status" role="status">
       在原生 RT 将鼠标移到航点 {{ waypoint?.location }}。向导会自动点「{{
         nativeStepLabels[step.kind]
       }}」。
     </p>
-    <p v-else-if="autoFilling" role="status"> 正在自动填写 · {{ actionLabel }} </p>
-    <p v-else-if="progress.phase === 'done'" role="status"
-      >航点、燃料消耗和步骤已写入。
-      <template v-if="loop">
-        <template v-if="repeats === true"
-          >循环已开启。备货后在原生 RT 分配飞船，分配即开始循环。</template
-        >
-        <template v-else>循环尚未开启，请在原生 RT 手动打开 Loop，核对备货后再分配飞船。</template>
-      </template>
-      <template v-else-if="repeats === false"
-        >循环已关闭。请核对备货和飞行参数，再分配飞船。</template
-      >
-      <template v-else>请在原生 RT 确认 Loop 已关闭，核对备货和飞行参数后再分配飞船。</template>
+    <p v-else-if="progress.phase === 'done'" :class="$style.status" role="status">
+      已生成。
+      <template v-if="loop && repeats === true">循环已开启。</template>
+      <template v-else-if="loop">循环尚未开启，请先打开 Loop。</template>
+      <template v-else-if="repeats === false">循环已关闭。</template>
+      <template v-else-if="repeats === true">循环已开启，请先在原生 RT 关闭 Loop。</template>
+      <template v-else>请在原生 RT 核对 Loop 设置。</template>
+      备货后在原生 RT 分配飞船。
     </p>
+    <p v-else :class="$style.status" role="status">
+      {{ busy ? '正在填写' : '已暂停' }} · {{ actionLabel }}
+    </p>
+    <div
+      v-if="
+        progress.phase !== 'scan-fuel' && progress.phase !== 'done' && !routeCreationUnconfirmed
+      "
+      :class="$style.writeProgress">
+      <progress :value="completedWaypoints" :max="waypoints.length" aria-label="航点写入进度" />
+      <span>航点 {{ completedWaypoints }}/{{ waypoints.length }}</span>
+    </div>
+
     <div :class="$style.controls">
       <PrunButton
         v-if="actionLabel && (!error || retryAction) && !autoFilling"
         primary
-        :disabled="busy || !fuelUsageValid"
+        :disabled="busy || !usageValid"
         data-tooltip="按计算出的燃料消耗与反应堆使用量连续创建航点、保存档位并写入装卸步骤。"
-        @click="advance(true)"
-        >{{ routeId ? '继续自动填写' : '自动填写' }}</PrunButton
-      >
-      <PrunButton v-if="autoFilling" dark @click="stopAutoFill">停止自动填写</PrunButton>
-      <PrunButton v-else-if="fuelStatus" dark @click="stopAutoFill">停止计算燃料消耗</PrunButton>
+        @click="advance(true)">
+        {{ routeId ? '继续自动填写' : '自动填写' }}
+      </PrunButton>
+      <PrunButton v-if="autoFilling || fuelStatus" dark @click="stopAutoFill">
+        {{ progress.phase === 'scan-fuel' ? '停止计算燃料消耗' : '停止自动填写' }}
+      </PrunButton>
       <PrunButton
         v-if="actionLabel && (!error || retryAction) && !autoFilling"
         dark
-        :disabled="busy || !fuelUsageValid"
-        @click="advance()"
-        >{{ error ? retryAction : actionLabel }}</PrunButton
-      >
+        :disabled="busy || !usageValid"
+        @click="advance()">
+        {{ error ? retryAction : actionLabel }}
+      </PrunButton>
       <PrunButton
-        v-if="routeId || error"
+        v-if="knownNaturalId || error"
         dark
         :disabled="busy && !waitingForNativeStep"
-        @click="showRoute"
-        >查看原生 RT</PrunButton
-      >
-      <PrunButton v-if="waitingForNativeStep && !autoFilling" dark @click="cancelNativeStepWait"
-        >取消等待</PrunButton
-      >
+        @click="showRoute">
+        查看原生 RT
+      </PrunButton>
       <PrunButton
-        v-if="!loop && progress.phase === 'done' && repeats !== false"
+        v-if="progress.phase === 'done' && routeNaturalId"
+        dark
+        :disabled="busy"
+        @click="emit('viewInFleet', routeNaturalId)">
+        在 FLEET 查看航线
+      </PrunButton>
+      <PrunButton v-if="waitingForNativeStep && !autoFilling" dark @click="cancelNativeStepWait">
+        取消等待
+      </PrunButton>
+      <PrunButton
+        v-if="tile && !loop && progress.phase === 'done' && repeats !== false"
         dark
         @click="checkLoop">
         复查循环设置
       </PrunButton>
       <PrunButton
-        v-if="loop && progress.phase === 'done' && routeId && repeats !== true && !autoFilling"
+        v-if="loop && progress.phase === 'done' && routeId && repeats !== true"
         dark
         :disabled="busy"
-        @click="enableLoop">
+        @click="retryLoop">
         重试开启循环
       </PrunButton>
-      <PrunButton
-        v-if="loop"
-        dark
-        :disabled="busy || !stockingPackage"
-        data-tooltip="按 N 轮出发地账单扣掉仓库库存生成 CX 采购包（含每轮 SF/FF）。"
-        @click="openStocking"
-        >打开备货包（{{ stockingRounds }} 轮）</PrunButton
-      >
-      <PrunButton v-else-if="hasPurchase" dark :disabled="busy" @click="openPurchase"
-        >打开采购包</PrunButton
-      >
+      <template v-if="loop && !busy">
+        <label>
+          备货轮数
+          <input
+            v-model.number="stockingRoundsInput"
+            :class="$style.fuelInput"
+            type="number"
+            min="1"
+            :max="nMax"
+            step="1"
+            aria-label="备货轮数"
+            @change="normalizeStockingRounds" />
+          / {{ nMax }}
+        </label>
+        <PrunButton
+          dark
+          :disabled="!stockingPackage"
+          data-tooltip="按首轮和后续轮次的外部补给缺口生成 CX 采购包。"
+          @click="openStocking">
+          打开备货包
+        </PrunButton>
+      </template>
+      <PrunButton v-else-if="!loop && !busy && hasPurchase" dark @click="openPurchase">
+        打开采购包
+      </PrunButton>
       <PrunButton dark :disabled="busy" @click="emit('close')">关闭</PrunButton>
     </div>
+
+    <details v-show="!busy" :class="$style.details">
+      <summary>
+        航点与设置
+        <template v-if="fuelWarnings.length + stockingWarnings.length > 0">
+          （{{ fuelWarnings.length + stockingWarnings.length }} 条提示）
+        </template>
+      </summary>
+      <div v-if="loop" :class="$style.loopPanel">
+        <div
+          >本轮周期：<strong>{{ cycleText || '—' }}</strong
+          >（预计，随出发时刻漂移）</div
+        >
+        <div
+          >一次运输实际可用：<strong>{{ supplyText || '—' }}</strong></div
+        >
+        <div
+          >出发地库存可支撑：<strong>{{ sustainText }}</strong> 轮</div
+        >
+      </div>
+      <div v-if="editing && !loop && routeId === undefined" :class="$style.controls">
+        <label
+          ><input
+            v-model="tanks"
+            type="checkbox"
+            value="STL"
+            :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
+          出发地补满 STL</label
+        >
+        <label
+          ><input
+            v-model="tanks"
+            type="checkbox"
+            value="FTL"
+            :disabled="busy || routeId !== undefined || progress.phase !== 'scan-fuel'" />
+          出发地补满 FTL</label
+        >
+      </div>
+      <p v-if="editing && loop">航点档位和出发地补满设置沿用循环规划，备货量按这套档位计算。</p>
+      <p v-else-if="editing"
+        >燃料消耗与反应堆使用量按飞往各航点的航段计算：优先用 FTC
+        公式模型。确认余油不足时停止创建。缺少轨道、环境或网关数据时改用 BTF
+        试飞，试飞也无结果时保留默认档。创建航线前可以修改百分比。</p
+      >
+      <ol :class="$style.stops">
+        <li v-for="(stop, i) in waypoints" :key="i">
+          <strong>{{ stop.location }}</strong>
+          <label>
+            · 燃料消耗
+            <input
+              v-model.number="fuelUsagePercents[i]"
+              :class="$style.fuelInput"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              :disabled="loop || busy || routeId !== undefined"
+              :title="`燃料消耗 ${fuelUsagePercents[i]}%`"
+              :aria-label="`${stop.location} 燃料消耗百分比`" />%
+          </label>
+          <label>
+            · 反应堆
+            <input
+              v-model.number="reactorUsagePercents[i]"
+              :class="$style.fuelInput"
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              placeholder="—"
+              :disabled="loop || busy || routeId !== undefined"
+              :title="`反应堆使用量 ${reactorUsagePercents[i]}%`"
+              :aria-label="`${stop.location} 反应堆使用量百分比`" />%
+          </label>
+          <span v-if="stop.steps.length > 0"> · {{ stop.steps.map(describe).join('、') }}</span>
+        </li>
+      </ol>
+      <ul v-if="fuelWarnings.length > 0" :class="$style.warnings" role="status">
+        <li v-for="warning in fuelWarnings" :key="warning">{{ warning }}</li>
+      </ul>
+      <ul v-if="stockingWarnings.length > 0" :class="$style.warnings" role="status">
+        <li v-for="warning in stockingWarnings" :key="warning">{{ warning }}</li>
+      </ul>
+    </details>
   </div>
 </template>
 
 <style module>
 .body {
-  padding: 12px;
+  padding: 6px 0;
+  border-block: 1px solid #2b485a;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status {
+  margin: 4px 0 8px;
+}
+
+.writeProgress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.writeProgress > progress {
+  width: min(180px, 55%);
+  accent-color: rgb(63, 162, 222);
+}
+
+.details {
+  margin-top: 8px;
+}
+
+.details > summary {
+  cursor: pointer;
 }
 
 .controls {
