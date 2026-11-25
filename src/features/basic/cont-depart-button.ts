@@ -58,7 +58,7 @@ async function depart(button: HTMLButtonElement) {
     const result = await openSfcAndFill(target);
     if (!result.ok && result.message) {
       button.setAttribute('data-tooltip', result.message);
-      button.setAttribute('data-tooltip-position', 'left');
+      button.setAttribute('data-tooltip-position', 'top');
     }
   } finally {
     busyButtons.delete(button);
@@ -116,7 +116,7 @@ function syncRow(row: HTMLTableRowElement, contract: PrunApi.Contract, targets: 
   setGreyed(button, !target.ready || busyButtons.has(button));
   if (button.getAttribute('data-tooltip') !== target.hint) {
     button.setAttribute('data-tooltip', target.hint);
-    button.setAttribute('data-tooltip-position', 'left');
+    button.setAttribute('data-tooltip-position', 'top');
   }
 }
 

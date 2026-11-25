@@ -139,7 +139,7 @@ const statusClass = computed(() => getStatusClass(contract.status));
           departTarget.ready && !departing ? undefined : C.Button.disabled,
         ]"
         :data-tooltip="departTarget.hint"
-        data-tooltip-position="left"
+        data-tooltip-position="top"
         @click="onDepart">
         {{ departing ? '…' : '起飞' }}
       </button>
