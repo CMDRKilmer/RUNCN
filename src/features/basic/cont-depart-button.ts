@@ -15,7 +15,6 @@ import onNodeDisconnected from '@src/utils/on-node-disconnected';
 // 行 ↔ 条款的对应：条件表第一列是 `#N`，N = condition.index + 1（已实测核对）。
 // 只按 index 匹配、匹配不到就跳过，不做文本匹配（站名 / 语言一变就断）。
 const BUTTON_ATTR = 'data-rp-cont-depart';
-const BUTTON_TEXT = '起飞';
 
 const latestTargets = new WeakMap<HTMLButtonElement, DepartTarget>();
 const busyButtons = new WeakSet<HTMLButtonElement>();
@@ -32,7 +31,7 @@ function createButton(cell: HTMLTableCellElement) {
   button.type = 'button';
   button.className = `${C.Button.btn} ${C.Button.primary}`;
   button.setAttribute(BUTTON_ATTR, '');
-  button.textContent = BUTTON_TEXT;
+  button.textContent = '起飞';
   // 不给按钮加 margin：本行没有原生按钮时（游戏会在装货中隐藏「完成」），
   // 4px 的左边距会让「起飞」比下一行的「完成」向右偏。间隔由 CSS 的
   // `td > button + button` 处理，只在前一个按钮存在时才生效。
@@ -117,6 +116,9 @@ function syncRow(row: HTMLTableRowElement, contract: PrunApi.Contract, targets: 
   latestTargets.set(button, target);
   if (button.getAttribute(BUTTON_ATTR) !== condition.id) {
     button.setAttribute(BUTTON_ATTR, condition.id);
+  }
+  if (button.textContent !== target.label) {
+    button.textContent = target.label;
   }
   setGreyed(button, !target.ready || busyButtons.has(button));
 }

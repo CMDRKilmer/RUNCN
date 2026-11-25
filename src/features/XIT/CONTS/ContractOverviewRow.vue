@@ -152,7 +152,7 @@ const statusClass = computed(() => getStatusClass(contract.status));
           departTarget.ready && !departing ? undefined : C.Button.disabled,
         ]"
         @click="onDepart">
-        {{ departing ? '…' : '起飞' }}
+        {{ departing ? '…' : departTarget.label }}
       </button>
       <span v-else>--</span>
     </td>

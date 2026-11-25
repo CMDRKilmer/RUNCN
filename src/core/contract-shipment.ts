@@ -23,10 +23,24 @@ const ACTIVE_STATUSES = new Set<PrunApi.ContractStatus>([
   'DEADLINE_EXCEEDED',
 ]);
 
+/**
+ * ready    —— 装完货、船停着，可以起飞
+ * loading  —— 取货条款没完成，按钮灰着
+ * inFlight —— 货已经上船且船在途：按钮显示「在途」，避免误以为还没起飞
+ * noShip   —— 装完了但没找到载货的飞船（可能刚卸货 / 数据未同步）
+ */
+export type DepartState = 'ready' | 'loading' | 'inFlight' | 'noShip';
+
 export interface DepartTarget {
   /** 交付条款 id：同一合同可能有多条交付条款，用它给按钮做标识。 */
   key: string;
   registration: string | undefined;
+  /** 飞船名（玩家起的名字，如「Virtuosa」）；用来显示，比注册码好认 */
+  shipName: string | undefined;
+  /** 按钮当前状态，决定按钮文案与是否可点 */
+  state: DepartState;
+  /** 按钮文案：ready/loading/noShip → 「起飞」；inFlight → 「在途」 */
+  label: string;
   destinationId: string;
   destinationLabel: string;
   ready: boolean;
@@ -115,23 +129,37 @@ export function getDepartTargets(
     const destinationLabel = getDestinationFullName(destination) ?? destinationId;
     const ship = findShipForShipment(shipmentItemId, index);
     const registration = ship?.registration;
+    const shipName = ship?.name;
 
     // 提示文案要短：气泡最宽 320px，长了会换三四行盖住表格。
+    // 船名优先于注册码：AVI-068M5 是内部编号，玩家认得的是船名。
+    const shipLabel = shipName ?? registration;
+    let state: DepartState;
     let hint: string;
     if (!pickupsDone) {
+      state = 'loading';
       hint = `取货未完成，装完才能起飞 → ${destinationLabel}`;
     } else if (registration === undefined) {
+      state = 'noShip';
       hint = `没找到载货的飞船 → ${destinationLabel}`;
+    } else if (ship?.flightId != null) {
+      // 货已装船且船在飞：不能再起飞，按钮文案也要跟着改，否则看着像还没起飞。
+      state = 'inFlight';
+      hint = `${shipLabel} 已在途 → ${destinationLabel}`;
     } else {
-      hint = `${registration} 起飞 → ${destinationLabel}`;
+      state = 'ready';
+      hint = `${shipLabel} 起飞 → ${destinationLabel}`;
     }
 
     targets.push({
       key: condition.id,
       registration,
+      shipName,
       destinationId,
       destinationLabel,
-      ready: pickupsDone && registration !== undefined,
+      ready: state === 'ready',
+      state,
+      label: state === 'inFlight' ? '在途' : '起飞',
       hint,
       pickupIds: [...condition.dependencies],
     });

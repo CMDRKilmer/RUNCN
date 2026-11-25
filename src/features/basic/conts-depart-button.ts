@@ -19,7 +19,6 @@ import onNodeDisconnected from '@src/utils/on-node-disconnected';
 //
 // 判定与 SFC 操作共用 @src/core/contract-shipment（XIT CONTSS、CONT 详情同一套）。
 const BUTTON_ATTR = 'data-rp-conts-depart';
-const BUTTON_TEXT = '起飞';
 
 // 按钮每次对齐时把最新的判定结果存这里，点击时直接取，避免闭包里的旧快照。
 const latestTargets = new WeakMap<HTMLButtonElement, DepartTarget>();
@@ -30,7 +29,7 @@ function createButton(nativeButton: HTMLButtonElement) {
   button.type = 'button';
   button.className = `${C.Button.btn} ${C.Button.primary}`;
   button.setAttribute(BUTTON_ATTR, '');
-  button.textContent = BUTTON_TEXT;
+  button.textContent = '起飞';
   // 和原生「查看」按钮贴在一起，补一点间距（表格单元格不是 flex，没有 gap）。
   button.style.marginRight = '4px';
   button.addEventListener('click', () => {
@@ -57,6 +56,9 @@ function updateButton(button: HTMLButtonElement, target: DepartTarget) {
   latestTargets.set(button, target);
   if (button.getAttribute(BUTTON_ATTR) !== target.key) {
     button.setAttribute(BUTTON_ATTR, target.key);
+  }
+  if (button.textContent !== target.label) {
+    button.textContent = target.label;
   }
   setGreyed(button, !target.ready || busyButtons.has(button));
 }
