@@ -86,3 +86,9 @@
 .nextPaymentAmount {
   opacity: 0.7;
 }
+
+/* 「起飞」所在列：按钮不折行，宽度随内容 */
+.departCell {
+  white-space: nowrap;
+  width: 1%;
+}

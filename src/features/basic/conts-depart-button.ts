@@ -1,13 +1,8 @@
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
-import {
-  getDestinationFullName,
-  getEntityNaturalIdFromAddress,
-} from '@src/infrastructure/prun-api/data/addresses';
-import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
-import { sleep } from '@src/utils/sleep';
+import { getDepartTargets, openSfcAndFill, type DepartTarget } from '@src/core/contract-shipment';
+import { watch } from 'vue';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
 // CONTS（合同列表）：给「货运合同」的指令列加一个「起飞」按钮。
@@ -20,103 +15,14 @@ import onNodeDisconnected from '@src/utils/on-node-disconnected';
 //    时按钮灰着（悬停会说明原因），避免误点。
 //  * 点亮的按钮打开装货那条船的航行控制，并把目的地自动填成合同卸货地址，
 //    但绝不提交飞行 —— 燃料与滑块仍由玩家在 SFC 里确认。
+//
+// 判定与 SFC 操作共用 @src/core/contract-shipment（XIT CONTSS、CONT 详情同一套）。
 const BUTTON_ATTR = 'data-rp-conts-depart';
 const BUTTON_TEXT = '起飞';
-const SFC_WAIT_TIMEOUT_MS = 8000;
-
-// 只处理进行中的合同：已取消 / 已终止 / 已完成的合同不提供起飞入口。
-const ACTIVE_STATUSES = new Set<PrunApi.ContractStatus>([
-  'CLOSED',
-  'PARTIALLY_FULFILLED',
-  'DEADLINE_EXCEEDED',
-]);
-
-interface DepartTarget {
-  /** 条件 id：同一合同可能有多条交付条款，用它给按钮做标识。 */
-  key: string;
-  registration: string | undefined;
-  destinationId: string;
-  destinationLabel: string;
-  ready: boolean;
-  hint: string;
-}
 
 // 按钮每次对齐时把最新的判定结果存这里，点击时直接取，避免闭包里的旧快照。
 const latestTargets = new WeakMap<HTMLButtonElement, DepartTarget>();
 const busyButtons = new WeakSet<HTMLButtonElement>();
-
-function findShipForShipment(shipmentItemId: string) {
-  // 船上的货物列表才是权威依据：这批货在谁的货舱里，就由谁起飞。
-  for (const store of storagesStore.all.value ?? []) {
-    if (store.type !== 'SHIP_STORE') {
-      continue;
-    }
-    const carried = store.items.some(x => x.type === 'SHIPMENT' && x.id === shipmentItemId);
-    if (!carried) {
-      continue;
-    }
-    const ship = shipsStore.all.value?.find(x => x.idShipStore === store.id);
-    if (ship) {
-      return ship;
-    }
-  }
-  return undefined;
-}
-
-function getTargets(contract: PrunApi.Contract) {
-  const targets: DepartTarget[] = [];
-  if (!ACTIVE_STATUSES.has(contract.status)) {
-    return targets;
-  }
-  // 取货条款全部完成才允许起飞。
-  const pickupsDone = contract.conditions
-    .filter(x => x.type === 'PICKUP_SHIPMENT')
-    .every(x => x.status === 'FULFILLED');
-
-  for (const condition of contract.conditions) {
-    if (condition.type !== 'DELIVERY_SHIPMENT') {
-      continue;
-    }
-    // 只认我方负责交付的那条：对方交付的条款轮不到我们起飞。
-    if (condition.party !== contract.party) {
-      continue;
-    }
-    if (condition.status === 'FULFILLED') {
-      continue;
-    }
-    const shipmentItemId = condition.shipmentItemId;
-    const destination = condition.destination;
-    if (!shipmentItemId || !destination) {
-      continue;
-    }
-    const destinationId = getEntityNaturalIdFromAddress(destination);
-    if (!destinationId) {
-      continue;
-    }
-    const destinationLabel = getDestinationFullName(destination) ?? destinationId;
-    const ship = findShipForShipment(shipmentItemId);
-    const registration = ship?.registration;
-
-    let hint: string;
-    if (!pickupsDone) {
-      hint = `还有取货条款未完成，装完货后才能起飞（目的地 ${destinationLabel}）`;
-    } else if (registration === undefined) {
-      hint = `没找到载着这批货的飞船，请确认货物已装上船（目的地 ${destinationLabel}）`;
-    } else {
-      hint = `${registration} → ${destinationLabel}：打开航行控制并把目的地填好`;
-    }
-
-    targets.push({
-      key: condition.id,
-      registration,
-      destinationId,
-      destinationLabel,
-      ready: pickupsDone && registration !== undefined,
-      hint,
-    });
-  }
-  return targets;
-}
 
 function createButton(nativeButton: HTMLButtonElement) {
   const button = document.createElement('button');
@@ -164,7 +70,7 @@ function syncRow(row: HTMLTableRowElement) {
   }
   const localId = contractCell.textContent?.trim();
   const contract = localId ? contractsStore.getByLocalId(localId) : undefined;
-  const targets = contract ? getTargets(contract) : [];
+  const targets = contract ? getDepartTargets(contract) : [];
 
   // 先清掉不再成立按钮（条款完成、合同结束、行被复用成别的合同）。
   for (const existing of [...actionCell.querySelectorAll<HTMLButtonElement>(`[${BUTTON_ATTR}]`)]) {
@@ -199,46 +105,18 @@ function syncTile(tile: PrunTile) {
   }
 }
 
-async function waitForAddressContainer(root: Element) {
-  const deadline = Date.now() + SFC_WAIT_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    const container = _$(root, C.AddressSelector.container);
-    if (container) {
-      return container;
-    }
-    await sleep(120);
-  }
-  return undefined;
-}
-
-function setHint(button: HTMLButtonElement, hint: string) {
-  button.setAttribute('data-tooltip', hint);
-  button.setAttribute('data-tooltip-position', 'left');
-}
-
 async function depart(button: HTMLButtonElement) {
   const target = latestTargets.get(button);
   if (!target || !target.ready || busyButtons.has(button)) {
     return;
   }
-  const registration = target.registration;
-  if (registration === undefined) {
-    return;
-  }
-
   busyButtons.add(button);
   setGreyed(button, true);
   try {
-    // 复用/新开 SFC 窗口；目的地随后填入，绝不自动提交飞行。
-    const window = await showBuffer(`SFC ${registration}`);
-    const container = await waitForAddressContainer(window);
-    if (!container) {
-      setHint(button, '航行控制已打开，但没找到目的地输入框，请手动选择');
-      return;
-    }
-    const ok = await selectAddress(container, target.destinationId);
-    if (!ok) {
-      setHint(button, `自动填「${target.destinationLabel}」失败，请在航行控制里手动选择`);
+    const result = await openSfcAndFill(target);
+    if (!result.ok && result.message) {
+      button.setAttribute('data-tooltip', result.message);
+      button.setAttribute('data-tooltip-position', 'left');
     }
   } finally {
     busyButtons.delete(button);
@@ -258,11 +136,9 @@ function onTileReady(tile: PrunTile) {
   });
   observer.observe(tile.anchor, { childList: true, subtree: true, characterData: true });
   // 条款进度变化未必反映到列表可见文本上（例如刚装完货，状态列还是「部分完成」），
-  // 所以再盯一层合同 store；磁贴关掉时随之解绑。
+  // 所以再盯一层合同 / 库存 / 飞船 store；磁贴关掉时随之解绑。
   // 装货完成等变化体现在 storage / ship store，而非合同 store：取货合同先于
   // STORAGE_CHANGE 到达时「ready:false」的目标会被缓存，装货完成后按钮仍灰着。
-  // 盯住 storage 与 ship 依赖，装完货即时重算「ready」，按钮随之点亮
-  // （PR #60 审查 #224）。
   const stop = watch(
     [contractsStore.all, storagesStore.all, shipsStore.all],
     () => syncTile(tile),

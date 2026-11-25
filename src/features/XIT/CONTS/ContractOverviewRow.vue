@@ -12,13 +12,38 @@ import {
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
 import { objectId } from '@src/utils/object-id';
+import {
+  getDepartTargets,
+  openSfcAndFill,
+  type ShipmentShipIndex,
+} from '@src/core/contract-shipment';
 import $style from './conts-shared.module.css';
 
-const { contract, deadline, deadlineStyle } = defineProps<{
+const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
   contract: PrunApi.Contract;
   deadline?: string;
   deadlineStyle?: string;
+  /** 由列表一次性建好的 shipmentItemId → 飞船索引，避免每行都遍历库存 */
+  shipIndex?: ShipmentShipIndex;
 }>();
+
+// 「起飞」目标：货运合同装完货后，打开装货那条船的 SFC 并填入卸货地。
+// 判定逻辑与原生 CONTS、CONT 详情共用 @src/core/contract-shipment。
+const departTarget = computed(() => getDepartTargets(contract, shipIndex)[0]);
+const departing = ref(false);
+
+async function onDepart() {
+  const target = departTarget.value;
+  if (!target?.ready || departing.value) {
+    return;
+  }
+  departing.value = true;
+  try {
+    await openSfcAndFill(target);
+  } finally {
+    departing.value = false;
+  }
+}
 
 const icons = computed(() => getContractIcons(contract));
 
@@ -104,5 +129,21 @@ const statusClass = computed(() => getStatusClass(contract.status));
     </td>
     <td :class="statusClass">{{ statusText }}</td>
     <td :style="deadlineStyle">{{ deadline ?? '--' }}</td>
+    <td :class="$style.departCell">
+      <button
+        v-if="departTarget"
+        type="button"
+        :class="[
+          C.Button.btn,
+          C.Button.primary,
+          departTarget.ready && !departing ? undefined : C.Button.disabled,
+        ]"
+        :data-tooltip="departTarget.hint"
+        data-tooltip-position="left"
+        @click="onDepart">
+        {{ departing ? '…' : '起飞' }}
+      </button>
+      <span v-else>--</span>
+    </td>
   </tr>
 </template>
