@@ -12,10 +12,15 @@ import {
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
 import { objectId } from '@src/utils/object-id';
-import { getDepartTargets, openSfcAndFill, type ShipmentIndex } from '@src/core/contract-shipment';
+import {
+  getDepartTargets,
+  openSfcAndFill,
+  type DepartTarget,
+  type ShipmentIndex,
+} from '@src/core/contract-shipment';
 import { attachFloatingTooltip } from '@src/utils/floating-tooltip';
 import $style from './conts-shared.module.css';
-import { onBeforeUnmount, watch } from 'vue';
+import { onBeforeUnmount } from 'vue';
 
 const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
   contract: PrunApi.Contract;
@@ -27,29 +32,53 @@ const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
 
 // 「起飞」目标：货运合同装完货后，打开装货那条船的 SFC 并填入卸货地。
 // 判定逻辑与原生 CONTS、CONT 详情共用 @src/core/contract-shipment。
-const departTarget = computed(() => getDepartTargets(contract, shipIndex)[0]);
-const departing = ref(false);
+//
+// 一条合同可能有多条交付条款（不同船、不同批次），必须**全部**渲染：只取 [0] 时，
+// 若第一条已在途，总览里就只剩一个灰色的「在途」，后面已就绪的那批点不到 ——
+// 原生 CONTS 本来就是每批一个按钮，这里保持一致。
+const departTargets = computed(() => getDepartTargets(contract, shipIndex));
+const departingKeys = ref<Set<string>>(new Set());
+
+function targetByKey(key: string) {
+  return departTargets.value.find(target => target.key === key);
+}
 
 // 「指令」列贴着磁贴右缘，游戏自带的 data-tooltip（元素上的绝对定位伪元素）
 // 会被滚动容器裁掉，这里改用 body 上的 fixed 浮层。
-const departButton = ref<HTMLButtonElement>();
-let detachTooltip: (() => void) | undefined;
-watch(departButton, el => {
-  detachTooltip?.();
-  detachTooltip = el ? attachFloatingTooltip(el, () => departTarget.value?.hint ?? '') : undefined;
-});
-onBeforeUnmount(() => detachTooltip?.());
+// 每条目标一个按钮，浮层按 key 分别解绑：函数式 ref 在元素卸载时会以 null 回调，
+// 正好用来收尾（v-if 摘掉元素不会触发 mouseleave，浮层会一直留在屏幕上）。
+const detachTooltips = new Map<string, () => void>();
 
-async function onDepart() {
-  const target = departTarget.value;
-  if (!target?.ready || departing.value) {
+function bindDepartButton(el: Element | null, key: string) {
+  detachTooltips.get(key)?.();
+  detachTooltips.delete(key);
+  if (!(el instanceof HTMLButtonElement)) {
     return;
   }
-  departing.value = true;
+  detachTooltips.set(
+    key,
+    attachFloatingTooltip(el, () => targetByKey(key)?.hint ?? ''),
+  );
+}
+
+onBeforeUnmount(() => {
+  for (const detach of detachTooltips.values()) {
+    detach();
+  }
+  detachTooltips.clear();
+});
+
+async function onDepart(target: DepartTarget) {
+  if (!target.ready || departingKeys.value.has(target.key)) {
+    return;
+  }
+  departingKeys.value = new Set(departingKeys.value).add(target.key);
   try {
     await openSfcAndFill(target);
   } finally {
-    departing.value = false;
+    const next = new Set(departingKeys.value);
+    next.delete(target.key);
+    departingKeys.value = next;
   }
 }
 
@@ -139,18 +168,19 @@ const statusClass = computed(() => getStatusClass(contract.status));
     <td :style="deadlineStyle">{{ deadline ?? '--' }}</td>
     <td :class="$style.departCell">
       <button
-        v-if="departTarget"
-        ref="departButton"
+        v-for="target in departTargets"
+        :key="target.key"
+        :ref="el => bindDepartButton(el as Element | null, target.key)"
         type="button"
         :class="[
           C.Button.btn,
           C.Button.primary,
-          departTarget.ready && !departing ? undefined : C.Button.disabled,
+          target.ready && !departingKeys.has(target.key) ? undefined : C.Button.disabled,
         ]"
-        @click="onDepart">
-        {{ departing ? '…' : departTarget.label }}
+        @click="onDepart(target)">
+        {{ departingKeys.has(target.key) ? '…' : target.label }}
       </button>
-      <span v-else>--</span>
+      <span v-if="departTargets.length === 0">--</span>
     </td>
   </tr>
 </template>

@@ -8,6 +8,8 @@
 // 这里改成自绘浮层：`position: fixed` 挂到 `document.body`，不受任何
 // 磁贴裁剪影响；位置按元素矩形计算，放不下就换到下方，并夹在视口内。
 
+import onNodeDisconnected from '@src/utils/on-node-disconnected';
+
 const TOOLTIP_CLASS = 'rp-floating-tooltip';
 const GAP = 8;
 const MAX_WIDTH = 320;
@@ -53,8 +55,22 @@ function hide() {
  * 给元素挂一个浮层提示。`text` 可以是函数，鼠标进入时再求值（判定会随状态变化）。
  * 返回解绑函数。
  */
+// 触发元素被整块摘掉时（React 重渲染、合同状态变化）不会发 mouseleave，
+// 气泡会一直停在屏幕上。这里在第一次悬停时给触发元素挂一次「断开即收起」，
+// 三个调用方（原生 CONTS、CONT 详情、XIT CONTSS）都不用各自处理。
+const watched = new WeakSet<HTMLElement>();
+
+function watchTriggerDisconnect(el: HTMLElement) {
+  if (watched.has(el)) {
+    return;
+  }
+  watched.add(el);
+  onNodeDisconnected(el, hide);
+}
+
 export function attachFloatingTooltip(el: HTMLElement, text: () => string): () => void {
   const onEnter = () => {
+    watchTriggerDisconnect(el);
     const value = text();
     if (value) {
       place(el, value);

@@ -35,9 +35,10 @@ function createButton(nativeButton: HTMLButtonElement) {
   button.addEventListener('click', () => {
     void depart(button);
   });
-  // 表格最后一列贴着磁贴右缘，游戏自带的 data-tooltip 会被裁掉，用 body 浮层。
-  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   nativeButton.parentElement?.insertBefore(button, nativeButton);
+  // 表格最后一列贴着磁贴右缘，游戏自带的 data-tooltip 会被裁掉，用 body 浮层。
+  // 节点断开即收起同样交给 floating-tooltip 处理。
+  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   return button;
 }
 

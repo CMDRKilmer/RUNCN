@@ -40,8 +40,10 @@ function createButton(cell: HTMLTableCellElement) {
   });
   // 游戏自带的 data-tooltip 是元素上的绝对定位伪元素，会被磁贴滚动容器裁掉，
   // 这里用 body 上的 fixed 浮层（文案取自当前判定的 hint）。
-  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   cell.appendChild(button);
+  // 浮层挂在 body 上：合同更新时 React 直接摘掉按钮、不会发 mouseleave，
+  // 「节点断开即收起」由 floating-tooltip 内部统一处理（悬停时登记一次）。
+  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   return button;
 }
 
