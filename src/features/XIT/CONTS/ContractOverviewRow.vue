@@ -12,11 +12,7 @@ import {
   formatAmount,
 } from '@src/features/XIT/CONTS/utils';
 import { objectId } from '@src/utils/object-id';
-import {
-  getDepartTargets,
-  openSfcAndFill,
-  type ShipmentShipIndex,
-} from '@src/core/contract-shipment';
+import { getDepartTargets, openSfcAndFill, type ShipmentIndex } from '@src/core/contract-shipment';
 import { attachFloatingTooltip } from '@src/utils/floating-tooltip';
 import $style from './conts-shared.module.css';
 import { onBeforeUnmount, watch } from 'vue';
@@ -26,7 +22,7 @@ const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
   deadline?: string;
   deadlineStyle?: string;
   /** 由列表一次性建好的 shipmentItemId → 飞船索引，避免每行都遍历库存 */
-  shipIndex?: ShipmentShipIndex;
+  shipIndex?: ShipmentIndex;
 }>();
 
 // 「起飞」目标：货运合同装完货后，打开装货那条船的 SFC 并填入卸货地。

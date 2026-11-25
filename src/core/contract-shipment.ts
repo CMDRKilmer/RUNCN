@@ -2,8 +2,11 @@ import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import {
   getDestinationFullName,
+  getEntityNameFromAddress,
   getEntityNaturalIdFromAddress,
 } from '@src/infrastructure/prun-api/data/addresses';
+import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
+import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
 import { selectAddress } from '@src/infrastructure/prun-ui/utils/select-address';
 import { sleep } from '@src/utils/sleep';
@@ -29,7 +32,14 @@ const ACTIVE_STATUSES = new Set<PrunApi.ContractStatus>([
  * inFlight —— 货已经上船且船在途：按钮显示「在途」，避免误以为还没起飞
  * noShip   —— 装完了但没找到载货的飞船（可能刚卸货 / 数据未同步）
  */
-export type DepartState = 'ready' | 'loading' | 'inFlight' | 'noShip';
+export type DepartState =
+  | 'ready'
+  | 'loading'
+  | 'inFlight'
+  /** 货装完了，但不在船上：落到了某个地面仓库 */
+  | 'inStore'
+  /** 到处都找不到这批货（已交付 / 数据未同步） */
+  | 'missing';
 
 export interface DepartTarget {
   /** 交付条款 id：同一合同可能有多条交付条款，用它给按钮做标识。 */
@@ -49,59 +59,79 @@ export interface DepartTarget {
   pickupIds: string[];
 }
 
-/** shipmentItemId → 载着它的飞船。XIT CONTSS 一次列上百单时用它把遍历摊一次。 */
-export type ShipmentShipIndex = ReadonlyMap<string, PrunApi.Ship | undefined>;
+export interface ShipmentLocation {
+  /** 这批货当前所在的容器：船货舱或某个地面仓库 */
+  store: PrunApi.Store;
+  /** 当 store 是 SHIP_STORE 时对应的飞船 */
+  ship: PrunApi.Ship | undefined;
+}
 
-export function buildShipmentShipIndex(): ShipmentShipIndex {
-  const index = new Map<string, PrunApi.Ship | undefined>();
+/** shipmentItemId → 所在容器。XIT CONTSS 一次列上百单时用它把遍历摊一次。 */
+export type ShipmentIndex = ReadonlyMap<string, ShipmentLocation>;
+
+export function buildShipmentIndex(): ShipmentIndex {
+  const index = new Map<string, ShipmentLocation>();
   for (const store of storagesStore.all.value ?? []) {
-    if (store.type !== 'SHIP_STORE') {
-      continue;
-    }
-    const ship = shipsStore.all.value?.find(x => x.idShipStore === store.id);
+    const ship =
+      store.type === 'SHIP_STORE'
+        ? shipsStore.all.value?.find(x => x.idShipStore === store.id)
+        : undefined;
     for (const item of store.items) {
       if (item.type === 'SHIPMENT' && !index.has(item.id)) {
-        index.set(item.id, ship);
+        index.set(item.id, { store, ship });
       }
     }
   }
   return index;
 }
 
-export function findShipForShipment(
+export function findShipmentLocation(
   shipmentItemId: string,
-  index?: ShipmentShipIndex,
-): PrunApi.Ship | undefined {
+  index?: ShipmentIndex,
+): ShipmentLocation | undefined {
   if (index !== undefined) {
     return index.get(shipmentItemId);
   }
-  // 船上的货物列表才是权威依据：这批货在谁的货舱里，就由谁起飞。
+  // 货物所在容器才是权威依据：在船货舱里就是船在运，在仓库里就是还没装船。
   for (const store of storagesStore.all.value ?? []) {
-    if (store.type !== 'SHIP_STORE') {
+    if (!store.items.some(x => x.type === 'SHIPMENT' && x.id === shipmentItemId)) {
       continue;
     }
-    const carried = store.items.some(x => x.type === 'SHIPMENT' && x.id === shipmentItemId);
-    if (!carried) {
-      continue;
-    }
-    const ship = shipsStore.all.value?.find(x => x.idShipStore === store.id);
-    if (ship) {
-      return ship;
-    }
+    const ship =
+      store.type === 'SHIP_STORE'
+        ? shipsStore.all.value?.find(x => x.idShipStore === store.id)
+        : undefined;
+    return { store, ship };
   }
   return undefined;
+}
+
+/** 地面仓库的显示名（站点名 + 仓库，仓库名优先）。 */
+function describeStore(store: PrunApi.Store): string {
+  if (store.type === 'SHIP_STORE') {
+    return '船货舱';
+  }
+  if (store.type === 'WAREHOUSE_STORE') {
+    const warehouse = warehousesStore.getById(store.addressableId);
+    const name = store.name ?? getDestinationFullName(warehouse?.address ?? undefined);
+    return name ? `${name} 仓库` : '仓库';
+  }
+  const site = sitesStore.getById(store.addressableId);
+  const name = site ? getEntityNameFromAddress(site.address) : undefined;
+  return name ? `${name} 仓库` : '基地仓库';
 }
 
 /** 算出该合同当前可以起飞的目标（每条我方负责、未完成的交付条款一条）。 */
 export function getDepartTargets(
   contract: PrunApi.Contract,
-  index?: ShipmentShipIndex,
+  index?: ShipmentIndex,
 ): DepartTarget[] {
   const targets: DepartTarget[] = [];
   if (!ACTIVE_STATUSES.has(contract.status)) {
     return targets;
   }
-  // 取货条款全部完成才允许起飞。
+  // 起飞闸门是**整单**的：同一合同的货往往装在一条船上，某一批没装完就起飞会
+  // 把剩下的货丢下，所以必须等全部取货条款 FULFILLED（用户明确要求）。
   const pickupsDone = contract.conditions
     .filter(x => x.type === 'PICKUP_SHIPMENT')
     .every(x => x.status === 'FULFILLED');
@@ -127,7 +157,9 @@ export function getDepartTargets(
       continue;
     }
     const destinationLabel = getDestinationFullName(destination) ?? destinationId;
-    const ship = findShipForShipment(shipmentItemId, index);
+
+    const location = findShipmentLocation(shipmentItemId, index);
+    const ship = location?.ship;
     const registration = ship?.registration;
     const shipName = ship?.name;
 
@@ -139,10 +171,18 @@ export function getDepartTargets(
     if (!pickupsDone) {
       state = 'loading';
       hint = `取货未完成，装完才能起飞 → ${destinationLabel}`;
-    } else if (registration === undefined) {
-      state = 'noShip';
-      hint = `没找到载货的飞船 → ${destinationLabel}`;
-    } else if (ship?.flightId != null) {
+    } else if (location === undefined) {
+      // 全表都找不到这批货：多半刚卸完货、交付状态还没刷新。
+      state = 'missing';
+      hint = `货物不在船上，可能已交付 → ${destinationLabel}`;
+    } else if (location.store.type !== 'SHIP_STORE') {
+      // 货在某个地面仓库：装船前不能起飞，直接告诉玩家货在哪。
+      state = 'inStore';
+      hint = `货在 ${describeStore(location.store)}，未装船 → ${destinationLabel}`;
+    } else if (ship === undefined) {
+      state = 'missing';
+      hint = `货物在船货舱但找不到该船 → ${destinationLabel}`;
+    } else if (ship.flightId != null) {
       // 货已装船且船在飞：不能再起飞，按钮文案也要跟着改，否则看着像还没起飞。
       state = 'inFlight';
       hint = `${shipLabel} 已在途 → ${destinationLabel}`;

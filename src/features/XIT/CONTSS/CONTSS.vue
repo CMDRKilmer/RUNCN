@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import StatusFilter from '@src/components/StatusFilter.vue';
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
-import { buildShipmentShipIndex } from '@src/core/contract-shipment';
+import { buildShipmentIndex } from '@src/core/contract-shipment';
 import ContractOverviewRow from '@src/features/XIT/CONTS/ContractOverviewRow.vue';
 import { isEmpty } from 'ts-extras';
 import {
@@ -32,7 +32,7 @@ const totals = computed(() => calculateContractTotals(filtered.value));
 
 // 「起飞」按钮要判断货在哪艘船上：一次列表上百单，这里建一次索引给各行共用，
 // 避免每行都遍历全部 storage。依赖会在库存/飞船变化时自动重算。
-const shipIndex = computed(() => buildShipmentShipIndex());
+const shipIndex = computed(() => buildShipmentIndex());
 
 // 计算每个合同最近的截止时间
 const contractDeadlines = computed(() => {
