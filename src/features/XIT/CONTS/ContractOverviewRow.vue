@@ -17,7 +17,9 @@ import {
   openSfcAndFill,
   type ShipmentShipIndex,
 } from '@src/core/contract-shipment';
+import { attachFloatingTooltip } from '@src/utils/floating-tooltip';
 import $style from './conts-shared.module.css';
+import { onBeforeUnmount, watch } from 'vue';
 
 const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
   contract: PrunApi.Contract;
@@ -31,6 +33,16 @@ const { contract, deadline, deadlineStyle, shipIndex } = defineProps<{
 // 判定逻辑与原生 CONTS、CONT 详情共用 @src/core/contract-shipment。
 const departTarget = computed(() => getDepartTargets(contract, shipIndex)[0]);
 const departing = ref(false);
+
+// 「指令」列贴着磁贴右缘，游戏自带的 data-tooltip（元素上的绝对定位伪元素）
+// 会被滚动容器裁掉，这里改用 body 上的 fixed 浮层。
+const departButton = ref<HTMLButtonElement>();
+let detachTooltip: (() => void) | undefined;
+watch(departButton, el => {
+  detachTooltip?.();
+  detachTooltip = el ? attachFloatingTooltip(el, () => departTarget.value?.hint ?? '') : undefined;
+});
+onBeforeUnmount(() => detachTooltip?.());
 
 async function onDepart() {
   const target = departTarget.value;
@@ -132,14 +144,13 @@ const statusClass = computed(() => getStatusClass(contract.status));
     <td :class="$style.departCell">
       <button
         v-if="departTarget"
+        ref="departButton"
         type="button"
         :class="[
           C.Button.btn,
           C.Button.primary,
           departTarget.ready && !departing ? undefined : C.Button.disabled,
         ]"
-        :data-tooltip="departTarget.hint"
-        data-tooltip-position="top"
         @click="onDepart">
         {{ departing ? '…' : '起飞' }}
       </button>

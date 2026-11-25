@@ -1215,3 +1215,7 @@ html[data-rp-theme][data-rp-theme][data-rp-theme]
 .rp-command-CONT td:has([data-rp-cont-depart]) > button {
   vertical-align: middle !important;
 }
+/* 两个按钮之间才有间距：用相邻兄弟选择器，避免「起飞」单独一行时被左边距推歪 */
+.rp-command-CONT td:has([data-rp-cont-depart]) > button + button {
+  margin-left: 4px !important;
+}

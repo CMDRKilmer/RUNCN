@@ -2,6 +2,7 @@ import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getDepartTargets, openSfcAndFill, type DepartTarget } from '@src/core/contract-shipment';
+import { attachFloatingTooltip } from '@src/utils/floating-tooltip';
 import { watch } from 'vue';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
@@ -32,11 +33,15 @@ function createButton(cell: HTMLTableCellElement) {
   button.className = `${C.Button.btn} ${C.Button.primary}`;
   button.setAttribute(BUTTON_ATTR, '');
   button.textContent = BUTTON_TEXT;
-  // 单元格里可能已经有原生「完成」按钮，补一点左边距。
-  button.style.marginLeft = '4px';
+  // 不给按钮加 margin：本行没有原生按钮时（游戏会在装货中隐藏「完成」），
+  // 4px 的左边距会让「起飞」比下一行的「完成」向右偏。间隔由 CSS 的
+  // `td > button + button` 处理，只在前一个按钮存在时才生效。
   button.addEventListener('click', () => {
     void depart(button);
   });
+  // 游戏自带的 data-tooltip 是元素上的绝对定位伪元素，会被磁贴滚动容器裁掉，
+  // 这里用 body 上的 fixed 浮层（文案取自当前判定的 hint）。
+  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   cell.appendChild(button);
   return button;
 }
@@ -57,8 +62,8 @@ async function depart(button: HTMLButtonElement) {
   try {
     const result = await openSfcAndFill(target);
     if (!result.ok && result.message) {
-      button.setAttribute('data-tooltip', result.message);
-      button.setAttribute('data-tooltip-position', 'top');
+      // 失败原因临时顶替 hint，下次对齐时会被覆盖回正常文案。
+      latestTargets.set(button, { ...target, hint: result.message });
     }
   } finally {
     busyButtons.delete(button);
@@ -114,10 +119,6 @@ function syncRow(row: HTMLTableRowElement, contract: PrunApi.Contract, targets: 
     button.setAttribute(BUTTON_ATTR, condition.id);
   }
   setGreyed(button, !target.ready || busyButtons.has(button));
-  if (button.getAttribute('data-tooltip') !== target.hint) {
-    button.setAttribute('data-tooltip', target.hint);
-    button.setAttribute('data-tooltip-position', 'top');
-  }
 }
 
 function syncTile(tile: PrunTile) {

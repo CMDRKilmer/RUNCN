@@ -116,13 +116,14 @@ export function getDepartTargets(
     const ship = findShipForShipment(shipmentItemId, index);
     const registration = ship?.registration;
 
+    // 提示文案要短：气泡最宽 320px，长了会换三四行盖住表格。
     let hint: string;
     if (!pickupsDone) {
-      hint = `还有取货条款未完成，装完货后才能起飞（目的地 ${destinationLabel}）`;
+      hint = `取货未完成，装完才能起飞 → ${destinationLabel}`;
     } else if (registration === undefined) {
-      hint = `没找到载着这批货的飞船，请确认货物已装上船（目的地 ${destinationLabel}）`;
+      hint = `没找到载货的飞船 → ${destinationLabel}`;
     } else {
-      hint = `${registration} → ${destinationLabel}：打开航行控制并把目的地填好`;
+      hint = `${registration} 起飞 → ${destinationLabel}`;
     }
 
     targets.push({
@@ -144,17 +145,15 @@ export async function openSfcAndFill(
 ): Promise<{ ok: boolean; message?: string }> {
   const registration = target.registration;
   if (registration === undefined) {
-    return { ok: false, message: '没找到载着这批货的飞船' };
+    return { ok: false, message: '没找到载货的飞船' };
   }
   const window = await showBuffer(`SFC ${registration}`);
   const container = await waitForAddressContainer(window);
   if (!container) {
-    return { ok: false, message: '航行控制已打开，但没找到目的地输入框，请手动选择' };
+    return { ok: false, message: 'SFC 已打开，请手动填目的地' };
   }
   const ok = await selectAddress(container, target.destinationId);
-  return ok
-    ? { ok: true }
-    : { ok: false, message: `自动填「${target.destinationLabel}」失败，请在航行控制里手动选择` };
+  return ok ? { ok: true } : { ok: false, message: '目的地自动填入失败，请手动选择' };
 }
 
 const SFC_WAIT_TIMEOUT_MS = 8000;

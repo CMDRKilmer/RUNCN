@@ -2,6 +2,7 @@ import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { getDepartTargets, openSfcAndFill, type DepartTarget } from '@src/core/contract-shipment';
+import { attachFloatingTooltip } from '@src/utils/floating-tooltip';
 import { watch } from 'vue';
 import onNodeDisconnected from '@src/utils/on-node-disconnected';
 
@@ -35,6 +36,8 @@ function createButton(nativeButton: HTMLButtonElement) {
   button.addEventListener('click', () => {
     void depart(button);
   });
+  // 表格最后一列贴着磁贴右缘，游戏自带的 data-tooltip 会被裁掉，用 body 浮层。
+  attachFloatingTooltip(button, () => latestTargets.get(button)?.hint ?? '');
   nativeButton.parentElement?.insertBefore(button, nativeButton);
   return button;
 }
@@ -56,10 +59,6 @@ function updateButton(button: HTMLButtonElement, target: DepartTarget) {
     button.setAttribute(BUTTON_ATTR, target.key);
   }
   setGreyed(button, !target.ready || busyButtons.has(button));
-  if (button.getAttribute('data-tooltip') !== target.hint) {
-    button.setAttribute('data-tooltip', target.hint);
-    button.setAttribute('data-tooltip-position', 'left');
-  }
 }
 
 function syncRow(row: HTMLTableRowElement) {
@@ -115,8 +114,7 @@ async function depart(button: HTMLButtonElement) {
   try {
     const result = await openSfcAndFill(target);
     if (!result.ok && result.message) {
-      button.setAttribute('data-tooltip', result.message);
-      button.setAttribute('data-tooltip-position', 'left');
+      latestTargets.set(button, { ...target, hint: result.message });
     }
   } finally {
     busyButtons.delete(button);
