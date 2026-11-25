@@ -315,6 +315,23 @@ export function mergeRouteRecord(
     loop: local.loop,
     cycleHours: local.cycleHours,
     fuelPerRound: local.fuelPerRound,
+    loopOriginReturn:
+      local.loopOriginReturn !== undefined &&
+      local.waypoints.length === server.waypoints.length &&
+      waypoints.every((waypoint, index) => sameWaypoint(local.waypoints[index]!, waypoint)) &&
+      routeWaypoints(route).every(waypoint =>
+        waypoint.steps.every(
+          step =>
+            (step.type !== 'LOAD' && step.type !== 'UNLOAD') ||
+            (step.minimum?.type === 'ABSOLUTE' &&
+              step.maximum?.type === 'ABSOLUTE' &&
+              step.minimum.units === step.maximum.units),
+        ),
+      ) &&
+      cargoSignature(local.waypoints, local.waypoints.length - 1) ===
+        cargoSignature(server.waypoints, server.waypoints.length - 1)
+        ? local.loopOriginReturn
+        : undefined,
   };
 }
 

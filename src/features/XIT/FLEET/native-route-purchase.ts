@@ -86,12 +86,22 @@ export function readOriginStock(origin: string) {
 export function cxShortfallPackage(
   origin: string,
   bill: Readonly<Record<string, number>>,
+  manualStock: Readonly<Record<string, number>> = {},
 ): UserData.ActionPackageData | undefined {
   const exchange = origin === '' ? undefined : exchangesStore.getByNaturalId(origin)?.code;
   if (exchange === undefined) {
     return undefined;
   }
-  const materials = billShortfall(bill, readOriginStock(origin));
+  const stock = readOriginStock(origin);
+  const materials = billShortfall(bill, stock);
+  for (const [ticker, missing] of Object.entries(billShortfall(manualStock, stock))) {
+    const remaining = (materials[ticker] ?? 0) - missing;
+    if (remaining > 0) {
+      materials[ticker] = remaining;
+    } else {
+      delete materials[ticker];
+    }
+  }
   if (Object.keys(materials).length === 0) {
     return undefined;
   }

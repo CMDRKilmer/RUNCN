@@ -57,6 +57,7 @@ const { openExchangeBurnAct, openExchangeBurnGenerator } =
   await import('../src/features/XIT/BURN/exchange-burn-actions.ts');
 const {
   billShortfall,
+  cxShortfallPackage,
   nativeRouteOriginBill,
   nativeRoutePlannedPurchasePackage,
   nativeRoutePurchasePackage,
@@ -71,6 +72,7 @@ const {
   sustainRounds,
   fullLoadUsableDays,
   netDailyBundle,
+  loopStockingBill,
   loopSustain,
   loopEligibility,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
@@ -1690,6 +1692,17 @@ await check('native RT purchase: no package outside a CX or with full stock', as
   assert.equal(nativeRoutePurchasePackage(record), undefined);
 });
 
+await check('loop stocking preserves manual starter cargo when a ticker is also bought as fuel', () => {
+  fixture.exchanges.HRT = { code: 'IC1' };
+  fixture.warehouses.HRT = { storeId: 'wh' };
+  fixture.stores.wh = {
+    id: 'wh',
+    items: [{ quantity: { material: { ticker: 'SF' }, amount: 2 } }],
+  };
+  const pkg = cxShortfallPackage('HRT', { SF: 12, COF: 3 }, { SF: 5, COF: 3 });
+  assert.deepEqual(pkg.groups[0].materials, { SF: 7 });
+});
+
 // ---- 「填满库存」：按船适配天数 → 每基地天数（FLEET.vue planConfig 的口径）----
 await check('fill inventory: fitted days clamp to each base cap', () => {
   // 单基地：适配值在 cap 内 → 用适配值。
@@ -1739,6 +1752,7 @@ await check('loop stocking cap limits rounds to one full ship load', () => {
   assert.deepEqual(cycle, { weight: 12, volume: 22 });
   // min(100/12, 100/22) = 4.54 → 4 轮。
   assert.equal(stockingRoundsMax({ weight: 100, volume: 100 }, cycle), 4);
+  assert.equal(stockingRoundsMax({ weight: 100, volume: 100 }, cycle, { weight: 25, volume: 45 }), 3);
   // 单轮就超舱 → 至少备 1 轮。
   assert.equal(stockingRoundsMax({ weight: 5, volume: 5 }, cycle), 1);
   assert.equal(stockingRoundsMax({ weight: 100, volume: 100 }, { weight: 0, volume: 0 }), 1);
@@ -2096,8 +2110,8 @@ await check('loop net producer at fractional cycle neither blocks nor under-extr
   assert.equal(plan.stops[0].returnLoad.RAW, 1);
 });
 
-await check('loop net-consumer self-produced material picks up shortfall from origin stock', () => {
-  // 自产但净消耗（日产 1 < 日耗 12）：净缺口 110 走出发地取货，提取扣送达后为 0。
+await check('loop cannot fund a recurring group-made shortfall from one-time origin stock', () => {
+  // 自产但净消耗（日产 1 < 日耗 12）：出发库存足够首轮，后续没有归航补回。
   const snapshot = {
     originNaturalId: 'CX',
     capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
@@ -2126,6 +2140,8 @@ await check('loop net-consumer self-produced material picks up shortfall from or
   assert.equal(plan.stops[0].returnLoad.COF, undefined);
   assert.equal(plan.fullLoadUsableDays, 500 / 11);
   assert.deepEqual(plan.purchaseBill, {});
+  assert.deepEqual(plan.loopOriginReturn, { COF: 110 });
+  assert.equal(plan.hasUnmetChainDemand, true);
 });
 
 await check('loop usable days read ship capacity and base BURN, not UNLOAD steps', () => {
@@ -2268,12 +2284,13 @@ await check(
     assert.deepEqual(checkedRoute.issues, []);
     assert.deepEqual(socketMessages, []);
     const legs = [{ fuelPercent: 25 }, { fuelPercent: 25 }];
+    const completedWaypoints = [];
     const written = writeNativeRouteBySocket(
       { waypoints, legs, name: '', checkedRoute },
       signal,
-      () => {},
+      (_, completed) => completedWaypoints.push(completed),
     );
-    const route = { id: 'r1', naturalId: 'RT-TEST-1', waypoints: [] };
+    const route = { id: 'r1', naturalId: 'RT-TEST-1', repeats: false, waypoints: [] };
     async function reply(action, response = 'SHIP_ROUTES_ROUTE', data = route) {
       await new Promise(resolve => setImmediate(resolve));
       assert.equal(socketMessages.at(-1)?.messageType, 'SHIP_ROUTES_' + action);
@@ -2333,7 +2350,10 @@ await check(
     await reply('ADD_STEP');
     unload.minimum.units = 10;
     await reply('EDIT_UNLOAD_STEP');
-    assert.equal((await written).routeId, 'r1');
+    const result = await written;
+    assert.equal(result.routeId, 'r1');
+    assert.equal(result.repeats, false);
+    assert.deepEqual(completedWaypoints, [0, 0, 1, 2]);
     assert.equal(socketMessages.length, 9);
   },
 );
@@ -2343,7 +2363,6 @@ const loopInput = bs => ({
   origin: 'CX',
   bases: bs,
   capacity: { weight: 100, volume: 100, freeWeight: 100, freeVolume: 100 },
-  originStock: {},
 });
 const fakeEstimate =
   hoursOf =>
@@ -2390,18 +2409,77 @@ await check('loop delivery stays steady while usable days show full load', async
   ]);
 });
 
-await check('loop iteration keeps last estimate when not converged', async () => {
-  const seq = [48, 100, 200];
+await check('loop cannot generate when integer transfers alternate between two periods', async () => {
+  const seq = [25, 24];
   let call = 0;
   const r = await computeLoopPlan(
     loopInput(bases()),
     fakeEstimate(() => seq[Math.min(call++, seq.length - 1)]),
   );
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
   assert.equal(r.converged, false);
-  assert.equal(r.iterations, 3);
-  assert.equal(r.cycleHours, 200);
-  assert.ok(r.warnings.some(w => w.includes('未收敛')));
+  assert.equal(r.iterations, 2);
+  assert.ok(r.reasons.some(reason => reason.includes('未收敛')));
+});
+
+await check('loop closes the 24-to-25-hour gap without rereading production mid-plan', async () => {
+  const bs = bases();
+  for (const base of bs) {
+    fixture.burns[base.siteId].burn.RAT.input = 24;
+  }
+  const inputs = [];
+  const result = await computeLoopPlan(loopInput(bs), input => {
+    inputs.push(input);
+    fixture.burns.A.burn.RAT.input = 200;
+    return fakeEstimate(() => 25)(input);
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.cycleHours, 25);
+  assert.equal(result.plan.stops.find(stop => stop.naturalId === 'A').unloadCx.RAT, 25);
+  assert.equal(inputs.length, 2);
+  assert.equal(inputs[0].startAtMs, inputs[1].startAtMs);
+  assert.ok(inputs[1].legPayloads[0] > inputs[0].legPayloads[0]);
+});
+
+await check('loop turns warehouse and market shortages into readiness gaps, not smaller loads', () => {
+  const snapshot = collectChainPlanningSnapshot({
+    originNaturalId: 'CX',
+    bases: bases(),
+    capacity,
+    loop: true,
+    cycleDays: 2,
+  });
+  const supplied = computeChainPlan({ ...snapshot, originStock: { RAT: 4 } }, String);
+  const empty = computeChainPlan({ ...snapshot, originStock: {}, purchaseStock: { RAT: 0 } }, String);
+  assert.deepEqual(buildNativeWaypoints(supplied), buildNativeWaypoints(empty));
+  assert.deepEqual(empty.cxBill, { RAT: 4 });
+  const first = loopStockingBill(empty.cxBill, {}, { stl: 10, ftl: 0 }, { stl: 3, ftl: 0 }, 1);
+  assert.deepEqual(billShortfall(first, { RAT: 4, SF: 3 }), {});
+  assert.deepEqual(billShortfall(first, { RAT: 1, SF: 3 }), { RAT: 3 });
+});
+
+await check('loop reserves return capacity for the next round before optional cargo', async () => {
+  const bs = bases();
+  const material = (input, output) => ({ input, output, workforce: 0, inventory: 0, daysLeft: 0 });
+  fixture.burns.A.burn = { RAW: material(0, 4), COF: material(3, 0), RAT: material(0, 10) };
+  fixture.burns.B.burn = { RAW: material(4, 0), COF: material(0, 3) };
+  fixture.products.A = ['RAW', 'RAT'];
+  fixture.products.B = ['COF'];
+  const result = await computeLoopPlan({
+    ...loopInput(bs),
+    capacity: { weight: 5, volume: 5, freeWeight: 5, freeVolume: 5 },
+  }, fakeEstimate(() => 24));
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.plan.loopOriginReturn, { COF: 3 });
+  assert.deepEqual(result.plan.cxBill, { COF: 3 });
+  assert.equal(result.plan.finalUnload.COF, 3);
+  assert.equal(result.plan.finalUnload.RAT, 1);
+  assert.deepEqual(result.plan.purchaseBill, {});
+  assert.deepEqual(
+    loopStockingBill(result.plan.cxBill, result.plan.loopOriginReturn, { stl: 10, ftl: 0 }, { stl: 3, ftl: 0 }, 3),
+    { COF: 3, SF: 23 },
+  );
+  assert.match(result.plan.warnings.join(' '), /RAT.*留存 9/);
 });
 
 await check('loop blocks when flight estimate is incomplete', async () => {

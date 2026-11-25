@@ -38,6 +38,8 @@ export interface NativeRouteRecord {
   repeats?: boolean;
   // 每轮 SF/FF 消耗（生成时快照）：运行中卡片据此算出发地支撑轮数与补货缺口。
   fuelPerRound?: { stl: number; ftl: number };
+  // 已验证由归航补回的首轮周转货。
+  loopOriginReturn?: Record<string, number>;
 }
 
 // 按**公司**分键：同一浏览器里换公司后，上一个公司的航线号属于另一个账号，

@@ -1,4 +1,4 @@
-// 原生 RT 向导（XIT RTWIZ）的 BTF 试飞回归脚本 —— 带退出码。
+// XIT FLEET 原生 RT 生成的 BTF 试飞回归脚本 —— 带退出码。
 //
 // 锁定的行为契约：
 //   ① 出发油量读不出来时不发该字段：覆盖成 undefined 会顶掉 calculateTestFlight 的基线

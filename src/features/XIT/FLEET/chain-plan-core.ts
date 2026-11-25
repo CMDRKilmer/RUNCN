@@ -392,6 +392,7 @@ export function computeChainPlan(
   const cxResupply = new Map<string, Record<string, number>>();
   // 出发地仓库剩余库存（取货会扣减，避免重复分配）。
   const remainingOriginStock = new Map(Object.entries(input.originStock ?? {}));
+  const loopOriginReturn: Record<string, number> = {};
   // 出发地「取货」明细：naturalId → ticker → 数量（装载后随行到站卸货）。
   const originPickupByStop = new Map<string, Record<string, number>>();
   // 组内产出的缺口（需求超出上游可提取量且空间站库存不足）按 ticker 汇总，用于警告。
@@ -416,6 +417,13 @@ export function computeChainPlan(
         continue;
       }
       const gap = bill[ticker]!;
+      if (input.loop) {
+        loopOriginReturn[ticker] = (loopOriginReturn[ticker] ?? 0) + gap;
+        const byTicker = originPickupByStop.get(id) ?? {};
+        byTicker[ticker] = gap;
+        originPickupByStop.set(id, byTicker);
+        continue;
+      }
       const stock = remainingOriginStock.get(ticker) ?? 0;
       const pickup = Math.min(gap, stock);
       if (pickup > 0) {
@@ -435,7 +443,7 @@ export function computeChainPlan(
     // 空间站仓库已有库存的普通物资（非组内产出）：优先从仓库「取货」装船，
     // 不足部分才进入 CX 采购（purchaseBill 阶段按取货量扣除），避免重复购买。
     for (const ticker of Object.keys(bill)) {
-      if (groupProducedTickers.has(ticker)) {
+      if (input.loop || groupProducedTickers.has(ticker)) {
         continue;
       }
       const stock = remainingOriginStock.get(ticker) ?? 0;
@@ -458,7 +466,7 @@ export function computeChainPlan(
   const remainingSupply = new Map<string, number>();
   for (const id of order) {
     const bill = cxResupply.get(id)!;
-    if (!byNaturalId.get(id)!.cxBuy) {
+    if (input.loop || !byNaturalId.get(id)!.cxBuy) {
       continue;
     }
     for (const [ticker, amount] of Object.entries(bill)) {
@@ -694,12 +702,15 @@ export function computeChainPlan(
       }
     }
     const finalPickup: Pick<CargoItem, 'ticker' | 'amount'>[] = [];
-    for (const ticker of finalTickers.get(id) ?? []) {
+    const returnTickers = input.loop
+      ? [...new Set(base.products)].filter(ticker => groupProducedTickers.has(ticker))
+      : (finalTickers.get(id) ?? []);
+    for (const ticker of returnTickers) {
       // 单趟：最终产物装尽到港时预计库存（含飞行期间新增产出），不扣自用预留。
       // 循环：只提取 周期 × BURN 日产（扣未覆盖自用），不动基地现有库存，
       // 固定步骤每轮重复才保持稳态。
       const amount = input.loop
-        ? loopExtractable(id, ticker)
+        ? Math.max(0, loopExtractable(id, ticker) - (delivered.get(id)?.get(ticker) ?? 0))
         : Math.max(0, Math.floor(projectedInventory(burns.get(id)![ticker], ticker, id)));
       if (amount > 0) {
         finalPickup.push({ ticker, amount });
@@ -708,9 +719,11 @@ export function computeChainPlan(
     // 有前向下游边的产物：已按需补给下游（flows），剩余可提取量运回空间站。
     // 遍历「所有下游边」而非仅正向 flows——下游已充足（need=0）时流量为 0，
     // 但产物仍有可提取余量，应运回空间站；否则会卡在基地既不送下游也不运回。
-    for (const ticker of [...new Set(edges.filter(f => f.from === id).map(f => f.ticker))]) {
+    for (const ticker of input.loop
+      ? []
+      : new Set(edges.filter(f => f.from === id).map(f => f.ticker))) {
       const sent = delivered.get(id)?.get(ticker) ?? 0;
-      const extractable = input.loop ? loopExtractable(id, ticker) : avail(id, ticker);
+      const extractable = avail(id, ticker);
       const surplus = Math.max(0, extractable - sent);
       if (surplus > 0) {
         finalPickup.push({ ticker, amount: surplus });
@@ -763,66 +776,99 @@ export function computeChainPlan(
   }
 
   // 返航货物一直留在船上，只能使用从本站到归航期间每段都空闲的舱容。
-  const futurePeak = Array<{ weight: number; volume: number }>(stops.length);
-  let peakWeight = 0;
-  let peakVolume = 0;
-  for (let i = stops.length - 1; i >= 0; i--) {
-    const load = stops[i]!.loadOnDeparture;
-    peakWeight = Math.max(peakWeight, load.weight);
-    peakVolume = Math.max(peakVolume, load.volume);
-    futurePeak[i] = { weight: peakWeight, volume: peakVolume };
+  const returnCapacity = stops.map(stop => ({
+    weight: freeCapacity.weight - stop.loadOnDeparture.weight,
+    volume: freeCapacity.volume - stop.loadOnDeparture.volume,
+  }));
+  function reserveReturn(index: number, ticker: string, requested: number) {
+    const unit = matWeightVolume(ticker, 1);
+    let amount = requested;
+    for (let i = index; i < returnCapacity.length; i++) {
+      const capacity = returnCapacity[i]!;
+      if (capacity.weight <= 0 || capacity.volume <= 0) {
+        return 0;
+      }
+      if (unit.weight > 0) {
+        amount = Math.min(amount, Math.floor(capacity.weight / unit.weight));
+      }
+      if (unit.volume > 0) {
+        amount = Math.min(amount, Math.floor(capacity.volume / unit.volume));
+      }
+    }
+    if (amount <= 0) {
+      return 0;
+    }
+    for (let i = index; i < returnCapacity.length; i++) {
+      const capacity = returnCapacity[i]!;
+      capacity.weight -= unit.weight * amount;
+      capacity.volume -= unit.volume * amount;
+    }
+    const stop = stops[index]!;
+    plan.finalUnload[ticker] = (plan.finalUnload[ticker] ?? 0) + amount;
+    stop.returnLoad[ticker] = (stop.returnLoad[ticker] ?? 0) + amount;
+    const existing = stop.load.get(ticker);
+    if (existing === undefined) {
+      stop.load.set(ticker, { amount, to: '回出发地' });
+    } else {
+      existing.amount += amount;
+      if (!existing.to.includes('回出发地')) {
+        existing.to += '、回出发地';
+      }
+    }
+    return amount;
   }
+
+  if (input.loop) {
+    plan.loopOriginReturn = loopOriginReturn;
+    const outstanding = { ...loopOriginReturn };
+    // 从靠近归航的站开始安排周转货物，缩短它们占用舱容的航段。
+    for (let index = stops.length - 1; index >= 0; index--) {
+      for (const item of returnPickups[index]!) {
+        const needed = outstanding[item.ticker] ?? 0;
+        if (needed > 0) {
+          outstanding[item.ticker] =
+            needed - reserveReturn(index, item.ticker, Math.min(needed, item.amount));
+        }
+      }
+    }
+    for (const [ticker, missed] of Object.entries(outstanding)) {
+      if (missed > 0) {
+        plan.hasUnmetChainDemand = true;
+        warnings.push(
+          `出发地「${ticker}」每轮需回运 ${formatAmount(loopOriginReturn[ticker]!)}，受产量或舱容限制缺 ${formatAmount(missed)}。`,
+        );
+      }
+    }
+  }
+
   let returnWeight = 0;
   let returnVolume = 0;
   for (const [index, stop] of stops.entries()) {
-    stop.loadOnArrival.weight += returnWeight;
-    stop.loadOnArrival.volume += returnVolume;
-    const reserved = futurePeak[index]!;
     let finalClipped = false;
     for (const item of returnPickups[index]!) {
-      const remainingW = freeCapacity.weight - reserved.weight - returnWeight;
-      const remainingV = freeCapacity.volume - reserved.volume - returnVolume;
-      if (remainingW <= 0 || remainingV <= 0) {
+      const remaining = item.amount - (stop.returnLoad[item.ticker] ?? 0);
+      const unshipped = remaining - reserveReturn(index, item.ticker, remaining);
+      if (unshipped > 0) {
         finalClipped = true;
-        continue;
-      }
-      const { weight: itemW, volume: itemV } = matWeightVolume(item.ticker, 1);
-      const totalW = itemW * item.amount;
-      const totalV = itemV * item.amount;
-      // 若整批装不下,则装尽剩余空间(逐件填充以保留整数),仅最后一个 ticker 可能截断。
-      let amount = item.amount;
-      if (totalW > remainingW && itemW > 0) {
-        amount = Math.min(amount, Math.floor(remainingW / itemW));
-      }
-      if (totalV > remainingV && itemV > 0) {
-        amount = Math.min(amount, Math.floor(remainingV / itemV));
-      }
-      if (amount <= 0) {
-        finalClipped = true;
-        continue;
-      }
-      const { weight, volume } = matWeightVolume(item.ticker, amount);
-      returnWeight += weight;
-      returnVolume += volume;
-      plan.finalUnload[item.ticker] = (plan.finalUnload[item.ticker] ?? 0) + amount;
-      stop.returnLoad[item.ticker] = (stop.returnLoad[item.ticker] ?? 0) + amount;
-      const existing = stop.load.get(item.ticker);
-      if (existing) {
-        existing.amount += amount;
-        if (!existing.to.includes('回出发地')) {
-          existing.to = `${existing.to}、回出发地`;
+        if (input.loop) {
+          warnings.push(
+            `「${stop.planetName}」${item.ticker} 受返航舱容限制，每轮留存 ${formatAmount(unshipped)}。`,
+          );
         }
-      } else {
-        stop.load.set(item.ticker, { amount, to: '回出发地' });
-      }
-      if (amount < item.amount) {
-        finalClipped = true;
       }
     }
-
     if (finalClipped) {
       stop.clipped = true;
-      warnings.push(`「${stop.planetName}」最终产物受舱容限制，部分未装上船。`);
+      if (!input.loop) {
+        warnings.push(`「${stop.planetName}」最终产物受舱容限制，部分未装上船。`);
+      }
+    }
+    stop.loadOnArrival.weight += returnWeight;
+    stop.loadOnArrival.volume += returnVolume;
+    for (const [ticker, amount] of Object.entries(stop.returnLoad)) {
+      const { weight, volume } = matWeightVolume(ticker, amount);
+      returnWeight += weight;
+      returnVolume += volume;
     }
     stop.loadOnDeparture.weight += returnWeight;
     stop.loadOnDeparture.volume += returnVolume;

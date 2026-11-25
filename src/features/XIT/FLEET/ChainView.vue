@@ -10,7 +10,12 @@ import { useChainLoopPlanning } from './use-chain-loop-planning';
 import { shipLabel, formatFlightDuration } from './chain-format';
 import type { ShipChainPlan } from './chain-allocation';
 import type { ChainPlannerBase, ChainPlan, ChainStopPlan } from './chain-types';
-import { chainShipFuelCaps, type ChainFlightLeg } from './chain-flight-time';
+import {
+  chainShipFirstRefill,
+  chainShipFuelCaps,
+  type ChainFlightEstimate,
+  type ChainFlightLeg,
+} from './chain-flight-time';
 import { billTotals, type DispatchShip } from '@src/features/XIT/FLEET/utils';
 import { matWeightVolume } from './chain-data';
 import { getBaseGroups } from '@src/core/base-groups';
@@ -42,28 +47,39 @@ import {
   type RouteStopState,
 } from './native-route-game';
 import { gameRouteDefinitions, gameRunningRoutes, liveNativeRoutes } from './native-route-live';
-import { stagedNativeRoute } from './native-route-staged';
+import type { NativeRouteGeneration } from './native-route-generation';
 import { stagedDispatch } from './staged';
 import {
   nativeRoutePurchasePackage,
+  billShortfall,
   nativeRouteOriginBill,
   nativeRouteUsableDays,
   cxShortfallPackage,
   readOriginStock,
 } from './native-route-purchase';
-import { loopSustain, fuelPerRound } from './native-route-loop';
+import {
+  loopRecurringBill,
+  loopStockingBill,
+  loopStockingRounds,
+  loopSustain,
+  fuelPerRound,
+  sustainRounds,
+} from './native-route-loop';
+import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { shipsStore } from '@src/infrastructure/prun-api/data/ships';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
-import { fixed0, formatCurrency } from '@src/utils/format';
+import { fixed0, fixed02, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
 
-const { ships, bases } = defineProps<{
+const { ships, bases, generationCandidate } = defineProps<{
   ships: DispatchShip[];
   bases: ChainPlannerBase[];
+  generationCandidate?: ShipChainPlan;
 }>();
+const emit = defineEmits<{ generate: [generation: NativeRouteGeneration] }>();
 
 // ── 状态 ─────────────────────────────────────────────────────
 // 选中的产业链分组（BSN「供应链分组」列录入的自由文本名）。
@@ -220,10 +236,38 @@ const loopSupplyText = computed(() => {
   const days = loopPlan.value?.plan?.fullLoadUsableDays;
   return days === undefined ? '' : `${days.toFixed(1)} 天`;
 });
-const loopWarnings = computed(() => loopPlan.value?.warnings ?? []);
+const loopStartup = computed(() => {
+  const ship = loopShip.value;
+  const result = loopPlan.value;
+  if (!loopActive.value || loopComputing.value || !ship || !result?.plan || !result.estimate) {
+    return undefined;
+  }
+  const plan = result.plan;
+  const fuel = fuelPerRound(result.estimate.legs, chainShipFuelCaps(ship.ship));
+  const returned = plan.loopOriginReturn ?? {};
+  const bill = loopStockingBill(
+    plan.cxBill,
+    returned,
+    fuel,
+    chainShipFirstRefill(ship.ship, fuel),
+    1,
+  );
+  const stock = readOriginStock(plan.originNaturalId);
+  const shortfall = billShortfall(bill, stock);
+  const manualShortfall = billShortfall(returned, stock);
+  const marketLimits: Record<string, number> = {};
+  for (const [ticker, amount] of Object.entries(shortfall)) {
+    const supply = cxobStore.getByTicker(`${ticker}.${ship.exchangeCode}`)?.supply;
+    const needed = amount - (manualShortfall[ticker] ?? 0);
+    if (supply !== undefined && supply < needed) {
+      marketLimits[ticker] = needed - supply;
+    }
+  }
+  return { shortfall, marketLimits, returned };
+});
 
 const routeNotice = ref<string>();
-const routeCheck = shallowRef<AbortController>();
+const routeCheck = shallowRef<{ controller: AbortController; shipId: string }>();
 const routeCheckIssues = ref<string[]>([]);
 const nativeRouteCandidate = computed(() => {
   if (selectedShips.value.length !== 1) {
@@ -240,16 +284,21 @@ const nativeRouteCandidate = computed(() => {
 watch([nativeRouteCandidate, chainGroup], () => {
   routeCheckIssues.value = [];
 });
-onBeforeUnmount(() => routeCheck.value?.abort());
+onBeforeUnmount(() => routeCheck.value?.controller.abort());
 
 async function generateNativeRoute() {
   const candidate = nativeRouteCandidate.value;
-  if (candidate === undefined || routeCheck.value !== undefined || chainTab.value !== 'plan') {
+  if (
+    candidate === undefined ||
+    generationCandidate !== undefined ||
+    routeCheck.value !== undefined ||
+    chainTab.value !== 'plan'
+  ) {
     return;
   }
   const group = chainGroup.value;
   const check = new AbortController();
-  routeCheck.value = check;
+  routeCheck.value = { controller: check, shipId: candidate.ship.ship.id };
   routeCheckIssues.value = [];
   routeNotice.value = undefined;
   try {
@@ -285,17 +334,13 @@ async function generateNativeRoute() {
       routeCheckIssues.value = checkedRoute.issues;
       return;
     }
-    // 校验通过后，在独立窗口显示写入进度。
-    stagedNativeRoute.value = {
-      sessionId: Date.now(),
+    emit('generate', {
       candidate,
-      waypoints,
+      initialWaypoints: waypoints,
       checkedRoute,
       chainName: group ?? '',
-      autoStart: true,
-      loop: loopSnapshot,
-    };
-    await showBuffer('XIT RTWIZ');
+      loopPlan: loopSnapshot,
+    });
   } catch (err) {
     if (!check.signal.aborted) {
       routeCheckIssues.value = [err instanceof Error ? err.message : String(err)];
@@ -378,14 +423,31 @@ function loopCardInfo(
   const origin = record.waypoints[0]?.location.trim() ?? '';
   // 燃料只认生成时快照（见 loopSustain）：游戏里手建的循环航线没快照时不给支撑轮数，
   // 补货包也只按物料算，避免拿罐容量当整圈油耗去误报「不足 1 轮」。
-  const { bill, sustain } = loopSustain(
-    nativeRouteOriginBill(record),
-    record.fuelPerRound,
-    readOriginStock(origin),
-  );
+  const cargo = nativeRouteOriginBill(record);
+  const stock = readOriginStock(origin);
+  const fuel = record.fuelPerRound;
+  const returned = record.loopOriginReturn;
+  let { bill, sustain } = loopSustain(cargo, fuel, stock);
+  if (returned !== undefined && fuel !== undefined) {
+    const recurring = loopRecurringBill(cargo, returned, fuel);
+    if (running) {
+      bill = recurring;
+      sustain = sustainRounds(recurring, stock);
+    } else {
+      const firstRefill = ship === undefined ? fuel : chainShipFirstRefill(ship, fuel);
+      bill = loopStockingBill(cargo, returned, fuel, firstRefill, 1);
+      sustain = loopStockingRounds(bill, recurring, stock);
+      for (const [ticker, amount] of Object.entries(returned)) {
+        const missing = amount - (stock[ticker] ?? 0);
+        if (missing > 0) {
+          alerts.push(`首轮需在出发地备好周转货 ${ticker} ×${missing}。`);
+        }
+      }
+    }
+  }
   const sustainText = sustain === undefined ? '—' : sustain === Infinity ? '∞' : String(sustain);
   if (sustain !== undefined && sustain < 1) {
-    alerts.push('出发地库存不足 1 轮，请补货后再分配。');
+    alerts.push(running ? '出发地外部补给不足 1 轮。' : '出发地库存不足 1 轮，请补货后再分配。');
   }
   return {
     isLoop,
@@ -393,7 +455,7 @@ function loopCardInfo(
     supplyText,
     sustainText,
     alerts,
-    replenish: cxShortfallPackage(origin, bill),
+    replenish: cxShortfallPackage(origin, bill, running ? undefined : returned),
   };
 }
 
@@ -723,13 +785,45 @@ function markClassKey(state: RouteStopState): string {
 }
 
 const planTables = computed<ShipChainPlan[]>(() => {
-  if (loopActive.value && loopShip.value !== undefined && loopPlan.value?.plan) {
-    return [{ ship: loopShip.value, plan: loopPlan.value.plan }];
+  const ship = loopShip.value;
+  const loop = loopPlan.value?.plan;
+  const plans = loopActive.value && ship && loop ? [{ ship, plan: loop }] : shipPlans.value;
+  if (
+    generationCandidate &&
+    !plans.some(x => x.ship.ship.id === generationCandidate.ship.ship.id)
+  ) {
+    return [generationCandidate, ...plans];
   }
-  return shipPlans.value;
+  return plans;
+});
+
+const planFlightTimesLoading = computed(() =>
+  loopActive.value ? loopComputing.value : flightTimesLoading.value,
+);
+const planFlightEstimates = computed(() => {
+  const estimates = new Map<string, ChainFlightEstimate>();
+  for (const { ship, plan } of planTables.value) {
+    const shipId = ship.ship.id;
+    const estimate =
+      loopActive.value && shipId === loopShip.value?.ship.id
+        ? loopPlan.value?.estimate
+        : flightEstimates.value.get(shipId);
+    if (
+      estimate?.legs.length === plan.stops.length + 1 &&
+      sameNaturalId(estimate.legs[0]?.from, plan.originNaturalId) &&
+      sameNaturalId(estimate.legs.at(-1)?.to, plan.originNaturalId) &&
+      plan.stops.every((stop, i) => sameNaturalId(estimate.legs[i]?.to, stop.naturalId))
+    ) {
+      estimates.set(shipId, estimate);
+    }
+  }
+  return estimates;
 });
 
 const chainTab = useTileState<'plan' | 'running'>('chainTab', 'plan');
+const content = useTemplateRef<HTMLDivElement>('content');
+const generationTarget = shallowRef<HTMLElement>();
+const focusedRoute = ref<string>();
 const chainTabs = computed(() => [
   { id: 'plan' as const, label: '规划中', count: planTables.value.length },
   { id: 'running' as const, label: '运行中', count: nativeRoutes.value.length },
@@ -744,6 +838,19 @@ function selectChainTab(tab: 'plan' | 'running') {
     void refreshGameRoutes();
   }
 }
+
+async function focusNativeRoute(naturalId: string) {
+  focusedRoute.value = naturalId;
+  selectChainTab('running');
+  await nextTick();
+  content.value?.querySelector('[data-focused-route]')?.scrollIntoView({ block: 'nearest' });
+}
+
+function setGenerationTarget(element: unknown) {
+  generationTarget.value = element instanceof HTMLElement ? element : undefined;
+}
+
+defineExpose({ focusNativeRoute, generationTarget });
 // 记录变化（向导新增、删除按钮）后跟游戏列表校准；校准失败就退回本地记录显示。
 watch(
   () => Object.keys(nativeRouteRecords.value).sort().join(','),
@@ -852,7 +959,27 @@ function formatFinalUnloadNotes(plan: {
 
 // ── 飞行时间显示 ─────────────────────────────────────────────
 function flightLegFor(shipId: string, legIndex: number): ChainFlightLeg | undefined {
-  return flightEstimates.value.get(shipId)?.legs[legIndex];
+  return planFlightEstimates.value.get(shipId)?.legs[legIndex];
+}
+
+function flightFuelText(shipId: string, legIndex: number): string {
+  if (planFlightTimesLoading.value) {
+    return '计算中…';
+  }
+  const leg = flightLegFor(shipId, legIndex);
+  if (leg?.ok !== true) {
+    return '—';
+  }
+  const units = (used: number | undefined) =>
+    used !== undefined && Number.isFinite(used) ? `${fixed02(used)} u` : '—';
+  const amounts = `STL ${units(leg.stlUsed)} · FTL ${units(leg.ftlUsed)}`;
+  const settings = leg.settings;
+  if (settings === undefined) {
+    return amounts;
+  }
+  const reactor =
+    settings.reactorPercent === undefined ? '' : ` · 反应堆 ${settings.reactorPercent}%`;
+  return `${amounts} · 档位 ${settings.fuelPercent}%${reactor}`;
 }
 
 // 到达时刻文本：HH:MM（本地时间，浏览器时区）；跨天时带 MM-DD。
@@ -893,7 +1020,7 @@ function flightCellTitle(shipId: string, legIndex: number): string | undefined {
 }
 
 function flightTotalText(shipId: string): string {
-  const est = flightEstimates.value.get(shipId);
+  const est = planFlightEstimates.value.get(shipId);
   if (!est) {
     return '';
   }
@@ -918,9 +1045,14 @@ function flightTotalText(shipId: string): string {
       <PrunButton
         v-if="chainTab === 'plan'"
         primary
-        :disabled="nativeRouteCandidate === undefined || routeCheck !== undefined"
+        :disabled="
+          generationCandidate !== undefined ||
+          nativeRouteCandidate === undefined ||
+          routeCheck !== undefined
+        "
+        :data-tooltip="generationCandidate ? '请先关闭当前的原生 RT 进度' : undefined"
         @click="generateNativeRoute">
-        {{ routeCheck === undefined ? '生成原生 RT' : '检查航线…' }}
+        生成原生 RT
       </PrunButton>
     </div>
 
@@ -970,7 +1102,7 @@ function flightTotalText(shipId: string): string {
 
     <!-- 规划中 / 运行中 分页：页签始终可见；运行中页列出所有创建过的原生 RT
          （点页签时再向游戏校准航线定义与执行状态）。 -->
-    <div :class="$style.content">
+    <div ref="content" :class="$style.content">
       <div :class="[C.Tabs.component, $style.tabsHeader]">
         <div :class="C.Tabs.tabs">
           <div
@@ -1010,7 +1142,15 @@ function flightTotalText(shipId: string): string {
             v-if="loopSupplyText">
             · 一次运输实际可用 {{ loopSupplyText }}</template
           >
-          <div v-for="warning in loopWarnings" :key="warning">⚠ {{ warning }}</div>
+          <template v-if="loopStartup">
+            <div>首轮备货缺口：{{ formatMaterials(loopStartup.shortfall) || '已备齐' }}</div>
+            <div v-if="formatMaterials(loopStartup.returned)">
+              首轮需备的周转货：{{ formatMaterials(loopStartup.returned) }}（归航补回）
+            </div>
+            <div v-if="formatMaterials(loopStartup.marketLimits)" :class="$style.opsWarn">
+              当前盘口不足：{{ formatMaterials(loopStartup.marketLimits) }}
+            </div>
+          </template>
         </template>
         <template v-else
           >循环周期未估算：{{ loopError ?? '请在计划里分配 1 艘船并勾选至少 1 个基地。' }}</template
@@ -1057,6 +1197,13 @@ function flightTotalText(shipId: string): string {
           </div>
         </div>
 
+        <div v-if="routeCheck?.shipId === sp.ship.ship.id" :class="$style.loadSub" role="status">
+          正在检查航线地址和装卸物料…
+        </div>
+        <div
+          v-if="generationCandidate?.ship.ship.id === sp.ship.ship.id"
+          :ref="setGenerationTarget" />
+
         <table :class="$style.table">
           <colgroup>
             <col :class="$style.colSeq" />
@@ -1070,7 +1217,14 @@ function flightTotalText(shipId: string): string {
               <th :class="$style.narrowCol">序</th>
               <th :class="$style.narrowCol">星球/空间站</th>
               <th>操作</th>
-              <th>飞行</th>
+              <th
+                :data-tooltip="
+                  loopActive
+                    ? '油耗与档位采用循环规划结果'
+                    : '按当前规划估算，创建原生 RT 时会核算写入档位'
+                ">
+                飞行 / 预计燃料消耗
+              </th>
               <th :class="$style.narrowCol">载重</th>
             </tr>
           </thead>
@@ -1080,7 +1234,11 @@ function flightTotalText(shipId: string): string {
               <td :class="$style.narrowCol">
                 <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
               </td>
-              <td :class="$style.matCell">
+              <td v-if="loopActive" :class="$style.matCell">
+                <span :class="$style.opsLabel">每轮装船</span>
+                [{{ formatMaterials(sp.plan.cxBill) || '无' }}]
+              </td>
+              <td v-else :class="$style.matCell">
                 <div>
                   <span :class="$style.opsLabel">采购</span>
                   [{{ formatMaterials(sp.plan.purchaseBill) || '无' }}]
@@ -1117,6 +1275,7 @@ function flightTotalText(shipId: string): string {
                 :data-tooltip="flightCellTitle(sp.ship.ship.id, i)"
                 data-tooltip-position="top">
                 → {{ stop.planetName }}{{ flightCellText(sp.ship.ship.id, i) }}
+                <div :class="$style.loadSub">{{ flightFuelText(sp.ship.ship.id, i) }}</div>
               </td>
               <td :class="$style.narrowCol">
                 <div>{{ formatLoadCell(stop.loadOnDeparture, sp.plan.capacity) }}</div>
@@ -1138,6 +1297,9 @@ function flightTotalText(shipId: string): string {
                 data-tooltip-position="top">
                 → {{ sp.plan.originNaturalId
                 }}{{ flightCellText(sp.ship.ship.id, sp.plan.stops.length) }}
+                <div :class="$style.loadSub">
+                  {{ flightFuelText(sp.ship.ship.id, sp.plan.stops.length) }}
+                </div>
               </td>
               <td :class="$style.narrowCol">
                 {{ formatLoadCell({ weight: 0, volume: 0 }, sp.plan.capacity) }}
@@ -1150,7 +1312,7 @@ function flightTotalText(shipId: string): string {
           <div :class="$style.summaryRow">
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
-              <template v-if="flightTimesLoading">计算中…</template>
+              <template v-if="planFlightTimesLoading">计算中…</template>
               <template v-else>{{ flightTotalText(sp.ship.ship.id) || '--' }}</template>
             </span>
           </div>
@@ -1162,7 +1324,9 @@ function flightTotalText(shipId: string): string {
             </span>
           </div>
           <div v-if="Object.keys(sp.plan.purchaseBill).length > 0" :class="$style.summaryRow">
-            <span :class="$style.summaryLabel">采购花费：</span>
+            <span :class="$style.summaryLabel">{{
+              loopActive ? '每轮采购估算：' : '采购花费：'
+            }}</span>
             <span>{{ formatCurrency(billCost(sp.plan.purchaseBill)) }}</span>
           </div>
           <div :class="$style.summaryRow">
@@ -1191,7 +1355,11 @@ function flightTotalText(shipId: string): string {
 
       <!-- 原生 RT（socket 写入）：与「运行中」同一套表格样式，含逐站进度 -->
       <template v-if="chainTab === 'running'">
-        <div v-for="entry in nativeRoutes" :key="nativeRouteRowKey(entry)" :class="$style.shipPlan">
+        <div
+          v-for="entry in nativeRoutes"
+          :key="nativeRouteRowKey(entry)"
+          :class="$style.shipPlan"
+          :data-focused-route="sameNaturalId(entry.record.naturalId, focusedRoute) || undefined">
           <div :class="$style.shipHeader">
             <span>
               {{
@@ -1659,6 +1827,10 @@ function flightTotalText(shipId: string): string {
   border: 1px solid #2b485a;
   border-radius: 4px;
   padding: 8px;
+}
+
+.shipPlan[data-focused-route] {
+  border-color: rgb(63, 162, 222);
 }
 
 .shipHeader {

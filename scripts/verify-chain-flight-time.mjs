@@ -182,7 +182,7 @@ await check('单段：时长来自公式模型，到达时刻 = 出发 + 时长'
   );
 });
 
-await check('逐段 SF 实耗 = 出发油量 − 到达余量，与每轮燃料对账', async failures => {
+await check('逐段 SF 预计油耗与每轮燃料对账', async failures => {
   useFixture({ stlRemaining: 3000 });
   const est = await estimateChainFlightTimes({
     ship,
@@ -214,7 +214,7 @@ await check('逐段 SF 实耗 = 出发油量 − 到达余量，与每轮燃料�
   );
   expect(
     failures,
-    '实耗取自余量差值（小于满罐 3000，不是拿满罐顶替）',
+    '预计油耗小于满罐 3000',
     used[0] < 3000,
     `actual=${used[0]}`,
   );
