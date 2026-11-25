@@ -29,8 +29,4 @@ function init() {
 // 不传 hidden 参数：本功能按原有样式出现在 XIT SET FEAT 的功能列表里，
 // 由该页的通用启停开关控制（开启 = 隐藏 UPCK，关闭 = 恢复显示），
 // 与列表内其它功能一样在更改后点「重启游戏以应用更改」生效。
-features.add(
-  import.meta.url,
-  init,
-  'INV：隐藏上下文菜单里原生的 UPCK「拆包」命令，关闭本功能后恢复显示。适用于所有主题，以及独立窗口与 FB 面板内嵌的库存窗口。',
-);
+features.add(import.meta.url, init, 'INV：隐藏上下文菜单的原生 UPCK「拆包」命令。');

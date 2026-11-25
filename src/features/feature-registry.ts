@@ -1,5 +1,6 @@
 import getBrowserVersion from '@src/utils/browser-version';
 import { userData } from '@src/store/user-data';
+import { resolveFeatureGroup } from './feature-groups';
 
 interface FeatureDescriptor {
   id: string;
@@ -51,6 +52,17 @@ function add(path: string, init: () => void, description: string, hidden = false
   }
   if (import.meta.env.DEV && registry.some(x => x.id === id)) {
     throw Error(`Duplicate feature id: ${id}`);
+  }
+  // 新增功能若既没命中前缀规则、也没在 feature-groups.ts 的 EXPLICIT 里登记，
+  // 就会落进「其他」分组。开发模式下提醒一句，免得玩家比我们先发现。
+  if (import.meta.env.DEV) {
+    const resolved = resolveFeatureGroup(id);
+    if (resolved.source === 'fallback') {
+      console.warn(
+        `[feature-groups] 「${id}」未命中任何分组规则，已归入「其他」。` +
+          '请在 src/features/feature-groups.ts 的 EXPLICIT 里补一行归属。',
+      );
+    }
   }
   registry.push({
     id,

@@ -53,8 +53,4 @@ function init() {
   tiles.observe('INV', onTileReady);
 }
 
-features.add(
-  import.meta.url,
-  init,
-  'INV：四大交易所 CX 仓库的上下文栏添加外显为「快捷买油」的入口（点击打开 XIT NX），外观沿用原生上下文命令，不显示 XIT NX 命令字样。',
-);
+features.add(import.meta.url, init, 'INV：交易所仓库上下文栏加「快捷买油」入口（打开 XIT NX）。');

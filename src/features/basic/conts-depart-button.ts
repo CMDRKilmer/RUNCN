@@ -279,5 +279,5 @@ function init() {
 features.add(
   import.meta.url,
   init,
-  'CONTS：货运合同的指令列加「起飞」按钮，全部取货条款完成后亮起，点开装货那条船的航行控制并自动填入卸货目的地（不自动起飞）。',
+  'CONTS：指令列加「起飞」按钮，取货完成后打开该船 SFC 并填入卸货地。',
 );
