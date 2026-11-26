@@ -80,7 +80,13 @@ function watchTriggerDisconnect(el: HTMLElement) {
     return;
   }
   watched.add(el);
-  onNodeDisconnected(el, () => hideFor(el));
+  onNodeDisconnected(el, () => {
+    // onNodeDisconnected 的回调只消费一次；而磁贴切走再切回时游戏会复用同一批节点
+    // （tiles.ts 的 retained frame），若这里不把标记清掉，重新接回后再悬停就不会再登记，
+    // 下一次被摘掉时气泡就留在屏幕上。清掉标记，允许重新登记。
+    watched.delete(el);
+    hideFor(el);
+  });
 }
 
 export function attachFloatingTooltip(el: HTMLElement, text: () => string): () => void {
