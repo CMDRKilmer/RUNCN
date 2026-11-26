@@ -64,7 +64,10 @@ async function depart(button: HTMLButtonElement) {
     const result = await openSfcAndFill(target);
     if (!result.ok && result.message) {
       // 失败原因临时顶替 hint，下次对齐时会被覆盖回正常文案。
-      latestTargets.set(button, { ...target, hint: result.message });
+      // 只改**当前**条目：等待期间货可能已换船，用点击时的 target 覆盖会让
+      // finally 把按钮恢复成指向旧船的 SFC。
+      const current = latestTargets.get(button) ?? target;
+      latestTargets.set(button, { ...current, hint: result.message });
     }
   } finally {
     busyButtons.delete(button);

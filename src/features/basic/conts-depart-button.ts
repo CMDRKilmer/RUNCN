@@ -117,7 +117,11 @@ async function depart(button: HTMLButtonElement) {
   try {
     const result = await openSfcAndFill(target);
     if (!result.ok && result.message) {
-      latestTargets.set(button, { ...target, hint: result.message });
+      // 只把原因并进**当前**条目：等待期间货可能已经换船，对齐逻辑更新过
+      // latestTargets；拿点击时的 target 覆盖回去，会让 finally 重新启用一个
+      // 指向旧船的 SFC 按钮（两艘船都 ready 时文字不变，也不会再触发修复）。
+      const current = latestTargets.get(button) ?? target;
+      latestTargets.set(button, { ...current, hint: result.message });
     }
   } finally {
     busyButtons.delete(button);
