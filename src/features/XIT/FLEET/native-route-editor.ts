@@ -595,7 +595,7 @@ export async function fillNativeStep(
     await selectMaterial(editor, step.ticker);
     // Set maximum first so a quantity above the native default stays valid.
     await setLimit(editor, 'Maximum', step.amount);
-    await setLimit(editor, 'Minimum', step.amount);
+    await setLimit(editor, 'Minimum', step.minimum ?? step.amount);
   }
 }
 

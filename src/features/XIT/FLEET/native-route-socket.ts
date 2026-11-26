@@ -245,6 +245,7 @@ export async function socketEditStep(
   type: 'LOAD' | 'UNLOAD',
   materialId: string,
   units: number,
+  minimum = units,
 ) {
   return await sendRouteAction(
     `SHIP_ROUTES_EDIT_${type}_STEP`,
@@ -253,7 +254,7 @@ export async function socketEditStep(
       waypointId,
       stepId,
       material: materialId,
-      minimum: { type: 'ABSOLUTE', units },
+      minimum: { type: 'ABSOLUTE', units: minimum },
       maximum: { type: 'ABSOLUTE', units },
       retain: 0,
     },
@@ -336,11 +337,14 @@ export async function checkNativeRoute(waypoints: readonly NativeWaypoint[], sig
 
 export type CheckedRoute = Awaited<ReturnType<typeof checkNativeRoute>>;
 
-interface SocketWriteInput {
+export interface RouteWritePlan {
   waypoints: readonly NativeWaypoint[];
   legs: readonly { fuelPercent: number; reactorPercent?: number }[];
-  name: string;
   checkedRoute: CheckedRoute;
+}
+
+interface SocketWriteInput extends RouteWritePlan {
+  name: string;
 }
 
 export interface SocketWriteResult {
@@ -367,6 +371,159 @@ function waypointDestination(waypoint: RouteWaypointData) {
     return encodeAddress(destination as PrunApi.Address);
   }
   return undefined;
+}
+
+function matchesWaypointSettings(
+  waypoint: RouteWaypointData,
+  destination: string,
+  leg: RouteWritePlan['legs'][number],
+) {
+  return (
+    waypointDestination(waypoint) === destination &&
+    waypoint.landing === true &&
+    waypoint.fuelUsageFactor === leg.fuelPercent / 100 &&
+    waypoint.reactorUsageFactor === (leg.reactorPercent ?? 50) / 100 &&
+    waypoint.preferences?.ftlPreference === waypointPreferences.ftlPreference &&
+    waypoint.preferences.useGateways === waypointPreferences.useGateways
+  );
+}
+
+function matchesRefuelStep(step: RouteStepData, tank: 'STL' | 'FTL') {
+  return (
+    step.type === 'REFUEL' &&
+    step.fuel === tank &&
+    step.source === 'LOCAL_STORE' &&
+    step.minimum?.type === 'CAPACITY' &&
+    step.maximum?.type === 'CAPACITY'
+  );
+}
+
+export interface NativeRouteCargoChange {
+  waypointId: string;
+  stepId: string;
+  location: string;
+  type: 'LOAD' | 'UNLOAD';
+  ticker: string;
+  materialId: string;
+  before: number;
+  amount: number;
+  minimum: number;
+}
+
+export function planNativeRouteCargoUpdate(
+  route: RouteData,
+  plan: RouteWritePlan,
+): NativeRouteCargoChange[] | undefined {
+  if (plan.checkedRoute.issues.length !== 0 || route.waypoints.length !== plan.waypoints.length) {
+    return undefined;
+  }
+  const changes: NativeRouteCargoChange[] = [];
+  for (const [index, waypoint] of plan.waypoints.entries()) {
+    const current = route.waypoints[index]!;
+    const address = plan.checkedRoute.addresses.get(waypoint.location);
+    const leg = plan.legs[index];
+    if (
+      address === undefined ||
+      leg === undefined ||
+      !matchesWaypointSettings(current, address, leg) ||
+      current.steps.length !== waypoint.steps.length
+    ) {
+      return undefined;
+    }
+    for (const [stepIndex, step] of waypoint.steps.entries()) {
+      const actual = current.steps[stepIndex]!;
+      if (step.kind === 'refuel' || step.kind === 'unload-all') {
+        const matches =
+          step.kind === 'refuel'
+            ? matchesRefuelStep(actual, step.tank)
+            : actual.type === 'UNLOAD_ALL';
+        if (!matches) {
+          return undefined;
+        }
+        continue;
+      }
+      const type = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
+      const materialId = plan.checkedRoute.materialIds.get(step.ticker);
+      const before = actual.maximum?.units;
+      if (
+        actual.type !== type ||
+        materialId === undefined ||
+        actual.material?.id !== materialId ||
+        actual.retain !== 0 ||
+        actual.minimum?.type !== 'ABSOLUTE' ||
+        actual.maximum?.type !== 'ABSOLUTE' ||
+        before === undefined ||
+        actual.minimum.units !== (step.minimum ?? before)
+      ) {
+        return undefined;
+      }
+      if (before !== step.amount) {
+        changes.push({
+          waypointId: current.id,
+          stepId: actual.id,
+          location: waypoint.location,
+          type,
+          ticker: step.ticker,
+          materialId,
+          before,
+          amount: step.amount,
+          minimum: step.minimum ?? step.amount,
+        });
+      }
+    }
+  }
+  return changes;
+}
+
+export async function updateNativeRouteCargo(
+  routeId: string,
+  plan: RouteWritePlan,
+  changes: readonly NativeRouteCargoChange[],
+  isUnassigned: (route: RouteData) => boolean,
+  onWrite: () => void,
+) {
+  if (hasPendingRouteRequest()) {
+    throw new Error('原生 RT 正在处理，请稍后重试。');
+  }
+  activeSessions++;
+  try {
+    let route = (await socketGetRoutes()).find(route => route.id === routeId);
+    if (
+      route === undefined ||
+      JSON.stringify(planNativeRouteCargoUpdate(route, plan)) !== JSON.stringify(changes)
+    ) {
+      throw new Error('原生 RT 已变化，请重新预览。');
+    }
+    if (!isUnassigned(route)) {
+      throw new Error('无法确认原生 RT 未分配，请核对后重新预览。');
+    }
+    if (changes.length > 0) {
+      onWrite();
+    }
+    for (const [index, change] of changes.entries()) {
+      if (index > 0 && !isUnassigned(route)) {
+        throw new Error('无法确认原生 RT 未分配，请核对后重新预览。');
+      }
+      route = await socketEditStep(
+        routeId,
+        change.waypointId,
+        change.stepId,
+        change.type,
+        change.materialId,
+        change.amount,
+        change.minimum,
+      );
+      if (
+        JSON.stringify(planNativeRouteCargoUpdate(route, plan)) !==
+        JSON.stringify(changes.slice(index + 1))
+      ) {
+        throw new Error('服务端回包与配货计划不一致，请重新预览剩余差异。');
+      }
+    }
+    return route;
+  } finally {
+    activeSessions--;
+  }
 }
 
 // 一次性写完：建航线 → 逐站添加航点和步骤，按回包补写属性 → 改名。
@@ -426,15 +583,7 @@ async function writeRoute(
     }
     const added = route.waypoints.at(-1)!;
     const leg = input.legs[index];
-    if (
-      leg !== undefined &&
-      (waypointDestination(added) !== destination ||
-        added.landing !== true ||
-        added.fuelUsageFactor !== leg.fuelPercent / 100 ||
-        added.reactorUsageFactor !== (leg.reactorPercent ?? 50) / 100 ||
-        added.preferences?.ftlPreference !== waypointPreferences.ftlPreference ||
-        added.preferences.useGateways !== waypointPreferences.useGateways)
-    ) {
+    if (leg !== undefined && !matchesWaypointSettings(added, destination, leg)) {
       route = await socketEditWaypoint(
         route.id,
         added.id,
@@ -468,23 +617,18 @@ async function writeRoute(
         continue;
       }
       if (step.kind === 'refuel') {
-        if (
-          addedStep.type !== type ||
-          addedStep.fuel !== step.tank ||
-          addedStep.source !== 'LOCAL_STORE' ||
-          addedStep.minimum?.type !== 'CAPACITY' ||
-          addedStep.maximum?.type !== 'CAPACITY'
-        ) {
+        if (!matchesRefuelStep(addedStep, step.tank)) {
           route = await socketEditRefuelStep(route.id, added.id, stepId, step.tank);
         }
         continue;
       }
       const materialId = input.checkedRoute.materialIds.get(step.ticker)!;
+      const minimum = step.minimum ?? step.amount;
       if (
         addedStep.type !== type ||
         addedStep.material?.id !== materialId ||
         addedStep.minimum?.type !== 'ABSOLUTE' ||
-        addedStep.minimum.units !== step.amount ||
+        addedStep.minimum.units !== minimum ||
         addedStep.maximum?.type !== 'ABSOLUTE' ||
         addedStep.maximum.units !== step.amount ||
         addedStep.retain !== 0
@@ -496,6 +640,7 @@ async function writeRoute(
           materialStepType,
           materialId,
           step.amount,
+          minimum,
         );
       }
     }

@@ -105,7 +105,8 @@ function routeHasLeg(route: RouteData, origin: PrunApi.Address, destination: Pru
   if (points.length < 2) {
     return false;
   }
-  for (let i = 0; i < points.length; i++) {
+  const legCount = route.repeats === true ? points.length : points.length - 1;
+  for (let i = 0; i < legCount; i++) {
     const next = points[(i + 1) % points.length];
     if (
       destinationMatches(points[i]!.destination, origin) &&
@@ -282,8 +283,15 @@ export function mergeRouteRecord(
   }
   // 时长是按生成时那艘船的质量、引擎、状况与罐容量算的：航线改派给别的船后不再成立。
   const sameShip = local.shipId === '' || server.shipId === '' || local.shipId === server.shipId;
+  const first = local.waypoints[0];
+  const last = local.waypoints.at(-1);
+  const wraps =
+    (local.loop === true || server.repeats === true) &&
+    first !== undefined &&
+    last !== undefined &&
+    !sameWaypoint(first, last);
   const stale = sameShip
-    ? staleLegIndexes(local.waypoints, server.waypoints)
+    ? staleLegIndexes(local.waypoints, server.waypoints, wraps)
     : new Set(server.waypoints.map((_, index) => index));
   const waypoints = server.waypoints.map((waypoint, index) => {
     const previous = local.waypoints[index];
@@ -319,13 +327,14 @@ export function mergeRouteRecord(
       local.loopOriginReturn !== undefined &&
       local.waypoints.length === server.waypoints.length &&
       waypoints.every((waypoint, index) => sameWaypoint(local.waypoints[index]!, waypoint)) &&
-      routeWaypoints(route).every(waypoint =>
+      routeWaypoints(route).every((waypoint, index) =>
         waypoint.steps.every(
           step =>
             (step.type !== 'LOAD' && step.type !== 'UNLOAD') ||
             (step.minimum?.type === 'ABSOLUTE' &&
               step.maximum?.type === 'ABSOLUTE' &&
-              step.minimum.units === step.maximum.units),
+              (step.minimum.units === step.maximum.units ||
+                (wraps && index === 0 && step.type === 'UNLOAD' && step.minimum.units === 0))),
         ),
       ) &&
       cargoSignature(local.waypoints, local.waypoints.length - 1) ===
@@ -341,6 +350,7 @@ export function mergeRouteRecord(
 function staleLegIndexes(
   local: readonly NativeRouteWaypointRecord[],
   server: readonly NativeRouteWaypointRecord[],
+  wraps: boolean,
 ) {
   const stale = new Set<number>();
   // 只有「补满」能切断下游作废：固定数量的补油（`limited`）充多少上游就决定多少。
@@ -355,10 +365,25 @@ function staleLegIndexes(
       server.length,
       tanks,
       refills,
+      wraps,
     )) {
       stale.add(leg);
     }
   };
+  if (wraps) {
+    const previousLast = local.at(-1);
+    const currentLast = server.at(-1);
+    if (
+      previousLast === undefined ||
+      currentLast === undefined ||
+      !sameWaypoint(previousLast, currentLast)
+    ) {
+      invalidateFrom(0, ['STL', 'FTL']);
+    }
+    if (cargoSignature(local, local.length - 1) !== cargoSignature(server, server.length - 1)) {
+      stale.add(0);
+    }
+  }
   for (let index = 0; index < server.length; index++) {
     const previous = local[index];
     const current = server[index];
@@ -366,7 +391,7 @@ function staleLegIndexes(
       // 航点换了地方：飞到它的那段距离、跃迁方式都变了，消耗随之改变，之后的余量也跟着变。
       // 两段都要清——本段（飞到它）即使本站补满也不成立；从它起飞的下游段则一路作废到
       // 两个油罐都补满（首站是出发地，它换了等于第 1 段换起点）。
-      if (index > 0) {
+      if (index > 0 || wraps) {
         stale.add(index);
       }
       invalidateFrom(index + 1, ['STL', 'FTL']);
@@ -661,9 +686,9 @@ export function routeStopStates(
   if (flight !== undefined) {
     index = record.waypoints.findIndex(
       (waypoint, i) =>
-        i > 0 &&
+        (i > 0 || record.repeats === true) &&
         waypointMatchesAddress(waypoint, flight.destination) &&
-        waypointMatchesAddress(record.waypoints[i - 1]!, flight.origin),
+        waypointMatchesAddress(record.waypoints.at(i - 1)!, flight.origin),
     );
     if (index < 0) {
       index = record.waypoints.findIndex(x => waypointMatchesAddress(x, flight.destination));
@@ -743,7 +768,7 @@ function cargoSignature(waypoints: readonly NativeRouteWaypointRecord[], departu
         continue;
       }
       const amount = step.capacity ? 'cap' : step.amount;
-      parts.push(`${index}:${step.kind}:${step.ticker}:${amount}`);
+      parts.push(`${index}:${step.kind}:${step.ticker}:${amount}:${step.minimum ?? ''}`);
     }
   }
   return parts.join('|');
@@ -796,10 +821,12 @@ function toStep(step: RouteStepData): NativeRouteStep | undefined {
   // CAPACITY（装载=装满 / 卸船=全部）没有绝对数量，标记出来避免按 0 吨计算。
   const capacity = step.maximum?.type === 'CAPACITY' || step.minimum?.type === 'CAPACITY';
   const amount = capacity ? 0 : (step.maximum?.units ?? step.minimum?.units ?? 0);
+  const optionalUnload = !capacity && step.type === 'UNLOAD' && step.minimum?.units === 0;
   return {
     kind: step.type === 'LOAD' ? 'load' : 'unload',
     ticker,
     amount,
     capacity: capacity || undefined,
+    ...(optionalUnload ? { minimum: 0 } : {}),
   };
 }
