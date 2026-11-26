@@ -442,9 +442,11 @@ ${P} :is([class*='Pagination__'], [class*='Selections__selection']) {
    主题引擎重映射成浅底深字，本身就可读，这里不接管，避免引入新变化。
    伪元素也不能写进 :is()（会让该分支整条失效），所以只列实体容器。 */
 ${P} .rp-tooltip-portal {
-  color: var(--rp-cc-tooltip-text) !important;
-  background-color: var(--rp-cc-tooltip-bg) !important;
-  border: 1px solid var(--rp-cc-tooltip-border) !important;
+  /* 与游戏自己的 [data-tooltip] 气泡统一：浅底深字 + 细描边。以前用
+     --rp-cc-tooltip-bg 的深底浅字，在浅色主题里就是一坨黑块，和其他气泡不是一套。 */
+  color: var(--rp-cc-text-primary) !important;
+  background-color: var(--rp-cc-surface) !important;
+  border: 1px solid var(--rp-cc-border-default) !important;
   box-shadow: var(--rp-cc-shadow-popover) !important;
   opacity: 1;
 }

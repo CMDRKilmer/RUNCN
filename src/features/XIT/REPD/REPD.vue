@@ -160,6 +160,33 @@ const selectedTypes = ref<Set<string>>(new Set());
 const repairing = ref(false);
 const repairMessage = ref<string | undefined>(undefined);
 
+// 已勾选类型涉及多少栋（维修是按栋执行，按钮上只显示类型数，气泡里给出栋数）
+const selectedBuildingCount = computed(() => {
+  const base = selected.value;
+  if (!base) {
+    return 0;
+  }
+  return base.types
+    .filter(type => selectedTypes.value.has(type.ticker))
+    .reduce((sum, type) => sum + type.count, 0);
+});
+
+const repairLabel = computed(() => {
+  if (repairing.value) {
+    return '维修中…';
+  }
+  const count = selectedTypes.value.size;
+  return count === 0 ? '开始维修' : `开始维修 · ${count} 类`;
+});
+
+const repairHint = computed(() => {
+  const count = selectedTypes.value.size;
+  if (count === 0) {
+    return '先在上方明细里勾选要维修的建筑类型';
+  }
+  return `对勾选的 ${count} 类共 ${selectedBuildingCount.value} 栋建筑逐栋维修`;
+});
+
 function defaultSelectedTypes(base: RepairBoardBase | undefined): Set<string> {
   if (!base) {
     return new Set();
@@ -220,6 +247,19 @@ const selectedAccentStyle = { boxShadow: 'inset 3px 0 0 #5aa9e6' };
 // ── 偏移天数：按「飞船 N 天后抵达」实时重算重量 / 体积 / 费用 ──
 const offsetOptions = [0, 1, 2, 3, 5, 7];
 const offsetDays = ref(settings.value.arrivalDays);
+
+// 选中态的实心块用内联样式给：主题引擎会把样式表里的 color 统一改成排版墨色、
+// 把带色背景/边框按「背景」「边框」角色降饱和，纯 CSS 的选中块在自定义主题下
+// 只剩 1.1~1.2 的底色差。内联样式不参与那趟重写，这一块在深浅两种底上都能看清。
+const offsetActiveStyle = {
+  backgroundColor: '#2f6ea8',
+  borderColor: '#8fc4ea',
+  color: '#ffffff',
+  // 主题引擎会用 `button { color: ink !important }` 之类generic 规则把字色改成
+  // 排版墨色（深色主题下是浅灰、浅色主题下是深灰），压过内联 color。
+  // -webkit-text-fill-color 的优先级高于 color，且主题没有覆盖它，用它锁白字。
+  WebkitTextFillColor: '#ffffff',
+};
 
 // 在上方设置栏改「飞船抵达」时，右侧明细的偏移选择同步到这个默认值；
 // 之后手动点偏移按钮仍可临时覆盖，不回写持久化设置。
@@ -578,14 +618,18 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
           </table>
         </div>
         <div :class="$style.repairBar" data-rp-repd-repair>
-          <PrunButton
-            dark
-            inline
-            :disabled="!selectedTypes.size || repairing"
-            data-rp-repd-repair-btn
-            @click="onRepairSelected">
-            {{ repairing ? '维修中…' : '维修已选类型' }}
-          </PrunButton>
+          <!-- 气泡走 Tooltip 组件（body 级 fixed 浮层）：游戏原生 data-tooltip 是元素上的
+               绝对定位伪元素，磁贴一窄就在右/下边缘被裁掉。 -->
+          <Tooltip :tooltip="repairHint" position="top" no-icon :class="$style.repairTip">
+            <PrunButton
+              primary
+              :class="$style.repairBtn"
+              :disabled="!selectedTypes.size || repairing"
+              data-rp-repd-repair-btn
+              @click="onRepairSelected">
+              {{ repairLabel }}
+            </PrunButton>
+          </Tooltip>
           <span :class="$style.repairMsg" data-rp-repd-repair-msg>{{ repairMessage }}</span>
         </div>
         <div :class="$style.repairTableWrap" data-rp-repd-matlist>
@@ -618,6 +662,7 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
               :key="day"
               type="button"
               :class="[$style.offsetBtn, offsetDays === day && $style.offsetActive]"
+              :style="offsetDays === day ? offsetActiveStyle : undefined"
               @click="offsetDays = day">
               {{ day === 0 ? '今天' : `+${day}` }}
             </button>
@@ -642,16 +687,20 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
         <div :class="[$style.panelTitle, $style.cartTitle]">
           <span>购物清单 · {{ formatCost(offsetBill?.cost) }}</span>
           <div :class="$style.cartActions">
-            <PrunButton
-              dark
-              inline
-              :disabled="!selectedTypes.size || !offsetBill?.load?.length"
-              data-tooltip="按已勾选类型的维修材料比价购买；自动扣除被维修基地仓库与所选交易所仓库的已有库存"
-              data-tooltip-position="top"
-              data-rp-repd-compare
-              @click="onCompare"
-              >比价购买</PrunButton
-            >
+            <Tooltip
+              tooltip="按已勾选类型的维修材料比价购买；自动扣除被维修基地仓库与所选交易所仓库的已有库存"
+              position="top"
+              no-icon
+              :class="$style.repairTip">
+              <PrunButton
+                dark
+                inline
+                :disabled="!selectedTypes.size || !offsetBill?.load?.length"
+                data-rp-repd-compare
+                @click="onCompare"
+                >比价购买</PrunButton
+              >
+            </Tooltip>
           </div>
         </div>
         <div :class="$style.meta">
@@ -920,9 +969,11 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
 }
 
 .offsetLabel {
+  flex: 0 0 auto;
   font-size: 1em;
   color: #8a9aa8;
   margin-right: 2px;
+  white-space: nowrap;
 }
 
 /* 「等待」合并到偏移行右侧：向左自动撑开，与偏移按钮拉开间距。 */
@@ -935,9 +986,11 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
 }
 
 .offsetBtn {
-  padding: 0 5px;
+  flex: 0 0 auto;
+  padding: 0 6px;
   font-size: 1em;
-  line-height: 16px;
+  line-height: 18px;
+  white-space: nowrap;
   color: #bbbbbb;
   background: transparent;
   border: 1px solid #2b485a;
@@ -949,10 +1002,10 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
   background-color: rgba(255, 255, 255, 0.08);
 }
 
+/* 颜色全部由 offsetActiveStyle 内联给出（见 script），这里只管排版：
+   样式表里一旦写了 background/color，主题引擎会生成 !important 覆盖把它洗淡。 */
 .offsetActive {
-  border-color: #5aa9e6;
-  color: #fff;
-  background-color: rgba(90, 169, 230, 0.2);
+  font-weight: 700;
 }
 
 /* 表格统一铺满所属面板，三个模块的表格宽度因此一致。 */
@@ -1017,6 +1070,22 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
 
 .repairBar :global(button) {
   font-size: 14px;
+}
+
+/* 主操作按钮：游戏 primary（实心蓝）而不是 dark inline——后者与旁边的
+   说明文字同一观感，看不出是能点的执行按钮。给一个最小宽度和字重，
+   勾选变化时按钮不会跟着文字长度左右跳动。 */
+.repairBtn {
+  flex: 0 0 auto;
+  min-width: 132px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Tooltip 组件的容器是 inline-block 的 span，这里让它按 flex 子项参与行内布局。 */
+.repairTip {
+  display: inline-flex;
+  flex: 0 0 auto;
 }
 
 .repairMsg {
