@@ -374,13 +374,11 @@ export function computeChainPlan(
     delivered.set(flow.from, m);
   }
 
-  // 组内产出的物资（BSN 白名单 + output>0）：封闭环内自产自销，
-  // 一律不纳入 CX 采购清单，全部经基地「提取」流转（送下游/运回空间站）。
-  // 多船分段时由调用方传入全局集合，跨段产物在各段同样剔除采购。
+  // 白名单内的组内产物优先由基地提供。多船分段时由调用方传入全局集合。
   const groupProducedTickers = input.groupProducedTickers ?? new Set(producers.keys());
 
   // 每站 CX 账单：与基地规划派遣一致的完整账单（补给+维修），
-  // 减去链上「确定输送」的量；组内产出的 ticker 整体剔除（缺口不回落 CX 采购）。
+  // 减去链上「确定输送」的量；循环的组内产物在安排回运之后再确定外购量。
   // 出发地空间站仓库已有库存的物资（含组内产物与普通补给）优先以「取货」装船，
   // 采购量在 purchaseBill 阶段扣除取货部分，避免仓库已有仍重复购买。
   const incoming = new Map<string, Map<string, number>>(); // naturalId → ticker → 输送量
@@ -392,7 +390,7 @@ export function computeChainPlan(
   const cxResupply = new Map<string, Record<string, number>>();
   // 出发地仓库剩余库存（取货会扣减，避免重复分配）。
   const remainingOriginStock = new Map(Object.entries(input.originStock ?? {}));
-  const loopOriginReturn: Record<string, number> = {};
+  const loopReturnDemand: Record<string, number> = {};
   // 出发地「取货」明细：naturalId → ticker → 数量（装载后随行到站卸货）。
   const originPickupByStop = new Map<string, Record<string, number>>();
   // 组内产出的缺口（需求超出上游可提取量且空间站库存不足）按 ticker 汇总，用于警告。
@@ -411,14 +409,14 @@ export function computeChainPlan(
         }
       }
     }
-    // 组内产出的物资不纳入 CX 采购：缺口优先由空间站仓库库存以「取货」补足，剩余缺口警告。
+    // 循环先按完整缺口装船，再区分周转货和外购；单趟用仓库现有库存补足。
     for (const ticker of Object.keys(bill)) {
       if (!groupProducedTickers.has(ticker)) {
         continue;
       }
       const gap = bill[ticker]!;
       if (input.loop) {
-        loopOriginReturn[ticker] = (loopOriginReturn[ticker] ?? 0) + gap;
+        loopReturnDemand[ticker] = (loopReturnDemand[ticker] ?? 0) + gap;
         const byTicker = originPickupByStop.get(id) ?? {};
         byTicker[ticker] = gap;
         originPickupByStop.set(id, byTicker);
@@ -819,8 +817,9 @@ export function computeChainPlan(
   }
 
   if (input.loop) {
-    plan.loopOriginReturn = loopOriginReturn;
-    const outstanding = { ...loopOriginReturn };
+    const returned: Record<string, number> = {};
+    plan.loopOriginReturn = returned;
+    const outstanding = { ...loopReturnDemand };
     // 从靠近归航的站开始安排周转货物，缩短它们占用舱容的航段。
     for (let index = stops.length - 1; index >= 0; index--) {
       for (const item of returnPickups[index]!) {
@@ -832,10 +831,15 @@ export function computeChainPlan(
       }
     }
     for (const [ticker, missed] of Object.entries(outstanding)) {
+      const amount = loopReturnDemand[ticker]! - missed;
+      if (amount > 0) {
+        returned[ticker] = amount;
+        plan.originPickup[ticker] = amount;
+      }
       if (missed > 0) {
-        plan.hasUnmetChainDemand = true;
+        plan.purchaseBill[ticker] = missed;
         warnings.push(
-          `出发地「${ticker}」每轮需回运 ${formatAmount(loopOriginReturn[ticker]!)}，受产量或舱容限制缺 ${formatAmount(missed)}。`,
+          `出发地「${ticker}」每轮回运 ${formatAmount(amount)}，从外部补给 ${formatAmount(missed)}。`,
         );
       }
     }
@@ -879,14 +883,13 @@ export function computeChainPlan(
   // 归航前舱载（最后站离开后、卸最终产物前）。
   plan.loadOnReturn = { weight: cargoWeight + returnWeight, volume: cargoVolume + returnVolume };
 
-  // 汇总装船总账单（全部站）与 CX 采购账单（仅开启「购买」的站，
-  // 扣除出发地「取货」补足的部分——取货不产生采购）。
+  // 汇总装船总量和各站启用的 CX 采购量。循环周转货的外购差额已在回运分配时计入。
   for (const stop of stops) {
     for (const [ticker, amount] of Object.entries(stop.unloadCx)) {
       if (amount > 0) {
         plan.cxBill[ticker] = (plan.cxBill[ticker] ?? 0) + amount;
         const pickup = Math.min(amount, originPickupByStop.get(stop.naturalId)?.[ticker] ?? 0);
-        if (pickup > 0) {
+        if (pickup > 0 && !input.loop) {
           plan.originPickup[ticker] = (plan.originPickup[ticker] ?? 0) + pickup;
         }
         if (stop.cxBuy) {

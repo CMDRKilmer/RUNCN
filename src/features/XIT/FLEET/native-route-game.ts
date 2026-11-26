@@ -738,6 +738,10 @@ function cargoSignature(waypoints: readonly NativeRouteWaypointRecord[], departu
       if (step.kind === 'refuel') {
         continue;
       }
+      if (step.kind === 'unload-all') {
+        parts.push(`${index}:unload-all`);
+        continue;
+      }
       const amount = step.capacity ? 'cap' : step.amount;
       parts.push(`${index}:${step.kind}:${step.ticker}:${amount}`);
     }
@@ -769,6 +773,9 @@ function percentOf(factor: number | undefined) {
 }
 
 function toStep(step: RouteStepData): NativeRouteStep | undefined {
+  if (step.type === 'UNLOAD_ALL') {
+    return { kind: 'unload-all' };
+  }
   if (step.type === 'REFUEL') {
     // 补满（CAPACITY）是默认；玩家改成固定数量后出发油量与上游消耗有关，必须记下来。
     // 上限缺失时按「非补满」处理：宁可多作废时长，也不要把不保证满罐当成边界。

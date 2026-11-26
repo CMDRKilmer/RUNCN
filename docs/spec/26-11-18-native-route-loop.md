@@ -36,7 +36,7 @@
 
 - 向导增加「循环执行」复选框，默认关闭。
 - 循环模式要求：恰好 1 艘船、至少 1 个基地、至少 2 个不同目的地。
-- 航线形状保持 `出发地 → 基地… → 出发地`。首站是目的地，船从当前位置飞过去；循环从首站重新开始。
+- 航线形状保持 `出发地 → 基地… → 出发地`。首站是目的地，船从当前位置飞过去；循环从首站重新开始。循环预览把仓库首尾两行合为一行，展示归航卸货、补油、装船和归航飞行数据。写入保留末尾仓库航点，关闭 Loop 后仍归航卸货。
 - 写入顺序：在 FLEET「规划中」查看预览并点「生成原生 RT」→ 检查航点地址与装卸物料 → 建航线 → 添加航点和步骤，按回包补写不符的设置 → 打开 Loop → 读回确认。Loop 打开失败时保留单趟航线并提示手动开启。
 
 ### 周期与运量
@@ -48,6 +48,7 @@
 - 配货天数为 `ceil(预计飞行小时 / 24)`，至少 1 天。先按 1 天配货，再按逐段载重估时。向上取整的结果变动时按新天数配货并重新估时，直到两者匹配。
 - 实际飞行时长随出发时刻变化，原生 Loop 每轮接着运行。生成后按写入的固定数量装卸。
 - 逐站校验「卸货 − 取货 +（日产 − 日耗）× 配货天数」。每轮必需物资短缺、缺装卸物料尺寸、必需装载超出舱容或缺油时，显示对应基地、物料或航段。
+- 循环校验失败时，规划仍显示已计算的循环方案和归航数据。只有通过校验的方案可生成 RT。
 
 **循环运量**
 
@@ -56,13 +57,13 @@
 - 提取量按 `floor(配货天数 × (output − input − workforce))` 计算。实际提取可加回本轮送达的自产自耗量（`loopExtractable`），流量分配时先按全额自用扣除。
 
 - 链上产物提取（基地 LOAD）写成精确绝对量，减产轮库存不足该量时原地等待。必需的链上交付和下一轮的周转货优先占用舱容。可选回运用剩余舱容，并按基地和物料显示每轮留存量。
-- 组内产出仍按 BSN 白名单处理。需要从出发地送出的组内产物汇总为首轮周转货，之后由同一航线归航补回。若每轮产量或回运舱容不足，停用生成。当前出发仓库库存和订单簿供给用于首轮备货预览。
+- 组内产出按 BSN 白名单处理。从出发地送出的组内产物优先由同一航线归航补回，实际回运量算作周转货。产量或返航舱容不足的差额计入每轮外部采购，出发地装船量仍按完整需求。当前出发仓库库存和订单簿供给用于备货预览。
 - 「满载可用」表示船总舱容 ÷ Σ各基地净日耗，按重量与体积上限取较小值。规划表用 `ChainPlan.fullLoadUsableDays`，向导与运行中卡片用 `nativeRouteUsableDays`。缺少基地 BURN 或净消耗物料重量、体积时显示 —。
 
-**步骤 min/max（一律准确数值）**
+**定量装卸与全舱卸载**
 
-- 所有装卸步骤 `min=max=计划量`（用户 2026-11-21 定，取代 2026-11-19 的「出发站只改卸货、其余站点装/卸 `min=0`」机会式口径）：循环与单趟写同一组数量。缺料或上游减产时步骤按「等待最少数量」原地停住，不做「只搬现有量」的弹性搬运；出发地缺料同样让船不发（背压）。
-- 同 ticker 的采购卸货与链上卸货合并为一条 UNLOAD（与单趟一致）：数量精确后，拆开已无法表达不同 min/max。
+- 定量装卸步骤 `min=max=计划量`（用户 2026-11-21 定，取代 2026-11-19 的「出发站只改卸货、其余站点装/卸 `min=0`」机会式口径）：循环与单趟写同一组数量。缺料或上游减产时步骤按「等待最少数量」原地停住，不做「只搬现有量」的弹性搬运；出发地缺料同样让船不发（背压）。
+- 同料号的采购卸货与链上卸货先合并。选船初始货舱确认为空且本站卸完后没有留船货物时，用一条原生 `UNLOAD_ALL`，预览仍显示预计清单。回退原生界面填写时使用定量卸货清单。
 - `min=0` 的 socket 能力仍算已实采（2026-11-19：`EDIT_LOAD_STEP`/`EDIT_UNLOAD_STEP` 写 `minimum:{type:'ABSOLUTE',units:0}` 均被服务端接受并回显；新建步骤默认 `min=1`），RPrun 只是不再写 0。目标仓库无空间仍原地等待（仓储背压）。
 
 **仓储与慢基地**
@@ -150,7 +151,7 @@
 - `ChainPlan` 增加 `fullLoadUsableDays?`（满载可用天数，满载加权分摊展示口径：总舱容 ÷ Σ各基地净日耗 bundle）。
 - `NativeRouteRecord` 增加 `loop?: boolean`、`cycleHours?: number`。
 - `RouteData` / `NativeRouteView` 增加 `repeats?: boolean`，以游戏定义覆盖本地快照。
-- `computeChainPlan` 增加稳态 need 口径开关（loop）。`buildNativeWaypoints` 不接 `loop`：装卸步骤一律 `min=max=计划量`，循环与单趟写同一组数量。
+- `computeChainPlan` 增加稳态 need 口径开关（loop）。`buildNativeWaypoints` 的清舱判断在循环与单趟共用。普通物料装卸按 `min=max=计划量`。
 - 新纯函数建议放 `native-route-loop.ts`：每轮装载账单、每轮 SF/FF 消耗、备货轮数上限、可支撑轮数、资格校验。
 - 复用 `native-route-purchase.ts` 的缺口算法，输入改为 N 轮账单。
 
@@ -158,7 +159,7 @@
 
 1. `native-route-socket.ts` 补 `RouteData.repeats` 与 `socketSetRouteRepeats`（`SHIP_ROUTES_SET_REPEAT`）；装卸步骤写 `minimum=maximum=数量`（报文均已实采）。
 2. `ChainFlightLeg` 补逐段油耗；新增 `native-route-loop.ts`（每轮账单、SF/FF 消耗、N 轮备货、资格校验）。
-3. `computeChainPlan` 加稳态 need 口径；`buildNativeWaypoints` 装卸一律写 `min=max`。
+3. `computeChainPlan` 加稳态 need 口径；`buildNativeWaypoints` 定量装卸写 `min=max`，满足清舱条件时写 `UNLOAD_ALL`。
 4. `use-chain-loop-planning.ts` 生成按整天配货的循环计划和飞行估算；`ChainView.vue` 展示预览。
 5. `NativeRouteDialog.vue` 增加循环选项、写后开 Loop、N 轮备货与警告。
 6. `native-route-registry.ts` / `native-route-game.ts` 记录并合并循环状态；`native-route-rte.ts` 解析阻塞状态。
@@ -178,7 +179,7 @@
 
 回归脚本能覆盖纯模块，覆盖不到的写明归属，不把「有断言」说成「有验证」：
 
-- `../../scripts/verify-fleet-contracts.mjs`：按整天计算的**净缺口**账单（`loopBurnBill`/`computeChainPlan`：日耗扣自产，自给材料不送）、**满载可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、24 与 48 小时边界、增加载重后跨档重估、超舱容和无法收敛、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、装卸步骤一律 `min=max`（`buildNativeWaypoints` 不再有 loop 参数，同 ticker 采购与链上卸货合并为一条精确量；`socketEditStep` 报文经桩录制断言 `minimum`/`maximum` 同为 `ABSOLUTE` 数量、补油仍 `CAPACITY`）、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
+- `../../scripts/verify-fleet-contracts.mjs`：按整天计算的**净缺口**账单（`loopBurnBill`/`computeChainPlan`：日耗扣自产，自给材料不送）、**满载可用天数**（`fullLoadUsableDays`/`netDailyBundle`：舱容 ÷ Σ净日耗 bundle 加权分摊，自给基地不占分摊、缺数据不出数）、24 与 48 小时边界、增加载重后跨档重估、超舱容和无法收敛、备货轮数上限、支撑轮数（`loopSustain` 无每轮燃料快照留空）、循环资格、定量装卸数量和补油容量报文、全舱卸载的单请求写入、同一料号留给后续站时保持定量卸货、`repeats` 合并、`fuelPerRound` 的逐段求和与缺段回退（字面量腿，只测消费端）、**真实 `shipFuelRemainingFor`** 的吨→u 罐容量（0.06 t/u × 210 t → 3500 u，向下取整，余量 100）。
 - `../../scripts/verify-chain-flight-time.mjs`：真实公式模型下的**生产端**逐段 SF/FF 实耗（`stlUsed = 出发油量 − 到达余量`，系内为 0 而非回退），并与 `fuelPerRound` 对账。
 - 浏览器：单趟和循环均在 FLEET「规划中」预览，飞行列直接显示各段预计 STL/FTL 油耗和档位，含归航段。循环预览沿用写入的档位。多个船只或循环估时不可用时「生成原生 RT」置灰。点生成后先检查地址和物料，失败时在规划中显示问题，通过后在对应飞船的规划卡片内显示当前阶段及已写完的航点数。写入时切换页签和视图，返回「规划中」后仍可看到同一次生成的进度或结果。生成后可定位「运行中」的新航线，并打开采购包或备货包。
 - 实机：2 基地 1 船跑满两轮；基地有初始缓冲时多轮不饿死、不溢仓；上游减产轮链上提取/卸载不阻塞；抽掉一种出发地输入验证在出发地阻塞、补货后恢复；航行中补货；关闭 Loop 在下一轮生效。
@@ -192,7 +193,7 @@
 - RTE 各状态的界面文案（中/英）。
 - 对话框隐藏 CXOB 窗口能否在真实会话里及时回推 `COMEX_BROKER_DATA`（脚本以桩替代）。读不到按「未知即可买」处理，代价是订单簿确实为空时会多下一单燃料。
 - LOAD 步骤 `retain` 字段语义（实采回显 46；RPrun 在装卸步骤固定写 0、不读取）。
-- 未知步骤类型（`UNLOAD_ALL`/`UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`）目前被 `toStep` 丢弃：手动增删 `UNLOAD_ALL`/`UNLOAD_FUEL` 不触发下游时长作废，是否纳入签名待扩展。
+- `UNLOAD_ALL` 在目标仓库空间不足时的执行结果待实机确认。尚未解析 `UNLOAD_FUEL`/`WAIT`/`LOAD_SHIPMENT`/`UNLOAD_SHIPMENT`。
 - （可选）`CREATE_ROUTE` 是否能直接带 `repeats`：已有独立 `SET_REPEAT`，非必需。
 
 > 已实采（2026-11-19，prun-client-log / prun-log）：WAIT 协议 `EDIT_WAIT_STEP {amount, unit:'MINUTES'}`、REFUEL `source:'LOCAL_STORE'`+CAPACITY、UNLOAD_FUEL 协议、LOAD/UNLOAD `min=0` 对称回显。详见 feature-patterns socket 表。

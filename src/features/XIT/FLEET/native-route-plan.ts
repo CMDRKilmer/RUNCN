@@ -4,11 +4,21 @@ export const DEFAULT_WAYPOINT_FUEL_PERCENT = 25;
 
 export type RouteTank = 'STL' | 'FTL';
 
-export type NativeRouteStep =
-  | { kind: 'load' | 'unload'; ticker: string; amount: number; capacity?: true }
+type NativeRouteMaterialStep = {
+  kind: 'load' | 'unload';
+  ticker: string;
+  amount: number;
+  capacity?: true;
+};
+
+export type NativeRouteEditableStep =
+  | NativeRouteMaterialStep
   // `limited` = 游戏里把补油量改成了固定数量（`minimum/maximum: ABSOLUTE`）。缺省表示补满
   // （`CAPACITY`，RPrun 写入的就是这个），也只有补满才能当作「出发油量与上游无关」的边界。
   | { kind: 'refuel'; tank: RouteTank; limited?: true };
+
+export type NativeRouteStep =
+  NativeRouteEditableStep | { kind: 'unload-all'; planned?: NativeRouteMaterialStep[] };
 
 export interface NativeWaypoint {
   location: string;
@@ -46,7 +56,7 @@ export function percentAtLeast(value: number, minimum = 0) {
   return Math.min(100, Math.max(1, percent));
 }
 
-export function buildNativeWaypoints(plan: ChainPlan) {
+export function buildNativeWaypoints(plan: ChainPlan, startsWithEmptyCargo = false) {
   if (plan.stops.length === 0 || plan.overCapacity || plan.hasUnmetChainDemand === true) {
     throw new Error('环线缺少可执行站点、超出舱容或有未满足的产业链需求。');
   }
@@ -77,7 +87,53 @@ export function buildNativeWaypoints(plan: ChainPlan) {
       throw new Error('航线包含空地址或连续重复的航点。');
     }
   }
-  return waypoints;
+  return startsWithEmptyCargo ? withFullUnloads(waypoints) : waypoints;
+}
+
+function withFullUnloads(waypoints: NativeWaypoint[]): NativeWaypoint[] {
+  const cargo = new Map<string, number>();
+  const result: NativeWaypoint[] = [];
+  for (const waypoint of waypoints) {
+    const planned = waypoint.steps.filter(
+      (step): step is NativeRouteMaterialStep => step.kind === 'unload',
+    );
+    const clearsCargo =
+      planned.length > 0 &&
+      planned.length === cargo.size &&
+      planned.every(step => cargo.get(step.ticker) === step.amount);
+    for (const step of waypoint.steps) {
+      if (step.kind !== 'load' && step.kind !== 'unload') {
+        continue;
+      }
+      const amount =
+        (cargo.get(step.ticker) ?? 0) + (step.kind === 'load' ? step.amount : -step.amount);
+      if (amount < 0 || !Number.isSafeInteger(amount)) {
+        return waypoints;
+      }
+      if (amount === 0) {
+        cargo.delete(step.ticker);
+      } else {
+        cargo.set(step.ticker, amount);
+      }
+    }
+    result.push({
+      ...waypoint,
+      steps: clearsCargo
+        ? [
+            { kind: 'unload-all', planned },
+            ...waypoint.steps.filter(step => step.kind !== 'unload'),
+          ]
+        : waypoint.steps,
+    });
+  }
+  return result;
+}
+
+// 原生界面回退沿用已支持的逐项装卸编辑器。
+export function editableNativeSteps(steps: readonly NativeRouteStep[]): NativeRouteEditableStep[] {
+  return steps.flatMap<NativeRouteEditableStep>(step =>
+    step.kind === 'unload-all' ? (step.planned ?? []) : [step],
+  );
 }
 
 // 改了 fromIndex 段的档位后，需要作废时长的航段下标：本段必然失效；中途不补油时
@@ -119,7 +175,10 @@ export function legLoadWeight(plan: ChainPlan, index: number, legCount: number) 
   return plan.stops[index - 2]?.loadOnDeparture.weight ?? 0;
 }
 
-function materialSteps(kind: 'load' | 'unload', bill: Record<string, number>): NativeRouteStep[] {
+function materialSteps(
+  kind: 'load' | 'unload',
+  bill: Record<string, number>,
+): NativeRouteMaterialStep[] {
   return Object.entries(bill).flatMap(([ticker, amount]) => {
     if (!Number.isSafeInteger(amount) || amount < 0) {
       throw new Error(`${ticker} 的货量无法写入原生 RT。`);

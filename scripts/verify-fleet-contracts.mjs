@@ -31,7 +31,7 @@ const { fillInventoryDays } = await import('../src/features/XIT/FLEET/supplies-c
 const { planChainRoute } = await import('../src/features/XIT/FLEET/chain-planner.ts');
 const { planFastestChainSegments, splitChainPlanAcrossShips } =
   await import('../src/features/XIT/FLEET/chain-allocation.ts');
-const { buildNativeWaypoints, legLoadWeight } =
+const { buildNativeWaypoints, editableNativeSteps, legLoadWeight } =
   await import('../src/features/XIT/FLEET/native-route-plan.ts');
 const { completeActionPackage } = await import('../src/features/XIT/ACT/action-completion.ts');
 const { migrateUserData } = await import('../src/store/user-data-migrations.ts');
@@ -182,6 +182,49 @@ await check('native RT keeps warehouse departure and return as separate waypoint
   assert.deepEqual(procurement.actions[0].cxInvReserve, { RAT: 4 });
   assert.deepEqual(procurement.groups[0].materials, { RAT: 10 });
 });
+await check('native RT clears the hold only when no cargo is meant for a later stop', () => {
+  const plan = {
+    originNaturalId: 'CX',
+    cxBill: { H2O: 100, O: 5 },
+    finalUnload: { H2O: 60, FE: 4 },
+    stops: [
+      {
+        naturalId: 'A',
+        unloadCx: {},
+        unloadChain: new Map(),
+        load: new Map([['H2O', { amount: 60 }]]),
+      },
+      {
+        naturalId: 'B',
+        unloadCx: { H2O: 100, O: 5 },
+        unloadChain: new Map(),
+        load: new Map([['FE', { amount: 4 }]]),
+      },
+    ],
+  };
+  const fixed = buildNativeWaypoints(plan);
+  const optimized = buildNativeWaypoints(plan, true);
+  assert.deepEqual(optimized.map(x => x.location), ['CX', 'A', 'B', 'CX']);
+  assert.deepEqual(optimized[2].steps, fixed[2].steps);
+  assert.equal(optimized[3].steps[0].kind, 'unload-all');
+  assert.deepEqual(optimized.map(x => editableNativeSteps(x.steps)), fixed.map(x => x.steps));
+
+  plan.stops[1].unloadChain.set('H2O', { amount: 60 });
+  plan.finalUnload = { FE: 4 };
+  const allToB = buildNativeWaypoints(plan, true);
+  assert.deepEqual(allToB[2].steps, [
+    {
+      kind: 'unload-all',
+      planned: [
+        { kind: 'unload', ticker: 'H2O', amount: 160 },
+        { kind: 'unload', ticker: 'O', amount: 5 },
+      ],
+    },
+    { kind: 'load', ticker: 'FE', amount: 4 },
+  ]);
+  assert.ok(buildNativeWaypoints(plan).every(x => x.steps.every(s => s.kind !== 'unload-all')));
+});
+
 await check('native RT legs use the load carried after each stop', () => {
   const plan = {
     loadOnDeparture: { weight: 12 },
@@ -1058,6 +1101,19 @@ function mergedHours(localStops, serverStops, hours, executingShipId = 'S') {
 
 const stops = (...fuel) =>
   fuel.map((fuelPercent, index) => ({ location: `B${index}`, fuelPercent }));
+
+await check('native RT reads UNLOAD_ALL and includes it in flight estimate invalidation', () => {
+  const points = stops(25, 50, 50);
+  const local = nativeRouteLocal(points, [undefined, 10, 20]);
+  const server = nativeRouteServer(points);
+  server.waypoints[1].steps.push({ id: 'clear', type: 'UNLOAD_ALL' });
+  const merged = mergeRouteRecord(server, 'S', local);
+  assert.deepEqual(merged.waypoints[1].steps, [{ kind: 'unload-all' }]);
+  assert.deepEqual(merged.waypoints.map(x => x.flightHours), [undefined, 10, undefined]);
+  local.waypoints[1].steps.push({ kind: 'unload-all' });
+  const unchanged = mergeRouteRecord(server, 'S', local);
+  assert.deepEqual(unchanged.waypoints.map(x => x.flightHours), [undefined, 10, 20]);
+});
 
 await check('native RT merge: unchanged route keeps every estimate', async () => {
   const stopsWithFuel = stops(25, 50, 50);
@@ -2135,8 +2191,8 @@ await check('loop net producer at fractional cycle neither blocks nor under-extr
   assert.equal(plan.stops[0].returnLoad.RAW, 1);
 });
 
-await check('loop cannot fund a recurring group-made shortfall from one-time origin stock', () => {
-  // 自产但净消耗（日产 1 < 日耗 12）：出发库存足够首轮，后续没有归航补回。
+await check('loop counts net-consuming group-made cargo as recurring external supply', () => {
+  // 出发库存足够首轮，后续没有归航补回。
   const snapshot = {
     originNaturalId: 'CX',
     capacity: { weight: 500, volume: 500, freeWeight: 500, freeVolume: 500 },
@@ -2164,9 +2220,10 @@ await check('loop cannot fund a recurring group-made shortfall from one-time ori
   assert.equal(plan.stops[0].unloadCx.COF, 110);
   assert.equal(plan.stops[0].returnLoad.COF, undefined);
   assert.equal(plan.fullLoadUsableDays, 500 / 11);
-  assert.deepEqual(plan.purchaseBill, {});
-  assert.deepEqual(plan.loopOriginReturn, { COF: 110 });
-  assert.equal(plan.hasUnmetChainDemand, true);
+  assert.deepEqual(plan.purchaseBill, { COF: 110 });
+  assert.deepEqual(plan.loopOriginReturn, {});
+  assert.deepEqual(plan.originPickup, {});
+  assert.equal(plan.hasUnmetChainDemand, undefined);
 });
 
 await check('loop usable days read ship capacity and base BURN, not UNLOAD steps', () => {
@@ -2288,7 +2345,7 @@ await check('RT preflight reports unresolved waypoints and materials before crea
 });
 
 await check(
-  'RT writer skips matching defaults and edits differing waypoint and step settings',
+  'RT writer skips matching defaults, edits differences, and adds UNLOAD_ALL in one request',
   async () => {
     socketMessages.length = 0;
     fixture.stations.CX = { address: { encoded: 'HOME|STA,CX' } };
@@ -2302,7 +2359,10 @@ await check(
           { kind: 'load', ticker: 'H2O', amount: 10 },
         ],
       },
-      { location: 'A', steps: [{ kind: 'unload', ticker: 'H2O', amount: 10 }] },
+      {
+        location: 'A',
+        steps: [{ kind: 'unload', ticker: 'H2O', amount: 10 }, { kind: 'unload-all' }],
+      },
     ];
     const signal = new AbortController().signal;
     const checkedRoute = await checkNativeRoute(waypoints, signal);
@@ -2375,11 +2435,14 @@ await check(
     await reply('ADD_STEP');
     unload.minimum.units = 10;
     await reply('EDIT_UNLOAD_STEP');
+    second.steps.push({ id: 'clear', type: 'UNLOAD_ALL' });
+    await reply('ADD_STEP');
+    assert.equal(socketMessages.at(-1).payload.type, 'UNLOAD_ALL');
     const result = await written;
     assert.equal(result.routeId, 'r1');
     assert.equal(result.repeats, false);
     assert.deepEqual(completedWaypoints, [0, 0, 1, 2]);
-    assert.equal(socketMessages.length, 9);
+    assert.equal(socketMessages.length, 10);
   },
 );
 
@@ -2517,6 +2580,33 @@ await check('loop reserves return capacity for the next round before optional ca
     { COF: 3, SF: 23 },
   );
   assert.match(result.plan.warnings.join(' '), /RAT.*留存 9/);
+});
+
+await check('loop buys the recurring shortfall and reuses the planned return', async () => {
+  const material = (input, output) => ({ input, output, workforce: 0, inventory: 0, daysLeft: 0 });
+  const bs = bases();
+  fixture.burns.A.burn = { RAW: material(0, 4), BSC: material(5, 0) };
+  fixture.burns.B.burn = { RAW: material(4, 0), BSC: material(0, 2) };
+  fixture.products.A = ['RAW'];
+  fixture.products.B = ['BSC'];
+  const result = await computeLoopPlan(loopInput(bs), fakeEstimate(() => 4));
+  assert.equal(result.ok, true);
+  assert.equal(result.supplyDays, 1);
+  assert.equal(result.plan.cxBill.BSC, 5);
+  assert.equal(result.plan.finalUnload.BSC, 2);
+  assert.deepEqual(result.plan.loopOriginReturn, { BSC: 2 });
+  assert.deepEqual(result.plan.originPickup, { BSC: 2 });
+  assert.deepEqual(result.plan.purchaseBill, { BSC: 3 });
+  assert.match(result.plan.warnings.join(' '), /BSC.*回运 2.*外部补给 3/);
+  assert.deepEqual(buildNativeWaypoints(result.plan)[0].steps, [
+    { kind: 'load', ticker: 'BSC', amount: 5 },
+  ]);
+  const noFuel = { stl: 0, ftl: 0 };
+  const bill = loopStockingBill(result.plan.cxBill, result.plan.loopOriginReturn, noFuel, noFuel, 2);
+  assert.deepEqual(bill, { BSC: 8 });
+  fixture.exchanges.CX = { code: 'AI1' };
+  const pkg = cxShortfallPackage('CX', bill, result.plan.loopOriginReturn);
+  assert.deepEqual(pkg.groups[0].materials, { BSC: 6 });
 });
 
 await check('loop blocks when flight estimate is incomplete', async () => {

@@ -81,7 +81,7 @@ export interface ChainPlan {
   purchaseBill: Record<string, number>;
   // 出发地「取货」清单：组内产出的缺口由空间站仓库库存补足（不采购，装船随行）。
   originPickup: Record<string, number>;
-  // 循环在出发地周转的必需货物。首轮预备，随后由同一条航线归航补回。
+  // 循环实际回运的周转货。首轮预备，后续由归航补回；差额计入外部采购。
   loopOriginReturn?: Record<string, number>;
   warnings: string[];
   hasUnmetChainDemand?: true;

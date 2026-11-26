@@ -8,7 +8,7 @@ import {
 } from '@src/infrastructure/prun-ui/utils/set-slider-value';
 import { changeInputValue, changeSelectIndex, clickElement } from '@src/utils/dom';
 import { sleep } from '@src/utils/sleep';
-import { isWaypointPercent, type NativeRouteStep } from './native-route-plan';
+import { isWaypointPercent, type NativeRouteEditableStep } from './native-route-plan';
 
 const routeIdPattern = /^RT-[A-Z0-9]+-\d+$/i;
 const chineseLabels: Record<string, readonly string[]> = {
@@ -418,7 +418,7 @@ function waitForNativeStepButton(
 export async function addNativeStep(
   tile: RtTile,
   waypoint: Awaited<ReturnType<typeof addWaypoint>>,
-  step: NativeRouteStep,
+  step: NativeRouteEditableStep,
   options: { signal: AbortSignal; onWaiting: (waiting: boolean) => void },
 ) {
   const command = step.kind.toUpperCase();
@@ -451,7 +451,7 @@ export async function addNativeStep(
   }, `未能确认新增的 ${command} 步骤，请在原生 RT 核对。`);
 }
 
-function editorFor(tile: RtTile, step: NativeRouteStep) {
+function editorFor(tile: RtTile, step: NativeRouteEditableStep) {
   return editorWithTitle(tile, `EDIT ${step.kind.toUpperCase()} STEP`);
 }
 
@@ -566,7 +566,11 @@ export async function saveNativeWaypointFuel(
   await saveNativeEditor(tile, editor, () => editorWithTitle(tile, waypointEditorTitle));
 }
 
-export async function openNativeStep(tile: RtTile, edit: HTMLElement, step: NativeRouteStep) {
+export async function openNativeStep(
+  tile: RtTile,
+  edit: HTMLElement,
+  step: NativeRouteEditableStep,
+) {
   if (!tile.anchor.contains(edit) || editorFor(tile, step) !== undefined) {
     throw new Error('新增步骤已变化，请在原生 RT 核对。');
   }
@@ -574,7 +578,11 @@ export async function openNativeStep(tile: RtTile, edit: HTMLElement, step: Nati
   return await waitForRt(() => editorFor(tile, step), '原生步骤编辑器未打开。');
 }
 
-export async function fillNativeStep(tile: RtTile, editor: HTMLElement, step: NativeRouteStep) {
+export async function fillNativeStep(
+  tile: RtTile,
+  editor: HTMLElement,
+  step: NativeRouteEditableStep,
+) {
   if (editorFor(tile, step) !== editor) {
     throw new Error('原生步骤编辑器已变化。');
   }
@@ -591,7 +599,11 @@ export async function fillNativeStep(tile: RtTile, editor: HTMLElement, step: Na
   }
 }
 
-export async function saveNativeStep(tile: RtTile, editor: HTMLElement, step: NativeRouteStep) {
+export async function saveNativeStep(
+  tile: RtTile,
+  editor: HTMLElement,
+  step: NativeRouteEditableStep,
+) {
   await saveNativeEditor(tile, editor, () => editorFor(tile, step));
 }
 
