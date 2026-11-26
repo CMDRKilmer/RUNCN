@@ -275,10 +275,11 @@ export function collectChainPlanningSnapshot(
   input: ChainRouteInput,
 ): ChainPlanningSnapshot | undefined {
   const now = gameNow();
+  const burnForSite = input.loop ? (siteId: string) => getPlanetBurn(siteId)?.burn : effectiveBurn;
   const bases: ChainPlanningBase[] = [];
   const tickers = new Set<string>(Object.keys(input.originStock ?? {}));
   for (const base of input.bases) {
-    const current = effectiveBurn(base.siteId);
+    const current = burnForSite(base.siteId);
     if (current === undefined) {
       return undefined;
     }
@@ -324,7 +325,7 @@ export function collectChainPlanningSnapshot(
   }
   const consumers = new Map<string, string[]>();
   for (const site of sitesStore.all.value ?? []) {
-    const burn = effectiveBurn(site.siteId);
+    const burn = burnForSite(site.siteId);
     const id = getEntityNaturalIdFromAddress(site.address);
     if (burn === undefined || id === undefined) {
       continue;

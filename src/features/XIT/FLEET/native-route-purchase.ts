@@ -1,9 +1,9 @@
+import { getPlanetBurn } from '@src/core/burn';
 import { exchangesStore } from '@src/infrastructure/prun-api/data/exchanges';
 import { materialsStore } from '@src/infrastructure/prun-api/data/materials';
 import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { warehousesStore } from '@src/infrastructure/prun-api/data/warehouses';
-import { effectiveBurn } from './chain-data';
 import { fullLoadUsableDays, netDailyBundle } from './native-route-loop';
 import type { ChainPlan } from './chain-types';
 import type { DispatchShip } from './utils';
@@ -141,7 +141,7 @@ export function nativeRouteUsableDays(
     if (site === undefined) {
       continue;
     }
-    const burn = effectiveBurn(site.siteId);
+    const burn = getPlanetBurn(site.siteId)?.burn;
     if (burn === undefined) {
       return undefined;
     }
