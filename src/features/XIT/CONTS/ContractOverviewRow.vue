@@ -47,14 +47,24 @@ function targetByKey(key: string) {
 // 会被滚动容器裁掉，这里改用 body 上的 fixed 浮层。
 // 每条目标一个按钮，浮层按 key 分别解绑：函数式 ref 在元素卸载时会以 null 回调，
 // 正好用来收尾（v-if 摘掉元素不会触发 mouseleave，浮层会一直留在屏幕上）。
+//
+// 但函数式 ref 在**每次重渲染**都会再回调一次：`XIT CONTSS` 的截止时间每秒更新，
+// 行会重新渲染，无条件 detach 会把共享浮层的 hide() 调掉 —— 悬停中的气泡不到 1 秒
+// 就消失，且要重新移入才回来。所以只在元素**换人**（或卸载传 null）时才解绑。
 const detachTooltips = new Map<string, () => void>();
+const boundButtons = new Map<string, HTMLButtonElement>();
 
 function bindDepartButton(el: Element | null, key: string) {
+  if (el === boundButtons.get(key)) {
+    return; // 同一个按钮重复回调：保持现有绑定，别动浮层
+  }
   detachTooltips.get(key)?.();
   detachTooltips.delete(key);
+  boundButtons.delete(key);
   if (!(el instanceof HTMLButtonElement)) {
     return;
   }
+  boundButtons.set(key, el);
   detachTooltips.set(
     key,
     attachFloatingTooltip(el, () => targetByKey(key)?.hint ?? ''),
@@ -66,6 +76,7 @@ onBeforeUnmount(() => {
     detach();
   }
   detachTooltips.clear();
+  boundButtons.clear();
 });
 
 async function onDepart(target: DepartTarget) {
