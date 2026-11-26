@@ -205,7 +205,7 @@ const {
   bases: () => selectedBases.value,
 });
 
-// ── 循环模式（单船闭环迭代）─────────────────────────────────────
+// ── 循环模式（单船）─────────────────────────────────────
 // v1 仅单船：恰好选中 1 艘船时才驱动循环规划；多船/未选船时循环不生效，规划表走原口径。
 const loopShip = computed(() =>
   selectedShips.value.length === 1 ? selectedShips.value[0] : undefined,
@@ -219,7 +219,7 @@ const {
   bases: () => selectedBases.value,
   enabled: () => chainLoopMode.value && loopShip.value !== undefined,
 });
-// 循环计划可用：开关开 + 单船 + 迭代成功且有计划。规划表与生成向导据此切到循环口径。
+// 循环计划可用：开关开 + 单船 + 估时成功且有计划。规划表与生成向导据此切到循环口径。
 const loopActive = computed(
   () =>
     chainLoopMode.value &&
@@ -231,7 +231,7 @@ const loopCycleText = computed(() => {
   const hours = loopPlan.value?.cycleHours;
   return hours === undefined ? '' : formatFlightDuration(hours * 3600000);
 });
-// 一次运输实际可用天数（满载加权分摊展示口径：总舱容 ÷ Σ净日耗；实际送达按周期稳态）。
+// 满载可用天数（满载加权分摊展示口径：总舱容 ÷ Σ净日耗）。
 const loopSupplyText = computed(() => {
   const days = loopPlan.value?.plan?.fullLoadUsableDays;
   return days === undefined ? '' : `${days.toFixed(1)} 天`;
@@ -364,7 +364,7 @@ interface NativeRouteView {
   isLoop: boolean;
   // 生成时快照的飞行周期文本（预计）；非循环或无快照为空。
   cycleText: string;
-  // 一次运输实际可用天数文本（满载加权分摊：总舱容 ÷ ΣBURN 净日耗）；非循环或无数据为空。
+  // 满载可用天数文本（满载加权分摊：总舱容 ÷ ΣBURN 净日耗）；非循环或无数据为空。
   supplyText: string;
   // 出发地库存可支撑轮数文本（∞ = 无消耗）。
   sustainText: string;
@@ -415,7 +415,7 @@ function loopCardInfo(
   }
   const cycleText =
     record.cycleHours === undefined ? '' : formatFlightDuration(record.cycleHours * 3600000);
-  // 一次运输实际可用（满载加权分摊展示口径）：船总舱容 ÷ Σ航点基地净日耗；BURN 未加载显示 —。
+  // 满载可用（满载加权分摊展示口径）：船总舱容 ÷ Σ航点基地净日耗；BURN 未加载显示 —。
   const cargoCapacity = nativeRouteCapacity(ship);
   const supplyDays =
     cargoCapacity.weight > 0 ? nativeRouteUsableDays(record.waypoints, cargoCapacity) : undefined;
@@ -1138,10 +1138,8 @@ function flightTotalText(shipId: string): string {
           >循环模式不可用：{{ loopPlan.reasons.join('；') }}</template
         >
         <template v-else-if="loopActive">
-          循环模式 · 本轮周期 {{ loopCycleText }}（预计，随出发时刻漂移）<template
-            v-if="loopSupplyText">
-            · 一次运输实际可用 {{ loopSupplyText }}</template
-          >
+          循环模式 · 每轮按 {{ loopPlan?.supplyDays }} 天配货 · 预计飞行 {{ loopCycleText
+          }}<template v-if="loopSupplyText"> · 满载可用 {{ loopSupplyText }}</template>
           <template v-if="loopStartup">
             <div>首轮备货缺口：{{ formatMaterials(loopStartup.shortfall) || '已备齐' }}</div>
             <div v-if="formatMaterials(loopStartup.returned)">
@@ -1374,8 +1372,8 @@ function flightTotalText(shipId: string): string {
               <span v-else-if="entry.status === 'waiting'" :class="$style.routeWaiting">等待</span>
             </span>
             <div v-if="entry.isLoop" :class="$style.loopInfo">
-              周期 {{ entry.cycleText || '—' }}（预计） · 一次运输实际可用
-              {{ entry.supplyText || '—' }} · 出发地可支撑 {{ entry.sustainText }} 轮
+              周期 {{ entry.cycleText || '—' }}（预计） · 满载可用 {{ entry.supplyText || '—' }} ·
+              出发地可支撑 {{ entry.sustainText }} 轮
             </div>
             <div :class="$style.route">
               <span :class="$style.routeLabel">航线：</span>

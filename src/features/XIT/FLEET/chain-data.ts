@@ -15,7 +15,7 @@ import { sitesStore } from '@src/infrastructure/prun-api/data/sites';
 import { storagesStore } from '@src/infrastructure/prun-api/data/storage';
 import { cxobStore } from '@src/infrastructure/prun-api/data/cxob';
 import { combinedBaseBill } from '@src/features/XIT/FLEET/utils';
-import { cycleDelivery } from './native-route-loop';
+import { cycleDelivery, MIN_LOOP_SUPPLY_DAYS } from './native-route-loop';
 import type { ChainPlannerBase, ChainCapacity } from './chain-types';
 import type { ChainPlanningSnapshot, ChainPlanningBase } from './chain-plan-core';
 
@@ -33,12 +33,8 @@ export type ChainRouteInput = {
   // 各站预计到达时刻（相对规划时刻的小时数）：飞行期间基地继续生产/消耗，
   // 取货量按到达时预计库存计算，否则到港时取货包装不完飞行期间的新增产出。
   arrivalHoursByNaturalId?: Map<string, number>;
-  // 循环模式：运送量严格按 cycleDays × BURN 日输入/日输出（送达补净缺口、
-  // 提取运净余量，不减库存），天数覆盖为飞行周期 cycleDays，不走补给配置
-  // （config.days / supplies-cap / 消耗品过滤 / 维修材料都不适用），
-  // 也不按基地仓储 cap 钳短（改为余量警告）。
+  // 循环按 BURN 净额配货，不扣现有库存或读取单趟补给设置。
   loop?: boolean;
-  cycleDays?: number;
 };
 
 export function matWeightVolume(ticker: string, amount: number) {
@@ -259,7 +255,7 @@ export function effectiveBurn(siteId: string): BurnValues | undefined {
   return merged;
 }
 
-// 循环账单：周期净缺口（周期 × BURN 日耗扣自产），自给/净产不送。
+// 循环账单按配货天数的净缺口，自给或净产的材料不送。
 export function loopBurnBill(burn: BurnValues, days: number): Record<string, number> {
   const bill: Record<string, number> = {};
   for (const [ticker, mat] of Object.entries(burn)) {
@@ -287,7 +283,7 @@ export function collectChainPlanningSnapshot(
       Object.entries(current).map(([ticker, value]) => [ticker, { ...value }]),
     );
     const days = input.loop
-      ? (input.cycleDays ?? base.config.days)
+      ? MIN_LOOP_SUPPLY_DAYS
       : clampTargetDaysUtil(base.config.days, getSuppliesCap(base.site));
     const bill = input.loop
       ? loopBurnBill(burn, days)
@@ -296,7 +292,7 @@ export function collectChainPlanningSnapshot(
     const hours = input.arrivalHoursByNaturalId?.get(base.naturalId) ?? 0;
     const projectedStock: Record<string, number> = {};
     for (const [ticker, mat] of Object.entries(burn)) {
-      // 循环提取按 cycleDays × BURN 日产，不用到港预计库存（现有库存 + 排产预测）。
+      // 循环提取按 BURN 日产；到港预计库存用于单趟。
       if (!input.loop) {
         projectedStock[ticker] =
           hours <= 0
