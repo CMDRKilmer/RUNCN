@@ -1367,3 +1367,19 @@ html[data-rp-theme][data-rp-theme][data-rp-theme]
   [class*='StringHighlight'] {
   color: var(--rp-cc-text-link) !important;
 }
+
+/* ============================================================
+   CONT 合同详情：给取货条款行加了「起飞」按钮后，指令列里「完成」与「起飞」
+   会因单元格过窄（79px）折成两行、上下错位。这里让该列不换行，表格自行加宽；
+   同时给按钮之间一点横向间距（原生按钮之间没有 gap）。
+   ============================================================ */
+.rp-command-CONT td:has([data-rp-cont-depart]) {
+  white-space: nowrap !important;
+}
+.rp-command-CONT td:has([data-rp-cont-depart]) > button {
+  vertical-align: middle !important;
+}
+/* 两个按钮之间才有间距：用相邻兄弟选择器，避免「起飞」单独一行时被左边距推歪 */
+.rp-command-CONT td:has([data-rp-cont-depart]) > button + button {
+  margin-left: 4px !important;
+}

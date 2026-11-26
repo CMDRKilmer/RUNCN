@@ -33,6 +33,7 @@ import './cmds-clickable-commands';
 import './co-base-count';
 import './cogcu-generate-supply-act/cogcu-generate-supply-act';
 import './cont-confirm-all';
+import './cont-depart-button';
 import './conts-depart-button';
 import './contd-auto-fill';
 import './contd-condition-address-placeholder';

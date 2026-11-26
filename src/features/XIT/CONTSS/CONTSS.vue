@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import StatusFilter from '@src/components/StatusFilter.vue';
 import { contractsStore } from '@src/infrastructure/prun-api/data/contracts';
+import { buildShipmentIndex } from '@src/core/contract-shipment';
 import ContractOverviewRow from '@src/features/XIT/CONTS/ContractOverviewRow.vue';
 import { isEmpty } from 'ts-extras';
 import {
@@ -28,6 +29,10 @@ const filtered = computed(() =>
 
 // 总待收款和应付款统计
 const totals = computed(() => calculateContractTotals(filtered.value));
+
+// 「起飞」按钮要判断货在哪艘船上：一次列表上百单，这里建一次索引给各行共用，
+// 避免每行都遍历全部 storage。依赖会在库存/飞船变化时自动重算。
+const shipIndex = computed(() => buildShipmentIndex());
 
 // 计算每个合同最近的截止时间
 const contractDeadlines = computed(() => {
@@ -110,11 +115,12 @@ function deadlineText(ms?: number) {
           <th>进度</th>
           <th>状态</th>
           <th>截止</th>
+          <th>指令</th>
         </tr>
       </thead>
       <tbody>
         <tr v-if="isEmpty(filtered)">
-          <td colspan="8" :class="$style.empty">没有活动合同</td>
+          <td colspan="9" :class="$style.empty">没有活动合同</td>
         </tr>
         <template v-else>
           <ContractOverviewRow
@@ -122,7 +128,8 @@ function deadlineText(ms?: number) {
             :key="contract.id"
             :contract="contract"
             :deadline="deadlineText(contractDeadlines.get(contract.id))"
-            :deadline-style="deadlineStyle(contractDeadlines.get(contract.id))" />
+            :deadline-style="deadlineStyle(contractDeadlines.get(contract.id))"
+            :ship-index="shipIndex" />
         </template>
       </tbody>
     </table>
