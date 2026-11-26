@@ -1937,6 +1937,42 @@ await check('loop snapshot bills follow cycle × BURN net need, not config days'
   );
 });
 
+await check('loop cargo and usable days follow BURN without started-order supplements', () => {
+  const bs = bases().slice(0, 1);
+  fixture.burns.A.burn.DRF = { input: 4, output: 4, workforce: 0, inventory: 0 };
+  fixture.materials.RAT = { weight: 2, volume: 1 };
+  fixture.materials.DRF = { weight: 1, volume: 1 };
+  fixture.production.A = [
+    {
+      capacity: 1,
+      orders: [
+        {
+          started: { timestamp: 1_000_000 },
+          duration: { millis: 3 * 3_600_000 },
+          halted: false,
+          recurring: false,
+          inputs: [{ material: { ticker: 'DRF' }, amount: 2 }],
+          outputs: [],
+        },
+      ],
+    },
+  ];
+  const input = { originNaturalId: 'CX', capacity, bases: bs };
+  const cycleDays = cycleDaysFromHours(3 + 23 / 60 + 10 / 3600);
+  const plan = planChainRoute({ ...input, loop: true, cycleDays });
+  assert.deepEqual(plan.purchaseBill, { RAT: 1 });
+  const waypoints = buildNativeWaypoints(plan);
+  assert.deepEqual(waypoints, [
+    { location: 'CX', steps: [{ kind: 'load', ticker: 'RAT', amount: 1 }] },
+    { location: 'A', steps: [{ kind: 'unload', ticker: 'RAT', amount: 1 }] },
+    { location: 'CX', steps: [] },
+  ]);
+  assert.equal(plan.fullLoadUsableDays, 50);
+  assert.equal(nativeRouteUsableDays(waypoints, capacity), 50);
+  const single = collectChainPlanningSnapshot(input);
+  assert.equal(single.bases[0].burn.DRF.input, 20);
+});
+
 await check('loop self-produced material delivers net shortfall and extracts net surplus', () => {
   // C 产 RAW 10/日；A 产 RAW 10/日且自耗 12/日（净消耗）；B 耗 2/日。10 天周期。
   // A 净缺口 20 由 C 送达；A 自产 100 全留作一轮生产所需，提取 0。
