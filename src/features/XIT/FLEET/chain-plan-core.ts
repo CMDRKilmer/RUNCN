@@ -64,8 +64,8 @@ export function computeChainPlan(
     weight: (input.materials[ticker]?.weight ?? 0) * amount,
     volume: (input.materials[ticker]?.volume ?? 0) * amount,
   });
-  // 循环满载可用天数（总舱容 ÷ Σ净日耗 bundle，加权分摊）：仅「一次运输实际可用」
-  // 展示口径；实际每轮送达按稳态 周期×日耗，不装满。任一净消耗材料缺重量/体积时
+  // 循环满载可用天数（总舱容 ÷ Σ净日耗 bundle，加权分摊）：仅「满载可用」
+  // 展示口径；每轮按装卸计划配货。任一净消耗材料缺重量/体积时
   // 不出数（显示 —），不按偏小的需求报大天数。
   let fullLoadDays: number | undefined;
   if (input.loop) {
@@ -708,7 +708,7 @@ export function computeChainPlan(
     for (const ticker of returnTickers) {
       // 单趟：最终产物装尽到港时预计库存（含飞行期间新增产出），不扣自用预留。
       // 循环：只提取 周期 × BURN 日产（扣未覆盖自用），不动基地现有库存，
-      // 固定步骤每轮重复才保持稳态。
+      // 同一批货按固定数量重复装卸。
       const amount = input.loop
         ? Math.max(0, loopExtractable(id, ticker) - (delivered.get(id)?.get(ticker) ?? 0))
         : Math.max(0, Math.floor(projectedInventory(burns.get(id)![ticker], ticker, id)));

@@ -1,5 +1,5 @@
 // 原生 RT 循环执行的纯计算（XIT FLEET）。不读 store、不发请求，输入全部由调用方传入。
-// 稳态净额（cycleDays × (日耗 − 日产)）由这里的 cycleNetAmount/cycleDelivery 定义：
+// 净额（配货天数 × (日耗 − 日产)）由这里的 cycleNetAmount/cycleDelivery 定义：
 // 账单（chain-data）与 need/avail/提取（chain-plan-core）共用同一份口径；这里还负责
 // 备货轮数、支撑轮数与资格校验。周期只是生成时快照：估时随出发时刻漂移，运行中不做后台重算。
 
@@ -13,8 +13,10 @@ export interface LoopLegFuel {
   ftlUsed?: number;
 }
 
-export function cycleDaysFromHours(cycleHours: number): number {
-  return cycleHours / 24;
+export const MIN_LOOP_SUPPLY_DAYS = 1;
+
+export function loopSupplyDays(flightHours: number): number {
+  return Math.max(MIN_LOOP_SUPPLY_DAYS, Math.ceil(flightHours / 24));
 }
 
 export interface BurnRate {
@@ -61,7 +63,7 @@ export function netDailyBundle(
 
 // 满载可用天数（按净日耗加权分摊）：各基地份额 ∝ 净日耗 bundle，等价于
 // 总舱容 ÷ Σ净日耗 bundle（重量/体积取较小），各基地可用天数拉平。
-// 仅「一次运输实际可用」展示口径——实际每轮送达按 周期 × 日耗 稳态，不装满。
+// 满载天数只用于展示；每轮按预计飞行时长向上取整配货。
 // 自给基地净日耗为 0、不占分摊；无净消耗基地 → undefined。
 export function fullLoadUsableDays(
   capacity: { weight: number; volume: number },

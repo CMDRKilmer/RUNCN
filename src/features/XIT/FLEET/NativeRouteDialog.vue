@@ -276,7 +276,7 @@ const sustain = computed(() =>
 const cycleText = computed(() =>
   loopPlan === undefined ? '' : formatFlightDuration(loopPlan.cycleHours * 3600000),
 );
-// 一次运输实际可用 = 满载加权分摊：船总舱容 ÷ ΣBURN 净日耗（自给材料不计）。
+// 满载可用 = 满载加权分摊：船总舱容 ÷ ΣBURN 净日耗（自给材料不计）。
 const supplyText = computed(() => {
   const cap = shipChainCapacity(candidate.ship);
   const days = cap === undefined ? undefined : nativeRouteUsableDays(waypoints.value, cap);
@@ -1013,7 +1013,7 @@ async function showRoute() {
           >（预计，随出发时刻漂移）</div
         >
         <div
-          >一次运输实际可用：<strong>{{ supplyText || '—' }}</strong></div
+          >满载可用：<strong>{{ supplyText || '—' }}</strong></div
         >
         <div
           >出发地库存可支撑：<strong>{{ sustainText }}</strong> 轮</div
