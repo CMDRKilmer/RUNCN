@@ -163,7 +163,15 @@ function onTileReady(tile: PrunTile) {
     () => syncTile(tile),
     { flush: 'post' },
   );
-  onNodeDisconnected(tile.anchor, stop);
+  // 磁贴切走再切回时 frame / anchor 会被复用（tiles.ts 的 retained frame），
+  // 游戏只发一次「anchor 被摘掉」的通知；observer 是从 anchor 自身往下的，
+  // 摘掉 anchor 本身不会让它收到任何 mutation，`!isConnected` 分支也就永远不成立。
+  // 只 stop() 而不 disconnect，旧 observer 会挂在这个复用的 anchor 上继续存活，
+  // 于是每次切回来都多一个 observer，之后每次 DOM 变化就跑 N 次 syncTile。
+  onNodeDisconnected(tile.anchor, () => {
+    observer.disconnect();
+    stop();
+  });
   syncTile(tile);
 }
 

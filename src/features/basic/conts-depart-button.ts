@@ -149,7 +149,12 @@ function onTileReady(tile: PrunTile) {
     () => syncTile(tile),
     { flush: 'post' },
   );
-  onNodeDisconnected(tile.anchor, stop);
+  // 同 CONT 详情：anchor 被复用，摘掉它本身不会触发以它为根的 observer，
+  // 必须显式 disconnect，否则切回来一次就多留一个观察者。
+  onNodeDisconnected(tile.anchor, () => {
+    observer.disconnect();
+    stop();
+  });
   syncTile(tile);
 }
 
