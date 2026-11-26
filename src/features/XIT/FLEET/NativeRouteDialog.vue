@@ -34,6 +34,7 @@ import {
 } from './native-route-socket';
 import {
   DEFAULT_WAYPOINT_FUEL_PERCENT,
+  editableNativeSteps,
   hoursInvalidatedBySettingChange,
   isWaypointPercent,
   type NativeRouteStep,
@@ -323,7 +324,14 @@ const repeats = ref<boolean>();
 const waypointIndex = ref(0);
 const socketWrittenWaypoints = ref(0);
 const stepIndex = ref(0);
-const waypoint = computed(() => waypoints.value[waypointIndex.value]);
+const usingNativeEditor = ref(false);
+const editorWaypoints = computed(() =>
+  waypoints.value.map(waypoint => ({ ...waypoint, steps: editableNativeSteps(waypoint.steps) })),
+);
+const displayedWaypoints = computed(() =>
+  usingNativeEditor.value ? editorWaypoints.value : waypoints.value,
+);
+const waypoint = computed(() => editorWaypoints.value[waypointIndex.value]);
 const step = computed(() => waypoint.value?.steps[stepIndex.value]);
 
 type Progress =
@@ -395,7 +403,7 @@ function recordRoute(routeId: string, naturalId: string) {
     repeats: repeats.value,
     fuelPerRound: loopPlan?.fuel,
     loopOriginReturn: loopPlan === undefined ? undefined : loopReturn,
-    waypoints: waypoints.value.map((waypoint, index) => {
+    waypoints: displayedWaypoints.value.map((waypoint, index) => {
       const reactor = reactorUsagePercents.value[index];
       return {
         location: waypoint.location,
@@ -463,6 +471,9 @@ const retryAction = computed(() => {
 function describe(item: NativeRouteStep) {
   if (item.kind === 'refuel') {
     return `从本站仓库补满 ${item.tank}`;
+  }
+  if (item.kind === 'unload-all') {
+    return '卸载全部';
   }
   return `${item.kind === 'load' ? '装' : '卸'} ${item.amount} ${item.ticker}`;
 }
@@ -753,6 +764,10 @@ async function advanceOnce(retrying: boolean) {
         ...fuelWarnings.value,
         `socket 写入失败：${err instanceof Error ? err.message : String(err)}。改用界面填写。`,
       ];
+      if (waypoints.value.some(x => x.steps.some(step => step.kind === 'unload-all'))) {
+        fuelWarnings.value.push('界面回退按计划逐项卸货。');
+      }
+      usingNativeEditor.value = true;
       progress.value = { phase: 'open' };
     } finally {
       writeTask = undefined;
@@ -1044,7 +1059,7 @@ async function showRoute() {
         试飞，试飞也无结果时保留默认档。创建航线前可以修改百分比。</p
       >
       <ol :class="$style.stops">
-        <li v-for="(stop, i) in waypoints" :key="i">
+        <li v-for="(stop, i) in displayedWaypoints" :key="i">
           <strong>{{ stop.location }}</strong>
           <label>
             · 燃料消耗

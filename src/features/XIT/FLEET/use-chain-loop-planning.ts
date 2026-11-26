@@ -44,12 +44,6 @@ function validateLoopTransfers(plan: ChainPlan, snapshot: ChainPlanningSnapshot)
   if (plan.stops.length === 0) {
     reasons.push('本轮没有可执行的基地装卸。');
   }
-  for (const [ticker, amount] of Object.entries(plan.loopOriginReturn ?? {})) {
-    const missing = amount - (plan.finalUnload[ticker] ?? 0);
-    if (missing > 0) {
-      reasons.push(`出发地「${ticker}」每轮少回运 ${fixed0(missing)}，产量或舱容不足。`);
-    }
-  }
   const stops = new Map(plan.stops.map(stop => [stop.naturalId, stop]));
   const missingDimensions = new Set<string>();
   for (const base of snapshot.bases) {

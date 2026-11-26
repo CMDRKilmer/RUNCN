@@ -8,7 +8,7 @@ import {
   resolveEntity,
 } from '@src/infrastructure/prun-api/data/flight-test-collector';
 import { sendServerMessage } from '@src/infrastructure/prun-api/socket-io-middleware';
-import type { NativeWaypoint } from './native-route-plan';
+import { editableNativeSteps, type NativeWaypoint } from './native-route-plan';
 
 // 原生 RT 的 socket 写入（协议来自游戏实采：SHIP_ROUTES_* 一组 action 消息）。
 // 每次请求下发一份完整的 SHIP_ROUTES_ROUTE（含全部航点/步骤 id），据此串联后续请求。
@@ -233,7 +233,7 @@ export async function socketEditWaypoint(
 export async function socketAddStep(
   routeId: string,
   waypointId: string,
-  type: 'LOAD' | 'UNLOAD' | 'REFUEL',
+  type: 'LOAD' | 'UNLOAD' | 'REFUEL' | 'UNLOAD_ALL',
 ) {
   return await sendRouteAction('SHIP_ROUTES_ADD_STEP', { routeId, waypointId, type }, routeId);
 }
@@ -319,7 +319,7 @@ export async function checkNativeRoute(waypoints: readonly NativeWaypoint[], sig
       }
       addresses.set(location, address);
     }
-    for (const step of waypoint.steps) {
+    for (const step of editableNativeSteps(waypoint.steps)) {
       if (step.kind === 'refuel') {
         continue;
       }
@@ -388,7 +388,7 @@ export async function writeNativeRouteBySocket(
     if (destination === undefined) {
       throw new Error(`航点 ${waypoint.location} 尚未校验。`);
     }
-    for (const step of waypoint.steps) {
+    for (const step of editableNativeSteps(waypoint.steps)) {
       if (step.kind !== 'refuel' && materialIds.get(step.ticker) === undefined) {
         throw new Error(`${waypoint.location} · 物料 ${step.ticker} 尚未校验。`);
       }
@@ -447,7 +447,12 @@ async function writeRoute(
     for (const step of waypoint.steps) {
       signal.throwIfAborted();
       const materialStepType = step.kind === 'load' ? 'LOAD' : 'UNLOAD';
-      const type = step.kind === 'refuel' ? 'REFUEL' : materialStepType;
+      const type =
+        step.kind === 'unload-all'
+          ? 'UNLOAD_ALL'
+          : step.kind === 'refuel'
+            ? 'REFUEL'
+            : materialStepType;
       route = await socketAddStep(route.id, added.id, type);
       const createdSteps = route.waypoints.at(-1)?.steps ?? [];
       if (createdSteps.length <= stepCount) {
@@ -456,6 +461,12 @@ async function writeRoute(
       stepCount = createdSteps.length;
       const addedStep = createdSteps.at(-1)!;
       const stepId = addedStep.id;
+      if (step.kind === 'unload-all') {
+        if (addedStep.type !== 'UNLOAD_ALL') {
+          throw new Error(`${waypoint.location} 的「卸载全部」步骤没有写入。`);
+        }
+        continue;
+      }
       if (step.kind === 'refuel') {
         if (
           addedStep.type !== type ||

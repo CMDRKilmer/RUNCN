@@ -281,7 +281,35 @@ const nativeRouteCandidate = computed(() => {
   return !loading.value && shipPlans.value.length === 1 ? shipPlans.value[0] : undefined;
 });
 
-watch([nativeRouteCandidate, chainGroup], () => {
+const nativeRouteDraft = computed(() => {
+  const candidate = nativeRouteCandidate.value;
+  if (candidate === undefined) {
+    return undefined;
+  }
+  const cargo = candidate.ship.cargoStore;
+  const emptyCargo =
+    cargo !== undefined &&
+    cargo.items.length === 0 &&
+    cargo.weightLoad === 0 &&
+    cargo.volumeLoad === 0;
+  try {
+    return { waypoints: buildNativeWaypoints(candidate.plan, emptyCargo) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+function plannedUnloadAll(plan: ChainPlan, index: number) {
+  return (
+    nativeRouteCandidate.value?.plan === plan &&
+    nativeRouteDraft.value?.waypoints?.[index]?.steps.some(step => step.kind === 'unload-all') ===
+      true
+  );
+}
+
+const unloadAllTooltip = '卸下到站时舱内全部物料，分配前请确认没有计划外物料。';
+
+watch([nativeRouteDraft, chainGroup], () => {
   routeCheckIssues.value = [];
 });
 onBeforeUnmount(() => routeCheck.value?.controller.abort());
@@ -303,7 +331,11 @@ async function generateNativeRoute() {
   routeNotice.value = undefined;
   try {
     const loop = chainLoopMode.value;
-    const waypoints = buildNativeWaypoints(candidate.plan);
+    const draft = nativeRouteDraft.value;
+    if (draft?.waypoints === undefined) {
+      throw new Error(draft?.error ?? '缺少原生 RT 规划。');
+    }
+    const waypoints = draft.waypoints;
     let loopSnapshot;
     if (loop) {
       const estimate = loopPlan.value?.estimate;
@@ -326,7 +358,7 @@ async function generateNativeRoute() {
     if (check.signal.aborted) {
       return;
     }
-    if (nativeRouteCandidate.value !== candidate || chainGroup.value !== group) {
+    if (nativeRouteDraft.value !== draft || chainGroup.value !== group) {
       routeCheckIssues.value = ['规划已更新，请核对后重新生成。'];
       return;
     }
@@ -676,8 +708,9 @@ async function deleteNativeRoute(record: NativeRouteRecord) {
 interface NativeRouteLoad {
   onArrival: { weight: number; volume: number };
   onDeparture: { weight: number; volume: number };
-  // 出现「按容量装载/卸全部」步骤后，具体吨位无法由计划推算，后续行只显示未知。
+  // 按容量装卸后，离站载重未知。全舱卸载会将其重置为零。
   uncertain?: boolean;
+  uncertainChange?: boolean;
 }
 
 function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
@@ -686,8 +719,15 @@ function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
   let uncertain = false;
   for (const waypoint of record.waypoints) {
     const onArrival = { ...state };
+    const uncertainOnArrival = uncertain;
     for (const step of waypoint.steps) {
       if (step.kind === 'refuel') {
+        continue;
+      }
+      if (step.kind === 'unload-all') {
+        state.weight = 0;
+        state.volume = 0;
+        uncertain = false;
         continue;
       }
       if (step.capacity) {
@@ -699,7 +739,12 @@ function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
       state.weight += sign * wv.weight;
       state.volume += sign * wv.volume;
     }
-    loads.push({ onArrival, onDeparture: { ...state }, uncertain: uncertain || undefined });
+    loads.push({
+      onArrival,
+      onDeparture: { ...state },
+      uncertain: uncertain || undefined,
+      uncertainChange: uncertainOnArrival || undefined,
+    });
   }
   return loads;
 }
@@ -725,7 +770,10 @@ function nativeRouteStepMaterials(
   const bills: Record<string, number> = {};
   const capacities: string[] = [];
   for (const step of record.waypoints[index]?.steps ?? []) {
-    if (step.kind === 'refuel' || step.kind !== kind) {
+    if (step.kind === 'unload-all' && kind === 'unload') {
+      capacities.push('全部物料');
+    }
+    if (step.kind !== kind) {
       continue;
     }
     if (step.capacity) {
@@ -784,10 +832,19 @@ function markClassKey(state: RouteStopState): string {
   }
 }
 
-const planTables = computed<ShipChainPlan[]>(() => {
+const loopPreview = computed<ShipChainPlan | undefined>(() => {
   const ship = loopShip.value;
-  const loop = loopPlan.value?.plan;
-  const plans = loopActive.value && ship && loop ? [{ ship, plan: loop }] : shipPlans.value;
+  const plan = loopPlan.value?.plan;
+  return chainLoopMode.value && !loopComputing.value && ship && plan ? { ship, plan } : undefined;
+});
+
+function isLoopPreview(plan: ChainPlan) {
+  return loopPreview.value?.plan === plan;
+}
+
+const planTables = computed<ShipChainPlan[]>(() => {
+  const preview = loopPreview.value;
+  const plans = chainLoopMode.value ? (preview === undefined ? [] : [preview]) : shipPlans.value;
   if (
     generationCandidate &&
     !plans.some(x => x.ship.ship.id === generationCandidate.ship.ship.id)
@@ -798,16 +855,15 @@ const planTables = computed<ShipChainPlan[]>(() => {
 });
 
 const planFlightTimesLoading = computed(() =>
-  loopActive.value ? loopComputing.value : flightTimesLoading.value,
+  chainLoopMode.value ? loopComputing.value : flightTimesLoading.value,
 );
 const planFlightEstimates = computed(() => {
   const estimates = new Map<string, ChainFlightEstimate>();
   for (const { ship, plan } of planTables.value) {
     const shipId = ship.ship.id;
-    const estimate =
-      loopActive.value && shipId === loopShip.value?.ship.id
-        ? loopPlan.value?.estimate
-        : flightEstimates.value.get(shipId);
+    const estimate = isLoopPreview(plan)
+      ? loopPlan.value?.estimate
+      : flightEstimates.value.get(shipId);
     if (
       estimate?.legs.length === plan.stops.length + 1 &&
       sameNaturalId(estimate.legs[0]?.from, plan.originNaturalId) &&
@@ -1134,9 +1190,12 @@ function flightTotalText(shipId: string): string {
         :class="loopActive ? $style.allocOk : $style.notice">
         <template v-if="loopShip === undefined">循环模式仅支持单船：请只分配一艘船。</template>
         <template v-else-if="loopComputing">循环周期估算中…</template>
-        <template v-else-if="loopPlan && !loopPlan.ok"
-          >循环模式不可用：{{ loopPlan.reasons.join('；') }}</template
-        >
+        <template v-else-if="loopPlan && !loopPlan.ok">
+          循环模式不可用：{{ loopPlan.reasons.join('；') }}
+          <div v-if="loopPreview && loopPlan.supplyDays !== undefined">
+            下方预览按 {{ loopPlan.supplyDays }} 天配货
+          </div>
+        </template>
         <template v-else-if="loopActive">
           循环模式 · 每轮按 {{ loopPlan?.supplyDays }} 天配货 · 预计飞行 {{ loopCycleText
           }}<template v-if="loopSupplyText"> · 满载可用 {{ loopSupplyText }}</template>
@@ -1190,8 +1249,16 @@ function flightTotalText(shipId: string): string {
                 }}<BaseAlias v-if="stop.naturalId" :natural-id="stop.naturalId" />
               </span>
             </template>
-            <span :class="$style.routeArrow">→</span>
-            <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+            <span
+              v-if="isLoopPreview(sp.plan)"
+              :class="$style.routeArrow"
+              :data-tooltip="`归航至 ${sp.plan.originNaturalId}`"
+              >↺</span
+            >
+            <template v-else>
+              <span :class="$style.routeArrow">→</span>
+              <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
+            </template>
           </div>
         </div>
 
@@ -1217,7 +1284,7 @@ function flightTotalText(shipId: string): string {
               <th>操作</th>
               <th
                 :data-tooltip="
-                  loopActive
+                  isLoopPreview(sp.plan)
                     ? '油耗与档位采用循环规划结果'
                     : '按当前规划估算，创建原生 RT 时会核算写入档位'
                 ">
@@ -1232,9 +1299,28 @@ function flightTotalText(shipId: string): string {
               <td :class="$style.narrowCol">
                 <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
               </td>
-              <td v-if="loopActive" :class="$style.matCell">
-                <span :class="$style.opsLabel">每轮装船</span>
-                [{{ formatMaterials(sp.plan.cxBill) || '无' }}]
+              <td v-if="isLoopPreview(sp.plan)" :class="$style.matCell">
+                <div v-if="formatMaterials(sp.plan.finalUnload)">
+                  <span
+                    :class="$style.opsLabel"
+                    :data-tooltip="
+                      plannedUnloadAll(sp.plan, sp.plan.stops.length + 1)
+                        ? unloadAllTooltip
+                        : undefined
+                    "
+                    >{{
+                      plannedUnloadAll(sp.plan, sp.plan.stops.length + 1)
+                        ? '归航卸载全部'
+                        : '归航卸货'
+                    }}</span
+                  >
+                  [{{ formatMaterials(sp.plan.finalUnload) }}]
+                </div>
+                <div><span :class="$style.opsLabel">补满</span> [STL、FTL]</div>
+                <div>
+                  <span :class="$style.opsLabel">每轮装船</span>
+                  [{{ formatMaterials(sp.plan.cxBill) || '无' }}]
+                </div>
               </td>
               <td v-else :class="$style.matCell">
                 <div>
@@ -1246,7 +1332,17 @@ function flightTotalText(shipId: string): string {
                   [{{ formatMaterials(spaceStationTake(sp.plan)) || '无' }}]
                 </div>
               </td>
-              <td :class="$style.matCell">出发</td>
+              <td
+                v-if="isLoopPreview(sp.plan)"
+                :class="$style.matCell"
+                :data-tooltip="flightCellTitle(sp.ship.ship.id, sp.plan.stops.length)"
+                data-tooltip-position="top">
+                ↺ 归航{{ flightCellText(sp.ship.ship.id, sp.plan.stops.length) }}
+                <div :class="$style.loadSub">
+                  {{ flightFuelText(sp.ship.ship.id, sp.plan.stops.length) }}
+                </div>
+              </td>
+              <td v-else :class="$style.matCell">出发</td>
               <td :class="$style.narrowCol">
                 {{ formatLoadCell(sp.plan.loadOnDeparture, sp.plan.capacity) }}
               </td>
@@ -1259,7 +1355,11 @@ function flightTotalText(shipId: string): string {
               </td>
               <td :class="$style.matCell">
                 <div>
-                  <span :class="$style.opsLabel">卸货</span>
+                  <span
+                    :class="$style.opsLabel"
+                    :data-tooltip="plannedUnloadAll(sp.plan, i + 1) ? unloadAllTooltip : undefined"
+                    >{{ plannedUnloadAll(sp.plan, i + 1) ? '卸载全部' : '卸货' }}</span
+                  >
                   [{{ formatUnloadAt(stop) || '无' }}]
                 </div>
                 <div>
@@ -1280,13 +1380,23 @@ function flightTotalText(shipId: string): string {
                 <div :class="$style.loadSub">{{ formatLoadDelta(stop) }}</div>
               </td>
             </tr>
-            <tr>
+            <tr v-if="!isLoopPreview(sp.plan)">
               <td :class="$style.narrowCol">{{ sp.plan.stops.length + 1 }}</td>
               <td :class="$style.narrowCol">
                 <span :class="$style.routeOrigin">{{ sp.plan.originNaturalId }}</span>
               </td>
               <td :class="$style.matCell">
-                <span :class="$style.opsLabel">卸货</span>
+                <span
+                  :class="$style.opsLabel"
+                  :data-tooltip="
+                    plannedUnloadAll(sp.plan, sp.plan.stops.length + 1)
+                      ? unloadAllTooltip
+                      : undefined
+                  "
+                  >{{
+                    plannedUnloadAll(sp.plan, sp.plan.stops.length + 1) ? '卸载全部' : '卸货'
+                  }}</span
+                >
                 [{{ formatMaterials(sp.plan.finalUnload) || '无' }}]
               </td>
               <td
@@ -1323,7 +1433,7 @@ function flightTotalText(shipId: string): string {
           </div>
           <div v-if="Object.keys(sp.plan.purchaseBill).length > 0" :class="$style.summaryRow">
             <span :class="$style.summaryLabel">{{
-              loopActive ? '每轮采购估算：' : '采购花费：'
+              isLoopPreview(sp.plan) ? '每轮采购估算：' : '采购花费：'
             }}</span>
             <span>{{ formatCurrency(billCost(sp.plan.purchaseBill)) }}</span>
           </div>
@@ -1513,14 +1623,16 @@ function flightTotalText(shipId: string): string {
                   <template v-if="entry.loads[index]">
                     <div
                       v-if="entry.loads[index]!.uncertain"
-                      data-tooltip="该航段含「按容量装载」或「卸全部」步骤，载重无法精确计算"
+                      data-tooltip="该航段含按容量装卸的步骤，载重无法精确计算"
                       >—</div
                     >
                     <template v-else>
                       <div>{{
                         formatLoadCell(entry.loads[index]!.onDeparture, entry.capacity)
                       }}</div>
-                      <div :class="$style.loadSub">{{ formatLoadChange(entry.loads[index]!) }}</div>
+                      <div v-if="!entry.loads[index]!.uncertainChange" :class="$style.loadSub">{{
+                        formatLoadChange(entry.loads[index]!)
+                      }}</div>
                     </template>
                   </template>
                   <span v-else>—</span>
