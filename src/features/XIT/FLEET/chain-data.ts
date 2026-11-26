@@ -260,7 +260,7 @@ export function effectiveBurn(siteId: string): BurnValues | undefined {
 }
 
 // 循环账单：周期净缺口（周期 × BURN 日耗扣自产），自给/净产不送。
-function loopBurnBill(burn: BurnValues, days: number): Record<string, number> {
+export function loopBurnBill(burn: BurnValues, days: number): Record<string, number> {
   const bill: Record<string, number> = {};
   for (const [ticker, mat] of Object.entries(burn)) {
     const amount = cycleDelivery(mat, days);

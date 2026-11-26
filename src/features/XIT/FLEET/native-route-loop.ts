@@ -123,6 +123,55 @@ export function roundBill(
   return bill;
 }
 
+export function loopRecurringBill(
+  cargo: Readonly<Record<string, number>>,
+  returned: Readonly<Record<string, number>>,
+  fuel: LoopFuel,
+) {
+  const external: Record<string, number> = {};
+  for (const [ticker, amount] of Object.entries(cargo)) {
+    const required = amount - (returned[ticker] ?? 0);
+    if (required > 0) {
+      external[ticker] = required;
+    }
+  }
+  return roundBill(external, fuel);
+}
+
+export function loopStockingBill(
+  cargo: Readonly<Record<string, number>>,
+  returned: Readonly<Record<string, number>>,
+  fuel: LoopFuel,
+  firstRefill: LoopFuel,
+  rounds: number,
+) {
+  const bill = roundBill(cargo, firstRefill);
+  if (rounds > 1) {
+    for (const [ticker, amount] of Object.entries(loopRecurringBill(cargo, returned, fuel))) {
+      bill[ticker] = (bill[ticker] ?? 0) + (rounds - 1) * amount;
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(bill).map(([ticker, amount]) => [ticker, Math.ceil(amount)]),
+  );
+}
+
+export function loopStockingRounds(
+  firstBill: Readonly<Record<string, number>>,
+  recurringBill: Readonly<Record<string, number>>,
+  stock: Readonly<Record<string, number>>,
+) {
+  const remaining = { ...stock };
+  for (const [ticker, amount] of Object.entries(firstBill)) {
+    const balance = (stock[ticker] ?? 0) - amount;
+    if (balance < 0) {
+      return 0;
+    }
+    remaining[ticker] = balance;
+  }
+  return 1 + sustainRounds(recurringBill, remaining);
+}
+
 export function billWeightVolume(
   bill: Readonly<Record<string, number>>,
   materials: Readonly<Record<string, { weight: number; volume: number }>>,
@@ -140,13 +189,18 @@ export function billWeightVolume(
 export function stockingRoundsMax(
   capacity: { weight: number; volume: number },
   cycle: { weight: number; volume: number },
+  first: { weight: number; volume: number } = cycle,
 ): number {
-  if (cycle.weight <= 0 && cycle.volume <= 0) {
+  if (
+    (cycle.weight <= 0 && cycle.volume <= 0) ||
+    first.weight > capacity.weight ||
+    first.volume > capacity.volume
+  ) {
     return 1;
   }
-  const byWeight = cycle.weight > 0 ? capacity.weight / cycle.weight : Infinity;
-  const byVolume = cycle.volume > 0 ? capacity.volume / cycle.volume : Infinity;
-  return Math.max(1, Math.floor(Math.min(byWeight, byVolume)));
+  const byWeight = cycle.weight > 0 ? (capacity.weight - first.weight) / cycle.weight : Infinity;
+  const byVolume = cycle.volume > 0 ? (capacity.volume - first.volume) / cycle.volume : Infinity;
+  return Math.max(1, 1 + Math.floor(Math.min(byWeight, byVolume)));
 }
 
 // 出发地库存可支撑轮数：按账单里最先耗尽的物料计算。空账单无消耗 → Infinity。
