@@ -37,6 +37,7 @@ import {
   editableNativeSteps,
   hoursInvalidatedBySettingChange,
   isWaypointPercent,
+  withOriginRefuels,
   type NativeRouteStep,
   type RouteTank,
 } from './native-route-plan';
@@ -139,16 +140,7 @@ const reactorUsageValid = computed(() =>
 const usageValid = computed(() => fuelUsageValid.value && reactorUsageValid.value);
 const fuelStatus = ref<string>();
 const fuelWarnings = ref<string[]>([]);
-const waypoints = computed(() =>
-  initialWaypoints.map((stop, index) =>
-    index === 0
-      ? {
-          ...stop,
-          steps: [...tanks.value.map(tank => ({ kind: 'refuel' as const, tank })), ...stop.steps],
-        }
-      : stop,
-  ),
-);
+const waypoints = computed(() => withOriginRefuels(initialWaypoints, tanks.value));
 const purchase = nativeRoutePlannedPurchasePackage(candidate.ship, candidate.plan);
 const hasPurchase = purchase.groups.some(group => Object.keys(group.materials ?? {}).length > 0);
 
@@ -475,6 +467,9 @@ function describe(item: NativeRouteStep) {
   if (item.kind === 'unload-all') {
     return '卸载全部';
   }
+  if (item.minimum === 0) {
+    return `最多卸 ${item.amount} ${item.ticker}`;
+  }
   return `${item.kind === 'load' ? '装' : '卸'} ${item.amount} ${item.ticker}`;
 }
 
@@ -487,7 +482,7 @@ const actionLabel = computed(() => {
     case 'open':
       return '打开原生 RT';
     case 'create':
-      return '创建单趟航线';
+      return '创建航线';
     case 'open-route':
       return `打开 ${routeId.value ?? 'RT'}`;
     case 'select':
@@ -541,7 +536,7 @@ function setLoopWarning(message: string | undefined) {
 }
 
 // 循环模式：航点/步骤写完后打开游戏 Loop（SHIP_ROUTES_SET_REPEAT），用响应 repeats 校验。
-// 失败保留单趟航线并提示手动开启——开关与航点/步骤独立，socket 不可用时不阻断已写好的航线。
+// 开关与航点、步骤独立；失败时保留已写好的航线，分配前需手动开启 Loop。
 async function enableLoop() {
   const routeKey = routeId.value;
   if (!loop || routeKey === undefined) {
@@ -574,7 +569,7 @@ async function enableLoop() {
     repeats.value = false;
     setLoopWarning(
       `循环开关打开失败：${err instanceof Error ? err.message : String(err)}。` +
-        '已保留单趟航线，请在原生 RT 手动开启 Loop 后再分配。',
+        '已保留航线，请在原生 RT 手动开启 Loop 后再分配。',
     );
   }
 }
@@ -919,7 +914,9 @@ async function showRoute() {
     </p>
     <p v-else-if="progress.phase === 'done'" :class="$style.status" role="status">
       已生成。
-      <template v-if="loop && repeats === true">循环已开启。</template>
+      <template v-if="loop && repeats === true"
+        >循环已开启。关闭 Loop 生效时，飞船会停在末个基地。</template
+      >
       <template v-else-if="loop">循环尚未开启，请先打开 Loop。</template>
       <template v-else-if="repeats === false">循环已关闭。</template>
       <template v-else-if="repeats === true">循环已开启，请先在原生 RT 关闭 Loop。</template>

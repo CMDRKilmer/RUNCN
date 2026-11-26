@@ -2,7 +2,7 @@ import type { ShipChainPlan } from './chain-allocation';
 import type { NativeRouteLegPercent, NativeWaypoint } from './native-route-plan';
 import type { CheckedRoute } from './native-route-socket';
 
-interface NativeRouteLoopSnapshot {
+export interface NativeRouteLoopSnapshot {
   cycleHours: number;
   fuel: { stl: number; ftl: number };
   legs: NativeRouteLegPercent[];

@@ -2,8 +2,8 @@
 // Usage: node --experimental-strip-types scripts/verify-fleet-contracts.mjs.
 // Exit 0 = PASS (last line PASS n/n); assertions fail with exit 1.
 // Game stores, transport and windows are fixtures. Hook lifecycle cases defer the estimator; flight models have separate regressions.
-// Native RT merge cases drive the real record merge against fixture route payloads; they cover duration invalidation only.
-// Native RT writer cases verify that preflight errors prevent creation and that matching responses skip edits.
+// Native RT merge cases check flight duration and resupply snapshots against fixture route payloads.
+// Native RT writer cases check preflight, material step limits and skipping edits for matching responses.
 // The fill-inventory cases cover how a ship's fitted days become each base's planned days.
 // CX BURN cases cover deduplicating route bases and replacing their inventory with CX stock.
 // This does not execute browser actions or contact a server.
@@ -76,8 +76,14 @@ const {
   loopEligibility,
 } = await import('../src/features/XIT/FLEET/native-route-loop.ts');
 const { shipFuelRemainingFor } = await import('../src/features/XIT/FTC/ship-fuel.ts');
-const { checkNativeRoute, socketEditStep, socketEditRefuelStep, writeNativeRouteBySocket } =
-  await import('../src/features/XIT/FLEET/native-route-socket.ts');
+const {
+  checkNativeRoute,
+  planNativeRouteCargoUpdate,
+  socketEditStep,
+  socketEditRefuelStep,
+  updateNativeRouteCargo,
+  writeNativeRouteBySocket,
+} = await import('../src/features/XIT/FLEET/native-route-socket.ts');
 let passes = 0;
 async function check(name, fn) {
   userData.actionPackages = [];
@@ -135,7 +141,7 @@ const ship = (id, items = []) => ({
     volumeLoad: 0,
   },
 });
-await check('native RT keeps warehouse departure and return as separate waypoints', () => {
+await check('native RT merges warehouse stops only for a repeating route', () => {
   const plan = {
     originNaturalId: 'CX',
     cxBill: { RAT: 14 },
@@ -173,6 +179,15 @@ await check('native RT keeps warehouse departure and return as separate waypoint
     location: 'CX',
     steps: [],
   });
+  const loop = buildNativeWaypoints(plan, false, true);
+  assert.deepEqual(loop.map(x => x.location), ['CX', 'A', 'B']);
+  assert.deepEqual(loop[0].steps, [
+    { kind: 'unload', ticker: 'FE', amount: 3, minimum: 0 },
+    { kind: 'load', ticker: 'RAT', amount: 14 },
+  ]);
+  const emptyLoop = buildNativeWaypoints(plan, true, true);
+  assert.equal(emptyLoop[0].steps[0].kind, 'unload-all');
+  assert.deepEqual(editableNativeSteps(emptyLoop[0].steps), loop[0].steps);
   assert.throws(() => buildNativeWaypoints({ ...plan, hasUnmetChainDemand: true }));
   const procurement = nativeRoutePlannedPurchasePackage(ship('S'), plan);
   assert.deepEqual(
@@ -1102,6 +1117,33 @@ function mergedHours(localStops, serverStops, hours, executingShipId = 'S') {
 const stops = (...fuel) =>
   fuel.map((fuelPercent, index) => ({ location: `B${index}`, fuelPercent }));
 
+await check('native RT preserves the merged warehouse estimate and resupply snapshot', () => {
+  const points = stops(60, 25);
+  points[0].refuels = ['STL', 'FTL'];
+  const local = nativeRouteLocal(points, [20, 10]);
+  local.loop = true;
+  local.loopOriginReturn = { RAT: 4 };
+  local.waypoints[0].steps.unshift({ kind: 'unload', ticker: 'RAT', amount: 4, minimum: 0 });
+  const server = nativeRouteServer(points);
+  server.repeats = true;
+  server.waypoints[0].steps.unshift({
+    type: 'UNLOAD',
+    material: { ticker: 'RAT' },
+    minimum: { type: 'ABSOLUTE', units: 0 },
+    maximum: { type: 'ABSOLUTE', units: 4 },
+  });
+  const merged = mergeRouteRecord(server, 'S', local);
+  assert.deepEqual(merged.waypoints.map(x => x.flightHours), [20, 10]);
+  assert.deepEqual(merged.loopOriginReturn, { RAT: 4 });
+  server.waypoints[1].fuelUsageFactor = 0.35;
+  assert.deepEqual(
+    mergeRouteRecord(server, 'S', local).waypoints.map(x => x.flightHours),
+    [undefined, undefined],
+  );
+  server.waypoints[0].steps[0].minimum.units = 4;
+  assert.equal(mergeRouteRecord(server, 'S', local).loopOriginReturn, undefined);
+});
+
 await check('native RT reads UNLOAD_ALL and includes it in flight estimate invalidation', () => {
   const points = stops(25, 50, 50);
   const local = nativeRouteLocal(points, [undefined, 10, 20]);
@@ -1336,6 +1378,16 @@ await check('native RT progress: arrival at the origin keeps the return-leg posi
   arrive();
   assert.deepEqual(routeStopStates(record, docked('A')), ['done', 'done', 'arrived']);
   assert.equal(routeProgressText(record, docked('A')), '3/3');
+});
+
+await check('native RT progress: a compact loop returns to its first waypoint', () => {
+  const { record, docked, flying, arrive } = nativeRouteProgressCase();
+  record.repeats = true;
+  record.waypoints.pop();
+  assert.deepEqual(routeStopStates(record, flying('B', 'A')), ['transit', 'pending']);
+  arrive();
+  assert.deepEqual(routeStopStates(record, docked('A')), ['arrived', 'pending']);
+  assert.equal(routeProgressText(record, docked('A')), '1/2');
 });
 
 // ---- 「运行中」列表：所有创建过的航线都要出现 ----
@@ -2355,6 +2407,7 @@ await check(
       {
         location: 'CX',
         steps: [
+          { kind: 'unload', ticker: 'H2O', amount: 4, minimum: 0 },
           { kind: 'refuel', tank: 'STL' },
           { kind: 'load', ticker: 'H2O', amount: 10 },
         ],
@@ -2401,6 +2454,20 @@ await check(
     await reply('CREATE_ROUTE');
     route.waypoints.push(first);
     await reply('ADD_WAYPOINT');
+    const returnUnload = {
+      id: 's0',
+      type: 'UNLOAD',
+      material: { id: 'water' },
+      minimum: { type: 'ABSOLUTE', units: 1 },
+      maximum: { type: 'ABSOLUTE', units: 4 },
+      retain: 0,
+    };
+    first.steps.push(returnUnload);
+    await reply('ADD_STEP');
+    returnUnload.minimum.units = 0;
+    await reply('EDIT_UNLOAD_STEP');
+    assert.deepEqual(socketMessages.at(-1).payload.minimum, { type: 'ABSOLUTE', units: 0 });
+    assert.deepEqual(socketMessages.at(-1).payload.maximum, { type: 'ABSOLUTE', units: 4 });
     first.steps.push({
       id: 's1',
       type: 'REFUEL',
@@ -2442,9 +2509,150 @@ await check(
     assert.equal(result.routeId, 'r1');
     assert.equal(result.repeats, false);
     assert.deepEqual(completedWaypoints, [0, 0, 1, 2]);
-    assert.equal(socketMessages.length, 10);
+    assert.equal(socketMessages.length, 12);
   },
 );
+
+function nativeCargoUpdateFixture() {
+  const route = nativeRouteServer([
+    { location: 'CX', fuelPercent: 35, refuels: ['STL'] },
+    { location: 'A', fuelPercent: 25 },
+  ]);
+  route.repeats = true;
+  route.waypoints[0].steps[0].source = 'LOCAL_STORE';
+  const load = (id, type, units, minimum = units) => ({
+    id,
+    type,
+    material: { id: 'water', ticker: 'H2O' },
+    maximum: { type: 'ABSOLUTE', units },
+    minimum: { type: 'ABSOLUTE', units: minimum },
+    retain: 0,
+  });
+  route.waypoints[0].steps.unshift(load('return', 'UNLOAD', 4, 0));
+  route.waypoints[0].steps.push(load('warehouse-load', 'LOAD', 10));
+  route.waypoints[1].steps.push(load('base-unload', 'UNLOAD', 10));
+  route.waypoints[1].steps.push(load('base-load', 'LOAD', 4));
+  const plan = {
+    waypoints: [
+      {
+        location: 'CX',
+        steps: [
+          { kind: 'unload', ticker: 'H2O', amount: 5, minimum: 0 },
+          { kind: 'refuel', tank: 'STL' },
+          { kind: 'load', ticker: 'H2O', amount: 10 },
+        ],
+      },
+      {
+        location: 'A',
+        steps: [
+          { kind: 'unload', ticker: 'H2O', amount: 10 },
+          { kind: 'load', ticker: 'H2O', amount: 5 },
+        ],
+      },
+    ],
+    legs: [{ fuelPercent: 35 }, { fuelPercent: 25 }],
+    checkedRoute: {
+      issues: [],
+      addresses: new Map([['CX', 'S|PLA|STA,CX'], ['A', 'S|PLA|STA,A']]),
+      materialIds: new Map([['H2O', 'water']]),
+    },
+  };
+  return { route, plan };
+}
+
+await check('RT cargo preview rejects different steps and different flight settings', () => {
+  const { route, plan } = nativeCargoUpdateFixture();
+  const changes = planNativeRouteCargoUpdate(route, plan);
+  assert.deepEqual(changes.map(x => [x.stepId, x.before, x.amount, x.minimum]), [
+    ['return', 4, 5, 0],
+    ['base-load', 4, 5, 5],
+  ]);
+  const different = structuredClone(route);
+  different.waypoints[0].fuelUsageFactor = 0.4;
+  assert.equal(planNativeRouteCargoUpdate(different, plan), undefined);
+  different.waypoints[0].fuelUsageFactor = 0.35;
+  different.waypoints[0].steps[0].minimum.units = 4;
+  assert.equal(planNativeRouteCargoUpdate(different, plan), undefined);
+  different.waypoints[0].steps[0].minimum.units = 0;
+  different.waypoints[0].steps.reverse();
+  assert.equal(planNativeRouteCargoUpdate(different, plan), undefined);
+});
+
+await check('RT cargo update writes only changed amounts to existing step IDs', async () => {
+  socketMessages.length = 0;
+  const { route, plan } = nativeCargoUpdateFixture();
+  const changes = planNativeRouteCargoUpdate(route, plan);
+  let started = 0;
+  const written = updateNativeRouteCargo(route.id, plan, changes, () => true, () => started++);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(socketMessages.at(-1).messageType, 'SHIP_ROUTES_GET_ROUTES');
+  dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes: [structuredClone(route)] } });
+  for (const [index, change] of changes.entries()) {
+    await new Promise(resolve => setImmediate(resolve));
+    const { messageType, payload } = socketMessages.at(-1);
+    assert.equal(
+      messageType,
+      index === 0 ? 'SHIP_ROUTES_EDIT_UNLOAD_STEP' : 'SHIP_ROUTES_EDIT_LOAD_STEP',
+    );
+    assert.equal(payload.routeId, 'route-1');
+    assert.equal(payload.stepId, index === 0 ? 'return' : 'base-load');
+    assert.equal(payload.minimum.units, index === 0 ? 0 : 5);
+    assert.equal(payload.maximum.units, 5);
+    const step = route.waypoints[index].steps.find(step => step.id === change.stepId);
+    step.minimum.units = payload.minimum.units;
+    step.maximum.units = payload.maximum.units;
+    dispatchForce({ type: 'SHIP_ROUTES_ROUTE', data: structuredClone(route) });
+  }
+  assert.equal((await written).naturalId, 'RT-A-1');
+  assert.equal(started, 1);
+  assert.equal(socketMessages.length, 3);
+  assert.deepEqual(planNativeRouteCargoUpdate(route, plan), []);
+
+  const resync = updateNativeRouteCargo(
+    route.id,
+    plan,
+    [],
+    () => true,
+    () => assert.fail('unexpected write'),
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes: [structuredClone(route)] } });
+  assert.equal((await resync).id, route.id);
+  assert.equal(socketMessages.length, 4);
+  assert.equal(socketMessages.at(-1).messageType, 'SHIP_ROUTES_GET_ROUTES');
+});
+
+await check('RT cargo update rechecks preview and stops if a ship is assigned mid-write', async () => {
+  socketMessages.length = 0;
+  const { route, plan } = nativeCargoUpdateFixture();
+  const changes = planNativeRouteCargoUpdate(route, plan);
+  let unassigned = true;
+  const changedRoute = structuredClone(route);
+  changedRoute.waypoints[0].steps[0].maximum.units = 6;
+  const stale = assert.rejects(
+    updateNativeRouteCargo(route.id, plan, changes, () => true, () => assert.fail('unexpected write')),
+    /已变化/,
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes: [changedRoute] } });
+  await stale;
+  assert.equal(socketMessages.length, 1);
+
+  const partial = assert.rejects(
+    updateNativeRouteCargo(route.id, plan, changes, () => unassigned, () => {}),
+    /无法确认原生 RT 未分配/,
+  );
+  await new Promise(resolve => setImmediate(resolve));
+  dispatchForce({ type: 'SHIP_ROUTES_ROUTES', data: { routes: [structuredClone(route)] } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(socketMessages.at(-1).payload.stepId, 'return');
+  route.waypoints[0].steps[0].maximum.units = 5;
+  unassigned = false;
+  dispatchForce({ type: 'SHIP_ROUTES_ROUTE', data: structuredClone(route) });
+  await partial;
+  assert.equal(socketMessages.length, 3);
+  assert.deepEqual(planNativeRouteCargoUpdate(route, plan).map(x => x.stepId), ['base-load']);
+});
 
 const loopInput = bs => ({
   ship: { id: 'S', registration: 'S' },
@@ -2651,7 +2859,7 @@ await check('native RT merge: server repeats overrides local loop snapshot', () 
   assert.equal(fresh.cycleHours, undefined);
 });
 
-await check('native RT merge: step amount reads from maximum, min range is not recorded', () => {
+await check('native RT merge: load and exact unload amounts read from maximum', () => {
   const waypoint = steps => ({
     id: 'w0',
     destination: 'S|PLA|STA,B0',
@@ -2684,7 +2892,6 @@ await check('native RT merge: step amount reads from maximum, min range is not r
     ],
   };
   const stepsOut = mergeRouteRecord(server, undefined, undefined).waypoints[0].steps;
-  // 玩家手建的 min≠max 也只按 maximum.units 记数量：RPrun 不写、不存弹性区间。
   assert.deepEqual(stepsOut, [
     { kind: 'load', ticker: 'RAT', amount: 50, capacity: undefined },
     { kind: 'unload', ticker: 'RAT', amount: 50, capacity: undefined },

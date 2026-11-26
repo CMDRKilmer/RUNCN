@@ -23,7 +23,7 @@ import { useTileState } from '@src/store/user-data-tiles';
 
 import { showConfirmationOverlay } from '@src/infrastructure/prun-ui/tile-overlay';
 import { showBuffer } from '@src/infrastructure/prun-ui/buffers';
-import { buildNativeWaypoints, DEFAULT_WAYPOINT_FUEL_PERCENT } from './native-route-plan';
+import { buildNativeWaypoints, withOriginRefuels, type NativeWaypoint } from './native-route-plan';
 import {
   nativeRouteRecords,
   recordNativeRoute,
@@ -33,12 +33,18 @@ import {
 import {
   checkNativeRoute,
   hasPendingRouteRequest,
+  planNativeRouteCargoUpdate,
   socketDeleteRoute,
   socketGetRoutes,
+  updateNativeRouteCargo,
+  type NativeRouteCargoChange,
+  type RouteData,
+  type RouteWritePlan,
 } from './native-route-socket';
 import { readRouteExecutions } from './native-route-rte';
 import type { RouteStatus } from './native-route-rte';
 import {
+  gameRouteRecord,
   matchRunningRoutes,
   recordsToRemoveAfterDelete,
   routeProgressText,
@@ -47,7 +53,7 @@ import {
   type RouteStopState,
 } from './native-route-game';
 import { gameRouteDefinitions, gameRunningRoutes, liveNativeRoutes } from './native-route-live';
-import type { NativeRouteGeneration } from './native-route-generation';
+import type { NativeRouteGeneration, NativeRouteLoopSnapshot } from './native-route-generation';
 import { stagedDispatch } from './staged';
 import {
   nativeRoutePurchasePackage,
@@ -293,7 +299,7 @@ const nativeRouteDraft = computed(() => {
     cargo.weightLoad === 0 &&
     cargo.volumeLoad === 0;
   try {
-    return { waypoints: buildNativeWaypoints(candidate.plan, emptyCargo) };
+    return { waypoints: buildNativeWaypoints(candidate.plan, emptyCargo, chainLoopMode.value) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
@@ -314,12 +320,35 @@ watch([nativeRouteDraft, chainGroup], () => {
 });
 onBeforeUnmount(() => routeCheck.value?.controller.abort());
 
+function captureLoopSnapshot(
+  candidate: ShipChainPlan,
+  waypointCount: number,
+): NativeRouteLoopSnapshot {
+  const estimate = loopPlan.value?.estimate;
+  if (estimate === undefined || estimate.legs.length !== waypointCount) {
+    throw new Error('循环估时与航点不匹配。');
+  }
+  const legs = estimate.legs.map(leg => {
+    if (leg.settings === undefined) {
+      throw new Error(`${leg.from} → ${leg.to} 缺少循环飞行档位。`);
+    }
+    return leg.settings;
+  });
+  return {
+    cycleHours: estimate.totalHours,
+    fuel: fuelPerRound(estimate.legs, chainShipFuelCaps(candidate.ship.ship)),
+    // 档位按目的地存储，归航段对应第 0 个航点。
+    legs: [legs.at(-1)!, ...legs.slice(0, -1)],
+  };
+}
+
 async function generateNativeRoute() {
   const candidate = nativeRouteCandidate.value;
   if (
     candidate === undefined ||
     generationCandidate !== undefined ||
     routeCheck.value !== undefined ||
+    cargoUpdating.value ||
     chainTab.value !== 'plan'
   ) {
     return;
@@ -328,6 +357,7 @@ async function generateNativeRoute() {
   const check = new AbortController();
   routeCheck.value = { controller: check, shipId: candidate.ship.ship.id };
   routeCheckIssues.value = [];
+  cargoUpdatePreview.value = undefined;
   routeNotice.value = undefined;
   try {
     const loop = chainLoopMode.value;
@@ -336,24 +366,7 @@ async function generateNativeRoute() {
       throw new Error(draft?.error ?? '缺少原生 RT 规划。');
     }
     const waypoints = draft.waypoints;
-    let loopSnapshot;
-    if (loop) {
-      const estimate = loopPlan.value?.estimate;
-      if (estimate === undefined || estimate.legs.length !== waypoints.length - 1) {
-        throw new Error('循环估时与航点不匹配。');
-      }
-      const legs = estimate.legs.map(leg => {
-        if (leg.settings === undefined) {
-          throw new Error(`${leg.from} → ${leg.to} 缺少循环飞行档位。`);
-        }
-        return leg.settings;
-      });
-      loopSnapshot = {
-        cycleHours: estimate.totalHours,
-        fuel: fuelPerRound(estimate.legs, chainShipFuelCaps(candidate.ship.ship)),
-        legs: [{ fuelPercent: DEFAULT_WAYPOINT_FUEL_PERCENT }, ...legs],
-      };
-    }
+    const loopSnapshot = loop ? captureLoopSnapshot(candidate, waypoints.length) : undefined;
     const checkedRoute = await checkNativeRoute(waypoints, check.signal);
     if (check.signal.aborted) {
       return;
@@ -379,6 +392,183 @@ async function generateNativeRoute() {
     }
   } finally {
     routeCheck.value = undefined;
+  }
+}
+
+interface CargoUpdateOption {
+  record: NativeRouteRecord;
+  changes: NativeRouteCargoChange[];
+}
+
+interface CargoUpdatePreview {
+  companyId: string;
+  draftWaypoints: NativeWaypoint[];
+  plan: RouteWritePlan;
+  snapshot: NativeRouteLoopSnapshot;
+  returned: ChainPlan['loopOriginReturn'];
+  options: CargoUpdateOption[];
+}
+
+const cargoUpdatePreview = shallowRef<CargoUpdatePreview>();
+const cargoUpdateRouteId = ref<string>();
+const cargoUpdating = ref(false);
+const cargoUpdateChoice = computed(() =>
+  cargoUpdatePreview.value?.options.find(
+    option => option.record.routeId === cargoUpdateRouteId.value,
+  ),
+);
+const cargoUpdateOptions = computed(() =>
+  (cargoUpdatePreview.value?.options ?? []).map(({ record }) => ({
+    value: record.routeId,
+    label: `${record.name}（${record.naturalId}）`,
+  })),
+);
+watch([nativeRouteDraft, chainGroup], () => (cargoUpdatePreview.value = undefined));
+
+function routeIsUnassigned(route: RouteData) {
+  return (
+    shipsStore.all.value?.every(
+      ship =>
+        ship.assignedRoute !== undefined &&
+        !sameNaturalId(ship.assignedRoute ?? undefined, route.id) &&
+        !sameNaturalId(ship.assignedRoute ?? undefined, route.naturalId),
+    ) === true
+  );
+}
+
+async function previewCargoUpdate() {
+  const candidate = nativeRouteCandidate.value;
+  const draftWaypoints = nativeRouteDraft.value?.waypoints;
+  const companyId = userDataStore.companyId;
+  const group = chainGroup.value?.trim();
+  if (
+    !chainLoopMode.value ||
+    !candidate ||
+    !draftWaypoints ||
+    !companyId ||
+    generationCandidate !== undefined ||
+    routeCheck.value !== undefined ||
+    cargoUpdating.value
+  ) {
+    return;
+  }
+  const check = new AbortController();
+  routeCheck.value = { controller: check, shipId: candidate.ship.ship.id };
+  routeCheckIssues.value = [];
+  cargoUpdatePreview.value = undefined;
+  routeNotice.value = undefined;
+  try {
+    const snapshot = captureLoopSnapshot(candidate, draftWaypoints.length);
+    const waypoints = withOriginRefuels(draftWaypoints);
+    const checkedRoute = await checkNativeRoute(waypoints, check.signal);
+    if (checkedRoute.issues.length > 0) {
+      routeCheckIssues.value = checkedRoute.issues;
+      return;
+    }
+    const routes = await socketGetRoutes();
+    check.signal.throwIfAborted();
+    if (
+      nativeRouteDraft.value?.waypoints !== draftWaypoints ||
+      userDataStore.companyId !== companyId
+    ) {
+      throw new Error('规划已更新，请重新预览配货。');
+    }
+    const plan = { waypoints, legs: snapshot.legs, checkedRoute };
+    const options: CargoUpdateOption[] = [];
+    for (const route of routes) {
+      const record = nativeRouteRecords.value[route.id];
+      if (
+        record?.loop !== true ||
+        record.shipId !== candidate.ship.ship.id ||
+        record.chainName !== group ||
+        !routeIsUnassigned(route)
+      ) {
+        continue;
+      }
+      const changes = planNativeRouteCargoUpdate(route, plan);
+      if (changes !== undefined && (changes.length > 0 || record.fuelPerRound === undefined)) {
+        options.push({ record, changes });
+      }
+    }
+    if (options.length === 0) {
+      routeNotice.value =
+        '没有可更新的循环 RT。航线须未分配，航点、步骤和档位须与规划一致，且货量有差异。';
+      return;
+    }
+    cargoUpdateRouteId.value = options[0]!.record.routeId;
+    cargoUpdatePreview.value = {
+      companyId,
+      draftWaypoints,
+      plan,
+      snapshot,
+      returned: candidate.plan.loopOriginReturn,
+      options,
+    };
+  } catch (err) {
+    if (!check.signal.aborted) {
+      routeCheckIssues.value = [err instanceof Error ? err.message : String(err)];
+    }
+  } finally {
+    routeCheck.value = undefined;
+  }
+}
+
+async function applyCargoUpdate() {
+  const preview = cargoUpdatePreview.value;
+  const choice = cargoUpdateChoice.value;
+  if (!preview || !choice || cargoUpdating.value || routeCheck.value || generationCandidate) {
+    return;
+  }
+  const { record, changes } = choice;
+  cargoUpdating.value = true;
+  cargoUpdatePreview.value = undefined;
+  routeNotice.value = `正在更新 ${record.naturalId} 的配货…`;
+  try {
+    const route = await updateNativeRouteCargo(
+      record.routeId,
+      preview.plan,
+      changes,
+      route => userDataStore.companyId === preview.companyId && routeIsUnassigned(route),
+      () => {
+        if (nativeRouteDraft.value?.waypoints !== preview.draftWaypoints) {
+          throw new Error('规划已更新，请重新预览配货。');
+        }
+        // 逐条写入可能中途失败，旧的耗油、周期和周转货快照此时不再适用。
+        recordNativeRoute({
+          ...record,
+          cycleHours: undefined,
+          fuelPerRound: undefined,
+          loopOriginReturn: undefined,
+          waypoints: record.waypoints.map(waypoint => ({ ...waypoint, flightHours: undefined })),
+        });
+      },
+    );
+    if (userDataStore.companyId !== preview.companyId) {
+      return;
+    }
+    if (changes.length === 0 && nativeRouteDraft.value?.waypoints !== preview.draftWaypoints) {
+      throw new Error('规划已更新，请重新预览配货。');
+    }
+    recordNativeRoute({
+      ...record,
+      repeats: route.repeats,
+      cycleHours: preview.snapshot.cycleHours,
+      fuelPerRound: preview.snapshot.fuel,
+      loopOriginReturn: preview.returned,
+      waypoints: gameRouteRecord(route, record.shipId).waypoints.map((waypoint, index) => ({
+        ...waypoint,
+        location: preview.plan.waypoints[index]!.location,
+        flightHours: preview.snapshot.legs[index]?.hours,
+      })),
+    });
+    routeNotice.value =
+      changes.length === 0
+        ? `已同步 ${record.naturalId} 的配货快照。`
+        : `已更新 ${record.naturalId} 的 ${changes.length} 项配货。`;
+  } catch (err) {
+    routeNotice.value = `更新配货中断。${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    cargoUpdating.value = false;
   }
 }
 
@@ -717,7 +907,7 @@ function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
   const state = { weight: 0, volume: 0 };
   const loads: NativeRouteLoad[] = [];
   let uncertain = false;
-  for (const waypoint of record.waypoints) {
+  for (const [index, waypoint] of record.waypoints.entries()) {
     const onArrival = { ...state };
     const uncertainOnArrival = uncertain;
     for (const step of waypoint.steps) {
@@ -732,6 +922,9 @@ function nativeRouteLoads(record: NativeRouteRecord): NativeRouteLoad[] {
       }
       if (step.capacity) {
         uncertain = true;
+        continue;
+      }
+      if (index === 0 && step.minimum === 0) {
         continue;
       }
       const wv = matWeightVolume(step.ticker, step.amount);
@@ -768,21 +961,24 @@ function nativeRouteStepMaterials(
   kind: 'load' | 'unload',
 ) {
   const bills: Record<string, number> = {};
-  const capacities: string[] = [];
+  const variableAmounts: string[] = [];
   for (const step of record.waypoints[index]?.steps ?? []) {
     if (step.kind === 'unload-all' && kind === 'unload') {
-      capacities.push('全部物料');
+      variableAmounts.push('全部物料');
     }
     if (step.kind !== kind) {
       continue;
     }
-    if (step.capacity) {
-      capacities.push(`${step.ticker}×${kind === 'load' ? '满' : '全部'}`);
+    if (step.capacity || step.minimum === 0) {
+      const quantity = step.capacity ? (kind === 'load' ? '满' : '全部') : `≤${step.amount}`;
+      variableAmounts.push(`${step.ticker}×${quantity}`);
       continue;
     }
     bills[step.ticker] = (bills[step.ticker] ?? 0) + step.amount;
   }
-  return [...(formatMaterials(bills) ? [formatMaterials(bills)] : []), ...capacities].join('、');
+  return [...(formatMaterials(bills) ? [formatMaterials(bills)] : []), ...variableAmounts].join(
+    '、',
+  );
 }
 
 function nativeRouteRefuelText(record: NativeRouteRecord, index: number) {
@@ -792,19 +988,23 @@ function nativeRouteRefuelText(record: NativeRouteRecord, index: number) {
     .join('、');
 }
 
-function isNativeRouteEnd(record: NativeRouteRecord, index: number) {
-  return index === 0 || index === record.waypoints.length - 1;
+function isNativeRouteEnd(entry: NativeRouteView, index: number) {
+  return index === 0 || nativeRouteNextLeg(entry, index) === undefined;
 }
 
 // 第 index 行描述的是「从这一站飞到下一站」：档位存在下一站上（航点档位 = 飞到该航点的设置）。
-function nativeRouteNextLeg(record: NativeRouteRecord, index: number) {
-  // 第 0 行是出发站，档位同样在下一站上。
-  return record.waypoints[index + 1];
+function nativeRouteNextLeg(entry: NativeRouteView, index: number) {
+  const points = entry.record.waypoints;
+  return points[index + 1] ?? (hasNativeReturnLeg(entry) ? points[0] : undefined);
 }
 
-// 预计飞行时长与档位同一口径：存在「飞到该航点」的航点上。
-function nativeRouteLegHours(record: NativeRouteRecord, index: number) {
-  return record.waypoints[index + 1]?.flightHours;
+function hasNativeReturnLeg(entry: NativeRouteView) {
+  const points = entry.record.waypoints;
+  return (
+    entry.repeats &&
+    points.length > 1 &&
+    !sameNaturalId(points[0]?.location, points.at(-1)?.location)
+  );
 }
 function stopMarker(state: RouteStopState) {
   switch (state) {
@@ -1099,12 +1299,25 @@ function flightTotalText(shipId: string): string {
       <RadioItem v-model="chainLoopMode" horizontal>循环模式</RadioItem>
       <div :class="$style.spacer" />
       <PrunButton
+        v-if="chainTab === 'plan' && chainLoopMode"
+        dark
+        :disabled="
+          generationCandidate !== undefined ||
+          nativeRouteDraft?.waypoints === undefined ||
+          routeCheck !== undefined ||
+          cargoUpdating
+        "
+        @click="previewCargoUpdate">
+        预览更新配货
+      </PrunButton>
+      <PrunButton
         v-if="chainTab === 'plan'"
         primary
         :disabled="
           generationCandidate !== undefined ||
           nativeRouteCandidate === undefined ||
-          routeCheck !== undefined
+          routeCheck !== undefined ||
+          cargoUpdating
         "
         :data-tooltip="generationCandidate ? '请先关闭当前的原生 RT 进度' : undefined"
         @click="generateNativeRoute">
@@ -1263,11 +1476,51 @@ function flightTotalText(shipId: string): string {
         </div>
 
         <div v-if="routeCheck?.shipId === sp.ship.ship.id" :class="$style.loadSub" role="status">
-          正在检查航线地址和装卸物料…
+          正在检查航线…
         </div>
         <div
           v-if="generationCandidate?.ship.ship.id === sp.ship.ship.id"
           :ref="setGenerationTarget" />
+        <div v-if="cargoUpdateChoice" :class="$style.shipPlan">
+          <div :class="$style.shipHeader">
+            <span>更新 {{ cargoUpdateChoice.record.naturalId }} 的配货</span>
+            <SelectInput
+              v-if="cargoUpdateOptions.length > 1"
+              v-model="cargoUpdateRouteId"
+              :options="cargoUpdateOptions"
+              :width="220"
+              :class="$style.groupSelect" />
+            <div :class="$style.shipActions">
+              <PrunButton dark @click="cargoUpdatePreview = undefined">取消</PrunButton>
+              <PrunButton primary @click="applyCargoUpdate">
+                {{ cargoUpdateChoice.changes.length === 0 ? '同步配货快照' : '写入配货' }}
+              </PrunButton>
+            </div>
+          </div>
+          <div v-if="cargoUpdateChoice.changes.length === 0" :class="$style.hint">
+            原生 RT 的装卸数量已和当前规划一致。
+          </div>
+          <table v-else :class="$style.table">
+            <thead>
+              <tr>
+                <th>航点</th>
+                <th>操作</th>
+                <th>当前数量</th>
+                <th>计划数量</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="change in cargoUpdateChoice.changes"
+                :key="`${change.waypointId}|${change.stepId}`">
+                <td>{{ change.location }}</td>
+                <td>{{ change.type === 'LOAD' ? '装载' : '卸货' }} {{ change.ticker }}</td>
+                <td>{{ change.minimum === 0 ? '≤' : '' }}{{ change.before }}</td>
+                <td>{{ change.minimum === 0 ? '≤' : '' }}{{ change.amount }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <table :class="$style.table">
           <colgroup>
@@ -1303,16 +1556,8 @@ function flightTotalText(shipId: string): string {
                 <div v-if="formatMaterials(sp.plan.finalUnload)">
                   <span
                     :class="$style.opsLabel"
-                    :data-tooltip="
-                      plannedUnloadAll(sp.plan, sp.plan.stops.length + 1)
-                        ? unloadAllTooltip
-                        : undefined
-                    "
-                    >{{
-                      plannedUnloadAll(sp.plan, sp.plan.stops.length + 1)
-                        ? '归航卸载全部'
-                        : '归航卸货'
-                    }}</span
+                    :data-tooltip="plannedUnloadAll(sp.plan, 0) ? unloadAllTooltip : undefined"
+                    >{{ plannedUnloadAll(sp.plan, 0) ? '归航卸载全部' : '归航卸货' }}</span
                   >
                   [{{ formatMaterials(sp.plan.finalUnload) }}]
                 </div>
@@ -1491,7 +1736,7 @@ function flightTotalText(shipId: string): string {
                 <span v-if="index > 0" :class="$style.routeArrow">→</span>
                 <span
                   :class="[
-                    isNativeRouteEnd(entry.record, index) ? $style.routeOrigin : $style.routeNode,
+                    isNativeRouteEnd(entry, index) ? $style.routeOrigin : $style.routeNode,
                     routeStopStates(entry.record, entry.ship)[index] === 'done'
                       ? $style.routeDone
                       : '',
@@ -1499,6 +1744,7 @@ function flightTotalText(shipId: string): string {
                   >{{ stop.location }}</span
                 >
               </template>
+              <span v-if="hasNativeReturnLeg(entry)" :class="$style.routeArrow">↺</span>
             </div>
             <ul v-if="entry.alerts.length > 0" :class="$style.routeAlerts" role="status">
               <li v-for="alert in entry.alerts" :key="alert">{{ alert }}</li>
@@ -1570,7 +1816,7 @@ function flightTotalText(shipId: string): string {
                   {{ index }}
                 </td>
                 <td :class="$style.narrowCol">
-                  <span v-if="isNativeRouteEnd(entry.record, index)" :class="$style.routeOrigin">{{
+                  <span v-if="isNativeRouteEnd(entry, index)" :class="$style.routeOrigin">{{
                     stop.location
                   }}</span>
                   <template v-else
@@ -1600,23 +1846,30 @@ function flightTotalText(shipId: string): string {
                   >
                 </td>
                 <td :class="$style.matCell">
-                  <div v-if="index + 1 < entry.record.waypoints.length">
-                    → {{ entry.record.waypoints[index + 1]!.location }}
+                  <div v-if="nativeRouteNextLeg(entry, index)">
+                    {{ index + 1 < entry.record.waypoints.length ? '→' : '↺' }}
+                    {{ nativeRouteNextLeg(entry, index)!.location }}
                   </div>
-                  <div v-else>归航</div>
+                  <div v-else>{{
+                    sameNaturalId(stop.location, entry.record.waypoints[0]?.location)
+                      ? '归航'
+                      : '终点'
+                  }}</div>
                   <!-- 航点的燃料/反应堆档位描述「飞到该航点」的那一段，所以这一行要取下一站的档位。 -->
-                  <div v-if="nativeRouteNextLeg(entry.record, index)" :class="$style.loadSub">
-                    燃料 {{ nativeRouteNextLeg(entry.record, index)!.fuelPercent }}%<template
-                      v-if="nativeRouteNextLeg(entry.record, index)!.reactorPercent !== undefined">
+                  <div v-if="nativeRouteNextLeg(entry, index)" :class="$style.loadSub">
+                    燃料 {{ nativeRouteNextLeg(entry, index)!.fuelPercent }}%<template
+                      v-if="nativeRouteNextLeg(entry, index)!.reactorPercent !== undefined">
                       · 反应堆
-                      {{ nativeRouteNextLeg(entry.record, index)!.reactorPercent }}%</template
+                      {{ nativeRouteNextLeg(entry, index)!.reactorPercent }}%</template
                     >
                   </div>
                   <div
-                    v-if="nativeRouteLegHours(entry.record, index) !== undefined"
+                    v-if="nativeRouteNextLeg(entry, index)?.flightHours !== undefined"
                     :class="$style.loadSub">
                     预计
-                    {{ formatFlightDuration(nativeRouteLegHours(entry.record, index)! * 3600000) }}
+                    {{
+                      formatFlightDuration(nativeRouteNextLeg(entry, index)!.flightHours! * 3600000)
+                    }}
                   </div>
                 </td>
                 <td :class="$style.narrowCol">

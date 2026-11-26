@@ -8,6 +8,7 @@ type NativeRouteMaterialStep = {
   kind: 'load' | 'unload';
   ticker: string;
   amount: number;
+  minimum?: 0;
   capacity?: true;
 };
 
@@ -23,6 +24,24 @@ export type NativeRouteStep =
 export interface NativeWaypoint {
   location: string;
   steps: NativeRouteStep[];
+}
+
+export function withOriginRefuels(
+  waypoints: readonly NativeWaypoint[],
+  tanks: readonly RouteTank[] = ['STL', 'FTL'],
+): NativeWaypoint[] {
+  return waypoints.map((stop, index) =>
+    index === 0
+      ? {
+          ...stop,
+          steps: [
+            ...stop.steps.filter(step => step.kind !== 'load'),
+            ...tanks.map(tank => ({ kind: 'refuel' as const, tank })),
+            ...stop.steps.filter(step => step.kind === 'load'),
+          ],
+        }
+      : stop,
+  );
 }
 
 export interface NativeRouteLegPercent {
@@ -56,7 +75,7 @@ export function percentAtLeast(value: number, minimum = 0) {
   return Math.min(100, Math.max(1, percent));
 }
 
-export function buildNativeWaypoints(plan: ChainPlan, startsWithEmptyCargo = false) {
+export function buildNativeWaypoints(plan: ChainPlan, startsWithEmptyCargo = false, loop = false) {
   if (plan.stops.length === 0 || plan.overCapacity || plan.hasUnmetChainDemand === true) {
     throw new Error('环线缺少可执行站点、超出舱容或有未满足的产业链需求。');
   }
@@ -80,14 +99,24 @@ export function buildNativeWaypoints(plan: ChainPlan, startsWithEmptyCargo = fal
       steps: [...materialSteps('unload', unload), ...materialSteps('load', load)],
     });
   }
-  waypoints.push({ location: origin, steps: materialSteps('unload', plan.finalUnload) });
+  const returnSteps = materialSteps('unload', plan.finalUnload);
+  // 首次到达仓库时尚未从基地取货，卸货步骤必须能在空舱时完成。
+  waypoints.push({
+    location: origin,
+    steps: loop ? returnSteps.map(step => ({ ...step, minimum: 0 as const })) : returnSteps,
+  });
   for (const [index, waypoint] of waypoints.entries()) {
     const from = waypoints[index - 1]?.location;
     if (!waypoint.location.trim() || waypoint.location === from) {
       throw new Error('航线包含空地址或连续重复的航点。');
     }
   }
-  return startsWithEmptyCargo ? withFullUnloads(waypoints) : waypoints;
+  const route = startsWithEmptyCargo ? withFullUnloads(waypoints) : waypoints;
+  if (loop) {
+    const first = route[0]!;
+    first.steps = [...route.pop()!.steps, ...first.steps];
+  }
+  return route;
 }
 
 function withFullUnloads(waypoints: NativeWaypoint[]): NativeWaypoint[] {
@@ -146,10 +175,13 @@ export function hoursInvalidatedBySettingChange(
   count: number,
   tanksAffected: readonly RouteTank[],
   refills: (step: NativeRouteStep) => boolean = step => step.kind === 'refuel',
+  loop = false,
 ): number[] {
   const stale: number[] = [];
   const pending = new Set(tanksAffected);
-  for (let k = fromIndex; k < count && pending.size > 0; k++) {
+  const end = loop ? fromIndex + count : count;
+  for (let index = fromIndex; index < end && pending.size > 0; index++) {
+    const k = index % count;
     stale.push(k);
     // 航点 k 的补油步骤在飞往 k+1 之前执行。
     for (const step of waypoints[k]?.steps ?? []) {
