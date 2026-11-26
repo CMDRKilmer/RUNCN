@@ -4,7 +4,6 @@ import LoadingSpinner from '@src/components/LoadingSpinner.vue';
 import MaterialPurchaseTable from '@src/components/MaterialPurchaseTable.vue';
 import NumberInput from '@src/components/forms/NumberInput.vue';
 import RadioItem from '@src/components/forms/RadioItem.vue';
-import SelectInput from '@src/components/forms/SelectInput.vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import PrunLink from '@src/components/PrunLink.vue';
 import Tooltip from '@src/components/Tooltip.vue';
@@ -41,19 +40,6 @@ userData.settings.repairBoard ??= {
 };
 
 const board = userData.settings.repairBoard;
-
-const arrivalModel = computed({
-  get: () => String(board.arrivalDays),
-  set: (value: string) => {
-    board.arrivalDays = Number(value);
-  },
-});
-
-const arrivalOptions = [
-  { label: '今天', value: '0' },
-  { label: '24 小时后', value: '1' },
-  { label: '48 小时后', value: '2' },
-];
 
 const settings = computed(() => getRepairBoardSettings());
 
@@ -245,8 +231,15 @@ const selectedRowStyle = { backgroundColor: 'rgba(255, 255, 255, 0.12)' };
 const selectedAccentStyle = { boxShadow: 'inset 3px 0 0 #5aa9e6' };
 
 // ── 偏移天数：按「飞船 N 天后抵达」实时重算重量 / 体积 / 费用 ──
+// 这一行是「飞船抵达」的唯一入口（原左栏设置项已删）：点哪档就写回设置，
+// 看板顶部的到期费用、购物清单、缺料表都按同一档重算。
 const offsetOptions = [0, 1, 2, 3, 5, 7];
 const offsetDays = ref(settings.value.arrivalDays);
+
+function setOffsetDays(days: number) {
+  offsetDays.value = days;
+  board.arrivalDays = days;
+}
 
 // 选中态的实心块用内联样式给：主题引擎会把样式表里的 color 统一改成排版墨色、
 // 把带色背景/边框按「背景」「边框」角色降饱和，纯 CSS 的选中块在自定义主题下
@@ -260,15 +253,6 @@ const offsetActiveStyle = {
   // -webkit-text-fill-color 的优先级高于 color，且主题没有覆盖它，用它锁白字。
   WebkitTextFillColor: '#ffffff',
 };
-
-// 在上方设置栏改「飞船抵达」时，右侧明细的偏移选择同步到这个默认值；
-// 之后手动点偏移按钮仍可临时覆盖，不回写持久化设置。
-watch(
-  () => settings.value.arrivalDays,
-  days => {
-    offsetDays.value = days;
-  },
-);
 
 const offsetBill = computed(() => {
   const base = selected.value;
@@ -457,13 +441,6 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
               position="bottom"
               tooltip="距离目标日还剩这么多天及以内时，状态标为「即将到期」（黄）。" />
             <NumberInput v-model="board.dueSoonDays" />
-          </div>
-          <div :class="$style.settingItem">
-            <span :class="$style.settingLabel">飞船抵达</span>
-            <Tooltip
-              position="bottom"
-              tooltip="账单按飞船哪天抵达计算。今天 / 24 小时后 / 48 小时后三档直接取游戏给的维修材料，不再自己用公式折算。" />
-            <SelectInput v-model="arrivalModel" :options="arrivalOptions" />
           </div>
           <div :class="$style.settingItem">
             <span :class="$style.settingLabel">库存抵扣</span>
@@ -656,14 +633,20 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
         </div>
         <div :class="$style.bottomGroup" data-rp-repd-bottom>
           <div :class="$style.offsetRow">
-            <span :class="$style.offsetLabel">偏移</span>
+            <Tooltip
+              tooltip="账单按飞船哪天抵达计算：今天直接取游戏给的维修材料，+1 天起按建筑老化公式估算。点哪档，看板费用与下方清单都按这档重算。"
+              position="top"
+              no-icon
+              :class="$style.offsetLabelTip">
+              <span :class="$style.offsetLabel">偏移</span>
+            </Tooltip>
             <button
               v-for="day in offsetOptions"
               :key="day"
               type="button"
               :class="[$style.offsetBtn, offsetDays === day && $style.offsetActive]"
               :style="offsetDays === day ? offsetActiveStyle : undefined"
-              @click="offsetDays = day">
+              @click="setOffsetDays(day)">
               {{ day === 0 ? '今天' : `+${day}` }}
             </button>
             <span :class="$style.waitInline">
@@ -966,6 +949,12 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
   align-items: center;
   gap: 3px;
   padding: 2px 4px;
+}
+
+.offsetLabelTip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  cursor: help;
 }
 
 .offsetLabel {
