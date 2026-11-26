@@ -43,6 +43,25 @@ function targetByKey(key: string) {
   return departTargets.value.find(target => target.key === key);
 }
 
+// 自动填目的地失败时（SFC 渲染超时 / 选不到地址）把原因顶到提示上，
+// 与原生 CONTS、CONT 详情的口径一致；成功一次就清掉。
+const departErrors = ref<Map<string, string>>(new Map());
+
+function hintFor(key: string) {
+  const error = departErrors.value.get(key);
+  return error ?? targetByKey(key)?.hint ?? '';
+}
+
+function setDepartError(key: string, message: string | undefined) {
+  const next = new Map(departErrors.value);
+  if (message === undefined) {
+    next.delete(key);
+  } else {
+    next.set(key, message);
+  }
+  departErrors.value = next;
+}
+
 // 「指令」列贴着磁贴右缘，游戏自带的 data-tooltip（元素上的绝对定位伪元素）
 // 会被滚动容器裁掉，这里改用 body 上的 fixed 浮层。
 // 每条目标一个按钮，浮层按 key 分别解绑：函数式 ref 在元素卸载时会以 null 回调，
@@ -67,7 +86,7 @@ function bindDepartButton(el: Element | null, key: string) {
   boundButtons.set(key, el);
   detachTooltips.set(
     key,
-    attachFloatingTooltip(el, () => targetByKey(key)?.hint ?? ''),
+    attachFloatingTooltip(el, () => hintFor(key)),
   );
 }
 
@@ -85,7 +104,10 @@ async function onDepart(target: DepartTarget) {
   }
   departingKeys.value = new Set(departingKeys.value).add(target.key);
   try {
-    await openSfcAndFill(target);
+    // openSfcAndFill 失败时返回 { ok: false, message } 而不是抛错，不能丢掉：
+    // 原生 CONTS / CONT 详情都会把原因顶到按钮提示上，这里保持一致。
+    const result = await openSfcAndFill(target);
+    setDepartError(target.key, result.ok ? undefined : result.message);
   } finally {
     const next = new Set(departingKeys.value);
     next.delete(target.key);

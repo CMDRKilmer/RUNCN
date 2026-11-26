@@ -32,6 +32,7 @@ function ensureTooltip() {
 
 function place(el: HTMLElement, text: string) {
   activeTrigger = el;
+  watchScroll();
   const box = ensureTooltip();
   box.textContent = text;
   box.style.display = 'block';
@@ -109,6 +110,22 @@ export function attachFloatingTooltip(el: HTMLElement, text: () => string): () =
 /** 页面滚走或磁贴重排时把气泡收掉（否则会停在原地）。 */
 export function hideFloatingTooltip() {
   hide();
+}
+
+// 键盘聚焦（Tab）出来的气泡不依赖鼠标位置：磁贴内容滚动时按钮既不会 blur 也不会
+// 断开，`position: fixed` 的气泡会停在旧坐标上盖住别的内容。滚动一律收起 ——
+// 用捕获阶段，磁贴内部的滚动容器也能收到。
+let watchingScroll = false;
+
+function watchScroll() {
+  if (watchingScroll) {
+    return;
+  }
+  watchingScroll = true;
+  window.addEventListener('scroll', () => hideFloatingTooltip(), {
+    capture: true,
+    passive: true,
+  });
 }
 
 // 一次性注入样式：与游戏自带气泡同款配色，只是定位方式不同。
