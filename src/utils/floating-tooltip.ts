@@ -15,6 +15,9 @@ const GAP = 8;
 const MAX_WIDTH = 320;
 
 let tooltip: HTMLDivElement | undefined;
+// 当前气泡是给谁显示的：整页只有一个浮层，谁都不能顺手把别人的气泡收掉
+// （悬停 A 之后悬停 B，A 被重渲染摘掉时不能连带隐藏 B 的提示）。
+let activeTrigger: HTMLElement | undefined;
 
 function ensureTooltip() {
   if (tooltip?.isConnected) {
@@ -28,6 +31,7 @@ function ensureTooltip() {
 }
 
 function place(el: HTMLElement, text: string) {
+  activeTrigger = el;
   const box = ensureTooltip();
   box.textContent = text;
   box.style.display = 'block';
@@ -46,9 +50,19 @@ function place(el: HTMLElement, text: string) {
 }
 
 function hide() {
+  activeTrigger = undefined;
   if (tooltip) {
     tooltip.style.display = 'none';
   }
+}
+
+// 只收「属于该元素」的气泡：清理由别的触发元素发起的（它的断开、它的解绑）
+// 时，当前悬停的元素还亮着，不能跟着消失。
+function hideFor(el: HTMLElement) {
+  if (activeTrigger !== el) {
+    return;
+  }
+  hide();
 }
 
 /**
@@ -65,7 +79,7 @@ function watchTriggerDisconnect(el: HTMLElement) {
     return;
   }
   watched.add(el);
-  onNodeDisconnected(el, hide);
+  onNodeDisconnected(el, () => hideFor(el));
 }
 
 export function attachFloatingTooltip(el: HTMLElement, text: () => string): () => void {
@@ -76,7 +90,7 @@ export function attachFloatingTooltip(el: HTMLElement, text: () => string): () =
       place(el, value);
     }
   };
-  const onLeave = () => hide();
+  const onLeave = () => hideFor(el);
 
   el.addEventListener('mouseenter', onEnter);
   el.addEventListener('mouseleave', onLeave);
@@ -88,7 +102,7 @@ export function attachFloatingTooltip(el: HTMLElement, text: () => string): () =
     el.removeEventListener('mouseleave', onLeave);
     el.removeEventListener('focus', onEnter);
     el.removeEventListener('blur', onLeave);
-    hide();
+    hideFor(el);
   };
 }
 
