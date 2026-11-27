@@ -230,7 +230,9 @@ const output = computed<ContractJson>(() => {
   ) {
     result.price = Number(price.value);
   }
-  if (deadline.value !== undefined && deadline.value > 0) {
+  // 原生贷款模板没有「限期」字段（只有 role/货币/本金/利率/间隔 + 各模板专属项），
+  // 填了也灌不进弹窗，所以贷款合同不输出 deadline。
+  if (!isLoan.value && deadline.value !== undefined && deadline.value > 0) {
     result.deadline = Number(deadline.value);
   }
   return result;
@@ -538,7 +540,7 @@ function applyTotalPrice() {
           </Active>
         </template>
 
-        <Active label="限期（天）" tooltip="可选。不填则使用模板默认值（约 3 天）。">
+        <Active v-if="!isLoan" label="限期（天）" tooltip="可选。不填则使用模板默认值（约 3 天）。">
           <input
             v-model.number="deadline"
             type="number"
