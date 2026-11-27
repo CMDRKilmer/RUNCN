@@ -20,7 +20,7 @@ import { parseActJson } from '@src/features/XIT/CONTGEN/act-import';
 import { fixed02 } from '@src/utils/format';
 import { getTileState } from '@src/store/user-data-tiles';
 
-type Template = 'BUY' | 'SELL' | 'SHIP';
+type Template = 'BUY' | 'SELL' | 'SHIP' | 'LOAN_STABLE' | 'LOAN_ANNUITY' | 'LOAN_INTEREST';
 
 interface Item {
   // Internal picker field — kept as `ticker` for clarity. On emit we
@@ -46,6 +46,14 @@ interface ContractJson {
   price?: number;
   deadline?: number;
   items: OutputItem[];
+  // 贷款模板（LOAN_*）专用：身份、本金、利率、间隔，以及各模板专属参数。
+  role?: 'LENDER' | 'BORROWER';
+  amount?: number;
+  interestRate?: number;
+  interval?: number;
+  duration?: number;
+  repaymentRate?: number;
+  initialRepaymentRate?: number;
 }
 
 const template = useTileState<Template>('template', 'BUY');
@@ -101,10 +109,32 @@ const templates = [
   { label: '购买', value: 'BUY' },
   { label: '销售', value: 'SELL' },
   { label: '运输', value: 'SHIP' },
+  { label: '贷款·等额本金（稳定）', value: 'LOAN_STABLE' },
+  { label: '贷款·等额本息（年金）', value: 'LOAN_ANNUITY' },
+  { label: '贷款·先息后本（利息）', value: 'LOAN_INTEREST' },
 ];
 
 const isShip = computed(() => template.value === 'SHIP');
 const isBuyOrSell = computed(() => template.value === 'BUY' || template.value === 'SELL');
+const isLoan = computed(() => template.value.startsWith('LOAN_'));
+
+// ── 贷款字段 ──
+// 利率/还本比例按百分比输入（2 = 2%），输出 JSON 时换算成游戏用的小数（0.02）。
+const loanAmount = useTileState<number | undefined>('loanAmount', 1000000);
+const loanRatePct = useTileState<number | undefined>('loanRatePct', 2);
+const loanInterval = useTileState<number | undefined>('loanInterval', 7);
+const loanRole = useTileState<'LENDER' | 'BORROWER'>('loanRole', 'LENDER');
+// 利息贷款：期数（interval × 期数 = 总时长）
+const loanDuration = useTileState<number | undefined>('loanDuration', 10);
+// 稳定贷款：每期固定还本比例
+const loanRepaymentPct = useTileState<number | undefined>('loanRepaymentPct', 12);
+// 年金贷款：首期还本比例（之后每期总额固定）
+const loanInitialRepaymentPct = useTileState<number | undefined>('loanInitialRepaymentPct', 12);
+
+const loanRoles = [
+  { label: '出借方（我放贷）', value: 'LENDER' },
+  { label: '借入方（我借款）', value: 'BORROWER' },
+];
 
 // Watch template changes and reset fields that don't apply.
 watch(template, (next, prev) => {
@@ -159,6 +189,21 @@ const output = computed<ContractJson>(() => {
     currency: currency.value,
     items: cleanedItems,
   };
+  if (isLoan.value) {
+    // 贷款没有物品行：金额、利率、间隔、身份，以及各模板专属参数。
+    result.items = [];
+    result.role = loanRole.value;
+    result.amount = Number(loanAmount.value ?? 0);
+    result.interestRate = Number(loanRatePct.value ?? 0) / 100;
+    result.interval = Number(loanInterval.value ?? 0);
+    if (template.value === 'LOAN_INTEREST') {
+      result.duration = Number(loanDuration.value ?? 0);
+    } else if (template.value === 'LOAN_STABLE') {
+      result.repaymentRate = Number(loanRepaymentPct.value ?? 0) / 100;
+    } else {
+      result.initialRepaymentRate = Number(loanInitialRepaymentPct.value ?? 0) / 100;
+    }
+  }
   if (contractName.value.trim().length > 0) {
     result.name = contractName.value.trim();
   }
@@ -199,6 +244,30 @@ const validationErrors = computed<string[]>(() => {
   const errs: string[] = [];
   if (!currencies.includes(currency.value)) {
     errs.push(`未知的币种 "${currency.value}"`);
+  }
+  if (isLoan.value) {
+    const amount = Number(loanAmount.value ?? 0);
+    const rate = Number(loanRatePct.value ?? 0);
+    const interval = Number(loanInterval.value ?? 0);
+    if (!(amount > 0)) {
+      errs.push('本金必须大于 0');
+    }
+    if (!(rate >= 0)) {
+      errs.push('利率不能为负');
+    }
+    if (!(interval >= 1)) {
+      errs.push('还款间隔至少 1 天');
+    }
+    if (template.value === 'LOAN_INTEREST' && !((loanDuration.value ?? 0) >= 1)) {
+      errs.push('先息后本至少要 1 期');
+    }
+    if (template.value === 'LOAN_STABLE' && !((loanRepaymentPct.value ?? 0) > 0)) {
+      errs.push('每期还本比例必须大于 0');
+    }
+    if (template.value === 'LOAN_ANNUITY' && !((loanInitialRepaymentPct.value ?? 0) > 0)) {
+      errs.push('首期还本比例必须大于 0');
+    }
+    return errs;
   }
   if (output.value.items.length === 0) {
     errs.push('至少需要 1 个物品');
@@ -477,7 +546,68 @@ function applyTotalPrice() {
         </Active>
       </div>
 
-      <Active label="物品清单" tooltip="每行一个物品；BUY/SELL 需填单价，SHIP 共享运费。">
+      <div v-if="isLoan" :class="$style.topFields">
+        <Active label="我方身份" tooltip="出借方＝我把钱借出去；借入方＝我借钱。">
+          <SelectInput v-model="loanRole" :options="loanRoles" />
+        </Active>
+        <Active label="本金" tooltip="贷款金额（合同币种）。">
+          <input v-model.number="loanAmount" type="number" min="0" step="1" :class="$style.input" />
+        </Active>
+        <Active label="利率（%/期）" tooltip="每期利率，按百分比填写：2 = 每期 2%。">
+          <input
+            v-model.number="loanRatePct"
+            type="number"
+            min="0"
+            step="0.01"
+            :class="$style.input" />
+        </Active>
+        <Active label="还款间隔（天）" tooltip="相邻两期还款之间相隔的天数。">
+          <input
+            v-model.number="loanInterval"
+            type="number"
+            min="1"
+            step="1"
+            :class="$style.input" />
+        </Active>
+        <Active
+          v-if="template === 'LOAN_INTEREST'"
+          label="还款期数"
+          tooltip="先息后本：每期只还利息，最后一期连本带息还清。期数 × 间隔 = 总时长。">
+          <input
+            v-model.number="loanDuration"
+            type="number"
+            min="1"
+            step="1"
+            :class="$style.input" />
+        </Active>
+        <Active
+          v-if="template === 'LOAN_STABLE'"
+          label="每期还本比例（%）"
+          tooltip="等额本金：每期偿还固定比例的本金，利息按剩余本金另计。">
+          <input
+            v-model.number="loanRepaymentPct"
+            type="number"
+            min="0.01"
+            step="0.01"
+            :class="$style.input" />
+        </Active>
+        <Active
+          v-if="template === 'LOAN_ANNUITY'"
+          label="首期还本比例（%）"
+          tooltip="等额本息：每期还款总额固定，首期本金占比决定这个固定额。">
+          <input
+            v-model.number="loanInitialRepaymentPct"
+            type="number"
+            min="0.01"
+            step="0.01"
+            :class="$style.input" />
+        </Active>
+      </div>
+
+      <Active
+        v-if="!isLoan"
+        label="物品清单"
+        tooltip="每行一个物品；BUY/SELL 需填单价，SHIP 共享运费。">
         <div :class="$style.items">
           <div :class="$style.itemHeader">
             <div :class="$style.itemHeaderCellTicker">物品 (Ticker)</div>
