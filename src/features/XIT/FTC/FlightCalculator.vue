@@ -16,6 +16,7 @@ import type {
 } from '@src/infrastructure/fio/flight-formula';
 import { calculateFormulaOptions, type FormulaOptions } from './formula-options';
 import { loadFormulaInputs } from './formula-inputs';
+import { ensureGatewayConnections } from './gateway-loader';
 import { FUEL_EXCHANGES, ensureFuelPrices, fuelPrices as fuelPriceState } from './fuel-prices';
 import $style from './FTC.module.css';
 
@@ -228,7 +229,11 @@ async function calculate(optimize: boolean) {
       throw new Error('出发时间无效');
     }
     message.value = '正在读取航线与轨道数据…';
+    const gatewaysReady = !request.preferences.useGateways || (await ensureGatewayConnections());
     const loaded = await loadFormulaInputs(from.value, to.value, request.preferences.useGateways);
+    if (!gatewaysReady && loaded.origin.split('|')[0] !== loaded.destination.split('|')[0]) {
+      throw new Error('未能读取网关连接，请稍后重试。');
+    }
     request.origin = loaded.origin;
     request.destination = loaded.destination;
     const output = calculateFormulaOptions(

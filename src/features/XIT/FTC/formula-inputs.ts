@@ -13,9 +13,7 @@ import { resolveFormulaEndpoint } from './formula-endpoint';
 export async function loadFormulaInputs(from: string, to: string, useGateways: boolean) {
   // 端点解析（含「SFC 把空间站规范化成星系 id」的反查）见 formula-endpoint.ts。
   const endpoints = await Promise.all([resolveFormulaEndpoint(from), resolveFormulaEndpoint(to)]);
-  // 网关连接只认已入库的数据：这里**不触发**服务器请求（ToS 要求玩家点击才可通信，
-  // 见 gateway-loader.ts 头部）。缺数据时 flight-formula 会在 warning 里说明成因，
-  // 玩家点 FTC 面板的「网关」按钮即可补数据。
+  // FTC 通过网关加载器预读。共享输入组装只取已入库的连接。
   const gateways = useGateways ? routesStore.getAllGateways().map(x => ({ ...x })) : [];
   const gateBodies = gateways.flatMap(x =>
     x.planetId === undefined ? [] : [{ naturalId: x.planetId, systemId: x.systemId }],
