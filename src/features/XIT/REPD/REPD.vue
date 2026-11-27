@@ -234,21 +234,28 @@ const selectedAccentStyle = { boxShadow: 'inset 3px 0 0 #5aa9e6' };
 // 这一行是「飞船抵达」的唯一入口（原左栏设置项已删）：点哪档就写回设置，
 // 看板顶部的到期费用、购物清单、缺料表都按同一档重算。
 const offsetOptions = [0, 1, 2, 3, 5, 7];
-const offsetDays = ref(settings.value.arrivalDays);
-
-function setOffsetDays(days: number) {
-  offsetDays.value = days;
-  board.arrivalDays = days;
-}
+// 直接读写持久化设置，而不是各磁贴各存一份 ref：同一账户同时开两个 XIT REPD 时，
+// 在 A 里改偏移，B 的明细与比价报价也要跟着变——否则 B 会用新的 arrivalDays 算基准、
+// 却拿旧偏移算材料清单，预算自相矛盾。
+const offsetDays = computed({
+  get: () => board.arrivalDays,
+  set: (days: number) => {
+    board.arrivalDays = days;
+  },
+});
 
 // 选中态的实心块用内联样式给：主题引擎会把样式表里的 color 统一改成排版墨色、
 // 把带色背景/边框按「背景」「边框」角色降饱和，纯 CSS 的选中块在自定义主题下
 // 只剩 1.1~1.2 的底色差。内联样式不参与那趟重写，这一块在深浅两种底上都能看清。
 const offsetActiveStyle = {
   backgroundColor: '#2f6ea8',
+  // 悬停时 .offsetBtn:hover 会被主题引擎改写成 !important 的近透明背景，压过内联
+  // backgroundColor，选中块瞬间变浅、白字看不清（浅色主题尤甚）。背景图不在那条
+  // 规则里，用同色渐变把选中块钉住。
+  backgroundImage: 'linear-gradient(#2f6ea8, #2f6ea8)',
   borderColor: '#8fc4ea',
   color: '#ffffff',
-  // 主题引擎会用 `button { color: ink !important }` 之类generic 规则把字色改成
+  // 主题引擎会用 `button { color: ink !important }` 之类的通用规则把字色改成
   // 排版墨色（深色主题下是浅灰、浅色主题下是深灰），压过内联 color。
   // -webkit-text-fill-color 的优先级高于 color，且主题没有覆盖它，用它锁白字。
   WebkitTextFillColor: '#ffffff',
@@ -646,7 +653,7 @@ const repairMaterials = computed<{ ticker: string; need: number; have: number; m
               type="button"
               :class="[$style.offsetBtn, offsetDays === day && $style.offsetActive]"
               :style="offsetDays === day ? offsetActiveStyle : undefined"
-              @click="setOffsetDays(day)">
+              @click="offsetDays = day">
               {{ day === 0 ? '今天' : `+${day}` }}
             </button>
             <span :class="$style.waitInline">
