@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { accountingPeriods } from '@src/infrastructure/prun-api/data/accounting-periods';
+import {
+  accountingPeriods,
+  ensureAccountingPeriods,
+} from '@src/infrastructure/prun-api/data/accounting-periods';
 import {
   EXPENSE_GROUPS,
   expenseGroupOf,
@@ -11,6 +14,10 @@ import { formatCurrency } from '@src/utils/format';
 // 利润表：收入/支出类科目的当期余额就是当期发生额（每期结转到利润），
 // 所以直接读会计期间余额即可，无需对流水做差。
 const COLUMNS = 3;
+
+// 会计余额平时要打开原生 FIN 才会推送，这里挂载时补一次静默请求，
+// 让插件自己的页面也能直接拿到数据。
+onMounted(ensureAccountingPeriods);
 
 // recent 返回升序，反转后按「本期 → 上期 → 上上期」排列。
 const ordered = computed(() => [...accountingPeriods.recent(COLUMNS)].reverse());
@@ -115,8 +122,8 @@ const headers = computed(() => {
 });
 
 // 与原生 FINIS 对齐：游戏对科目值和合计都是**向下取整**（负数也往下，例如
-// -232,539.4 显示 -232,540），而插件原来用四舍五入，导致每个非整数科目都比
-// 原生大 1。这里统一改成 floor，两个页面的数字就完全一致。
+// -1,234.6 显示 -1,235），而插件原来用四舍五入，导致每个非整数科目都比原生大 1。
+// 这里统一改成 floor，两个页面的数字就完全一致。
 // 注意：原生合计不是「逐项取整后相加」，而是各自对原值求和再取整，所以这里
 // 只改显示，values / totals 内部仍保留原始小数。
 function cell(value: number | undefined) {
@@ -128,7 +135,7 @@ function cell(value: number | undefined) {
   <div :class="$style.root">
     <div :class="$style.title">利润表（插件口径）</div>
     <div v-if="!hasData" :class="$style.empty">
-      还没有收到会计期间数据。打开一次 <b>FIN</b> 或 <b>FINIS</b> 后回来即可看到。
+      正在获取会计期间数据…（若长时间为空，可打开一次原生 <b>FIN</b> 触发同步）
     </div>
     <table v-else :class="$style.table">
       <thead>
