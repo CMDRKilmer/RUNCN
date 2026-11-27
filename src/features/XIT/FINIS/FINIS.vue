@@ -133,7 +133,6 @@ function cell(value: number | undefined) {
 
 <template>
   <div :class="$style.root">
-    <div :class="$style.title">利润表（插件口径）</div>
     <div v-if="!hasData" :class="$style.empty">
       正在获取会计期间数据…（若长时间为空，可打开一次原生 <b>FIN</b> 触发同步）
     </div>
@@ -208,10 +207,6 @@ function cell(value: number | undefined) {
   gap: 0.25rem;
   padding: 0.25rem 0.5rem;
   font-size: calc(1em + 1px);
-}
-
-.title {
-  font-weight: 600;
 }
 
 .empty {
