@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import PrunButton from '@src/components/PrunButton.vue';
 import TextInput from '@src/components/forms/TextInput.vue';
 import { requestStars, starsStore, starsVersion } from '@src/infrastructure/prun-api/data/stars';
@@ -41,6 +41,9 @@ import FlightCalculator from './FlightCalculator.vue';
 import $style from './FTC.module.css';
 
 const calculatorBlueprintId = ref('');
+onMounted(() => {
+  void ensureGatewayConnections();
+});
 
 // Data collection remains separate from formula-based calculations.
 const prefetching = ref(false);
@@ -363,6 +366,13 @@ async function startMatrixScan() {
       matrixMessage.value = '这些行的罐容量无效：' + bad.map(b => b.variant).join('、');
       return;
     }
+    if (from.split('|')[0] !== to.split('|')[0]) {
+      matrixMessage.value = '正在读取网关数据…';
+      if (!(await ensureGatewayConnections())) {
+        matrixMessage.value = '未能读取网关连接，请稍后重试。';
+        return;
+      }
+    }
     const flightInputs = await snapshotFlightInputs(probeAddr, targetAddr);
     const result = await scanTransitMatrix({
       probe: from,
@@ -523,6 +533,13 @@ async function startFScan() {
       ftlPreference: fScanFtlPreference.value,
       shouldCancel: () => fScanCancelled.value,
     };
+    if (scanOptions.useGateways && from.split('|')[0] !== to.split('|')[0]) {
+      fScanMessage.value = '正在读取网关数据…';
+      if (!(await ensureGatewayConnections())) {
+        fScanMessage.value = '未能读取网关连接，请稍后重试。';
+        return;
+      }
+    }
     const flightInputs = await snapshotFlightInputs(probeAddr, targetAddr);
     const variants: Awaited<ReturnType<typeof scanTransitFuelCurve>>[] = [];
     const configurations = ftlTiers.flatMap(ftlFuel =>

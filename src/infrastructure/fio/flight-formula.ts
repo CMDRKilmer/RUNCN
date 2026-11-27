@@ -384,6 +384,7 @@ export function predictFormulaFlight(
     const gatewayFirst = blocks[0].gateway;
     const gatewayLast = blocks.at(-1)!.gateway;
     const mixed = blocks.length > 1;
+    const fuelSaving = engine?.option === 'STL_ENGINE_FUEL_SAVING';
     if (mixed) {
       const supportedBlocks =
         blocks.length === 2 || (blocks.length === 3 && !gatewayFirst && !gatewayLast);
@@ -391,7 +392,7 @@ export function predictFormulaFlight(
         supportedBlocks &&
           (gatewayFirst || takesOff) &&
           (gatewayLast || lands) &&
-          engine?.option === 'STL_ENGINE_STANDARD',
+          (engine?.option === 'STL_ENGINE_STANDARD' || (fuelSaving && blocks.length === 2)),
         '此混合航线组合尚未验收',
       );
       mixedNeedsBlindTest = !gatewayFirst;
@@ -454,6 +455,10 @@ export function predictFormulaFlight(
         approachFuel = Math.floor(
           mixedBase + stationReserve - (gateMinimum - targetMinimum) * (1 - share) + 1e-10,
         );
+      } else if (fuelSaving) {
+        const flowRatio = flow / 0.015;
+        approachFuel = Math.floor(mixedBase + (4.5 + 0.1 * targetSpeed * (1 - tier)) * flowRatio);
+        lastFuel = Math.floor(mixedBase + 6 * flowRatio);
       }
       if (noFirstTransfer) {
         firstFuel = 0;

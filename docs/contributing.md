@@ -256,9 +256,12 @@ Use `data-tooltip` attribute for instant tooltips (PrUn-style). Don't use `title
 
 ### Server Communication & ToS
 
-Every action that triggers server communication must require a user click. No automated server requests without explicit player action. This is a hard rule from the game developers.
+Every action that triggers server communication must require a user click, subject to the exceptions below.
+
+Project exception for `XIT FTC`: the panel preloads the gateway snapshot when it opens. Gateway-enabled calculations and scans can share the in-flight request. There is no server polling.
 
 Developer-approved exceptions (known ToS violations — do not extend this list without discussion):
+
 
 - `XIT BURN` opens invisible buffers.
 - CX BURN, BURNGEN and CBUY share the company route list. Opening one of these panels reads the list once if it is missing, deferring the read during RT writes. Later route messages update the list passively.
