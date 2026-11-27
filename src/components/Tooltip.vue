@@ -32,6 +32,9 @@ function createEl() {
   el.style.zIndex = '2147483647';
   el.style.transition = 'opacity 120ms ease, transform 120ms ease';
   el.style.opacity = '0';
+  // 未启用主题（原样界面）时的兜底：跟游戏原生气泡一样的深色块；
+  // 启用主题后由 theme-ceramic.ts 里的 .rp-tooltip-portal 规则统一成
+  // 与游戏原生提示一致的浅底深字（!important 覆盖这里）。
   el.style.background = '#2a2a2a';
   el.style.color = '#fff';
   el.style.padding = '6px 8px';
