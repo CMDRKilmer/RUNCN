@@ -115,12 +115,6 @@ export async function newContractDraftAndFill(json: string): Promise<NewContract
   const knownNaturalIds = new Set<string>(
     (contractDraftsStore.all.value ?? []).map(d => d.naturalId),
   );
-  // Park the JSON BEFORE opening the panel, because the consumer
-  // reads the workspace key synchronously on SectionHeader mount
-  // and clears it immediately. Writing later would race with the
-  // mount and lose the value.
-  const workspace = getTileState<{ json?: string }>('contgen-output');
-  workspace.json = json;
   // Make sure a CONTD list panel is open. showBuffer focuses an
   // existing one or opens a new one — the call returns once the
   // Window div is mounted, but the TileFrame registration (which
@@ -152,6 +146,17 @@ export async function newContractDraftAndFill(json: string): Promise<NewContract
     );
     return fresh?.naturalId ?? null;
   }, '新合同草稿 naturalId');
+  // Park the JSON right before switching the panel, and tag it with the
+  // target draft. 场里可能还开着别的 CONTD 详情磁贴，它的自动填充面板一旦先
+  // 挂载就会把这个 key 抢过去、填到别人草案上；带上 draftId 后只有目标磁贴
+  // （命令为 `CONTD <naturalId>`）才会消费。写入必须早于 switch，因为消费端
+  // 是同步读 key 的。
+  const workspace = getTileState<{ json?: string; draftId?: string; at?: number }>(
+    'contgen-output',
+  );
+  workspace.json = json;
+  workspace.draftId = newNaturalId;
+  workspace.at = Date.now();
   // Switch the same list panel to the new draft's detailed view.
   // PrUn re-renders the panel in place, which causes
   // contd-auto-fill's onTileReady to inject the JSON auto-fill

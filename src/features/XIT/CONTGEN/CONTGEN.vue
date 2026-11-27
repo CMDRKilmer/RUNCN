@@ -251,6 +251,9 @@ const validationErrors = computed<string[]>(() => {
     const interval = Number(loanInterval.value ?? 0);
     if (!(amount > 0)) {
       errs.push('本金必须大于 0');
+    } else if (amount < 100) {
+      // 游戏自己的下限：小于 100 时模板弹窗的「应用模板」是禁用的。
+      errs.push('本金至少 100（游戏下限）');
     }
     if (!(rate >= 0)) {
       errs.push('利率不能为负');
