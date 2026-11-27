@@ -14,6 +14,26 @@ interface DraftItem {
   price: number;
 }
 
+// 三类贷款模板。字段与购买/销售/运输完全不同：没有商品行、没有位置，
+// 而是一组固定字段（role / loanCurrency / loanAmount / interestRate /
+// interval + 各模板专属项）。模板值取自游戏 <select> 的 option.value。
+const LOAN_TEMPLATES = ['LOAN_STABLE', 'LOAN_ANNUITY', 'LOAN_INTEREST'] as const;
+type LoanTemplate = (typeof LOAN_TEMPLATES)[number];
+
+function isLoanTemplate(template: string): template is LoanTemplate {
+  return (LOAN_TEMPLATES as readonly string[]).includes(template);
+}
+
+// 每个贷款模板的「专属参数」字段名（实测自 CONTD → 选择模板）：
+//   稳定（等额本金） → repaymentRate  每期还本比例
+//   年金（等额本息） → repayment      首期还本比例
+//   利息（先息后本） → duration       还款期数
+const LOAN_TERM_FIELD: Record<LoanTemplate, string> = {
+  LOAN_STABLE: 'repaymentRate',
+  LOAN_ANNUITY: 'repayment',
+  LOAN_INTEREST: 'duration',
+};
+
 interface DraftConfig {
   template: string;
   currency: string;
@@ -37,6 +57,21 @@ interface DraftConfig {
   // Optional. When provided, overwrites the 合同名称 field on the draft
   // header. Otherwise the existing name is left untouched.
   name?: string;
+  // ── 贷款模板（LOAN_*）专用 ──
+  // 我方身份：LENDER 出借方（我放贷）/ BORROWER 借入方（我借款）。
+  role?: 'LENDER' | 'BORROWER';
+  // 本金。
+  amount?: number;
+  // 每期利率，小数形式（0.02 = 2%/期）。
+  interestRate?: number;
+  // 还款间隔（天）。
+  interval?: number;
+  // 先息后本：还款期数。
+  duration?: number;
+  // 等额本金：每期还本比例（0.12 = 12%）。
+  repaymentRate?: number;
+  // 等额本息：首期还本比例（0.12 = 12%）。
+  initialRepaymentRate?: number;
 }
 
 const MARKER = 'data-rprun-auto-fill';
@@ -545,6 +580,14 @@ async function applyConfig(tile: PrunTile, config: DraftConfig): Promise<void> {
     templateSelect.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     templateSelect.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
   }
+  // 1b. 贷款模板没有商品行、没有位置字段，表单是另一套（角色 / 货币 /
+  //     本金 / 利率 / 间隔 + 专属参数）。在这里分出去，后面的加行、选物品、
+  //     地址都是商品模板专有的，对贷款会直接超时。
+  if (isLoanTemplate(wantsTemplate)) {
+    await fillLoanForm(tsContainer, wantsTemplate, config);
+    await applyTemplateModal(tile);
+    return;
+  }
   // Wait for the per-template <form> to render a row 0. BUY/SELL use
   // `trades[0].*`, SHIP uses `shipments[0].*` (PrUn renamed the array
   // for the SHIP template). The material input has no name attribute
@@ -885,7 +928,20 @@ async function applyConfig(tile: PrunTile, config: DraftConfig): Promise<void> {
     }
   }
 
-  // 6. Apply template → modal closes, conditions form refreshes.
+  // 6. Apply template.
+  await applyTemplateModal(tile);
+
+  // Applying the template IS the save: PrUn PATCHes the draft on
+  // apply, so the conditions land on the server with no extra save
+  // click. Clicking the conditions-form 保存 afterwards would
+  // re-submit the draft's stale object and overwrite what apply just
+  // saved (the "form shows 7 rows but the contract saved 21"
+  // symptom) — so there is deliberately no save step here.
+}
+
+// 点「应用模板」并等弹窗关闭。商品模板和贷款模板共用这一段：两者都靠
+// apply 的 PATCH 落库，不再单独点保存。
+async function applyTemplateModal(tile: PrunTile): Promise<void> {
   // Re-resolve the container fresh: the node captured at the top of
   // the fill may have been replaced by an intermediate re-render,
   // and dispatching events on a detached node never reaches React's
@@ -899,6 +955,17 @@ async function applyConfig(tile: PrunTile, config: DraftConfig): Promise<void> {
     _$$(applyForm, 'button').find(b => /apply template|应用模板/i.test(b.textContent ?? '')),
     'Apply Template button not found',
   );
+  // 游戏的「应用模板」不是靠 disabled 属性禁用的，而是换一个 Button__disabled 类
+  // ——点上去没有任何反应，随后卡在等弹窗关闭上，报错完全看不出原因（贷款本金
+  // 小于 100 时就是这样）。这里先判掉，给一句能对上的错误。
+  if (
+    /Button__disabled/.test(applyButton.className) ||
+    applyButton.getAttribute('aria-disabled') === 'true'
+  ) {
+    throw new Error(
+      '「应用模板」处于禁用状态：表单没过游戏校验（贷款本金需 ≥ 100，利率 / 间隔 / 还本比例也要在允许范围内）',
+    );
+  }
   await clickElement(applyButton);
   // The modal unmounts once PrUn's PATCH round-trips. Check the
   // CURRENT container (not the captured node — the apply re-render
@@ -909,13 +976,101 @@ async function applyConfig(tile: PrunTile, config: DraftConfig): Promise<void> {
     'template modal to close after applying',
     8000,
   );
+}
 
-  // Applying the template IS the save: PrUn PATCHes the draft on
-  // apply, so the conditions land on the server with no extra save
-  // click. Clicking the conditions-form 保存 afterwards would
-  // re-submit the draft's stale object and overwrite what apply just
-  // saved (the "form shows 7 rows but the contract saved 21"
-  // symptom) — so there is deliberately no save step here.
+// 填贷款模板弹窗。实测字段名（CONTD → 选择模板）：
+//   select[name="role"]          BORROWER 借入方 / LENDER 出借方
+//   select[name="loanCurrency"]  AIC / CIS / ICA / NCC
+//   input[name="loanAmount"]     本金
+//   input[name="interestRate"]   每期利率（小数）
+//   input[name="interval"]       还款间隔（天）
+//   input[name="repaymentRate"]  等额本金：每期还本比例
+//   input[name="repayment"]      等额本息：首期还本比例
+//   input[name="duration"]       先息后本：还款期数
+// 货币和角色都会触发一次局部重渲染（货币还决定了金额的币种），所以先写这两个，
+// 再写数值；最后逐个核对，被重渲染吞掉的写入重试一次，仍不符就报错。
+async function fillLoanForm(
+  tsContainer: HTMLElement,
+  template: LoanTemplate,
+  config: DraftConfig,
+): Promise<void> {
+  const form = () => _$(tsContainer, 'form') as HTMLFormElement | null;
+  const loanInput = (name: string) =>
+    (form()?.querySelector(`input[name="${name}"]`) as HTMLInputElement | null) ?? null;
+  const loanSelect = (name: string) =>
+    (form()?.querySelector(`select[name="${name}"]`) as HTMLSelectElement | null) ?? null;
+
+  await waitFor(
+    () => loanInput('loanAmount') !== null,
+    'loan template fields to render',
+    15000,
+    () => {
+      const current = form();
+      const names =
+        current === null
+          ? '<no form>'
+          : Array.from(current.querySelectorAll('input, select'))
+              .map(el => el.getAttribute('name') ?? el.tagName.toLowerCase())
+              .join(', ');
+      return `fields=[${names}]`;
+    },
+  );
+
+  const role = notNullish(loanSelect('role'), '贷款模板缺少「角色」下拉');
+  selectByValueOrLabel(role, config.role ?? 'LENDER');
+  await sleep(80);
+
+  const currency = notNullish(loanSelect('loanCurrency'), '贷款模板缺少「货币」下拉');
+  selectByValueOrLabel(currency, config.currency);
+  await sleep(120);
+  // 换币种会重渲染金额行；等它回到 DOM 再写数值，否则写入落在被替换的节点上。
+  await waitFor(() => loanInput('loanAmount') !== null, 'loan form to re-render after currency');
+
+  const termValue =
+    template === 'LOAN_INTEREST'
+      ? config.duration
+      : template === 'LOAN_STABLE'
+        ? config.repaymentRate
+        : config.initialRepaymentRate;
+  const wanted: [string, number][] = [
+    ['loanAmount', notNullish(config.amount, '贷款缺少本金')],
+    ['interestRate', notNullish(config.interestRate, '贷款缺少利率')],
+    ['interval', notNullish(config.interval, '贷款缺少还款间隔')],
+    [LOAN_TERM_FIELD[template], notNullish(termValue, `贷款模板 ${template} 缺少专属参数`)],
+  ];
+
+  for (const [name, value] of wanted) {
+    const input = notNullish(loanInput(name), `贷款字段 ${name} 不存在`);
+    focusElement(input);
+    changeInputValue(input, String(value));
+    await sleep(60);
+  }
+
+  // 核对 + 修复：React 重渲染偶尔吞掉写入。
+  for (const [name, value] of wanted) {
+    const input = loanInput(name);
+    if (input !== null && Number(input.value) === value) {
+      continue;
+    }
+    changeInputValue(notNullish(input, `贷款字段 ${name} 消失`), String(value));
+    await sleep(80);
+    const again = loanInput(name);
+    if (again === null || Number(again.value) !== value) {
+      throw new Error(`贷款字段 ${name} 未能填入（期望 ${value}，实际 ${again?.value ?? '缺失'}）`);
+    }
+  }
+
+  const roleCheck = loanSelect('role');
+  if (roleCheck !== null && roleCheck.value !== (config.role ?? 'LENDER')) {
+    throw new Error(`角色未能选中（期望 ${config.role}，实际 ${roleCheck.value}）`);
+  }
+  const currencyCheck = loanSelect('loanCurrency');
+  if (
+    currencyCheck !== null &&
+    currencyCheck.value.toUpperCase() !== config.currency.toUpperCase()
+  ) {
+    throw new Error(`货币未能选中（期望 ${config.currency}，实际 ${currencyCheck.value}）`);
+  }
 }
 
 // Walks every FormComponent label inside `root`, returns the first
@@ -958,6 +1113,86 @@ function findLabeledInput(root: HTMLElement, labelText: string): HTMLInputElemen
   return null;
 }
 
+// 贷款模板的校验与商品模板完全不同：没有 items、没有 location，取而代之是
+// 本金 / 利率 / 间隔 / 身份 + 各模板专属参数。金额一律用游戏本身的单位
+// （利率和还本比例是小数，2% 写 0.02），避免"填 2 变成 0.02%"这类歧义。
+function validateLoanConfig(cfg: Record<string, unknown>, template: LoanTemplate): DraftConfig {
+  if (typeof cfg.currency !== 'string' || cfg.currency.length === 0) {
+    throw new Error('"currency" is required for loan contracts (e.g. "ICA", "NCC", "CIS")');
+  }
+  if (typeof cfg.amount !== 'number' || !isFinite(cfg.amount) || cfg.amount <= 0) {
+    throw new Error('"amount" must be a positive number for loan contracts');
+  }
+  // 游戏自己卡的下限：本金 < 100 时「应用模板」是禁用状态（实测 99 禁用、100 可用），
+  // 提前拦下来，别等到点应用才发现按钮点不动。
+  if (cfg.amount < 100) {
+    throw new Error('"amount" must be at least 100 (in-game minimum for loan contracts)');
+  }
+  if (typeof cfg.interestRate !== 'number' || !isFinite(cfg.interestRate) || cfg.interestRate < 0) {
+    throw new Error('"interestRate" must be a non-negative decimal (0.02 means 2% per period)');
+  }
+  if (typeof cfg.interval !== 'number' || !isFinite(cfg.interval) || cfg.interval < 1) {
+    throw new Error('"interval" must be a number of days >= 1');
+  }
+  // role 允许写游戏值或中文，避免用户按界面文案填进去就报错。
+  const role = normalizeLoanRole(cfg.role);
+  if (role === undefined) {
+    throw new Error('"role" must be "LENDER" / "BORROWER" (or 出借方 / 借入方)');
+  }
+  const term: Record<string, string> = {
+    LOAN_STABLE: 'repaymentRate',
+    LOAN_ANNUITY: 'initialRepaymentRate',
+    LOAN_INTEREST: 'duration',
+  };
+  const termKey = term[template]!;
+  const termValue = cfg[termKey];
+  if (typeof termValue !== 'number' || !isFinite(termValue) || termValue <= 0) {
+    throw new Error(
+      template === 'LOAN_INTEREST'
+        ? '"duration" (number of installments) must be a positive number'
+        : `"${termKey}" must be a positive decimal (0.12 means 12% of principal)`,
+    );
+  }
+  if (cfg.name !== undefined && (typeof cfg.name !== 'string' || cfg.name.length === 0)) {
+    throw new Error('"name" must be a non-empty string when provided');
+  }
+  return {
+    template,
+    currency: cfg.currency,
+    items: [],
+    role,
+    amount: cfg.amount,
+    interestRate: cfg.interestRate,
+    interval: cfg.interval,
+    duration: template === 'LOAN_INTEREST' ? termValue : undefined,
+    repaymentRate: template === 'LOAN_STABLE' ? termValue : undefined,
+    initialRepaymentRate: template === 'LOAN_ANNUITY' ? termValue : undefined,
+    name: cfg.name as string | undefined,
+  };
+}
+
+// role 兼容三种写法：LENDER / BORROWER、小写、以及界面上的中文身份。
+function normalizeLoanRole(raw: unknown): 'LENDER' | 'BORROWER' | undefined {
+  if (raw === undefined || raw === null || raw === '') {
+    return 'LENDER';
+  }
+  if (typeof raw !== 'string') {
+    return undefined;
+  }
+  const upper = raw.trim().toUpperCase();
+  if (upper === 'LENDER' || upper === 'BORROWER') {
+    return upper;
+  }
+  const text = raw.trim();
+  if (text === '出借方' || text === '贷款方') {
+    return 'LENDER';
+  }
+  if (text === '借入方' || text === '借款方') {
+    return 'BORROWER';
+  }
+  return undefined;
+}
+
 function validateConfig(raw: unknown): DraftConfig {
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('JSON must be an object');
@@ -967,6 +1202,9 @@ function validateConfig(raw: unknown): DraftConfig {
     throw new Error('"template" is required (e.g. "BUY", "SELL", "SHIP")');
   }
   const template = cfg.template.toUpperCase();
+  if (isLoanTemplate(template)) {
+    return validateLoanConfig(cfg, template);
+  }
   if (typeof cfg.currency !== 'string' || cfg.currency.length === 0) {
     throw new Error('"currency" is required (e.g. "NCC", "ICA", "CIS", "AIC")');
   }
@@ -1122,12 +1360,32 @@ function buildPanel(tile: PrunTile) {
   // on panel mount and pre-fill the textarea, then clear the key so
   // a stale value doesn't refill on every re-mount. The value also
   // goes into the panel cache so a mid-fill rebuild doesn't lose it.
-  const pendingContgen = getTileState<{ json?: string }>('contgen-output');
+  //
+  // `draftId` 限定这份 JSON 属于哪份草案：CONTGEN 新建草案后，场里可能还开着
+  // 另一份 CONTD 详情，它的面板先挂载就会把 JSON 抢过去，填到别人的草案上
+  // （实测发生过）。带了 draftId 就只认命令匹配的那个磁贴；不带则保持旧行为。
+  // 超过 60 秒的残留（目标磁贴始终没挂载）直接丢弃，免得以后误填。
+  const pendingContgen = getTileState<{ json?: string; draftId?: string; at?: number }>(
+    'contgen-output',
+  );
+  const currentDraftId = tile.parameter?.trim().toUpperCase();
+  const pendingTargetsThisTile =
+    pendingContgen.draftId === undefined ||
+    (currentDraftId !== undefined &&
+      pendingContgen.draftId.trim().toUpperCase() === currentDraftId);
+  const pendingFresh = pendingContgen.at === undefined || Date.now() - pendingContgen.at < 60_000;
   let autoFilledFromContgen = false;
-  if (typeof pendingContgen.json === 'string' && pendingContgen.json.length > 0) {
+  if (
+    typeof pendingContgen.json === 'string' &&
+    pendingContgen.json.length > 0 &&
+    pendingTargetsThisTile &&
+    pendingFresh
+  ) {
     textarea.value = pendingContgen.json;
     panelJsonCache.set(jsonCacheKey, pendingContgen.json);
     delete pendingContgen.json;
+    delete pendingContgen.draftId;
+    delete pendingContgen.at;
     // CONTGEN-driven mounts should not require the user to press the
     // "填写" button manually. The user just hit "新建合同并填充" /
     // "发送到 CONTD" in CONTGEN — the next thing they expect to see
