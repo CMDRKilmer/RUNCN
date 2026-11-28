@@ -25,6 +25,7 @@ export interface LoopPlanInput {
   ship: PrunApi.Ship;
   origin: string;
   bases: ChainPlannerBase[];
+  manualBaseOrder?: boolean;
   capacity: ChainCapacity;
 }
 
@@ -90,6 +91,7 @@ export async function computeLoopPlan(
     originNaturalId: input.origin,
     capacity: input.capacity,
     bases: input.bases,
+    manualBaseOrder: input.manualBaseOrder,
     loop: true,
   });
   if (snapshot === undefined) {
@@ -168,6 +170,7 @@ export async function computeLoopPlan(
 export function useChainLoopPlanning(input: {
   ship: () => DispatchShip | undefined;
   bases: () => ChainPlannerBase[];
+  manualBaseOrder?: () => boolean;
   enabled: () => boolean;
 }) {
   const result = ref<LoopPlanResult | undefined>(undefined);
@@ -199,6 +202,7 @@ export function useChainLoopPlanning(input: {
         ship: ship.ship,
         origin: shipOriginNaturalId(ship),
         bases,
+        manualBaseOrder: input.manualBaseOrder?.(),
         capacity,
       });
       if (current === token) {
@@ -224,6 +228,7 @@ export function useChainLoopPlanning(input: {
       () => input.ship()?.cargoStore,
       () => input.ship()?.exchangeCode,
       () => input.bases(),
+      () => input.manualBaseOrder?.(),
     ],
     () => void recompute(),
     { immediate: true },

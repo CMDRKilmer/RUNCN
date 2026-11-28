@@ -79,6 +79,9 @@ import { userDataStore } from '@src/infrastructure/prun-api/data/user-data';
 import { fixed0, fixed02, formatCurrency } from '@src/utils/format';
 import { getPrice } from '@src/infrastructure/fio/cx';
 import { gameNow } from '@src/infrastructure/fio/orbit';
+import { vDraggable } from 'vue-draggable-plus';
+import { grip } from '@src/components/grip';
+import GripChar from '@src/components/grip/GripChar.vue';
 
 const { ships, bases, generationCandidate } = defineProps<{
   ships: DispatchShip[];
@@ -94,12 +97,14 @@ const chainGroup = useTileState<string | undefined>('chainGroup', undefined);
 const chainShipIds = useTileState<string[] | undefined>('chainShipIds', undefined);
 // 分组内勾选参与的基地：undefined = 默认全选。
 const chainBaseIds = useTileState<string[] | undefined>('chainBaseIds', undefined);
+const manualWaypointIds = useTileState<string[] | undefined>('chainWaypointOrder', undefined);
 // 循环模式（原生 RT Loop，v1 仅单船）：开启后按飞行周期重算运量，生成时打开游戏 Loop。
 const chainLoopMode = useTileState<boolean>('chainLoopMode', false);
 
 // 换分组时重置基地勾选（新分组默认全选）。
 watch(chainGroup, () => {
   chainBaseIds.value = undefined;
+  manualWaypointIds.value = undefined;
 });
 
 // ── 分组 ─────────────────────────────────────────────────────
@@ -143,9 +148,18 @@ const selectedBaseIds = computed(() => {
   return chainBaseIds.value.filter(id => present.has(id));
 });
 
-const selectedBases = computed(() =>
-  groupBases.value.filter(x => selectedBaseIds.value.includes(x.naturalId)),
-);
+const selectedBases = computed(() => {
+  const selected = groupBases.value.filter(x => selectedBaseIds.value.includes(x.naturalId));
+  const order = manualWaypointIds.value;
+  if (order === undefined) {
+    return selected;
+  }
+  const positions = new Map(order.map((id, index) => [id, index]));
+  return selected.sort(
+    (a, b) =>
+      (positions.get(a.naturalId) ?? order.length) - (positions.get(b.naturalId) ?? order.length),
+  );
+});
 
 function setBaseSelected(id: string, selected: boolean) {
   const current = selectedBaseIds.value;
@@ -198,6 +212,7 @@ function clearAllShips() {
 }
 
 const {
+  basePlan,
   flightEstimates,
   flightTimesLoading,
   timeAlloc,
@@ -209,6 +224,7 @@ const {
 } = useChainPlanning({
   ships: () => selectedShips.value,
   bases: () => selectedBases.value,
+  manualBaseOrder: () => manualWaypointIds.value !== undefined,
 });
 
 // ── 循环模式（单船）─────────────────────────────────────
@@ -223,8 +239,29 @@ const {
 } = useChainLoopPlanning({
   ship: () => loopShip.value,
   bases: () => selectedBases.value,
+  manualBaseOrder: () => manualWaypointIds.value !== undefined,
   enabled: () => chainLoopMode.value && loopShip.value !== undefined,
 });
+const waypointBases = computed({
+  get: () => {
+    const selected = selectedBases.value;
+    if (manualWaypointIds.value !== undefined) {
+      return selected;
+    }
+    const plan = chainLoopMode.value ? loopPlan.value?.plan : basePlan.value;
+    const positions = new Map(plan?.stops.map((stop, index) => [stop.naturalId, index]));
+    return [...selected].sort(
+      (a, b) =>
+        (positions.get(a.naturalId) ?? selected.length) -
+        (positions.get(b.naturalId) ?? selected.length),
+    );
+  },
+  set: (bases: ChainPlannerBase[]) => {
+    manualWaypointIds.value = bases.map(base => base.naturalId);
+  },
+});
+const waypointDragBinding = [waypointBases, grip.draggable];
+
 // 循环计划可用：开关开 + 单船 + 估时成功且有计划。规划表与生成向导据此切到循环口径。
 const loopActive = computed(
   () =>
@@ -1398,6 +1435,20 @@ function flightTotalText(shipId: string): string {
         </div>
       </div>
 
+      <div v-if="chainTab === 'plan' && waypointBases.length > 1" :class="$style.waypointOrder">
+        <span :class="$style.barLabel">航点顺序</span>
+        <ol v-draggable="waypointDragBinding" :class="$style.waypointList">
+          <li v-for="base in waypointBases" :key="base.naturalId">
+            <span :class="[grip.class, $style.waypointGrip]" data-tooltip="拖动调整航点顺序">
+              <GripChar aria-hidden="true" />
+            </span>
+            {{ base.naturalId }}<BaseAlias :site-id="base.siteId" />
+          </li>
+        </ol>
+        <PrunButton v-if="manualWaypointIds" dark @click="manualWaypointIds = undefined">
+          恢复自动排序
+        </PrunButton>
+      </div>
       <div
         v-if="chainTab === 'plan' && chainLoopMode"
         :class="loopActive ? $style.allocOk : $style.notice">
@@ -2123,6 +2174,24 @@ function flightTotalText(shipId: string): string {
 .table thead tr {
   border-bottom: 1px solid #2b485a;
   box-sizing: border-box;
+}
+
+.waypointOrder,
+.waypointList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.waypointList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waypointGrip {
+  cursor: grab;
 }
 
 .table tbody tr {

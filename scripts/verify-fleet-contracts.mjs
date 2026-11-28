@@ -2701,6 +2701,42 @@ await check('loop rounds full trip hours up to whole provisioning days', async (
   }
 });
 
+await check(
+  'manual waypoint order drives ship subplans, loop estimates and native RT',
+  async () => {
+    const bs = bases().reverse();
+    const input = { originNaturalId: 'CX', capacity, bases: bs };
+    const stopIds = plan => plan.stops.map(stop => stop.naturalId);
+    assert.deepEqual(stopIds(planChainRoute(input)), ['A', 'B']);
+    const manual = planChainRoute({ ...input, manualBaseOrder: true });
+    assert.deepEqual(stopIds(manual), ['B', 'A']);
+    const parts = splitChainPlanAcrossShips(manual, [ship('S1')], bs, undefined, undefined, {
+      manualBaseOrder: true,
+    });
+    assert.deepEqual(stopIds(parts[0].plan), ['B', 'A']);
+    assert.deepEqual(
+      buildNativeWaypoints(parts[0].plan).map(stop => stop.location),
+      ['CX', 'B', 'A', 'CX'],
+    );
+
+    const loop = await computeLoopPlan(
+      { ...loopInput(bs), manualBaseOrder: true },
+      estimateInput => {
+        assert.deepEqual(
+          estimateInput.stops.map(stop => stop.naturalId),
+          ['B', 'A'],
+        );
+        return fakeEstimate(() => 12)(estimateInput);
+      },
+    );
+    assert.equal(loop.ok, true);
+    assert.deepEqual(
+      buildNativeWaypoints(loop.plan, false, true).map(stop => stop.location),
+      ['CX', 'B', 'A'],
+    );
+  },
+);
+
 await check('loop re-estimates when a heavier load crosses into the next day', async () => {
   const bs = bases();
   for (const base of bs) {

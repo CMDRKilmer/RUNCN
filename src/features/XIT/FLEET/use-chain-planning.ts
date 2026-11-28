@@ -28,6 +28,7 @@ function fitsChainPlan(plan: ChainPlan) {
 export function useChainPlanning(input: {
   ships: () => DispatchShip[];
   bases: () => ChainPlannerBase[];
+  manualBaseOrder?: () => boolean;
 }) {
   const selectedShips = computed(input.ships);
   const selectedBases = computed(input.bases);
@@ -72,6 +73,7 @@ export function useChainPlanning(input: {
   ) {
     return splitChainPlanAcrossShips(plan, selectedShips.value, bases, arrivalHours, ranges, {
       includeEmptyPlans: true,
+      manualBaseOrder: input.manualBaseOrder?.(),
     });
   }
 
@@ -172,6 +174,7 @@ export function useChainPlanning(input: {
     const route = {
       originNaturalId: planOrigin.value,
       capacity,
+      manualBaseOrder: input.manualBaseOrder?.(),
       // The combined plan preserves stops supplied by any origin; subplans check actual stock.
       originStock: combinedOriginStock.value,
       arrivalHoursByNaturalId: arrivalHours,
