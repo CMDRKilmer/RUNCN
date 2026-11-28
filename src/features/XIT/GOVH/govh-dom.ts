@@ -256,6 +256,77 @@ async function withBuffer<T>(
   }
 }
 
+// 解析 WAR（仓库）窗口的「等级」字段：标签文本 + 相邻的数值节点。
+// 面板结构是 `label 等级` + 兄弟节点 `1`，与人口表无关，单独解析。
+function parseWarehouseLevel(window: HTMLElement): number | undefined {
+  for (const label of window.querySelectorAll('label')) {
+    const text = (label.textContent ?? '').trim();
+    if (text !== '等级' && !/^level$/i.test(text)) {
+      continue;
+    }
+    const value = parseNumber(label.nextElementSibling?.textContent ?? undefined);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+// 读取政府仓库（WAR）等级：hidden 窗口打开 → 解析 → 自动关闭。
+// 仓库不是 POPI 基建列表里的一项，只能走 WAR 这个原生窗口。
+export async function readWarehouseLevel(planet: string): Promise<number | undefined> {
+  // 星球编码原样传：naturalId 是 VH-192b 这种「大写-数字+小写字母」，
+  // 转成全大写会把结尾字母改掉，游戏就认不出这条指令。
+  const code = planet.trim();
+  if (code === '') {
+    return undefined;
+  }
+  return withBuffer(`WAR ${code}`, 9000, parseWarehouseLevel);
+}
+
+// 行星项目 id → 原生显示名的匹配规则。PLI 的「行星项目」区块**只列已建成的项目**，
+// 所以命中即代表已建成；名称以 PLI 为准（PPS 里 CoGC 写「全球商会」，PLI 写「CoGC」）。
+const PLANET_PROJECT_PATTERNS: readonly [string, RegExp][] = [
+  ['planetaryAdmin', /行星监管中心|Administration Cent(er|re)/i],
+  ['cogc', /CoGC|Chamber of Global Commerce/i],
+  ['shipyard', /船厂|Shipyard/i],
+  ['localMarket', /本地市场|Local Market/i],
+];
+
+function parsePlanetProjects(window: HTMLElement): string | undefined {
+  for (const label of window.querySelectorAll('label')) {
+    const text = (label.textContent ?? '').trim();
+    if (text !== '行星项目' && !/^planetary projects$/i.test(text)) {
+      continue;
+    }
+    const content = (label.parentElement?.textContent ?? '').trim();
+    if (content !== '') {
+      return content;
+    }
+  }
+  return undefined;
+}
+
+// 读取该星球已建成的行星项目（PLI 窗口的「行星项目」区块）。
+// 返回值是命中的项目 id 集合；读不到时返回 undefined 由面板显示「—」。
+export async function readBuiltPlanetProjects(planet: string): Promise<Set<string> | undefined> {
+  const code = planet.trim();
+  if (code === '') {
+    return undefined;
+  }
+  const text = await withBuffer(`PLI ${code}`, 9000, parsePlanetProjects);
+  if (text === undefined) {
+    return undefined;
+  }
+  const built = new Set<string>();
+  for (const [id, pattern] of PLANET_PROJECT_PATTERNS) {
+    if (pattern.test(text)) {
+      built.add(id);
+    }
+  }
+  return built;
+}
+
 // 解析 POPR 人口报告。
 function parsePopr(window: HTMLElement, planet: string): GovhSnapshot | undefined {
   const tables = populationTables(window);
