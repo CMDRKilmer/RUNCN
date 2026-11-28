@@ -1,6 +1,7 @@
 import { onApiMessage } from '@src/infrastructure/prun-api/data/api-messages';
 import { sendServerMessage } from '../socket-io-middleware';
 import { companyContextId } from './user-data';
+import { context } from './screens';
 
 // 游戏下发的会计期间余额（ACCOUNTING_BALANCES）。
 //
@@ -22,8 +23,22 @@ interface Period {
 
 const periods = ref<Period[]>([]);
 
+// 政府管理视图（URL 的 `context=` 是管理机构 id）里，服务器推的是**政府**的会计数据。
+// 判断与 balancesStore 保持一致：只在公司上下文接受。否则政府的收入/支出会留在这里，
+// 切回公司后利润表显示的还是政府那份，而且页面因为「已有数据」不再请求，等于卡死。
+function isCompanyContext() {
+  const urlContext = context.value;
+  if (!urlContext || !companyContextId.value) {
+    return true;
+  }
+  return urlContext === companyContextId.value;
+}
+
 onApiMessage({
   ACCOUNTING_BALANCES(data: { periods?: Period[] }) {
+    if (!isCompanyContext()) {
+      return;
+    }
     if (Array.isArray(data?.periods) && data.periods.length > 0) {
       periods.value = data.periods;
     }
@@ -35,22 +50,27 @@ onApiMessage({
 // 回来才有数据」）。这里复用游戏 socket 主动要一次——只读请求、不改服务端状态，
 // 响应仍走上面的 onApiMessage 统一处理。
 //
-// 同一会话只发一次：数据是整期余额，重复请求没有意义；失败（socket 未就绪）时
-// 不置位，下次打开页面还可以再试。
-let requested = false;
+// 按 contextId 记账而不是用一次性布尔值：换公司 / 重新登录后还要再要一次。
+// force=true（面板上的「刷新数据」）绕过这条记录，用于本期数据已经变化、
+// 需要重新取一次快照的场景。
+let requestedFor: string | undefined;
 
-export function requestAccountingPeriods() {
-  if (requested) {
+export function requestAccountingPeriods(force = false) {
+  const id = companyContextId.value;
+  if (id === undefined || !isCompanyContext()) {
+    return;
+  }
+  if (!force && requestedFor === id) {
     return;
   }
   const sent = sendServerMessage({
     messageType: 'ACCOUNTING_GET_BALANCES',
     payload: {},
     actionId: crypto.randomUUID(),
-    contextId: companyContextId.value,
+    contextId: id,
   });
   if (sent) {
-    requested = true;
+    requestedFor = id;
   }
 }
 
@@ -60,18 +80,6 @@ export function ensureAccountingPeriods() {
     requestAccountingPeriods();
   }
 }
-
-// 拿到公司身份后先预热一次：socket 可能比 userData 晚就绪，隔几秒补发。
-watch(
-  companyContextId,
-  id => {
-    if (id === undefined) {
-      return;
-    }
-    setTimeout(ensureAccountingPeriods, 3000);
-  },
-  { immediate: true },
-);
 
 export const accountingPeriods = {
   /** 按期间升序（末尾是当前期） */

@@ -2,7 +2,9 @@
 import {
   accountingPeriods,
   ensureAccountingPeriods,
+  requestAccountingPeriods,
 } from '@src/infrastructure/prun-api/data/accounting-periods';
+import PrunButton from '@src/components/PrunButton.vue';
 import {
   EXPENSE_GROUPS,
   expenseGroupOf,
@@ -18,6 +20,22 @@ const COLUMNS = 3;
 // 会计余额平时要打开原生 FIN 才会推送，这里挂载时补一次静默请求，
 // 让插件自己的页面也能直接拿到数据。
 onMounted(ensureAccountingPeriods);
+
+// 手动刷新：本期数据随时会变（新订单成交、发工资），挂载时的快照很快就旧了。
+// 这里由用户点击触发重新请求，满足「服务器通信必须由用户动作发起」的约定。
+const refreshing = ref(false);
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+
+function refresh() {
+  requestAccountingPeriods(true);
+  refreshing.value = true;
+  if (refreshTimer !== undefined) {
+    clearTimeout(refreshTimer);
+  }
+  refreshTimer = setTimeout(() => {
+    refreshing.value = false;
+  }, 1500);
+}
 
 // recent 返回升序，反转后按「本期 → 上期 → 上上期」排列。
 const ordered = computed(() => [...accountingPeriods.recent(COLUMNS)].reverse());
@@ -94,22 +112,36 @@ const expenseGroups = computed<GroupedRows[]>(() => {
   });
 });
 
-const revenueTotals = computed(() =>
-  Array.from({ length: COLUMNS }, (_, i) =>
-    revenueRows.value.reduce((s, r) => s + (r.values[i] ?? 0), 0),
-  ),
+// 某一列没有任何一期数据时返回 undefined（显示「—」），不能拿 0 顶替：
+// 服务器只给 1 期时，后两列的明细是「—」而合计是 0，看起来像「这两期收入为零」。
+function columnTotal(rows: Row[], index: number): number | undefined {
+  const present = rows.filter(row => row.values[index] !== undefined);
+  if (present.length === 0) {
+    return undefined;
+  }
+  return present.reduce((sum, row) => sum + (row.values[index] ?? 0), 0);
+}
+
+const revenueTotals = computed<(number | undefined)[]>(() =>
+  Array.from({ length: COLUMNS }, (_, i) => columnTotal(revenueRows.value, i)),
 );
-const expenseTotals = computed(() =>
-  Array.from({ length: COLUMNS }, (_, i) =>
-    expenseRows.value.reduce((s, r) => s + (r.values[i] ?? 0), 0),
-  ),
+const expenseTotals = computed<(number | undefined)[]>(() =>
+  Array.from({ length: COLUMNS }, (_, i) => columnTotal(expenseRows.value, i)),
 );
-const netTotals = computed(() =>
-  Array.from(
-    { length: COLUMNS },
-    (_, i) => (revenueTotals.value[i] ?? 0) - (expenseTotals.value[i] ?? 0),
-  ),
+const netTotals = computed<(number | undefined)[]>(() =>
+  Array.from({ length: COLUMNS }, (_, i) => {
+    const revenue = revenueTotals.value[i];
+    const expense = expenseTotals.value[i];
+    // 两边都得有数才能相减；缺期保持 undefined，别把「没有数据」算成零利润。
+    return revenue === undefined || expense === undefined ? undefined : revenue - expense;
+  }),
 );
+
+/** 跨期合计：跳过缺失期，全缺则 undefined。 */
+function sumColumns(values: readonly (number | undefined)[]): number | undefined {
+  const present = values.filter((value): value is number => value !== undefined);
+  return present.length === 0 ? undefined : present.reduce((a, b) => a + b, 0);
+}
 
 const hasData = computed(() => ordered.value.length > 0);
 const headers = computed(() => {
@@ -133,8 +165,14 @@ function cell(value: number | undefined) {
 
 <template>
   <div :class="$style.root">
+    <div :class="$style.toolbar">
+      <PrunButton dark :disabled="refreshing" data-finis-refresh @click="refresh">
+        {{ refreshing ? '请求中…' : '刷新数据' }}
+      </PrunButton>
+      <span :class="$style.toolbarHint">本期数据随时在变，重新取一次会计余额</span>
+    </div>
     <div v-if="!hasData" :class="$style.empty">
-      正在获取会计期间数据…（若长时间为空，可打开一次原生 <b>FIN</b> 触发同步）
+      正在获取会计期间数据…（若长时间为空，可点「刷新数据」或打开一次原生 <b>FIN</b>）
     </div>
     <table v-else :class="$style.table">
       <thead>
@@ -156,7 +194,7 @@ function cell(value: number | undefined) {
         <tr :class="$style.subtotal">
           <td>收入合计</td>
           <td v-for="(v, i) in revenueTotals" :key="i" :class="$style.num">{{ cell(v) }}</td>
-          <td :class="$style.num">{{ cell(revenueTotals.reduce((a, b) => a + b, 0)) }}</td>
+          <td :class="$style.num">{{ cell(sumColumns(revenueTotals)) }}</td>
         </tr>
 
         <tr :class="$style.gap"><td colspan="5"></td></tr>
@@ -181,14 +219,14 @@ function cell(value: number | undefined) {
         <tr :class="$style.subtotal">
           <td>支出合计</td>
           <td v-for="(v, i) in expenseTotals" :key="i" :class="$style.num">{{ cell(v) }}</td>
-          <td :class="$style.num">{{ cell(expenseTotals.reduce((a, b) => a + b, 0)) }}</td>
+          <td :class="$style.num">{{ cell(sumColumns(expenseTotals)) }}</td>
         </tr>
 
         <tr :class="$style.gap"><td colspan="5"></td></tr>
         <tr :class="$style.net">
           <td>净利润</td>
           <td v-for="(v, i) in netTotals" :key="i" :class="$style.num">{{ cell(v) }}</td>
-          <td :class="$style.num">{{ cell(netTotals.reduce((a, b) => a + b, 0)) }}</td>
+          <td :class="$style.num">{{ cell(sumColumns(netTotals)) }}</td>
         </tr>
       </tbody>
     </table>
@@ -211,6 +249,17 @@ function cell(value: number | undefined) {
 
 .empty {
   opacity: 0.75;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.toolbarHint {
+  font-size: 0.9em;
+  opacity: 0.6;
 }
 
 .table {
