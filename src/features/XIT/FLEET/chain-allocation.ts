@@ -453,7 +453,7 @@ export function splitChainPlanAcrossShips(
   // 未提供 / 长度与 usable 不匹配时退回按舱容贪心切段（旧行为）。
   allocByNaturalId?: string[][],
   // Keep empty subplans during fitting so their capacity and supply failures remain visible.
-  options?: { includeEmptyPlans?: boolean },
+  options?: { includeEmptyPlans?: boolean; manualBaseOrder?: boolean },
 ): ShipChainPlan[] {
   const byId = new Map(bases.map(b => [b.naturalId, b] as const));
   const ordered = plan.stops
@@ -537,6 +537,7 @@ export function splitChainPlanAcrossShips(
       originNaturalId: shipOriginNaturalId(ship),
       capacity: cap,
       bases: chunk,
+      manualBaseOrder: options?.manualBaseOrder,
       originStock: stock,
       purchaseStock: supply,
       groupProducedTickers,

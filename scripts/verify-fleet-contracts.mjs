@@ -489,6 +489,66 @@ await check(
     assert.deepEqual(snapshot, before);
   },
 );
+await check('manual ordering allocates cargo only along surviving forward edges', () => {
+  const producer = (naturalId, daysUntilFull, units) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 1,
+    cxBuy: true,
+    burn: { RAW: { input: 0, output: units, workforce: 0, inventory: units } },
+    products: ['RAW'],
+    bill: {},
+    projectedStock: { RAW: units },
+    daysUntilFull,
+  });
+  const consumer = (naturalId, daysLeft) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 1,
+    cxBuy: true,
+    burn: { RAW: { input: 10, output: 0, workforce: 0, inventory: 0, daysLeft } },
+    products: [],
+    bill: { RAW: 10 },
+    projectedStock: {},
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity,
+    originStock: {},
+    purchaseStock: {},
+    manualBaseOrder: true,
+    planetRanks: { A: 0, B: 1, C: 2, D: 3 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['B', 'D']]]),
+    bases: [producer('A', 5, 10), consumer('B', 0), producer('C', 1, 10), consumer('D', 1)],
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.deepEqual(plan.stops.map(stop => stop.naturalId), ['A', 'B', 'C', 'D']);
+  assert.equal(plan.stops[1].unloadChain.get('RAW').amount, 10);
+  assert.equal(plan.stops[3].unloadChain.get('RAW').amount, 10);
+  assert.equal(plan.hasUnmetChainDemand, undefined);
+
+  snapshot.bases[0] = producer('A', 5, 4);
+  const shortfall = computeChainPlan(snapshot, String);
+  assert.equal(shortfall.stops[1].unloadChain.get('RAW').amount, 4);
+  assert.equal(shortfall.hasUnmetChainDemand, true);
+
+  // D is urgent and A has pickup priority, but only A can serve B.
+  snapshot.bases = [producer('A', 1, 10), consumer('B', 1), producer('C', 5, 10), consumer('D', 0)];
+  const constrained = computeChainPlan(snapshot, String);
+  assert.deepEqual(constrained.stops.map(stop => stop.naturalId), ['A', 'B', 'C', 'D']);
+  assert.equal(constrained.stops[1].unloadChain.get('RAW').amount, 10);
+  assert.equal(constrained.stops[3].unloadChain.get('RAW').amount, 10);
+  assert.equal(constrained.hasUnmetChainDemand, undefined);
+
+  // C has no forward consumer. Pick up its output for the return leg.
+  snapshot.bases.pop();
+  snapshot.consumers.set('RAW', ['B']);
+  const returning = computeChainPlan(snapshot, String);
+  assert.deepEqual(returning.stops.map(stop => stop.naturalId), ['A', 'B', 'C']);
+  assert.equal(returning.finalUnload.RAW, 10);
+});
 await check('equal planet ranks keep stable frontier ordering', () => {
   const raw = { input: 0, output: 1, workforce: 0, inventory: 20, daysLeft: Infinity };
   const need = { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 };
@@ -2701,6 +2761,42 @@ await check('loop rounds full trip hours up to whole provisioning days', async (
   }
 });
 
+await check(
+  'manual waypoint order drives ship subplans, loop estimates and native RT',
+  async () => {
+    const bs = bases().reverse();
+    const input = { originNaturalId: 'CX', capacity, bases: bs };
+    const stopIds = plan => plan.stops.map(stop => stop.naturalId);
+    assert.deepEqual(stopIds(planChainRoute(input)), ['A', 'B']);
+    const manual = planChainRoute({ ...input, manualBaseOrder: true });
+    assert.deepEqual(stopIds(manual), ['B', 'A']);
+    const parts = splitChainPlanAcrossShips(manual, [ship('S1')], bs, undefined, undefined, {
+      manualBaseOrder: true,
+    });
+    assert.deepEqual(stopIds(parts[0].plan), ['B', 'A']);
+    assert.deepEqual(
+      buildNativeWaypoints(parts[0].plan).map(stop => stop.location),
+      ['CX', 'B', 'A', 'CX'],
+    );
+
+    const loop = await computeLoopPlan(
+      { ...loopInput(bs), manualBaseOrder: true },
+      estimateInput => {
+        assert.deepEqual(
+          estimateInput.stops.map(stop => stop.naturalId),
+          ['B', 'A'],
+        );
+        return fakeEstimate(() => 12)(estimateInput);
+      },
+    );
+    assert.equal(loop.ok, true);
+    assert.deepEqual(
+      buildNativeWaypoints(loop.plan, false, true).map(stop => stop.location),
+      ['CX', 'B', 'A'],
+    );
+  },
+);
+
 await check('loop re-estimates when a heavier load crosses into the next day', async () => {
   const bs = bases();
   for (const base of bs) {
@@ -2736,6 +2832,8 @@ await check('loop declines conflicting day estimates and loads that no longer fi
   assert.equal(result.ok, false);
   assert.equal(result.supplyDays, 2);
   assert.match(result.reasons.join(' '), /2 天.*舱容/);
+  assert.deepEqual(result.previousTiming, { supplyDays: 1, flightHours: 25 });
+  assert.equal(result.estimate, undefined);
 });
 
 await check('loop rejects a one-day load that exceeds free cargo capacity before estimation', async () => {

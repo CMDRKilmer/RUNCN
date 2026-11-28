@@ -25,7 +25,12 @@ async function reportExtensionUserOnStartup() {
       displayName: prunUsername,
     });
   } catch (err) {
-    console.warn('[ORG] Failed to report extension user:', err);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.debug('[ORG] Startup user report request was aborted.');
+      return;
+    }
+    const detail = err instanceof Error ? err.toString() : String(err);
+    console.warn(`[ORG] Failed to report extension user: ${detail}`);
   }
 }
 

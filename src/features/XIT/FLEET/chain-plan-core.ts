@@ -38,6 +38,7 @@ export interface ChainPlanningSnapshot {
   consumers: Map<string, string[]>;
   materials: Record<string, { weight: number; volume: number }>;
   planetRanks: Record<string, number>;
+  manualBaseOrder?: boolean;
   originStock: Record<string, number>;
   purchaseStock: Record<string, number>;
   groupProducedTickers?: Set<string>;
@@ -177,53 +178,56 @@ export function computeChainPlan(
     warnings.push('未检测到基地间的产业链关系，将执行纯补给环线（采购 → 卸货 → 提取 → 归航）。');
   }
 
-  // Kahn 拓扑排序（同层按星球名稳定排序）；所有选中基地入序，
-  // 无链关系的基地为孤立节点，按字母序混入航线。
   const allIds = bases.map(x => x.naturalId);
-  const adjacency = new Map<string, Set<string>>();
-  const inDegree = new Map<string, number>();
-  for (const id of allIds) {
-    adjacency.set(id, new Set());
-    inDegree.set(id, 0);
-  }
-  for (const edge of rawEdges) {
-    adjacency.get(edge.from)!.add(edge.to);
-  }
-  for (const tos of adjacency.values()) {
-    for (const to of tos) {
-      inDegree.set(to, inDegree.get(to)! + 1);
-    }
-  }
-  const frontier = allIds.filter(x => inDegree.get(x) === 0).sort(comparePlanets);
   const order: string[] = [];
-  while (frontier.length > 0) {
-    const next = frontier.shift()!;
-    order.push(next);
-    for (const to of adjacency.get(next)!) {
-      const degree = inDegree.get(to)! - 1;
-      inDegree.set(to, degree);
-      if (degree === 0) {
-        frontier.push(to);
+  if (input.manualBaseOrder) {
+    order.push(...allIds.sort(comparePlanets));
+  } else {
+    // Kahn 拓扑排序，同层按星球名稳定排序。
+    const adjacency = new Map<string, Set<string>>();
+    const inDegree = new Map<string, number>();
+    for (const id of allIds) {
+      adjacency.set(id, new Set());
+      inDegree.set(id, 0);
+    }
+    for (const edge of rawEdges) {
+      adjacency.get(edge.from)!.add(edge.to);
+    }
+    for (const tos of adjacency.values()) {
+      for (const to of tos) {
+        inDegree.set(to, inDegree.get(to)! + 1);
       }
     }
-    frontier.sort(comparePlanets);
-  }
-  if (order.length < allIds.length) {
-    warnings.push('产业链存在循环依赖，循环部分的输送顺序可能不满足上下游先后。');
-    const ordered = new Set(order);
-    for (const id of [...allIds].sort(comparePlanets)) {
-      if (!ordered.has(id)) {
-        order.push(id);
+    const frontier = allIds.filter(x => inDegree.get(x) === 0).sort(comparePlanets);
+    while (frontier.length > 0) {
+      const next = frontier.shift()!;
+      order.push(next);
+      for (const to of adjacency.get(next)!) {
+        const degree = inDegree.get(to)! - 1;
+        inDegree.set(to, degree);
+        if (degree === 0) {
+          frontier.push(to);
+        }
+      }
+      frontier.sort(comparePlanets);
+    }
+    if (order.length < allIds.length) {
+      warnings.push('产业链存在循环依赖，循环部分的输送顺序可能不满足上下游先后。');
+      const ordered = new Set(order);
+      for (const id of [...allIds].sort(comparePlanets)) {
+        if (!ordered.has(id)) {
+          order.push(id);
+        }
       }
     }
   }
 
-  // 循环断链：只保留「上游在下游之前到访」的边。
+  // 只保留本趟能先提取再送达的输送。
   const position = new Map(order.map((id, i) => [id, i] as const));
   const edges = rawEdges.filter(x => position.get(x.from)! < position.get(x.to)!);
   const dropped = rawEdges.length - edges.length;
   if (dropped > 0) {
-    warnings.push(`已忽略 ${dropped} 条循环输送（上游在下游之后到访，无法顺路输送）。`);
+    warnings.push(`已忽略 ${dropped} 条链上输送（上游在下游之后到访，无法顺路输送）。`);
   }
 
   const byNaturalId = new Map(bases.map(x => [x.naturalId, x] as const));
@@ -287,7 +291,13 @@ export function computeChainPlan(
   for (const ticker of new Set(edges.map(x => x.ticker))) {
     const tickerEdges = edges.filter(x => x.ticker === ticker);
     const upstreams = [...new Set(tickerEdges.map(x => x.from))];
-    const downstreams = [...new Set(tickerEdges.map(x => x.to))];
+    const sourcesByDestination = new Map<string, Set<string>>();
+    for (const { from, to } of tickerEdges) {
+      const sources = sourcesByDestination.get(to) ?? new Set<string>();
+      sources.add(from);
+      sourcesByDestination.set(to, sources);
+    }
+    const downstreams = [...sourcesByDestination.keys()];
     const avails = new Map(upstreams.map(x => [x, avail(x, ticker)] as const));
     const totalAvail = [...avails.values()].reduce((a, b) => a + b, 0);
     if (totalAvail <= 0) {
@@ -339,6 +349,12 @@ export function computeChainPlan(
     // 上游剩余可提取量：逐下游扣减，避免同一上游被重复提取超出其 avail。
     const remainingAvail = new Map(avails);
     let remainingAvailTotal = totalAvail;
+    const remainingDestinations = new Map(upstreams.map(from => [from, 0]));
+    for (const { from, to } of tickerEdges) {
+      if (needs.get(to)! > 0) {
+        remainingDestinations.set(from, remainingDestinations.get(from)! + 1);
+      }
+    }
     for (const to of orderedDownstreams) {
       const needTo = needs.get(to)!;
       if (needTo <= 0) {
@@ -349,7 +365,16 @@ export function computeChainPlan(
         break;
       }
       let remainingGive = give;
-      for (const from of orderedUpstreams) {
+      const sources = sourcesByDestination.get(to)!;
+      for (const from of sources) {
+        remainingDestinations.set(from, remainingDestinations.get(from)! - 1);
+      }
+      // Forward sources can serve a suffix of the route's consumers. Prefer the source
+      // with fewer remaining destinations, keeping pickup priority among equivalent sources.
+      const eligibleSources = orderedUpstreams
+        .filter(from => sources.has(from))
+        .sort((a, b) => remainingDestinations.get(a)! - remainingDestinations.get(b)!);
+      for (const from of eligibleSources) {
         const available = remainingAvail.get(from)!;
         if (available <= 0) {
           continue;
@@ -516,6 +541,12 @@ export function computeChainPlan(
   // - 白名单未配置：所有产出按中间产物处理（不提取，不搬运）。
   // 有下游边的 ticker 集合（用于排除 finalTickers）。
   const chainTickers = new Set(edges.map(x => x.ticker));
+  const forwardTickersBySource = new Map<string, Set<string>>();
+  for (const { from, ticker } of edges) {
+    const tickers = forwardTickersBySource.get(from) ?? new Set<string>();
+    tickers.add(ticker);
+    forwardTickersBySource.set(from, tickers);
+  }
   const finalTickers = new Map<string, string[]>(); // naturalId → tickers
   for (const base of bases) {
     const id = base.naturalId;
@@ -531,7 +562,7 @@ export function computeChainPlan(
     while (i < configured.length) {
       const ticker = configured[i]!;
       const mat = burn[ticker];
-      if (mat === undefined || mat.output <= 0 || chainTickers.has(ticker)) {
+      if (mat === undefined || mat.output <= 0 || forwardTickersBySource.get(id)?.has(ticker)) {
         i++;
         continue;
       }
@@ -717,9 +748,7 @@ export function computeChainPlan(
     // 有前向下游边的产物：已按需补给下游（flows），剩余可提取量运回空间站。
     // 遍历「所有下游边」而非仅正向 flows——下游已充足（need=0）时流量为 0，
     // 但产物仍有可提取余量，应运回空间站；否则会卡在基地既不送下游也不运回。
-    for (const ticker of input.loop
-      ? []
-      : new Set(edges.filter(f => f.from === id).map(f => f.ticker))) {
+    for (const ticker of input.loop ? [] : (forwardTickersBySource.get(id) ?? [])) {
       const sent = delivered.get(id)?.get(ticker) ?? 0;
       const extractable = avail(id, ticker);
       const surplus = Math.max(0, extractable - sent);

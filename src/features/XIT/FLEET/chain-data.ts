@@ -23,6 +23,7 @@ export type ChainRouteInput = {
   originNaturalId: string;
   capacity: ChainCapacity;
   bases: ChainPlannerBase[];
+  manualBaseOrder?: boolean;
   // 出发地空间站仓库库存（ticker → 数量），用于以「取货」补足组内产出的缺口。
   originStock?: Record<string, number>;
   // 组内产出 ticker 集合（多船分段时传全局集合，跨段产物在任何段都不纳入采购）。
@@ -353,11 +354,17 @@ export function collectChainPlanningSnapshot(
       purchaseStock[ticker] = supply;
     }
   }
-  const orderedIds = input.bases.map(x => x.naturalId).sort(comparePlanets);
+  const orderedIds = input.bases.map(x => x.naturalId);
+  if (!input.manualBaseOrder) {
+    orderedIds.sort(comparePlanets);
+  }
   const planetRanks: Record<string, number> = {};
   let rank = 0;
   for (let i = 0; i < orderedIds.length; i++) {
-    if (i > 0 && comparePlanets(orderedIds[i - 1], orderedIds[i]) !== 0) {
+    if (
+      i > 0 &&
+      (input.manualBaseOrder || comparePlanets(orderedIds[i - 1], orderedIds[i]) !== 0)
+    ) {
       rank++;
     }
     planetRanks[orderedIds[i]] = rank;
@@ -369,6 +376,7 @@ export function collectChainPlanningSnapshot(
     consumers,
     materials,
     planetRanks,
+    manualBaseOrder: input.manualBaseOrder,
     originStock: { ...input.originStock },
     purchaseStock,
     groupProducedTickers:
