@@ -489,6 +489,51 @@ await check(
     assert.deepEqual(snapshot, before);
   },
 );
+await check('manual ordering allocates cargo only along surviving forward edges', () => {
+  const producer = (naturalId, daysUntilFull, units) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 1,
+    cxBuy: true,
+    burn: { RAW: { input: 0, output: units, workforce: 0, inventory: units } },
+    products: ['RAW'],
+    bill: {},
+    projectedStock: { RAW: units },
+    daysUntilFull,
+  });
+  const consumer = (naturalId, daysLeft) => ({
+    naturalId,
+    planetName: naturalId,
+    days: 1,
+    cxBuy: true,
+    burn: { RAW: { input: 10, output: 0, workforce: 0, inventory: 0, daysLeft } },
+    products: [],
+    bill: { RAW: 10 },
+    projectedStock: {},
+    daysUntilFull: Infinity,
+  });
+  const snapshot = {
+    originNaturalId: 'CX',
+    capacity,
+    originStock: {},
+    purchaseStock: {},
+    manualBaseOrder: true,
+    planetRanks: { A: 0, B: 1, C: 2, D: 3 },
+    materials: { RAW: { weight: 1, volume: 1 } },
+    consumers: new Map([['RAW', ['B', 'D']]]),
+    bases: [producer('A', 5, 10), consumer('B', 0), producer('C', 1, 10), consumer('D', 1)],
+  };
+  const plan = computeChainPlan(snapshot, String);
+  assert.deepEqual(plan.stops.map(stop => stop.naturalId), ['A', 'B', 'C', 'D']);
+  assert.equal(plan.stops[1].unloadChain.get('RAW').amount, 10);
+  assert.equal(plan.stops[3].unloadChain.get('RAW').amount, 10);
+  assert.equal(plan.hasUnmetChainDemand, undefined);
+
+  snapshot.bases[0] = producer('A', 5, 4);
+  const shortfall = computeChainPlan(snapshot, String);
+  assert.equal(shortfall.stops[1].unloadChain.get('RAW').amount, 4);
+  assert.equal(shortfall.hasUnmetChainDemand, true);
+});
 await check('equal planet ranks keep stable frontier ordering', () => {
   const raw = { input: 0, output: 1, workforce: 0, inventory: 20, daysLeft: Infinity };
   const need = { input: 1, output: 0, workforce: 0, inventory: 0, daysLeft: 0 };

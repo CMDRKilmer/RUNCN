@@ -291,7 +291,13 @@ export function computeChainPlan(
   for (const ticker of new Set(edges.map(x => x.ticker))) {
     const tickerEdges = edges.filter(x => x.ticker === ticker);
     const upstreams = [...new Set(tickerEdges.map(x => x.from))];
-    const downstreams = [...new Set(tickerEdges.map(x => x.to))];
+    const sourcesByDestination = new Map<string, Set<string>>();
+    for (const { from, to } of tickerEdges) {
+      const sources = sourcesByDestination.get(to) ?? new Set<string>();
+      sources.add(from);
+      sourcesByDestination.set(to, sources);
+    }
+    const downstreams = [...sourcesByDestination.keys()];
     const avails = new Map(upstreams.map(x => [x, avail(x, ticker)] as const));
     const totalAvail = [...avails.values()].reduce((a, b) => a + b, 0);
     if (totalAvail <= 0) {
@@ -353,7 +359,11 @@ export function computeChainPlan(
         break;
       }
       let remainingGive = give;
+      const sources = sourcesByDestination.get(to)!;
       for (const from of orderedUpstreams) {
+        if (!sources.has(from)) {
+          continue;
+        }
         const available = remainingAvail.get(from)!;
         if (available <= 0) {
           continue;
