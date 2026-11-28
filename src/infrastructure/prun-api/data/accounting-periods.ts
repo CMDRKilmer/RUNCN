@@ -81,6 +81,20 @@ export function ensureAccountingPeriods() {
   }
 }
 
+// 拿到公司身份后先预热一次：socket 可能比 userData 晚就绪，隔几秒补发。
+// 这一步是**有意的**：用户已确认保留自动拉取（否则固定窗口要手动点刷新才出数）。
+// 只在公司上下文里发，且整个上下文只发一次（requestedFor 记账）。
+watch(
+  companyContextId,
+  id => {
+    if (id === undefined) {
+      return;
+    }
+    setTimeout(ensureAccountingPeriods, 3000);
+  },
+  { immediate: true },
+);
+
 export const accountingPeriods = {
   /** 按期间升序（末尾是当前期） */
   all: computed(() => periods.value),
