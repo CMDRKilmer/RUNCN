@@ -1456,6 +1456,11 @@ function flightTotalText(shipId: string): string {
         <template v-else-if="loopComputing">循环周期估算中…</template>
         <template v-else-if="loopPlan && !loopPlan.ok">
           循环模式不可用：{{ loopPlan.reasons.join('；') }}
+          <div v-if="loopPlan.previousTiming">
+            按 {{ loopPlan.previousTiming.supplyDays }} 天配货时，预计飞行
+            {{ formatFlightDuration(loopPlan.previousTiming.flightHours * 3600000) }}，因此需按
+            {{ loopPlan.supplyDays }} 天配货。
+          </div>
           <div v-if="loopPreview && loopPlan.supplyDays !== undefined">
             下方预览按 {{ loopPlan.supplyDays }} 天配货
           </div>
@@ -1717,7 +1722,10 @@ function flightTotalText(shipId: string): string {
             <span :class="$style.summaryLabel">飞行时长：</span>
             <span>
               <template v-if="planFlightTimesLoading">计算中…</template>
-              <template v-else>{{ flightTotalText(sp.ship.ship.id) || '--' }}</template>
+              <template v-else>{{
+                flightTotalText(sp.ship.ship.id) ||
+                (isLoopPreview(sp.plan) && sp.plan.overCapacity ? '未估时（超舱容）' : '--')
+              }}</template>
             </span>
           </div>
           <div :class="$style.summaryRow">

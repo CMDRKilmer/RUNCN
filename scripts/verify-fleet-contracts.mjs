@@ -2817,6 +2817,8 @@ await check('loop declines conflicting day estimates and loads that no longer fi
   assert.equal(result.ok, false);
   assert.equal(result.supplyDays, 2);
   assert.match(result.reasons.join(' '), /2 天.*舱容/);
+  assert.deepEqual(result.previousTiming, { supplyDays: 1, flightHours: 25 });
+  assert.equal(result.estimate, undefined);
 });
 
 await check('loop rejects a one-day load that exceeds free cargo capacity before estimation', async () => {

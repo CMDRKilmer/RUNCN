@@ -35,6 +35,7 @@ export interface LoopPlanResult {
   plan?: ChainPlan;
   supplyDays?: number;
   cycleHours?: number;
+  previousTiming?: { supplyDays: number; flightHours: number };
   estimate?: ChainFlightEstimate;
 }
 
@@ -99,6 +100,7 @@ export async function computeLoopPlan(
   }
   let days = MIN_LOOP_SUPPLY_DAYS;
   const triedDays = new Set<number>();
+  let previousTiming: LoopPlanResult['previousTiming'];
   while (triedDays.size < MAX_ESTIMATES && !triedDays.has(days)) {
     triedDays.add(days);
     const cargoSnapshot = {
@@ -115,6 +117,7 @@ export async function computeLoopPlan(
         reasons: [`按 ${days} 天配货的必需补给超过飞船剩余舱容。`],
         plan,
         supplyDays: days,
+        previousTiming,
       };
     }
     // 试配货量取整为零时，先估算途经所选基地的空舱路线。
@@ -162,6 +165,7 @@ export async function computeLoopPlan(
         estimate: est,
       };
     }
+    previousTiming = { supplyDays: days, flightHours: est.totalHours };
     days = nextDays;
   }
   return { ok: false, reasons: ['配货天数与装载后的预计飞行时长未收敛。'] };
