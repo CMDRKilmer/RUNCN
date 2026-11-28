@@ -822,8 +822,11 @@ function isBest(component: { bestExchange?: string }, code: string) {
           {{ needs.length }} 种维修材料
         </template>
         <template v-else-if="govhMode">
-          <strong>XIT GOVH {{ govhQuote?.planet ?? '' }}</strong> · 目标
-          {{ Math.round((govhQuote?.target ?? 0) * 100) }}% · {{ needs.length }} 种基建补给
+          <strong>XIT GOVH {{ govhQuote?.planet ?? '' }}</strong> ·
+          <template v-if="govhQuote?.kind === 'build'"> {{ needs.length }} 种建造材料 </template>
+          <template v-else>
+            目标 {{ Math.round((govhQuote?.target ?? 0) * 100) }}% · {{ needs.length }} 种基建补给
+          </template>
         </template>
         <template v-else-if="burnMode">
           <strong>XIT BURN {{ burnNaturalId }}</strong> · {{ needs.length }} 种需补物资

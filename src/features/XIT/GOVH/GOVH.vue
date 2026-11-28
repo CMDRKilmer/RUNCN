@@ -28,6 +28,7 @@ import {
 import { readCachedSnapshot, writeCachedBaseCount, writeCachedSnapshot } from './govh-cache';
 import { useManagedGovernments } from './govh-governments';
 import { setGovhQuote } from './govh-quote';
+import GovhBuildCalc from './GovhBuildCalc.vue';
 import { readPrices, subscribePrices, GOVH_EXCHANGES } from './govh-prices';
 import { readPlanetBaseCount } from './govh-base-count';
 import {
@@ -47,6 +48,9 @@ import {
 
 const parameters = useXitParameters();
 const planetInput = useTileState('govh-planet', '');
+// 页签：补给（原 GOVH 主面板）/ 建造（行星项目与建筑升级的材料计算）。
+// 用 useTileState 记住选择，重开窗口回到上次那一页。
+const activeTab = useTileState<'supply' | 'build'>('govh-tab', 'supply');
 // 目标满足度固定 100%：面板定位「一个报告周期备足」。
 // 模型层不再保留可调 target（求解器恒按 100% 目标 + 维生假设计算），减少二次采购的
 // 「省钱档」旋钮已从设计与求解器中移除，不存在「改 UI 即可恢复」的隐藏分支。
@@ -946,499 +950,529 @@ onUnmounted(() => {
 <template>
   <div ref="rootEl" :class="$style.root" :data-govh-restored="restoredFromCache ? 'cache' : 'cold'">
     <div :class="$style.titleRow">
-      <Header>政府基建补给助手</Header>
-      <span :class="$style.hint">六类需求 × 五类人口 · 本地数据 · 零外部请求</span>
+      <Header>政府基建助手</Header>
+      <span :class="$style.hint">补给 / 建造两个页签 · 本地数据 · 零外部请求</span>
     </div>
 
-    <div :class="$style.controls">
-      <Active label="管理的政府">
-        <select
-          v-model="selectedGovernment"
-          :class="$style.governmentSelect"
-          data-govh-government-select>
-          <option value="" disabled>{{ governmentPlaceholder }}</option>
-          <option v-for="option in governmentOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-          <option :value="CUSTOM_PLANET">自定义编码…</option>
-        </select>
-      </Active>
-      <Active v-if="customMode && basePlanetOptions.length > 0" label="自有基地星球">
-        <select
-          v-model="selectedBasePlanet"
-          :class="$style.basePlanetSelect"
-          data-govh-base-planet-select>
-          <option value="" disabled>{{ basePlanetPlaceholder }}</option>
-          <option v-for="option in basePlanetOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
-      </Active>
-      <Active v-if="customMode" label="自定义星球">
-        <TextInput
-          v-model="customPlanet"
-          :class="$style.planetInput"
-          focus-on-mount
-          placeholder="VH-192b"
-          data-govh-custom-planet
-          @change="applyCustomPlanet" />
-      </Active>
-      <Active label="维生预期">
-        <div
-          :class="$style.targetGroup"
-          data-govh-life-group
-          :data-govh-assumption="lifeAssumption">
-          <PrunButton
-            :primary="lifeAssumption === 'current'"
-            :dark="lifeAssumption !== 'current'"
-            :disabled="lifeSupportFull"
-            inline
-            data-govh-life-current
-            @click="setLifeAssumption('current')"
-            >按当前 {{ currentLifePercent() }}</PrunButton
-          >
-          <PrunButton
-            :primary="lifeAssumption === 'full'"
-            :dark="lifeAssumption !== 'full'"
-            :disabled="lifeSupportFull"
-            inline
-            data-govh-life-full
-            @click="setLifeAssumption('full')"
-            >预计补齐 100%</PrunButton
-          >
-        </div>
-      </Active>
-      <!-- 动作按钮整体成组：宽度不够时整组换行并右对齐，不会把「维生预期」挤到第二行。 -->
-      <div :class="$style.actions">
-        <PrunButton primary :disabled="loading || planetInput === ''" @click="refreshData(true)">
-          {{ loading ? '读取中…' : '刷新数据' }}
-        </PrunButton>
-        <PrunButton dark :disabled="!snapshot" @click="refreshPrices">更新价格</PrunButton>
-      </div>
+    <div :class="$style.tabs" data-govh-tabs>
+      <button
+        type="button"
+        :class="[$style.tab, activeTab === 'supply' && $style.tabActive]"
+        data-govh-tab="supply"
+        @click="activeTab = 'supply'">
+        基建补给助手
+      </button>
+      <button
+        type="button"
+        :class="[$style.tab, activeTab === 'build' && $style.tabActive]"
+        data-govh-tab="build"
+        @click="activeTab = 'build'">
+        基建建造计算
+      </button>
     </div>
 
-    <div :class="$style.governmentHint">{{ governmentStatus }}</div>
-    <div v-if="error" :class="$style.error">{{ error }}</div>
-    <div v-else-if="info" :class="$style.info">{{ info }}</div>
-
-    <template v-if="snapshot && result">
-      <!-- ① 现状：本期 POPR 报告明细（无折线图） + 六类需求现状/预览，左右两栏 -->
-      <div :class="$style.card">
-        <SectionHeader>报告值 / 本方案预测 · 目标 100%</SectionHeader>
-        <div :class="$style.sectionMeta">
-          本期人口报告明细（POPR 原生值，不含折线图） · 六类需求报告值 / 本方案预测（按{{
-            lifeAssumption === 'full' ? '住房补齐后 100%' : '当前维生'
-          }}预期，含封顶）
-        </div>
-        <div :class="$style.summaryGrid">
+    <template v-if="activeTab === 'supply'">
+      <div :class="$style.controls">
+        <Active label="管理的政府">
+          <select
+            v-model="selectedGovernment"
+            :class="$style.governmentSelect"
+            data-govh-government-select>
+            <option value="" disabled>{{ governmentPlaceholder }}</option>
+            <option v-for="option in governmentOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+            <option :value="CUSTOM_PLANET">自定义编码…</option>
+          </select>
+        </Active>
+        <Active v-if="customMode && basePlanetOptions.length > 0" label="自有基地星球">
+          <select
+            v-model="selectedBasePlanet"
+            :class="$style.basePlanetSelect"
+            data-govh-base-planet-select>
+            <option value="" disabled>{{ basePlanetPlaceholder }}</option>
+            <option v-for="option in basePlanetOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </Active>
+        <Active v-if="customMode" label="自定义星球">
+          <TextInput
+            v-model="customPlanet"
+            :class="$style.planetInput"
+            focus-on-mount
+            placeholder="VH-192b"
+            data-govh-custom-planet
+            @change="applyCustomPlanet" />
+        </Active>
+        <Active label="维生预期">
           <div
-            v-for="level in LEVELS"
-            :key="level"
-            :class="$style.statCell"
-            data-govh-population-stat>
-            <div :class="$style.statLabel">{{ LEVEL_LABELS[level] }}</div>
-            <div :class="$style.statValue">{{ formatPercent(snapshot.happiness[level]) }}</div>
+            :class="$style.targetGroup"
+            data-govh-life-group
+            :data-govh-assumption="lifeAssumption">
+            <PrunButton
+              :primary="lifeAssumption === 'current'"
+              :dark="lifeAssumption !== 'current'"
+              :disabled="lifeSupportFull"
+              inline
+              data-govh-life-current
+              @click="setLifeAssumption('current')"
+              >按当前 {{ currentLifePercent() }}</PrunButton
+            >
+            <PrunButton
+              :primary="lifeAssumption === 'full'"
+              :dark="lifeAssumption !== 'full'"
+              :disabled="lifeSupportFull"
+              inline
+              data-govh-life-full
+              @click="setLifeAssumption('full')"
+              >预计补齐 100%</PrunButton
+            >
           </div>
+        </Active>
+        <!-- 动作按钮整体成组：宽度不够时整组换行并右对齐，不会把「维生预期」挤到第二行。 -->
+        <div :class="$style.actions">
+          <PrunButton primary :disabled="loading || planetInput === ''" @click="refreshData(true)">
+            {{ loading ? '读取中…' : '刷新数据' }}
+          </PrunButton>
+          <PrunButton dark :disabled="!snapshot" @click="refreshPrices">更新价格</PrunButton>
         </div>
-        <div :class="$style.reportGrid" data-govh-report-grid>
-          <div :class="$style.reportColumn">
-            <div :class="$style.subTitle">
-              本期人口报告{{
-                snapshot.reportLabel ? ' · ' + snapshot.reportLabel : ' · POPR 原生明细'
-              }}
+      </div>
+
+      <div :class="$style.governmentHint">{{ governmentStatus }}</div>
+      <div v-if="error" :class="$style.error">{{ error }}</div>
+      <div v-else-if="info" :class="$style.info">{{ info }}</div>
+
+      <template v-if="snapshot && result">
+        <!-- ① 现状：本期 POPR 报告明细（无折线图） + 六类需求现状/预览，左右两栏 -->
+        <div :class="$style.card">
+          <SectionHeader>报告值 / 本方案预测 · 目标 100%</SectionHeader>
+          <div :class="$style.sectionMeta">
+            本期人口报告明细（POPR 原生值，不含折线图） · 六类需求报告值 / 本方案预测（按{{
+              lifeAssumption === 'full' ? '住房补齐后 100%' : '当前维生'
+            }}预期，含封顶）
+          </div>
+          <div :class="$style.summaryGrid">
+            <div
+              v-for="level in LEVELS"
+              :key="level"
+              :class="$style.statCell"
+              data-govh-population-stat>
+              <div :class="$style.statLabel">{{ LEVEL_LABELS[level] }}</div>
+              <div :class="$style.statValue">{{ formatPercent(snapshot.happiness[level]) }}</div>
             </div>
-            <div :class="$style.tableWrap">
-              <table :class="[$style.table, $style.miniTable]">
-                <thead>
-                  <tr>
-                    <th>项目</th>
-                    <th v-for="level in LEVELS" :key="level" :class="$style.numCol">
-                      {{ LEVEL_LABELS[level] }}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in snapshot.reportRows" :key="row.label">
-                    <td>{{ row.label }}</td>
-                    <td v-for="level in LEVELS" :key="level" :class="$style.numCell">
-                      {{ row.values[level] || '—' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <!-- 管理方项目：留在左栏，且与上方「本期人口报告」表共用同一个
+          </div>
+          <div :class="$style.reportGrid" data-govh-report-grid>
+            <div :class="$style.reportColumn">
+              <div :class="$style.subTitle">
+                本期人口报告{{
+                  snapshot.reportLabel ? ' · ' + snapshot.reportLabel : ' · POPR 原生明细'
+                }}
+              </div>
+              <div :class="$style.tableWrap">
+                <table :class="[$style.table, $style.miniTable]">
+                  <thead>
+                    <tr>
+                      <th>项目</th>
+                      <th v-for="level in LEVELS" :key="level" :class="$style.numCol">
+                        {{ LEVEL_LABELS[level] }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in snapshot.reportRows" :key="row.label">
+                      <td>{{ row.label }}</td>
+                      <td v-for="level in LEVELS" :key="level" :class="$style.numCell">
+                        {{ row.values[level] || '—' }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <!-- 管理方项目：留在左栏，且与上方「本期人口报告」表共用同一个
                    tableWrap，保证左右边缘严格对齐（含出现横向滚动条时）。
                    LR「项目」标签的当期 / 即办左右并排，四个字段共用第一列竖表头，
                    倒计时原样显示。LR 读不到时降级回 POPR 底部的单行项目。 -->
-              <table
-                v-if="snapshot.projects && (snapshot.projects.current || snapshot.projects.pending)"
-                :class="$style.projectTable"
-                data-govh-projects>
-                <colgroup>
-                  <col :class="$style.projectLabelCol" />
-                  <col :class="$style.projectValueCol" />
-                  <col :class="$style.projectValueCol" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th :class="$style.projectCorner">管理方项目</th>
-                    <th>当期</th>
-                    <th>即办</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="field in PROJECT_FIELDS" :key="field.key">
-                    <th scope="row" :class="$style.projectRowHead">{{ field.label }}</th>
-                    <!-- 表内不再挂 title：说明列靠两行截断、其余字段 nowrap 省略，
+                <table
+                  v-if="
+                    snapshot.projects && (snapshot.projects.current || snapshot.projects.pending)
+                  "
+                  :class="$style.projectTable"
+                  data-govh-projects>
+                  <colgroup>
+                    <col :class="$style.projectLabelCol" />
+                    <col :class="$style.projectValueCol" />
+                    <col :class="$style.projectValueCol" />
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th :class="$style.projectCorner">管理方项目</th>
+                      <th>当期</th>
+                      <th>即办</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="field in PROJECT_FIELDS" :key="field.key">
+                      <th scope="row" :class="$style.projectRowHead">{{ field.label }}</th>
+                      <!-- 表内不再挂 title：说明列靠两行截断、其余字段 nowrap 省略，
                          鼠标悬浮不再弹重复文案（用户明确要求）。 -->
-                    <td
-                      v-for="side in PROJECT_SIDES"
-                      :key="side"
-                      :class="field.clamp ? $style.projectClampCell : $style.projectValue">
-                      <div v-if="field.clamp" :class="$style.projectClamp">
-                        {{ projectValue(side, field.key) }}
-                      </div>
-                      <template v-else>{{ projectValue(side, field.key) }}</template>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <div
-                v-else-if="snapshot.project"
-                :class="$style.projectLine"
-                :title="snapshot.project.name + '：' + snapshot.project.description">
-                项目：{{ snapshot.project.name }} · {{ snapshot.project.description }}
+                      <td
+                        v-for="side in PROJECT_SIDES"
+                        :key="side"
+                        :class="field.clamp ? $style.projectClampCell : $style.projectValue">
+                        <div v-if="field.clamp" :class="$style.projectClamp">
+                          {{ projectValue(side, field.key) }}
+                        </div>
+                        <template v-else>{{ projectValue(side, field.key) }}</template>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div
+                  v-else-if="snapshot.project"
+                  :class="$style.projectLine"
+                  :title="snapshot.project.name + '：' + snapshot.project.description">
+                  项目：{{ snapshot.project.name }} · {{ snapshot.project.description }}
+                </div>
+              </div>
+            </div>
+            <div :class="$style.reportColumn">
+              <div :class="$style.subTitle">六类需求 · 报告值 / 本方案预测</div>
+              <div :class="$style.tableWrap">
+                <table :class="[$style.table, $style.miniTable]">
+                  <thead>
+                    <tr>
+                      <th>需求</th>
+                      <th title="需求量" :class="$style.numCol">需要</th>
+                      <th title="现状满足度" :class="$style.numCol">现状</th>
+                      <th title="按所选维生假设的补足后预测满足度" :class="$style.numCol">预览</th>
+                      <th title="提供量" :class="$style.numCol">提供</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="need in NEEDS" :key="need">
+                      <td>{{ NEED_LABELS[need] }}</td>
+                      <td :class="$style.numCell">{{ fixed0(result.needs[need].needed) }}</td>
+                      <td :class="$style.numCell">{{ snapshot.fulfillmentText[need] }}</td>
+                      <td :class="[$style.numCell, needClass(result.needs[need])]">
+                        <div :class="$style.previewStack">
+                          <strong>{{ formatPercent(result.needs[need].fulfillment) }}</strong>
+                          <!-- 「当前」小字始终占位一行（仅切换维生预期时显隐），避免 full 模式多出
+                             第 2 行导致整表高度跳动；visibility:hidden 仍保留布局高度。 -->
+                          <div
+                            :class="$style.previewNow"
+                            :data-govh-display-now="showDisplayNow(need) ? '' : null"
+                            :style="{ visibility: showDisplayNow(need) ? 'visible' : 'hidden' }"
+                            aria-hidden="true"
+                            >{{
+                              showDisplayNow(need)
+                                ? '当前 ' + formatPercent(result.needs[need].displayNow)
+                                : '当前'
+                            }}</div
+                          >
+                        </div>
+                      </td>
+                      <td :class="$style.numCell">{{ fixed0(result.needs[need].provided) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
-          <div :class="$style.reportColumn">
-            <div :class="$style.subTitle">六类需求 · 报告值 / 本方案预测</div>
-            <div :class="$style.tableWrap">
-              <table :class="[$style.table, $style.miniTable]">
-                <thead>
-                  <tr>
-                    <th>需求</th>
-                    <th title="需求量" :class="$style.numCol">需要</th>
-                    <th title="现状满足度" :class="$style.numCol">现状</th>
-                    <th title="按所选维生假设的补足后预测满足度" :class="$style.numCol">预览</th>
-                    <th title="提供量" :class="$style.numCol">提供</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="need in NEEDS" :key="need">
-                    <td>{{ NEED_LABELS[need] }}</td>
-                    <td :class="$style.numCell">{{ fixed0(result.needs[need].needed) }}</td>
-                    <td :class="$style.numCell">{{ snapshot.fulfillmentText[need] }}</td>
-                    <td :class="[$style.numCell, needClass(result.needs[need])]">
-                      <div :class="$style.previewStack">
-                        <strong>{{ formatPercent(result.needs[need].fulfillment) }}</strong>
-                        <!-- 「当前」小字始终占位一行（仅切换维生预期时显隐），避免 full 模式多出
-                             第 2 行导致整表高度跳动；visibility:hidden 仍保留布局高度。 -->
-                        <div
-                          :class="$style.previewNow"
-                          :data-govh-display-now="showDisplayNow(need) ? '' : null"
-                          :style="{ visibility: showDisplayNow(need) ? 'visible' : 'hidden' }"
-                          aria-hidden="true"
-                          >{{
-                            showDisplayNow(need)
-                              ? '当前 ' + formatPercent(result.needs[need].displayNow)
-                              : '当前'
-                          }}</div
-                        >
-                      </div>
-                    </td>
-                    <td :class="$style.numCell">{{ fixed0(result.needs[need].provided) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-        <!-- 说明区：两段注记左右对齐两栏表格，成本对照跨整宽收尾。
+          <!-- 说明区：两段注记左右对齐两栏表格，成本对照跨整宽收尾。
              两栏只放两段注记（与 reportGrid 同为 2 项，杜绝 auto-fit 在宽面板拆成 3+ 列）；
              成本对照移到栅格外的独立块，避免它作为第 3 个 item 撑出空列。
              不放在右栏表格脚下，避免右栏被文字撑高、左栏留白。 -->
-        <div :class="$style.notes" data-govh-notes>
-          <div :class="$style.notesGrid" data-govh-notes-grid>
-            <div :class="$style.lifeNote" data-govh-life-hint>
-              <strong>「维生」</strong>：宜居恒 100%；非宜居按
-              <strong>全星球住房 ÷ 总人口</strong>，补给无效，须玩家建住房。
-            </div>
-            <div :class="$style.assumptionNote" data-govh-assumption-note
-              ><span
-                v-for="(part, index) in assumptionNoteParts"
-                :key="index"
-                :class="part.emphasis ? $style.lifeCap : undefined"
-                :data-govh-life-cap="part.emphasis ? '' : null"
-                >{{ part.text }}</span
-              ></div
-            >
-          </div>
-          <div
-            v-if="assumptionCostText"
-            :class="[$style.assumptionNote, $style.noteCost]"
-            data-govh-assumption-cost>
-            {{ assumptionCostText }}
-          </div>
-          <!-- 未达标告警并入说明区：色条 .notes::before 由此自动覆盖到它的底边，
-               2 行 / 3 行星球一致；告警块去掉水平 padding 与边框，文字左缘与上方对齐（R36）。 -->
-          <div
-            v-if="targetWarning"
-            :class="[$style.warn, $style.notesWarn]"
-            data-govh-target-warning>
-            {{ targetWarning }}
-          </div>
-        </div>
-      </div>
-
-      <!-- ② 已建造等级（LR「人口」标签「建成」列；LR 不可用时回退 POPI） -->
-      <div :class="$style.card">
-        <SectionHeader>
-          已建造基建等级 · {{ builtBuildings.length }} / 14 类 · 整星 {{ baseCount }} 座基地<span
-            v-if="baseCount !== siteCount"
-            >（自有 {{ siteCount }}）</span
-          >
-        </SectionHeader>
-        <div :class="$style.buildingGrid">
-          <div
-            v-for="building in UPKEEP_BUILDINGS"
-            :key="building.ticker"
-            :class="$style.buildingCell">
-            <span :class="$style.buildingName">{{ building.name }}</span>
-            <span :class="$style.buildingLevel">{{ snapshot.levels[building.ticker] ?? 0 }}</span>
-          </div>
-        </div>
-        <!-- 上一周期运行率与本方案假设并列。两者口径不同（物料齐备度 vs 满足度，
-             后者还含维生封顶），不能摆成可相减的两列百分比：左侧是 LR 实测 chips，
-             右侧是假设说明，只让管理者看到「现实 / 理想」差距，不动求解逻辑。 -->
-        <div v-if="snapshot.infra" :class="$style.infraAudit" data-govh-infra-audit>
-          <div :class="$style.infraAuditCol">
-            <div :class="$style.infraAuditTitle">上一周期运行率 · LR 实测</div>
-            <div :class="$style.infraRates" data-govh-infra-rates>
-              <span
-                v-for="rate in lastPeriodRates"
-                :key="rate.need"
-                :class="$style.infraRate"
-                :data-govh-infra-rate="rate.need"
-                >{{ rate.label }} {{ rate.text }}</span
+          <div :class="$style.notes" data-govh-notes>
+            <div :class="$style.notesGrid" data-govh-notes-grid>
+              <div :class="$style.lifeNote" data-govh-life-hint>
+                <strong>「维生」</strong>：宜居恒 100%；非宜居按
+                <strong>全星球住房 ÷ 总人口</strong>，补给无效，须玩家建住房。
+              </div>
+              <div :class="$style.assumptionNote" data-govh-assumption-note
+                ><span
+                  v-for="(part, index) in assumptionNoteParts"
+                  :key="index"
+                  :class="part.emphasis ? $style.lifeCap : undefined"
+                  :data-govh-life-cap="part.emphasis ? '' : null"
+                  >{{ part.text }}</span
+                ></div
               >
             </div>
-          </div>
-          <div :class="$style.infraAuditCol">
-            <div :class="$style.infraAuditTitle">本方案假设</div>
-            <div :class="$style.infraAssumption" data-govh-infra-assumption>
-              物料备足后按 100% 运行计算；左侧为上一周期实测齐备度，仅作差距对照，不参与求解。
+            <div
+              v-if="assumptionCostText"
+              :class="[$style.assumptionNote, $style.noteCost]"
+              data-govh-assumption-cost>
+              {{ assumptionCostText }}
+            </div>
+            <!-- 未达标告警并入说明区：色条 .notes::before 由此自动覆盖到它的底边，
+               2 行 / 3 行星球一致；告警块去掉水平 padding 与边框，文字左缘与上方对齐（R36）。 -->
+            <div
+              v-if="targetWarning"
+              :class="[$style.warn, $style.notesWarn]"
+              data-govh-target-warning>
+              {{ targetWarning }}
             </div>
           </div>
-          <div v-if="infraWarnings.length > 0" :class="$style.infraWarn" data-govh-infra-warn>
-            <div v-for="(warning, index) in infraWarnings" :key="index">{{ warning }}</div>
-          </div>
         </div>
-      </div>
 
-      <!-- ③ 补给方案：全部物料自选 -->
-      <div :class="$style.card">
-        <SectionHeader>补给方案 · 全部物料自选</SectionHeader>
-        <div :class="$style.planNotes" data-govh-plan-notes>
-          <div :class="$style.planNote" data-govh-plan-note>
-            勾选：选中即纳入方案，可随时手动调整。
+        <!-- ② 已建造等级（LR「人口」标签「建成」列；LR 不可用时回退 POPI） -->
+        <div :class="$style.card">
+          <SectionHeader>
+            已建造基建等级 · {{ builtBuildings.length }} / 14 类 · 整星 {{ baseCount }} 座基地<span
+              v-if="baseCount !== siteCount"
+              >（自有 {{ siteCount }}）</span
+            >
+          </SectionHeader>
+          <div :class="$style.buildingGrid">
+            <div
+              v-for="building in UPKEEP_BUILDINGS"
+              :key="building.ticker"
+              :class="$style.buildingCell">
+              <span :class="$style.buildingName">{{ building.name }}</span>
+              <span :class="$style.buildingLevel">{{ snapshot.levels[building.ticker] ?? 0 }}</span>
+            </div>
           </div>
-          <div :class="$style.planNote" data-govh-plan-note>
-            {{ fillScopeNote }}
-          </div>
-          <div :class="$style.planNote" data-govh-plan-note>
-            推荐：本地实时价下的逐需求贪心近似，非严格全局最优。
-          </div>
-          <div :class="$style.planNote" data-govh-plan-note>
-            填充：点建筑下「填充此建筑」打开该建筑 POPID 原生窗口
+          <!-- 上一周期运行率与本方案假设并列。两者口径不同（物料齐备度 vs 满足度，
+             后者还含维生封顶），不能摆成可相减的两列百分比：左侧是 LR 实测 chips，
+             右侧是假设说明，只让管理者看到「现实 / 理想」差距，不动求解逻辑。 -->
+          <div v-if="snapshot.infra" :class="$style.infraAudit" data-govh-infra-audit>
+            <div :class="$style.infraAuditCol">
+              <div :class="$style.infraAuditTitle">上一周期运行率 · LR 实测</div>
+              <div :class="$style.infraRates" data-govh-infra-rates>
+                <span
+                  v-for="rate in lastPeriodRates"
+                  :key="rate.need"
+                  :class="$style.infraRate"
+                  :data-govh-infra-rate="rate.need"
+                  >{{ rate.label }} {{ rate.text }}</span
+                >
+              </div>
+            </div>
+            <div :class="$style.infraAuditCol">
+              <div :class="$style.infraAuditTitle">本方案假设</div>
+              <div :class="$style.infraAssumption" data-govh-infra-assumption>
+                物料备足后按 100% 运行计算；左侧为上一周期实测齐备度，仅作差距对照，不参与求解。
+              </div>
+            </div>
+            <div v-if="infraWarnings.length > 0" :class="$style.infraWarn" data-govh-infra-warn>
+              <div v-for="(warning, index) in infraWarnings" :key="index">{{ warning }}</div>
+            </div>
           </div>
         </div>
-        <div :class="$style.materialToolbar">
-          <!-- 补满范围放在补给方案表上方（与全选/清空同一行左侧）：
+
+        <!-- ③ 补给方案：全部物料自选 -->
+        <div :class="$style.card">
+          <SectionHeader>补给方案 · 全部物料自选</SectionHeader>
+          <div :class="$style.planNotes" data-govh-plan-notes>
+            <div :class="$style.planNote" data-govh-plan-note>
+              勾选：选中即纳入方案，可随时手动调整。
+            </div>
+            <div :class="$style.planNote" data-govh-plan-note>
+              {{ fillScopeNote }}
+            </div>
+            <div :class="$style.planNote" data-govh-plan-note>
+              推荐：本地实时价下的逐需求贪心近似，非严格全局最优。
+            </div>
+            <div :class="$style.planNote" data-govh-plan-note>
+              填充：点建筑下「填充此建筑」打开该建筑 POPID 原生窗口
+            </div>
+          </div>
+          <div :class="$style.materialToolbar">
+            <!-- 补满范围放在补给方案表上方（与全选/清空同一行左侧）：
                只改待补量口径，属于「这个表怎么算」，跟顶部的星球 / 维生参数不同层。 -->
-          <span :class="$style.fillScopeLabel">补满范围</span>
-          <div :class="$style.targetGroup" data-govh-fill-group :data-govh-fill-scope="fillScope">
-            <PrunButton
-              :primary="fillScope === 'next'"
-              :dark="fillScope !== 'next'"
-              inline
-              data-govh-fill-next
-              @click="setFillScope('next')"
-              >补满即时仓</PrunButton
-            >
-            <PrunButton
-              :primary="fillScope === 'both'"
-              :dark="fillScope !== 'both'"
-              inline
-              data-govh-fill-both
-              @click="setFillScope('both')"
-              >补满即时 + 储备仓</PrunButton
-            >
+            <span :class="$style.fillScopeLabel">补满范围</span>
+            <div :class="$style.targetGroup" data-govh-fill-group :data-govh-fill-scope="fillScope">
+              <PrunButton
+                :primary="fillScope === 'next'"
+                :dark="fillScope !== 'next'"
+                inline
+                data-govh-fill-next
+                @click="setFillScope('next')"
+                >补满即时仓</PrunButton
+              >
+              <PrunButton
+                :primary="fillScope === 'both'"
+                :dark="fillScope !== 'both'"
+                inline
+                data-govh-fill-both
+                @click="setFillScope('both')"
+                >补满即时 + 储备仓</PrunButton
+              >
+            </div>
+            <span :class="$style.toolbarDivider" aria-hidden="true"></span>
+            <!-- 物料选择：与「补满范围」同格式的分组标签，标明右侧三个按钮作用于勾选。 -->
+            <span :class="$style.fillScopeLabel">物料选择</span>
+            <PrunButton dark inline @click="selectAll">全选</PrunButton>
+            <PrunButton dark inline @click="selectNone">清空</PrunButton>
+            <PrunButton dark inline @click="resetToRecommended">恢复推荐</PrunButton>
+            <span :class="$style.selectedCount">
+              已选 {{ result.selected.size }} / {{ result.options.length }} 项
+            </span>
           </div>
-          <span :class="$style.toolbarDivider" aria-hidden="true"></span>
-          <!-- 物料选择：与「补满范围」同格式的分组标签，标明右侧三个按钮作用于勾选。 -->
-          <span :class="$style.fillScopeLabel">物料选择</span>
-          <PrunButton dark inline @click="selectAll">全选</PrunButton>
-          <PrunButton dark inline @click="selectNone">清空</PrunButton>
-          <PrunButton dark inline @click="resetToRecommended">恢复推荐</PrunButton>
-          <span :class="$style.selectedCount">
-            已选 {{ result.selected.size }} / {{ result.options.length }} 项
-          </span>
-        </div>
-        <div :class="$style.tableWrap">
-          <table :class="[$style.table, $style.supplyTable]">
-            <thead>
-              <tr>
-                <th>建筑</th>
-                <th :class="$style.needsHeader">覆盖需求</th>
-                <th :class="$style.checkCol">选</th>
-                <th :class="$style.materialCol">物料</th>
-                <th :class="$style.numCol">{{ fillScope === 'next' ? '即时仓量' : '满仓量' }}</th>
-                <th :class="$style.numCol">待补量</th>
-                <th :class="$style.numCol">单价</th>
-                <th>来源</th>
-                <th :class="$style.numCol">待补成本</th>
-                <th :class="$style.numCol">性价比</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-if="materialRows.length === 0">
-                <td colspan="10" :class="$style.empty">该星球没有已建基建，或没有匹配的物料。</td>
-              </tr>
-              <tr
-                v-for="row in materialRows"
-                :key="row.option.key"
-                :data-govh-group="row.groupIndex"
-                :data-govh-building-start="row.buildingStart ? 'true' : null"
-                :class="[
-                  row.option.selected ? $style.rowSelected : '',
-                  row.buildingStart && row.groupIndex > 0 ? $style.groupStart : '',
-                ]">
-                <td
-                  v-if="row.buildingStart"
-                  :rowspan="row.buildingSpan"
-                  :class="$style.nameCell"
-                  data-govh-col="建筑">
-                  <div :class="$style.nameCellContent">
-                    <div :class="$style.buildingName">
-                      {{ row.option.buildingName }}
-                      <span :class="$style.dim">Lv{{ row.option.builtLevel }}</span>
+          <div :class="$style.tableWrap">
+            <table :class="[$style.table, $style.supplyTable]">
+              <thead>
+                <tr>
+                  <th>建筑</th>
+                  <th :class="$style.needsHeader">覆盖需求</th>
+                  <th :class="$style.checkCol">选</th>
+                  <th :class="$style.materialCol">物料</th>
+                  <th :class="$style.numCol">{{ fillScope === 'next' ? '即时仓量' : '满仓量' }}</th>
+                  <th :class="$style.numCol">待补量</th>
+                  <th :class="$style.numCol">单价</th>
+                  <th>来源</th>
+                  <th :class="$style.numCol">待补成本</th>
+                  <th :class="$style.numCol">性价比</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="materialRows.length === 0">
+                  <td colspan="10" :class="$style.empty">该星球没有已建基建，或没有匹配的物料。</td>
+                </tr>
+                <tr
+                  v-for="row in materialRows"
+                  :key="row.option.key"
+                  :data-govh-group="row.groupIndex"
+                  :data-govh-building-start="row.buildingStart ? 'true' : null"
+                  :class="[
+                    row.option.selected ? $style.rowSelected : '',
+                    row.buildingStart && row.groupIndex > 0 ? $style.groupStart : '',
+                  ]">
+                  <td
+                    v-if="row.buildingStart"
+                    :rowspan="row.buildingSpan"
+                    :class="$style.nameCell"
+                    data-govh-col="建筑">
+                    <div :class="$style.nameCellContent">
+                      <div :class="$style.buildingName">
+                        {{ row.option.buildingName }}
+                        <span :class="$style.dim">Lv{{ row.option.builtLevel }}</span>
+                      </div>
+                      <PrunButton
+                        dark
+                        inline
+                        :class="$style.fillButton"
+                        :disabled="row.fillDisabled"
+                        @click="openPopid(row.option.building)">
+                        填充此建筑
+                      </PrunButton>
                     </div>
-                    <PrunButton
-                      dark
-                      inline
-                      :class="$style.fillButton"
-                      :disabled="row.fillDisabled"
-                      @click="openPopid(row.option.building)">
-                      填充此建筑
-                    </PrunButton>
-                  </div>
-                </td>
-                <td
-                  v-if="row.buildingStart"
-                  :rowspan="row.buildingSpan"
-                  :class="$style.needsCellMerged"
-                  data-govh-col="覆盖需求">
-                  <div :class="$style.needsCell">
-                    <span v-for="need in row.groupNeeds" :key="need" :class="$style.needTag">
-                      {{ NEED_LABELS[need] }}
-                    </span>
-                  </div>
-                </td>
-                <td :class="$style.checkCol" data-govh-col="选">
-                  <input
-                    type="checkbox"
-                    :checked="isSelected(row.option.key)"
-                    :disabled="!row.option.capacityKnown"
-                    :class="$style.checkbox"
-                    @change="toggleOption(row.option.key)" />
-                </td>
-                <!-- 物料列只留图标：ticker 文字与悬浮说明已删，列宽随之收窄。 -->
-                <td :class="$style.materialCol" data-govh-col="物料">
-                  <div :class="$style.materialCell">
-                    <MaterialIcon :ticker="row.option.ticker" size="medium" />
-                  </div>
-                </td>
-                <td :class="$style.numCell" data-govh-col="满仓量">{{
-                  row.option.capacityKnown ? fixed0(row.option.grossFillAmount) : '—'
-                }}</td>
-                <!-- 待补量与计算合并成一列：算式右对齐，等号后的得数加粗加深。
+                  </td>
+                  <td
+                    v-if="row.buildingStart"
+                    :rowspan="row.buildingSpan"
+                    :class="$style.needsCellMerged"
+                    data-govh-col="覆盖需求">
+                    <div :class="$style.needsCell">
+                      <span v-for="need in row.groupNeeds" :key="need" :class="$style.needTag">
+                        {{ NEED_LABELS[need] }}
+                      </span>
+                    </div>
+                  </td>
+                  <td :class="$style.checkCol" data-govh-col="选">
+                    <input
+                      type="checkbox"
+                      :checked="isSelected(row.option.key)"
+                      :disabled="!row.option.capacityKnown"
+                      :class="$style.checkbox"
+                      @change="toggleOption(row.option.key)" />
+                  </td>
+                  <!-- 物料列只留图标：ticker 文字与悬浮说明已删，列宽随之收窄。 -->
+                  <td :class="$style.materialCol" data-govh-col="物料">
+                    <div :class="$style.materialCell">
+                      <MaterialIcon :ticker="row.option.ticker" size="medium" />
+                    </div>
+                  </td>
+                  <td :class="$style.numCell" data-govh-col="满仓量">{{
+                    row.option.capacityKnown ? fixed0(row.option.grossFillAmount) : '—'
+                  }}</td>
+                  <!-- 待补量与计算合并成一列：算式右对齐，等号后的得数加粗加深。
                      内层 span 保留 data-govh-col="计算过程" 作为稳定验收钩子。 -->
-                <td :class="[$style.numCell, $style.calcCell]" data-govh-col="待补量">
-                  <span :class="$style.calcExpr" data-govh-col="计算过程">{{
-                    row.option.capacityKnown ? row.calcExpr + '=' : ''
-                  }}</span
-                  ><span :class="$style.calcResult">{{
-                    row.option.capacityKnown ? row.calcResult : '容量未知'
-                  }}</span>
-                </td>
-                <td :class="$style.numCell" data-govh-col="单价">{{
-                  row.option.price === undefined ? '—' : fixed2(row.option.price)
-                }}</td>
-                <td :class="$style.sourceCell" data-govh-col="来源">{{
-                  priceExchanges[row.option.ticker]
-                }}</td>
-                <td :class="$style.numCell" data-govh-col="待补成本">{{
-                  row.option.price === undefined || !row.option.capacityKnown
-                    ? '—'
-                    : fixed0(row.option.netFillCost)
-                }}</td>
-                <td :class="$style.numCell" data-govh-col="性价比">
-                  {{
-                    row.option.efficiency < 0
+                  <td :class="[$style.numCell, $style.calcCell]" data-govh-col="待补量">
+                    <span :class="$style.calcExpr" data-govh-col="计算过程">{{
+                      row.option.capacityKnown ? row.calcExpr + '=' : ''
+                    }}</span
+                    ><span :class="$style.calcResult">{{
+                      row.option.capacityKnown ? row.calcResult : '容量未知'
+                    }}</span>
+                  </td>
+                  <td :class="$style.numCell" data-govh-col="单价">{{
+                    row.option.price === undefined ? '—' : fixed2(row.option.price)
+                  }}</td>
+                  <td :class="$style.sourceCell" data-govh-col="来源">{{
+                    priceExchanges[row.option.ticker]
+                  }}</td>
+                  <td :class="$style.numCell" data-govh-col="待补成本">{{
+                    row.option.price === undefined || !row.option.capacityKnown
                       ? '—'
-                      : row.option.efficiency === Infinity
-                        ? '免费'
-                        : fixed2(row.option.efficiency * 1000)
-                  }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                      : fixed0(row.option.netFillCost)
+                  }}</td>
+                  <td :class="$style.numCell" data-govh-col="性价比">
+                    {{
+                      row.option.efficiency < 0
+                        ? '—'
+                        : row.option.efficiency === Infinity
+                          ? '免费'
+                          : fixed2(row.option.efficiency * 1000)
+                    }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
 
-      <!-- ④ 汇总 + 联动 -->
-      <div :class="$style.card">
-        <SectionHeader>汇总与采购联动</SectionHeader>
-        <div :class="$style.summaryGrid">
-          <div :class="$style.statCell">
-            <div :class="$style.statLabel"
-              >待补成本({{ fillScope === 'next' ? '即时仓' : '满仓' }})</div
-            >
-            <div :class="$style.statValue"
-              >{{ result.summary.missingPrices > 0 ? '≈' : ''
-              }}{{ fixed0(result.summary.fillCost) }}</div
-            >
+        <!-- ④ 汇总 + 联动 -->
+        <div :class="$style.card">
+          <SectionHeader>汇总与采购联动</SectionHeader>
+          <div :class="$style.summaryGrid">
+            <div :class="$style.statCell">
+              <div :class="$style.statLabel"
+                >待补成本({{ fillScope === 'next' ? '即时仓' : '满仓' }})</div
+              >
+              <div :class="$style.statValue"
+                >{{ result.summary.missingPrices > 0 ? '≈' : ''
+                }}{{ fixed0(result.summary.fillCost) }}</div
+              >
+            </div>
+            <div :class="$style.statCell">
+              <div :class="$style.statLabel">总重量</div>
+              <div :class="$style.statValue">{{ fixed0(result.summary.weight) }} t</div>
+            </div>
+            <div :class="$style.statCell">
+              <div :class="$style.statLabel">总体积</div>
+              <div :class="$style.statValue">{{ fixed0(result.summary.volume) }} m³</div>
+            </div>
           </div>
-          <div :class="$style.statCell">
-            <div :class="$style.statLabel">总重量</div>
-            <div :class="$style.statValue">{{ fixed0(result.summary.weight) }} t</div>
+          <div v-if="result.summary.missingPrices > 0" :class="$style.warn">
+            有
+            {{ result.summary.missingPrices }}
+            种物料没有本地报价，成本被低估。可点「更新价格」订阅本地订单簿；单价不接受手填，避免脱离统一价格口径。
           </div>
-          <div :class="$style.statCell">
-            <div :class="$style.statLabel">总体积</div>
-            <div :class="$style.statValue">{{ fixed0(result.summary.volume) }} m³</div>
+          <div :class="$style.metaLine">
+            主交易所：{{ GOVH_EXCHANGES.map(x => x.code).join(' / ') }} · 价格 1:1 不换算汇率
           </div>
+          <ActionBar>
+            <PrunButton primary @click="openCbuy">CBUY 比价</PrunButton>
+            <PrunButton dark @click="copyJson">复制 JSON</PrunButton>
+          </ActionBar>
         </div>
-        <div v-if="result.summary.missingPrices > 0" :class="$style.warn">
-          有
-          {{ result.summary.missingPrices }}
-          种物料没有本地报价，成本被低估。可点「更新价格」订阅本地订单簿；单价不接受手填，避免脱离统一价格口径。
-        </div>
-        <div :class="$style.metaLine">
-          主交易所：{{ GOVH_EXCHANGES.map(x => x.code).join(' / ') }} · 价格 1:1 不换算汇率
-        </div>
-        <ActionBar>
-          <PrunButton primary @click="openCbuy">CBUY 比价</PrunButton>
-          <PrunButton dark @click="copyJson">复制 JSON</PrunButton>
-        </ActionBar>
+      </template>
+
+      <div v-else-if="!error" :class="$style.emptyState">
+        从表头下拉菜单选择我作为管理者的政府；需要查其它星球时可选「自定义编码…」。数据从游戏本地
+        POPR / POPI / POPID 读取，零外部请求。
       </div>
     </template>
 
-    <div v-else-if="!error" :class="$style.emptyState">
-      从表头下拉菜单选择我作为管理者的政府；需要查其它星球时可选「自定义编码…」。数据从游戏本地 POPR
-      / POPI / POPID 读取，零外部请求。
-    </div>
+    <GovhBuildCalc
+      v-else
+      :default-planet="snapshot?.planet ?? ''"
+      :snapshot="snapshot"
+      :governments="governmentOptions"
+      :government="selectedGovernment"
+      :government-placeholder="governmentPlaceholder"
+      @update:government="selectedGovernment = $event" />
   </div>
 </template>
 
@@ -1460,6 +1494,33 @@ onUnmounted(() => {
 .hint {
   color: rgb(148, 158, 166);
   font-size: 11px;
+}
+/* 页签栏：选中底色用 background-image 而不是 background-color —— 主题引擎会把
+   带色背景改写成面板色，选中态就整块消失（与 FINIS 的一级科目行同一个坑）。 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+}
+.tab {
+  padding: 3px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.tab:hover {
+  opacity: 0.9;
+}
+.tabActive {
+  opacity: 1;
+  font-weight: 600;
+  background-image: linear-gradient(rgba(128, 128, 128, 0.2), rgba(128, 128, 128, 0.2));
+  border-color: rgba(128, 128, 128, 0.35);
 }
 .controls {
   display: flex;

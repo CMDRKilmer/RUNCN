@@ -19,6 +19,8 @@ export interface GovhQuoteItem {
 export interface GovhQuote {
   planet: string;
   target: number;
+  /** supply = 补给清单（按满足度目标）；build = 建造材料（无满足度语义）。 */
+  kind?: 'supply' | 'build';
   items: GovhQuoteItem[];
 }
 
