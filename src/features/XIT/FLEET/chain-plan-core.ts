@@ -349,6 +349,12 @@ export function computeChainPlan(
     // 上游剩余可提取量：逐下游扣减，避免同一上游被重复提取超出其 avail。
     const remainingAvail = new Map(avails);
     let remainingAvailTotal = totalAvail;
+    const remainingDestinations = new Map(upstreams.map(from => [from, 0]));
+    for (const { from, to } of tickerEdges) {
+      if (needs.get(to)! > 0) {
+        remainingDestinations.set(from, remainingDestinations.get(from)! + 1);
+      }
+    }
     for (const to of orderedDownstreams) {
       const needTo = needs.get(to)!;
       if (needTo <= 0) {
@@ -360,10 +366,15 @@ export function computeChainPlan(
       }
       let remainingGive = give;
       const sources = sourcesByDestination.get(to)!;
-      for (const from of orderedUpstreams) {
-        if (!sources.has(from)) {
-          continue;
-        }
+      for (const from of sources) {
+        remainingDestinations.set(from, remainingDestinations.get(from)! - 1);
+      }
+      // Forward sources can serve a suffix of the route's consumers. Prefer the source
+      // with fewer remaining destinations, keeping pickup priority among equivalent sources.
+      const eligibleSources = orderedUpstreams
+        .filter(from => sources.has(from))
+        .sort((a, b) => remainingDestinations.get(a)! - remainingDestinations.get(b)!);
+      for (const from of eligibleSources) {
         const available = remainingAvail.get(from)!;
         if (available <= 0) {
           continue;
@@ -530,6 +541,12 @@ export function computeChainPlan(
   // - 白名单未配置：所有产出按中间产物处理（不提取，不搬运）。
   // 有下游边的 ticker 集合（用于排除 finalTickers）。
   const chainTickers = new Set(edges.map(x => x.ticker));
+  const forwardTickersBySource = new Map<string, Set<string>>();
+  for (const { from, ticker } of edges) {
+    const tickers = forwardTickersBySource.get(from) ?? new Set<string>();
+    tickers.add(ticker);
+    forwardTickersBySource.set(from, tickers);
+  }
   const finalTickers = new Map<string, string[]>(); // naturalId → tickers
   for (const base of bases) {
     const id = base.naturalId;
@@ -545,7 +562,7 @@ export function computeChainPlan(
     while (i < configured.length) {
       const ticker = configured[i]!;
       const mat = burn[ticker];
-      if (mat === undefined || mat.output <= 0 || chainTickers.has(ticker)) {
+      if (mat === undefined || mat.output <= 0 || forwardTickersBySource.get(id)?.has(ticker)) {
         i++;
         continue;
       }
@@ -731,9 +748,7 @@ export function computeChainPlan(
     // 有前向下游边的产物：已按需补给下游（flows），剩余可提取量运回空间站。
     // 遍历「所有下游边」而非仅正向 flows——下游已充足（need=0）时流量为 0，
     // 但产物仍有可提取余量，应运回空间站；否则会卡在基地既不送下游也不运回。
-    for (const ticker of input.loop
-      ? []
-      : new Set(edges.filter(f => f.from === id).map(f => f.ticker))) {
+    for (const ticker of input.loop ? [] : (forwardTickersBySource.get(id) ?? [])) {
       const sent = delivered.get(id)?.get(ticker) ?? 0;
       const extractable = avail(id, ticker);
       const surplus = Math.max(0, extractable - sent);

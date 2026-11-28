@@ -533,6 +533,21 @@ await check('manual ordering allocates cargo only along surviving forward edges'
   const shortfall = computeChainPlan(snapshot, String);
   assert.equal(shortfall.stops[1].unloadChain.get('RAW').amount, 4);
   assert.equal(shortfall.hasUnmetChainDemand, true);
+
+  // D is urgent and A has pickup priority, but only A can serve B.
+  snapshot.bases = [producer('A', 1, 10), consumer('B', 1), producer('C', 5, 10), consumer('D', 0)];
+  const constrained = computeChainPlan(snapshot, String);
+  assert.deepEqual(constrained.stops.map(stop => stop.naturalId), ['A', 'B', 'C', 'D']);
+  assert.equal(constrained.stops[1].unloadChain.get('RAW').amount, 10);
+  assert.equal(constrained.stops[3].unloadChain.get('RAW').amount, 10);
+  assert.equal(constrained.hasUnmetChainDemand, undefined);
+
+  // C has no forward consumer. Pick up its output for the return leg.
+  snapshot.bases.pop();
+  snapshot.consumers.set('RAW', ['B']);
+  const returning = computeChainPlan(snapshot, String);
+  assert.deepEqual(returning.stops.map(stop => stop.naturalId), ['A', 'B', 'C']);
+  assert.equal(returning.finalUnload.RAW, 10);
 });
 await check('equal planet ranks keep stable frontier ordering', () => {
   const raw = { input: 0, output: 1, workforce: 0, inventory: 20, daysLeft: Infinity };
