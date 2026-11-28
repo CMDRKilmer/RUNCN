@@ -55,13 +55,13 @@ onApiMessage({
 // 需要重新取一次快照的场景。
 let requestedFor: string | undefined;
 
-export function requestAccountingPeriods(force = false) {
+export function requestAccountingPeriods(force = false): boolean {
   const id = companyContextId.value;
   if (id === undefined || !isCompanyContext()) {
-    return;
+    return false;
   }
   if (!force && requestedFor === id) {
-    return;
+    return false;
   }
   const sent = sendServerMessage({
     messageType: 'ACCOUNTING_GET_BALANCES',
@@ -72,6 +72,7 @@ export function requestAccountingPeriods(force = false) {
   if (sent) {
     requestedFor = id;
   }
+  return sent;
 }
 
 /** 页面挂载时调用：没数据就补一次请求。 */
@@ -81,16 +82,27 @@ export function ensureAccountingPeriods() {
   }
 }
 
-// 拿到公司身份后先预热一次：socket 可能比 userData 晚就绪，隔几秒补发。
-// 这一步是**有意的**：用户已确认保留自动拉取（否则固定窗口要手动点刷新才出数）。
-// 只在公司上下文里发，且整个上下文只发一次（requestedFor 记账）。
+// 拿到公司身份后先预热一次：socket 通常比 USER_DATA 晚就绪，第一次发送会失败
+// （sendServerMessage 返回 false），所以按 3 秒间隔重试，最多 8 次。
+// 这一步是**有意的**：用户已确认保留自动拉取（固定窗口不会重新挂载，否则要手点刷新才出数）。
+// 没发成功就不记 requestedFor，下一轮重试；发成功后同一上下文不再重复。
 watch(
   companyContextId,
   id => {
     if (id === undefined) {
       return;
     }
-    setTimeout(ensureAccountingPeriods, 3000);
+    let tries = 0;
+    const tick = () => {
+      if (periods.value.length > 0 || requestedFor === id) {
+        return;
+      }
+      requestAccountingPeriods();
+      if (requestedFor !== id && ++tries < 8) {
+        setTimeout(tick, 3000);
+      }
+    };
+    setTimeout(tick, 3000);
   },
   { immediate: true },
 );
